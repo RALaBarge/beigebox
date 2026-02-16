@@ -1,0 +1,58 @@
+# Full stack: AI Middleware + Ollama + Open WebUI
+# Usage: docker compose up -d
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  middleware:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: ai-middleware
+    ports:
+      - "8000:8000"
+    volumes:
+      - middleware_data:/app/data
+      - ../config.yaml:/app/config.yaml:ro
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GOOGLE_CSE_ID=${GOOGLE_CSE_ID:-}
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    ports:
+      - "3000:8080"
+    volumes:
+      - open_webui_data:/app/backend/data
+    environment:
+      # Point Open WebUI at the middleware, NOT directly at Ollama
+      - OPENAI_API_BASE_URL=http://middleware:8000/v1
+      - OPENAI_API_KEY=not-needed
+      # Also keep direct Ollama connection for model management
+      - OLLAMA_BASE_URL=http://ollama:11434
+    depends_on:
+      - middleware
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
+  middleware_data:
+  open_webui_data:

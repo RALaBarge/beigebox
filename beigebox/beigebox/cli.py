@@ -1,0 +1,314 @@
+#!/usr/bin/env python3
+"""
+BeigeBox CLI — Tap the line. Own the conversation.
+
+Named after the beige box — the phone phreaker device used to tap
+a phone line and intercept both sides of a conversation.
+
+Every command has a phreaker name and a standard alias:
+
+    PHREAKER        STANDARD        WHAT IT DOES
+    --------        --------        ----------------------------------
+    dial            start, serve    Start the BeigeBox proxy server
+    tap             log, tail       Live wiretap — watch the wire
+    ring            status, ping    Ping a running instance
+    sweep           search          Semantic search over conversations
+    dump            export          Export conversations to JSON
+    flash           info, config    Show stats and config at a glance
+    tone            banner          Print the BeigeBox banner
+"""
+
+import argparse
+import sys
+
+__version__ = "0.1.0"
+
+BANNER = r"""
+    ╔══════════════════════════════════════════════════╗
+    ║                                                  ║
+    ║   ██████  ███████ ██  ██████  ███████            ║
+    ║   ██   ██ ██      ██ ██       ██                 ║
+    ║   ██████  █████   ██ ██   ███ █████              ║
+    ║   ██   ██ ██      ██ ██    ██ ██                 ║
+    ║   ██████  ███████ ██  ██████  ███████            ║
+    ║                                                  ║
+    ║   ██████   ██████  ██   ██                       ║
+    ║   ██   ██ ██    ██  ██ ██                        ║
+    ║   ██████  ██    ██   ███                         ║
+    ║   ██   ██ ██    ██  ██ ██                        ║
+    ║   ██████   ██████  ██   ██                       ║
+    ║                                                  ║
+    ║   Tap the line. Own the conversation.   v""" + __version__ + r"""  ║
+    ║                                                  ║
+    ╚══════════════════════════════════════════════════╝
+"""
+
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+def cmd_dial(args):
+    """Start the BeigeBox proxy server."""
+    import uvicorn
+    from beigebox.config import get_config
+
+    cfg = get_config()
+    host = args.host or cfg["server"]["host"]
+    port = args.port or cfg["server"]["port"]
+
+    print(BANNER)
+    print(f"  Dialing up on {host}:{port}")
+    print(f"  Backend: {cfg['backend']['url']}")
+    print(f"  Model: {cfg['backend']['default_model']}")
+    print()
+
+    uvicorn.run(
+        "beigebox.main:app",
+        host=host,
+        port=port,
+        reload=args.reload,
+        log_level="info",
+    )
+
+
+def cmd_tap(args):
+    """Live wiretap — watch conversations on the wire."""
+    from beigebox.wiretap import live_tap
+    live_tap(
+        log_path=args.log,
+        follow=not args.no_follow,
+        last_n=args.last,
+        role_filter=args.role,
+        raw=args.raw,
+    )
+
+
+def cmd_ring(args):
+    """Ping a running BeigeBox instance."""
+    import httpx
+
+    url = args.url or "http://localhost:8000"
+    try:
+        resp = httpx.get(f"{url}/beigebox/health", timeout=5)
+        if resp.status_code == 200:
+            print(f"  ☎  Ring ring... {url} is UP")
+
+            stats = httpx.get(f"{url}/beigebox/stats", timeout=5).json()
+            sq = stats.get("sqlite", {})
+            vq = stats.get("vector", {})
+            tools = stats.get("tools", [])
+
+            print(f"  📼 Conversations: {sq.get('conversations', 0)}")
+            print(f"  💬 Messages: {sq.get('messages', 0)} (user: {sq.get('user_messages', 0)}, assistant: {sq.get('assistant_messages', 0)})")
+            print(f"  🧲 Embeddings: {vq.get('total_embeddings', 0)}")
+            print(f"  🔧 Tools: {', '.join(tools) if tools else 'none'}")
+        else:
+            print(f"  ✗  No answer — got HTTP {resp.status_code}")
+    except httpx.ConnectError:
+        print(f"  ✗  Dead line — nothing at {url}")
+    except Exception as e:
+        print(f"  ✗  Error: {e}")
+
+
+def cmd_sweep(args):
+    """Semantic search over stored conversations."""
+    from beigebox.config import get_config
+    from beigebox.storage.vector_store import VectorStore
+
+    cfg = get_config()
+    store = VectorStore(
+        chroma_path=cfg["storage"]["chroma_path"],
+        embedding_model=cfg["embedding"]["model"],
+        embedding_url=cfg["embedding"]["backend_url"],
+    )
+
+    query = " ".join(args.query)
+    print(f"  🔍 Sweeping for: '{query}'")
+    print("  " + "─" * 56)
+
+    results = store.search(query, n_results=args.results, role_filter=args.role)
+
+    if not results:
+        print("  No signal found.")
+        return
+
+    for i, hit in enumerate(results, 1):
+        meta = hit["metadata"]
+        score = 1 - hit["distance"]
+        content = hit["content"]
+        if len(content) > 200:
+            content = content[:200] + "..."
+
+        role = meta.get("role", "?")
+        role_color = "\033[96m" if role == "user" else "\033[93m"
+        reset = "\033[0m"
+
+        print(f"\n  [{i}] {role_color}{role.upper()}{reset} | score: {score:.3f} | model: {meta.get('model', '?')}")
+        print(f"      conv: {meta.get('conversation_id', '?')[:16]}...")
+        print(f"      {content}")
+
+
+def cmd_dump(args):
+    """Export conversations to JSON."""
+    import json
+    from beigebox.config import get_config
+    from beigebox.storage.sqlite_store import SQLiteStore
+
+    cfg = get_config()
+    store = SQLiteStore(cfg["storage"]["sqlite_path"])
+    stats = store.get_stats()
+
+    print(f"  📼 Database: {cfg['storage']['sqlite_path']}")
+    print(f"  💬 Conversations: {stats['conversations']} | Messages: {stats['messages']}")
+
+    data = store.export_all_json()
+    indent = 2 if args.pretty else None
+
+    with open(args.output, "w") as f:
+        json.dump(data, f, indent=indent, ensure_ascii=False)
+
+    print(f"  📦 Dumped {len(data)} conversations to {args.output}")
+
+
+def cmd_flash(args):
+    """Show stats at a glance."""
+    from beigebox.config import get_config
+    from beigebox.storage.sqlite_store import SQLiteStore
+
+    cfg = get_config()
+
+    print(BANNER)
+    print("  Configuration")
+    print(f"  ├─ Backend:   {cfg['backend']['url']}")
+    print(f"  ├─ Model:     {cfg['backend']['default_model']}")
+    print(f"  ├─ Embedder:  {cfg['embedding']['model']}")
+    print(f"  ├─ SQLite:    {cfg['storage']['sqlite_path']}")
+    print(f"  ├─ ChromaDB:  {cfg['storage']['chroma_path']}")
+    print(f"  └─ Logging:   {cfg['storage'].get('log_conversations', True)}")
+
+    try:
+        store = SQLiteStore(cfg["storage"]["sqlite_path"])
+        stats = store.get_stats()
+        print()
+        print("  Storage")
+        print(f"  ├─ Conversations: {stats['conversations']}")
+        print(f"  ├─ Messages:      {stats['messages']}")
+        print(f"  ├─ User msgs:     {stats['user_messages']}")
+        print(f"  └─ Asst msgs:     {stats['assistant_messages']}")
+    except Exception:
+        print("\n  Storage: (no database yet — run 'beigebox dial' first)")
+
+    tools_cfg = cfg.get("tools", {})
+    enabled = []
+    if tools_cfg.get("web_search", {}).get("enabled"):
+        enabled.append(f"web_search ({tools_cfg['web_search'].get('provider', 'duckduckgo')})")
+    if tools_cfg.get("web_scraper", {}).get("enabled"):
+        enabled.append("web_scraper")
+    if tools_cfg.get("google_search", {}).get("enabled"):
+        enabled.append("google_search")
+
+    print()
+    print("  Tools")
+    print(f"  └─ {', '.join(enabled) if enabled else 'none enabled'}")
+
+
+def cmd_tone(args):
+    """Print the banner."""
+    print(BANNER)
+
+
+# ---------------------------------------------------------------------------
+# Parser with aliases
+# ---------------------------------------------------------------------------
+
+def _add_command(subparsers, names, help_text, func, setup_fn=None):
+    """Register a command under multiple names (phreaker + standard)."""
+    p = subparsers.add_parser(names[0], help=help_text, aliases=names[1:])
+    p.set_defaults(func=func)
+    if setup_fn:
+        setup_fn(p)
+    return p
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="beigebox",
+        description="BeigeBox — Tap the line. Own the conversation.",
+        epilog=(
+            "Each command has a phreaker name and standard aliases.\n"
+            "Example: 'beigebox dial' and 'beigebox start' do the same thing.\n"
+            "Run 'beigebox <command> --help' for command-specific options."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--version", "-V", action="version",
+        version=f"beigebox {__version__}",
+    )
+
+    sub = parser.add_subparsers(dest="command", metavar="<command>")
+
+    # dial / start / serve / up
+    def setup_dial(p):
+        p.add_argument("--host", default=None, help="Override listen host")
+        p.add_argument("--port", "-p", type=int, default=None, help="Override listen port")
+        p.add_argument("--reload", action="store_true", help="Auto-reload on code changes (dev)")
+
+    _add_command(sub, ["dial", "start", "serve", "up"],
+                 "Start the BeigeBox proxy server", cmd_dial, setup_dial)
+
+    # tap / log / tail / watch
+    def setup_tap(p):
+        p.add_argument("--log", default=None, help="Path to wire.jsonl (default: from config)")
+        p.add_argument("--last", "-n", type=int, default=20, help="Show last N entries before following")
+        p.add_argument("--role", "-r", choices=["user", "assistant"], default=None, help="Filter by role")
+        p.add_argument("--no-follow", action="store_true", help="Don't follow, just show last entries")
+        p.add_argument("--raw", action="store_true", help="Raw JSONL output, no formatting")
+
+    _add_command(sub, ["tap", "log", "tail", "watch"],
+                 "Live wiretap — watch conversations on the wire", cmd_tap, setup_tap)
+
+    # ring / status / ping / health
+    def setup_ring(p):
+        p.add_argument("--url", "-u", default=None, help="BeigeBox URL (default: http://localhost:8000)")
+
+    _add_command(sub, ["ring", "status", "ping", "health"],
+                 "Ping a running BeigeBox instance", cmd_ring, setup_ring)
+
+    # sweep / search / find / query
+    def setup_sweep(p):
+        p.add_argument("query", nargs="+", help="Search query")
+        p.add_argument("--results", "-n", type=int, default=5, help="Number of results")
+        p.add_argument("--role", "-r", choices=["user", "assistant"], default=None, help="Filter by role")
+
+    _add_command(sub, ["sweep", "search", "find", "query"],
+                 "Semantic search over conversations", cmd_sweep, setup_sweep)
+
+    # dump / export
+    def setup_dump(p):
+        p.add_argument("--output", "-o", default="conversations_export.json", help="Output file")
+        p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
+
+    _add_command(sub, ["dump", "export"],
+                 "Export conversations to JSON", cmd_dump, setup_dump)
+
+    # flash / info / config / stats
+    _add_command(sub, ["flash", "info", "config", "stats"],
+                 "Show stats and config at a glance", cmd_flash)
+
+    # tone / banner
+    _add_command(sub, ["tone", "banner"],
+                 "Print the BeigeBox banner", cmd_tone)
+
+    args = parser.parse_args()
+    if not args.command:
+        cmd_tone(args)
+        parser.print_help()
+        return
+
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
