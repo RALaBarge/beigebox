@@ -4,7 +4,7 @@ A transparent proxy that sits between your LLM frontend (Open WebUI) and your LL
 
 ```
 +---------------+         +--------------------------------------+         +-----------------+
-|               |  HTTP   |          BEIGEBOX               |  HTTP   |                 |
+|               |  HTTP   |               BEIGEBOX               |  HTTP   |                 |
 |  Open WebUI   |-------->|                                      |-------->|  Ollama /        |
 |  (Frontend)   |<--------|  FastAPI Proxy                       |<--------|  llama.cpp       |
 |               |         |  +----------------------------------+|         |  (Backend)       |
