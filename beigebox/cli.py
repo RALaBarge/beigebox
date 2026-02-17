@@ -98,11 +98,18 @@ def cmd_ring(args):
             sq = stats.get("sqlite", {})
             vq = stats.get("vector", {})
             tools = stats.get("tools", [])
+            hooks = stats.get("hooks", [])
+            dlm = stats.get("decision_llm", {})
+            tokens = sq.get("tokens", {})
 
             print(f"  📼 Conversations: {sq.get('conversations', 0)}")
             print(f"  💬 Messages: {sq.get('messages', 0)} (user: {sq.get('user_messages', 0)}, assistant: {sq.get('assistant_messages', 0)})")
+            if tokens.get("total", 0) > 0:
+                print(f"  📊 Tokens: ~{tokens['total']:,} total")
             print(f"  🧲 Embeddings: {vq.get('total_embeddings', 0)}")
             print(f"  🔧 Tools: {', '.join(tools) if tools else 'none'}")
+            print(f"  🪝 Hooks: {', '.join(hooks) if hooks else 'none'}")
+            print(f"  🧠 Decision LLM: {'enabled (' + dlm.get('model', '?') + ')' if dlm.get('enabled') else 'disabled'}")
         else:
             print(f"  ✗  No answer — got HTTP {resp.status_code}")
     except httpx.ConnectError:
@@ -190,12 +197,31 @@ def cmd_flash(args):
     try:
         store = SQLiteStore(cfg["storage"]["sqlite_path"])
         stats = store.get_stats()
+        tokens = stats.get("tokens", {})
+        models = stats.get("models", {})
+
         print()
         print("  Storage")
         print(f"  ├─ Conversations: {stats['conversations']}")
         print(f"  ├─ Messages:      {stats['messages']}")
         print(f"  ├─ User msgs:     {stats['user_messages']}")
         print(f"  └─ Asst msgs:     {stats['assistant_messages']}")
+
+        if tokens.get("total", 0) > 0:
+            print()
+            print("  Tokens (estimated)")
+            print(f"  ├─ Total:     {tokens['total']:,}")
+            print(f"  ├─ User:      {tokens['user']:,}")
+            print(f"  └─ Assistant: {tokens['assistant']:,}")
+
+        if models:
+            print()
+            print("  Models")
+            model_items = list(models.items())
+            for i, (model, info) in enumerate(model_items):
+                prefix = "└─" if i == len(model_items) - 1 else "├─"
+                print(f"  {prefix} {model}: {info['messages']} msgs, ~{info['tokens']:,} tokens")
+
     except Exception:
         print("\n  Storage: (no database yet — run 'beigebox dial' first)")
 
@@ -211,6 +237,31 @@ def cmd_flash(args):
     print()
     print("  Tools")
     print(f"  └─ {', '.join(enabled) if enabled else 'none enabled'}")
+
+    # Decision LLM
+    d_cfg = cfg.get("decision_llm", {})
+    print()
+    print("  Decision LLM")
+    if d_cfg.get("enabled"):
+        print(f"  ├─ Model:   {d_cfg.get('model', '?')}")
+        print(f"  ├─ Timeout: {d_cfg.get('timeout', 5)}s")
+        routes = d_cfg.get("routes", {})
+        print(f"  └─ Routes:  {', '.join(routes.keys()) if routes else 'default only'}")
+    else:
+        print("  └─ disabled")
+
+    # Hooks
+    hooks_cfg = cfg.get("hooks", {})
+    hooks_dir = hooks_cfg.get("directory", "./hooks")
+    from pathlib import Path
+    hook_files = []
+    hooks_path = Path(hooks_dir)
+    if hooks_path.exists():
+        hook_files = [f.stem for f in sorted(hooks_path.glob("*.py")) if not f.name.startswith("_")]
+
+    print()
+    print("  Hooks")
+    print(f"  └─ {', '.join(hook_files) if hook_files else 'none'} (dir: {hooks_dir})")
 
 
 def cmd_tone(args):

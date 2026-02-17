@@ -1,11 +1,18 @@
 """
 FastAPI application — the BeigeBox entry point.
 Implements OpenAI-compatible endpoints that proxy to Ollama.
+
+Now with:
+  - Decision LLM initialization and preloading
+  - Hook manager setup
+  - Embedding model preloading
+  - Enhanced stats with token tracking
 """
 
 import logging
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -14,6 +21,8 @@ from beigebox.proxy import Proxy
 from beigebox.storage.sqlite_store import SQLiteStore
 from beigebox.storage.vector_store import VectorStore
 from beigebox.tools.registry import ToolRegistry
+from beigebox.agents.decision import DecisionAgent
+from beigebox.hooks import HookManager
 
 
 # ---------------------------------------------------------------------------
@@ -23,6 +32,8 @@ proxy: Proxy | None = None
 tool_registry: ToolRegistry | None = None
 sqlite_store: SQLiteStore | None = None
 vector_store: VectorStore | None = None
+decision_agent: DecisionAgent | None = None
+hook_manager: HookManager | None = None
 
 
 def _setup_logging(cfg: dict):
@@ -43,10 +54,33 @@ def _setup_logging(cfg: dict):
     )
 
 
+async def _preload_embedding_model(cfg: dict):
+    """Pin the embedding model in Ollama's memory at startup."""
+    embed_cfg = cfg.get("embedding", {})
+    model = embed_cfg.get("model", "")
+    url = embed_cfg.get("backend_url", cfg["backend"]["url"]).rstrip("/")
+
+    if not model:
+        return
+
+    logger = logging.getLogger(__name__)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{url}/api/generate",
+                json={"model": model, "prompt": "", "keep_alive": -1},
+            )
+            resp.raise_for_status()
+            logger.info("Embedding model '%s' preloaded and pinned", model)
+    except Exception as e:
+        logger.warning("Failed to preload embedding model: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     global proxy, tool_registry, sqlite_store, vector_store
+    global decision_agent, hook_manager
 
     cfg = get_config()
     _setup_logging(cfg)
@@ -60,11 +94,28 @@ async def lifespan(app: FastAPI):
         embedding_url=cfg["embedding"]["backend_url"],
     )
 
-    # Proxy
-    proxy = Proxy(sqlite=sqlite_store, vector=vector_store)
+    # Tools (pass vector_store for the memory tool)
+    tool_registry = ToolRegistry(vector_store=vector_store)
 
-    # Tools
-    tool_registry = ToolRegistry()
+    # Decision Agent
+    decision_agent = DecisionAgent.from_config(
+        available_tools=tool_registry.list_tools()
+    )
+
+    # Hooks
+    hooks_cfg = cfg.get("hooks", {})
+    hook_manager = HookManager(
+        hooks_dir=hooks_cfg.get("directory", "./hooks"),
+        hook_configs=hooks_cfg.get("hooks", []),
+    )
+
+    # Proxy (with decision agent and hooks)
+    proxy = Proxy(
+        sqlite=sqlite_store,
+        vector=vector_store,
+        decision_agent=decision_agent,
+        hook_manager=hook_manager,
+    )
 
     logger.info(
         "BeigeBox started — listening on %s:%s, backend %s",
@@ -73,7 +124,14 @@ async def lifespan(app: FastAPI):
         cfg["backend"]["url"],
     )
     logger.info("Storage: SQLite=%s, Chroma=%s", cfg["storage"]["sqlite_path"], cfg["storage"]["chroma_path"])
-    logger.info("Tools enabled: %s", tool_registry.list_tools())
+    logger.info("Tools: %s", tool_registry.list_tools())
+    logger.info("Hooks: %s", hook_manager.list_hooks())
+    logger.info("Decision LLM: %s", "enabled" if decision_agent.enabled else "disabled")
+
+    # Preload models in background
+    await _preload_embedding_model(cfg)
+    if decision_agent:
+        await decision_agent.preload()
 
     yield
 
@@ -86,7 +144,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="BeigeBox",
     description="Tap the line. Own the conversation.",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -127,32 +185,46 @@ async def list_models():
 
 
 # ---------------------------------------------------------------------------
-# Middleware-specific endpoints (not part of OpenAI spec)
+# BeigeBox-specific endpoints
 # ---------------------------------------------------------------------------
 
 @app.get("/beigebox/stats")
 async def stats():
-    """Return storage statistics."""
+    """Return storage and usage statistics."""
+    sqlite_stats = sqlite_store.get_stats() if sqlite_store else {}
+    vector_stats = vector_store.get_stats() if vector_store else {}
+    tools = tool_registry.list_tools() if tool_registry else []
+    hooks = hook_manager.list_hooks() if hook_manager else []
+
     return JSONResponse({
-        "sqlite": sqlite_store.get_stats() if sqlite_store else {},
-        "vector": vector_store.get_stats() if vector_store else {},
-        "tools": tool_registry.list_tools() if tool_registry else [],
+        "sqlite": sqlite_stats,
+        "vector": vector_stats,
+        "tools": tools,
+        "hooks": hooks,
+        "decision_llm": {
+            "enabled": decision_agent.enabled if decision_agent else False,
+            "model": decision_agent.model if decision_agent else "",
+        },
     })
 
 
 @app.get("/beigebox/search")
-async def search_conversations(q: str, n: int = 5):
+async def search_conversations(q: str, n: int = 5, role: str | None = None):
     """Semantic search over stored conversations."""
     if not vector_store:
         return JSONResponse({"error": "Vector store not initialized"}, status_code=503)
-    results = vector_store.search(q, n_results=n)
+    results = vector_store.search(q, n_results=n, role_filter=role)
     return JSONResponse({"query": q, "results": results})
 
 
 @app.get("/beigebox/health")
 async def health():
     """Health check."""
-    return JSONResponse({"status": "ok"})
+    return JSONResponse({
+        "status": "ok",
+        "version": "0.2.0",
+        "decision_llm": decision_agent.enabled if decision_agent else False,
+    })
 
 
 # ---------------------------------------------------------------------------

@@ -1,11 +1,10 @@
 """
-Basic tests for the proxy layer.
+Tests for proxy layer and data models.
 Run with: pytest tests/
 """
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
-from middleware.storage.models import Message
+from beigebox.storage.models import Message
 
 
 def test_message_creation():
@@ -14,8 +13,8 @@ def test_message_creation():
     assert msg.conversation_id == "abc"
     assert msg.role == "user"
     assert msg.content == "hello"
-    assert msg.id  # auto-generated
-    assert msg.timestamp  # auto-generated
+    assert msg.id
+    assert msg.timestamp
 
 
 def test_message_openai_format():
@@ -31,3 +30,9 @@ def test_message_openai_format():
     assert fmt["content"] == "world"
     assert fmt["model"] == "qwen3:32b"
     assert "timestamp" in fmt
+
+
+def test_message_token_count():
+    """Message stores token count."""
+    msg = Message(conversation_id="abc", role="user", content="hello", token_count=42)
+    assert msg.token_count == 42

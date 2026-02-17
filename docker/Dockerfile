@@ -12,13 +12,14 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Application code
-COPY middleware/ middleware/
+COPY beigebox/ beigebox/
 COPY config.yaml .
 COPY scripts/ scripts/
+COPY hooks/ hooks/
 
 # Create data directory
 RUN mkdir -p /app/data
 
 EXPOSE 8000
 
-CMD ["python", "-m", "middleware.main"]
+CMD ["python", "-m", "beigebox", "dial"]

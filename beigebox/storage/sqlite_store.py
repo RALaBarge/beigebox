@@ -134,15 +134,48 @@ class SQLiteStore:
         return result
 
     def get_stats(self) -> dict:
-        """Return basic stats about stored data."""
+        """Return stats about stored data including token usage."""
         with self._connect() as conn:
             conv_count = conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
             msg_count = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
             user_count = conn.execute("SELECT COUNT(*) FROM messages WHERE role='user'").fetchone()[0]
             asst_count = conn.execute("SELECT COUNT(*) FROM messages WHERE role='assistant'").fetchone()[0]
+
+            # Token stats
+            total_tokens = conn.execute(
+                "SELECT COALESCE(SUM(token_count), 0) FROM messages"
+            ).fetchone()[0]
+            user_tokens = conn.execute(
+                "SELECT COALESCE(SUM(token_count), 0) FROM messages WHERE role='user'"
+            ).fetchone()[0]
+            asst_tokens = conn.execute(
+                "SELECT COALESCE(SUM(token_count), 0) FROM messages WHERE role='assistant'"
+            ).fetchone()[0]
+
+            # Per-model breakdown
+            model_rows = conn.execute(
+                """SELECT model,
+                          COUNT(*) as messages,
+                          COALESCE(SUM(token_count), 0) as tokens
+                   FROM messages
+                   WHERE model != ''
+                   GROUP BY model
+                   ORDER BY messages DESC"""
+            ).fetchall()
+            models = {
+                row["model"]: {"messages": row["messages"], "tokens": row["tokens"]}
+                for row in model_rows
+            }
+
         return {
             "conversations": conv_count,
             "messages": msg_count,
             "user_messages": user_count,
             "assistant_messages": asst_count,
+            "tokens": {
+                "total": total_tokens,
+                "user": user_tokens,
+                "assistant": asst_tokens,
+            },
+            "models": models,
         }

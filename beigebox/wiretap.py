@@ -38,6 +38,7 @@ ROLE_COLORS = {
     "assistant": C_ASSISTANT,
     "system": C_SYSTEM,
     "tool": C_TOOL,
+    "decision": C_MODEL,
 }
 
 ROLE_ICONS = {
@@ -45,6 +46,7 @@ ROLE_ICONS = {
     "assistant": "◀",
     "system": "●",
     "tool": "⚡",
+    "decision": "⚖",
 }
 
 
@@ -132,6 +134,8 @@ def _format_entry(entry: dict, raw: bool = False) -> str:
     # Direction arrow
     if direction == "inbound":
         arrow = f"{C_DIM}──▶{C_RESET}"
+    elif direction == "internal":
+        arrow = f"{C_DIM}─●─{C_RESET}"
     else:
         arrow = f"{C_DIM}◀──{C_RESET}"
 

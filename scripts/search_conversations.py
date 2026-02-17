@@ -14,8 +14,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from middleware.config import get_config
-from middleware.storage.vector_store import VectorStore
+from beigebox.config import get_config
+from beigebox.storage.vector_store import VectorStore
 
 
 def main():
@@ -49,7 +49,6 @@ def main():
         distance = hit["distance"]
         content = hit["content"]
 
-        # Truncate long content for display
         if len(content) > 200:
             content = content[:200] + "..."
 

@@ -4,10 +4,8 @@ Uses a temp database for each test.
 """
 
 import pytest
-import tempfile
-import os
-from middleware.storage.sqlite_store import SQLiteStore
-from middleware.storage.models import Message
+from beigebox.storage.sqlite_store import SQLiteStore
+from beigebox.storage.models import Message
 
 
 @pytest.fixture
@@ -60,6 +58,33 @@ def test_stats(store):
     assert stats["messages"] == 3
     assert stats["user_messages"] == 2
     assert stats["assistant_messages"] == 1
+
+
+def test_stats_tokens(store):
+    """Token stats are tracked correctly."""
+    store.store_message(Message(conversation_id="c1", role="user", content="a", token_count=10))
+    store.store_message(Message(conversation_id="c1", role="assistant", content="b", token_count=20))
+    store.store_message(Message(conversation_id="c1", role="user", content="c", token_count=15))
+
+    stats = store.get_stats()
+    tokens = stats["tokens"]
+    assert tokens["total"] == 45
+    assert tokens["user"] == 25
+    assert tokens["assistant"] == 20
+
+
+def test_stats_models(store):
+    """Per-model breakdown is reported."""
+    store.store_message(Message(conversation_id="c1", role="user", content="a", model="qwen3:32b", token_count=10))
+    store.store_message(Message(conversation_id="c1", role="assistant", content="b", model="qwen3:32b", token_count=20))
+    store.store_message(Message(conversation_id="c2", role="user", content="c", model="mistral-nemo:12b", token_count=5))
+
+    stats = store.get_stats()
+    models = stats["models"]
+    assert "qwen3:32b" in models
+    assert models["qwen3:32b"]["messages"] == 2
+    assert models["qwen3:32b"]["tokens"] == 30
+    assert "mistral-nemo:12b" in models
 
 
 def test_export_json(store):

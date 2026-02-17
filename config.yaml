@@ -4,7 +4,7 @@
 # --- Backend (where requests get forwarded) ---
 backend:
   url: "http://localhost:11434"       # Ollama base URL
-  default_model: "mistral-nemo:12b"          # Fallback model if none specified in request
+  default_model: "mistral-nemo:12b"   # Fallback model if none specified in request
   timeout: 120                         # Seconds before we give up on a backend response
 
 # --- Middleware Server ---
@@ -26,6 +26,7 @@ storage:
 # --- Tools ---
 tools:
   enabled: true                        # Master switch for LangChain tool augmentation
+  webhook_url: ""                      # Send tool invocations here (e.g. "tcp://localhost:9999" for nc -lk 9999)
   web_search:
     enabled: true
     provider: "duckduckgo"             # "duckduckgo" or "google"
@@ -37,17 +38,61 @@ tools:
     enabled: false
     api_key: "${GOOGLE_API_KEY}"       # Resolved from .env at runtime
     cse_id: "${GOOGLE_CSE_ID}"
+  calculator:
+    enabled: true                      # Safe math expression evaluator
+  datetime:
+    enabled: true                      # Current time/date, timezone conversions
+    local_tz_offset: -5.0              # Your timezone offset from UTC (EST = -5)
+  system_info:
+    enabled: true                      # Host system stats (CPU, RAM, GPU, disk)
+  memory:
+    enabled: true                      # Semantic search over past conversations
+    max_results: 3
+    min_score: 0.3                     # Minimum similarity (0-1) to include
 
-# --- Decision LLM (Future) ---
+# --- Decision LLM ---
+# A small, fast model that routes requests to the right backend model
+# and decides if tools/RAG are needed. ~3GB RAM for the MoE variant.
+# Set enabled: true and pull the model to activate.
 decision_llm:
-  enabled: false
-  model: "qwen3:3b"                   # Small fast model for routing decisions
+  enabled: false                       # Set to true after pulling the model
+  model: "qwen3:30b-a3b"              # MoE: 30B total, 3B active — fast and smart
   backend_url: "http://localhost:11434"
+  timeout: 5                           # Seconds — if router is slow, skip and forward raw
+  max_tokens: 256                      # Routing decisions should be tiny
+
+  # Routes: named shortcuts to models. The decision LLM picks a route name,
+  # BeigeBox resolves it to the actual model string.
+  # Add/remove routes as you pull/remove models from Ollama.
+  routes:
+    default:
+      model: "mistral-nemo:12b"
+      description: "General purpose conversation and Q&A"
+    code:
+      model: "qwen2.5-coder:14b"
+      description: "Code generation, debugging, technical programming tasks"
+    large:
+      model: "qwen3:32b"
+      description: "Complex reasoning, analysis, long-form writing"
+    fast:
+      model: "qwen3:30b-a3b"
+      description: "Quick responses, simple questions, brainstorming"
+
+# --- Hooks ---
+# Extensible pre/post processing pipeline.
+# Drop .py files in the hooks directory, or specify paths explicitly.
+hooks:
+  directory: "./hooks"                 # Auto-load all .py files from this directory
+  # Or specify individual hooks with explicit paths:
+  # hooks:
+  #   - name: "my_hook"
+  #     path: "./hooks/my_hook.py"
+  #     enabled: true
 
 # --- Logging ---
 logging:
   level: "INFO"                        # DEBUG, INFO, WARNING, ERROR
-  file: "./data/middleware.log"
+  file: "./data/beigebox.log"
 
 # --- Wiretap (structured conversation log for `beigebox tap`) ---
 wiretap:

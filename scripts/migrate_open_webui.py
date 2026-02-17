@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Import existing Open WebUI conversation history into the middleware database.
+Import existing Open WebUI conversation history into BeigeBox.
 Reads from Open WebUI's SQLite DB and writes to our SQLite + ChromaDB.
 
 Usage:
@@ -16,26 +16,23 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from middleware.config import get_config
-from middleware.storage.sqlite_store import SQLiteStore
-from middleware.storage.vector_store import VectorStore
-from middleware.storage.models import Message
+from beigebox.config import get_config
+from beigebox.storage.sqlite_store import SQLiteStore
+from beigebox.storage.vector_store import VectorStore
+from beigebox.storage.models import Message
 
 
 def read_open_webui_db(db_path: str) -> list[dict]:
     """
     Read conversations from Open WebUI's SQLite database.
     Open WebUI stores chats as JSON blobs in a 'chat' table.
-    Schema may vary by version — this handles the common format.
     """
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
-    # Open WebUI typically has a 'chat' table with a 'chat' JSON column
     try:
         rows = conn.execute("SELECT id, chat, created_at, updated_at FROM chat ORDER BY created_at").fetchall()
     except sqlite3.OperationalError:
-        # Try alternative table names
         tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         print(f"Could not find 'chat' table. Available tables: {[t['name'] for t in tables]}")
         conn.close()
@@ -61,9 +58,6 @@ def read_open_webui_db(db_path: str) -> list[dict]:
 def extract_messages(chat_data: dict) -> list[dict]:
     """Extract messages from Open WebUI's chat JSON structure."""
     messages = []
-
-    # Open WebUI stores messages in various formats depending on version
-    # Common patterns: chat_data["messages"], chat_data["history"]["messages"]
     raw_messages = None
 
     if isinstance(chat_data, dict):
@@ -76,9 +70,7 @@ def extract_messages(chat_data: dict) -> list[dict]:
     if not raw_messages:
         return messages
 
-    # Handle both list format and dict format
     if isinstance(raw_messages, dict):
-        # Some versions use {msg_id: msg_data} format
         raw_messages = list(raw_messages.values())
 
     for msg in raw_messages:
@@ -127,7 +119,6 @@ def main():
             print(f"  ... and {len(conversations) - 5} more")
         return
 
-    # Initialize our stores
     cfg = get_config()
     sqlite = SQLiteStore(cfg["storage"]["sqlite_path"])
     vector = VectorStore(

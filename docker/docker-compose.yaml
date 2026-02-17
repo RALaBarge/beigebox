@@ -18,16 +18,17 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
 
-  middleware:
+  beigebox:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: ai-middleware
+    container_name: beigebox
     ports:
       - "8000:8000"
     volumes:
-      - middleware_data:/app/data
+      - beigebox_data:/app/data
       - ../config.yaml:/app/config.yaml:ro
+      - ../hooks:/app/hooks:ro
     environment:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GOOGLE_CSE_ID=${GOOGLE_CSE_ID:-}
@@ -43,16 +44,16 @@ services:
     volumes:
       - open_webui_data:/app/backend/data
     environment:
-      # Point Open WebUI at the middleware, NOT directly at Ollama
-      - OPENAI_API_BASE_URL=http://middleware:8000/v1
+      # Point Open WebUI at BeigeBox, NOT directly at Ollama
+      - OPENAI_API_BASE_URL=http://beigebox:8000/v1
       - OPENAI_API_KEY=not-needed
       # Also keep direct Ollama connection for model management
       - OLLAMA_BASE_URL=http://ollama:11434
     depends_on:
-      - middleware
+      - beigebox
     restart: unless-stopped
 
 volumes:
   ollama_data:
-  middleware_data:
+  beigebox_data:
   open_webui_data:
