@@ -4,13 +4,13 @@
 # --- Backend (where requests get forwarded) ---
 backend:
   url: "http://localhost:11434"       # Ollama base URL
-  default_model: "qwen3:32b"          # Fallback model if none specified in request
+  default_model: "mistral-nemo:12b"          # Fallback model if none specified in request
   timeout: 120                         # Seconds before we give up on a backend response
 
 # --- Middleware Server ---
 server:
   host: "0.0.0.0"
-  port: 8000
+  port: 8001
 
 # --- Embedding ---
 embedding:
