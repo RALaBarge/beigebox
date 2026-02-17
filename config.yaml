@@ -4,7 +4,7 @@
 # --- Backend (where requests get forwarded) ---
 backend:
   url: "http://localhost:11434"       # Ollama base URL
-  default_model: "mistral-nemo:12b"   # Fallback model if none specified in request
+  default_model: ""                   # Fallback model if none specified in request (set to a model you have pulled)
   timeout: 120                         # Seconds before we give up on a backend response
 
 # --- Middleware Server ---
@@ -56,7 +56,7 @@ tools:
 # Set enabled: true and pull the model to activate.
 decision_llm:
   enabled: false                       # Set to true after pulling the model
-  model: "qwen3:30b-a3b"              # MoE: 30B total, 3B active — fast and smart
+  model: ""                           # A small, fast model for routing (e.g. MoE variant with low active params)
   backend_url: "http://localhost:11434"
   timeout: 5                           # Seconds — if router is slow, skip and forward raw
   max_tokens: 256                      # Routing decisions should be tiny
@@ -66,16 +66,16 @@ decision_llm:
   # Add/remove routes as you pull/remove models from Ollama.
   routes:
     default:
-      model: "mistral-nemo:12b"
+      model: ""                        # Set to your general-purpose model
       description: "General purpose conversation and Q&A"
     code:
-      model: "qwen2.5-coder:14b"
+      model: ""                        # Set to your code-specialized model
       description: "Code generation, debugging, technical programming tasks"
     large:
-      model: "qwen3:32b"
+      model: ""                        # Set to your largest/smartest model
       description: "Complex reasoning, analysis, long-form writing"
     fast:
-      model: "qwen3:30b-a3b"
+      model: ""                        # Set to your fastest model (e.g. small or MoE)
       description: "Quick responses, simple questions, brainstorming"
 
 # --- Hooks ---

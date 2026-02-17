@@ -1,0 +1,86 @@
+# beigebox config — Docker deployment
+# Uses container service names for networking.
+# For bare-metal, use config.yaml instead.
+
+# --- Backend (where requests get forwarded) ---
+backend:
+  url: "http://ollama:11434"            # Docker service name
+  default_model: ""                     # Set to a model you have pulled
+  timeout: 120
+
+# --- Middleware Server ---
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+# --- Embedding ---
+embedding:
+  model: "nomic-embed-text"
+  backend_url: "http://ollama:11434"
+
+# --- Storage ---
+storage:
+  sqlite_path: "./data/conversations.db"
+  chroma_path: "./data/chroma"
+  log_conversations: true
+
+# --- Tools ---
+tools:
+  enabled: true
+  webhook_url: ""
+  web_search:
+    enabled: true
+    provider: "duckduckgo"
+    max_results: 5
+  web_scraper:
+    enabled: true
+    max_content_length: 10000
+  google_search:
+    enabled: false
+    api_key: "${GOOGLE_API_KEY}"
+    cse_id: "${GOOGLE_CSE_ID}"
+  calculator:
+    enabled: true
+  datetime:
+    enabled: true
+    local_tz_offset: -5.0
+  system_info:
+    enabled: true
+  memory:
+    enabled: true
+    max_results: 3
+    min_score: 0.3
+
+# --- Decision LLM ---
+decision_llm:
+  enabled: true                          # Enabled by default in Docker — setup pulls the model
+  model: ""                             # Set to a small, fast model for routing
+  backend_url: "http://ollama:11434"
+  timeout: 5
+  max_tokens: 256
+  routes:
+    default:
+      model: ""
+      description: "General purpose conversation and Q&A"
+    code:
+      model: ""
+      description: "Code generation, debugging, technical programming tasks"
+    large:
+      model: ""
+      description: "Complex reasoning, analysis, long-form writing"
+    fast:
+      model: ""
+      description: "Quick responses, simple questions, brainstorming"
+
+# --- Hooks ---
+hooks:
+  directory: "./hooks"
+
+# --- Logging ---
+logging:
+  level: "INFO"
+  file: "./data/beigebox.log"
+
+# --- Wiretap ---
+wiretap:
+  path: "./data/wire.jsonl"

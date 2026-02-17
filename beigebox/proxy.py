@@ -23,6 +23,8 @@ from beigebox.storage.models import Message
 from beigebox.storage.sqlite_store import SQLiteStore
 from beigebox.storage.vector_store import VectorStore
 from beigebox.agents.decision import DecisionAgent, Decision
+from beigebox.agents.zcommand import parse_z_command, ZCommand, HELP_TEXT
+from beigebox.agents.embedding_classifier import EmbeddingClassifier, EmbeddingDecision
 from beigebox.hooks import HookManager
 from beigebox.wiretap import WireLog
 
@@ -43,16 +45,24 @@ class Proxy:
         vector: VectorStore,
         decision_agent: DecisionAgent | None = None,
         hook_manager: HookManager | None = None,
+        embedding_classifier: EmbeddingClassifier | None = None,
+        tool_registry=None,
     ):
         self.sqlite = sqlite
         self.vector = vector
         self.decision_agent = decision_agent
         self.hook_manager = hook_manager
+        self.embedding_classifier = embedding_classifier
+        self.tool_registry = tool_registry
         self.cfg = get_config()
         self.backend_url = self.cfg["backend"]["url"].rstrip("/")
         self.timeout = self.cfg["backend"].get("timeout", 120)
         self.default_model = self.cfg["backend"].get("default_model", "")
         self.log_enabled = self.cfg["storage"].get("log_conversations", True)
+
+        # Route config for z-command model resolution
+        d_cfg = self.cfg.get("decision_llm", {})
+        self.routes = d_cfg.get("routes", {})
 
         # Wire log — structured tap of everything on the line
         wire_path = self.cfg.get("wiretap", {}).get("path", "./data/wire.jsonl")
@@ -206,6 +216,142 @@ class Proxy:
 
         return decision
 
+    def _resolve_route_to_model(self, route_name: str) -> str:
+        """Resolve a route name to an actual model string."""
+        if route_name in self.routes:
+            return self.routes[route_name].get("model", self.default_model)
+        return self.default_model
+
+    def _process_z_command(self, body: dict) -> tuple[ZCommand, dict]:
+        """
+        Check for z: prefix in the user's message.
+        If found, parse it, strip the prefix, and return the command + modified body.
+        """
+        user_msg = self._get_latest_user_message(body)
+        zcmd = parse_z_command(user_msg)
+
+        if not zcmd.active:
+            return zcmd, body
+
+        # Log the z-command to wiretap
+        self.wire.log(
+            direction="internal",
+            role="decision",
+            content=f"z-command: {zcmd.raw_directives} → route={zcmd.route or 'none'} "
+                    f"model={zcmd.model or 'none'} tools={zcmd.tools or 'none'}",
+            model="z-command",
+            conversation_id="",
+        )
+
+        # Strip the z: prefix from the actual message sent to the LLM
+        if zcmd.message and not zcmd.is_help:
+            messages = body.get("messages", [])
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    msg["content"] = zcmd.message
+                    break
+
+        return zcmd, body
+
+    def _apply_z_command(self, body: dict, zcmd: ZCommand) -> dict:
+        """Apply z-command routing overrides to the request body."""
+        if not zcmd.active:
+            return body
+
+        # Help — return immediately (handled in forward methods)
+        if zcmd.is_help:
+            return body
+
+        # Specific model override (e.g. z: llama3:8b)
+        if zcmd.model:
+            body["model"] = zcmd.model
+            return body
+
+        # Route alias override (e.g. z: complex → large route)
+        if zcmd.route:
+            body["model"] = self._resolve_route_to_model(zcmd.route)
+
+        return body
+
+    def _run_forced_tools(self, zcmd: ZCommand, user_msg: str) -> str:
+        """Run tools forced by z-command and return results as context."""
+        if not zcmd.tools or not self.tool_registry:
+            return ""
+
+        results = []
+        for tool_name in zcmd.tools:
+            tool_input = zcmd.tool_input if zcmd.tool_input else user_msg
+            result = self.tool_registry.run_tool(tool_name, tool_input)
+            if result:
+                results.append(f"[{tool_name}]: {result}")
+
+        return "\n".join(results)
+
+    def _inject_tool_context(self, body: dict, tool_results: str) -> dict:
+        """Inject tool results as a system message into the request."""
+        if not tool_results:
+            return body
+
+        messages = body.get("messages", [])
+        # Insert tool results as a system message before the last user message
+        tool_msg = {
+            "role": "system",
+            "content": f"The following tool results are available:\n\n{tool_results}",
+        }
+        # Insert before the last message
+        if messages:
+            messages.insert(-1, tool_msg)
+        body["messages"] = messages
+        return body
+
+    async def _hybrid_route(self, body: dict, zcmd: ZCommand) -> tuple[dict, Decision | None]:
+        """
+        Hybrid routing pipeline:
+          1. z-command (user override) — highest priority, skips everything
+          2. Embedding classifier (fast path) — ~50ms, handles clear cases
+          3. Decision LLM (slow path) — only for borderline cases
+
+        Returns (modified body, decision or None).
+        """
+        # 1. Z-command takes absolute priority
+        if zcmd.active and (zcmd.route or zcmd.model):
+            body = self._apply_z_command(body, zcmd)
+            return body, None
+
+        # 2. Try embedding classifier first (fast path)
+        if self.embedding_classifier and self.embedding_classifier.ready:
+            user_msg = self._get_latest_user_message(body)
+            if user_msg:
+                emb_result = self.embedding_classifier.classify(user_msg)
+
+                self.wire.log(
+                    direction="internal",
+                    role="decision",
+                    content=f"embedding: tier={emb_result.tier} "
+                            f"confidence={emb_result.confidence:.4f} "
+                            f"borderline={emb_result.borderline} ({emb_result.latency_ms}ms)",
+                    model="embedding-classifier",
+                    conversation_id="",
+                )
+
+                if not emb_result.borderline:
+                    # Clear classification — use it, skip decision LLM
+                    if emb_result.model:
+                        body["model"] = emb_result.model
+                    return body, None
+
+                # Borderline — fall through to decision LLM
+                logger.debug(
+                    "Embedding borderline (confidence=%.4f), escalating to decision LLM",
+                    emb_result.confidence,
+                )
+
+        # 3. Decision LLM (slow path for borderline cases)
+        decision = await self._run_decision(body)
+        if decision and not decision.fallback:
+            body = await self._apply_decision(body, decision)
+        return body, decision
+
     async def _apply_decision(self, body: dict, decision: Decision) -> dict:
         """Apply the decision LLM's routing to the request."""
         if decision.fallback:
@@ -232,21 +378,33 @@ class Proxy:
         model = self._get_model(body)
         conversation_id = self._extract_conversation_id(body)
 
-        # Decision LLM
-        decision = await self._run_decision(body)
+        # Z-command parsing
+        zcmd, body = self._process_z_command(body)
+
+        # Handle z: help — return help text directly without calling LLM
+        if zcmd.is_help:
+            return {
+                "choices": [{"message": {"role": "assistant", "content": HELP_TEXT}}],
+                "model": "beigebox",
+            }
 
         # Pre-request hooks
         if self.hook_manager:
-            context = self._build_hook_context(body, conversation_id, model, decision)
+            context = self._build_hook_context(body, conversation_id, model, None)
             body = self.hook_manager.run_pre_request(body, context)
 
         # Check if synthetic (tagged by hook)
         is_synthetic = self._is_synthetic(body)
 
-        # Apply decision routing
-        if decision:
-            body = await self._apply_decision(body, decision)
-            model = body.get("model", model)  # Update model after routing
+        # Run forced tools from z-command
+        if zcmd.active and zcmd.tools:
+            tool_results = self._run_forced_tools(zcmd, self._get_latest_user_message(body))
+            if tool_results:
+                body = self._inject_tool_context(body, tool_results)
+
+        # Hybrid routing: z-command → embedding classifier → decision LLM
+        body, decision = await self._hybrid_route(body, zcmd)
+        model = body.get("model", model)  # Update model after routing
 
         # Log incoming user messages (skip synthetic)
         if not is_synthetic:
@@ -283,21 +441,36 @@ class Proxy:
         model = self._get_model(body)
         conversation_id = self._extract_conversation_id(body)
 
-        # Decision LLM
-        decision = await self._run_decision(body)
+        # Z-command parsing
+        zcmd, body = self._process_z_command(body)
+
+        # Handle z: help — return as a single SSE chunk
+        if zcmd.is_help:
+            chunk = json.dumps({
+                "choices": [{"delta": {"content": HELP_TEXT}, "index": 0}],
+                "model": "beigebox",
+            })
+            yield f"data: {chunk}\n"
+            yield "data: [DONE]\n"
+            return
 
         # Pre-request hooks
         if self.hook_manager:
-            context = self._build_hook_context(body, conversation_id, model, decision)
+            context = self._build_hook_context(body, conversation_id, model, None)
             body = self.hook_manager.run_pre_request(body, context)
 
         # Check if synthetic
         is_synthetic = self._is_synthetic(body)
 
-        # Apply decision routing
-        if decision:
-            body = await self._apply_decision(body, decision)
-            model = body.get("model", model)
+        # Run forced tools from z-command
+        if zcmd.active and zcmd.tools:
+            tool_results = self._run_forced_tools(zcmd, self._get_latest_user_message(body))
+            if tool_results:
+                body = self._inject_tool_context(body, tool_results)
+
+        # Hybrid routing
+        body, decision = await self._hybrid_route(body, zcmd)
+        model = body.get("model", model)
 
         # Log incoming user messages (skip synthetic)
         if not is_synthetic:

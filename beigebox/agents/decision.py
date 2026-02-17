@@ -1,7 +1,7 @@
 """
 Decision LLM — the brain of BeigeBox.
 
-A small, fast model (e.g., Qwen3-30B-A3B MoE with 3B active params) reads
+A small, fast model (configured in config.yaml) reads
 the user's message and makes routing decisions:
   - Which model should handle this? (coder, general, large)
   - Does this need web search augmentation?

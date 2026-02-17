@@ -1,12 +1,32 @@
-# Full stack: AI Middleware + Ollama + Open WebUI
-# Usage: docker compose up -d
+# BeigeBox — Full Stack
+# Tap the line. Own the conversation.
+#
+# QUICKSTART:
+#   ./setup.sh              # pulls models, starts everything
+#
+# OR MANUALLY:
+#   docker compose up -d                     # full stack (Ollama + BeigeBox + Open WebUI)
+#   docker compose up -d beigebox open-webui # already have Ollama on host
+#
+# SERVICES:
+#   ollama     → :11434  LLM inference engine (GPU)
+#   beigebox   → :8000   transparent proxy + middleware
+#   open-webui → :3000   chat interface
+#
+# DATA:
+#   ollama_data    → model weights (persistent)
+#   beigebox_data  → conversations, embeddings, logs (persistent)
+#   open_webui_data → Open WebUI settings/users (persistent)
 
 services:
+  # ---------------------------------------------------------------------------
+  # Ollama — LLM inference
+  # ---------------------------------------------------------------------------
   ollama:
     image: ollama/ollama:latest
-    container_name: ollama
+    container_name: beigebox-ollama
     ports:
-      - "11434:11434"
+      - "${OLLAMA_PORT:-11434}:11434"
     volumes:
       - ollama_data:/root/.ollama
     deploy:
@@ -17,40 +37,60 @@ services:
               count: all
               capabilities: [gpu]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  # ---------------------------------------------------------------------------
+  # BeigeBox — transparent LLM proxy + middleware
+  # ---------------------------------------------------------------------------
   beigebox:
     build:
       context: ..
       dockerfile: docker/Dockerfile
     container_name: beigebox
     ports:
-      - "8000:8000"
+      - "${BEIGEBOX_PORT:-8000}:8000"
     volumes:
       - beigebox_data:/app/data
-      - ../config.yaml:/app/config.yaml:ro
       - ../hooks:/app/hooks:ro
     environment:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GOOGLE_CSE_ID=${GOOGLE_CSE_ID:-}
+      - OLLAMA_HOST=ollama
     depends_on:
-      - ollama
+      ollama:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/beigebox/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  # ---------------------------------------------------------------------------
+  # Open WebUI — chat frontend
+  # ---------------------------------------------------------------------------
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
-    container_name: open-webui
+    container_name: beigebox-webui
     ports:
-      - "3000:8080"
+      - "${WEBUI_PORT:-3000}:8080"
     volumes:
       - open_webui_data:/app/backend/data
     environment:
-      # Point Open WebUI at BeigeBox, NOT directly at Ollama
+      # Route ALL chat traffic through BeigeBox
       - OPENAI_API_BASE_URL=http://beigebox:8000/v1
       - OPENAI_API_KEY=not-needed
-      # Also keep direct Ollama connection for model management
+      # Direct Ollama connection for model management (pull/delete/etc)
       - OLLAMA_BASE_URL=http://ollama:11434
+      # Disable Open WebUI's built-in auth for local use (optional)
+      - WEBUI_AUTH=${WEBUI_AUTH:-false}
     depends_on:
-      - beigebox
+      beigebox:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

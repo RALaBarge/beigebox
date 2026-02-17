@@ -10,6 +10,7 @@ Every command has a phreaker name and a standard alias:
     PHREAKER        STANDARD        WHAT IT DOES
     --------        --------        ----------------------------------
     dial            start, serve    Start the BeigeBox proxy server
+    setup           install, pull   Pull required models into Ollama
     tap             log, tail       Live wiretap — watch the wire
     ring            status, ping    Ping a running instance
     sweep           search          Semantic search over conversations
@@ -21,7 +22,7 @@ Every command has a phreaker name and a standard alias:
 import argparse
 import sys
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 BANNER = r"""
     ╔══════════════════════════════════════════════════╗
@@ -82,6 +83,81 @@ def cmd_tap(args):
         role_filter=args.role,
         raw=args.raw,
     )
+
+
+def cmd_setup(args):
+    """Pull required models into Ollama."""
+    import httpx
+    from beigebox.config import get_config
+
+    cfg = get_config()
+    ollama_url = cfg["backend"]["url"].rstrip("/")
+
+    # Models to pull
+    required = [cfg["embedding"]["model"]]
+
+    d_cfg = cfg.get("decision_llm", {})
+    if d_cfg.get("enabled") and d_cfg.get("model"):
+        required.append(d_cfg["model"])
+
+    if args.model:
+        required.extend(args.model)
+
+    print(BANNER)
+    print(f"  Ollama: {ollama_url}")
+    print(f"  Models to pull: {', '.join(required)}")
+    print()
+
+    # Check Ollama is reachable
+    try:
+        resp = httpx.get(f"{ollama_url}/api/tags", timeout=5)
+        resp.raise_for_status()
+        existing = [m["name"] for m in resp.json().get("models", [])]
+    except Exception as e:
+        print(f"  ✗  Cannot reach Ollama at {ollama_url}: {e}")
+        print(f"     Make sure Ollama is running: ollama serve")
+        return
+
+    for model in required:
+        # Check if any existing model matches (ignoring tag specifics)
+        model_base = model.split(":")[0]
+        already = any(model_base in m for m in existing)
+
+        if already:
+            print(f"  ✓  {model} — already available")
+            continue
+
+        print(f"  ↓  Pulling {model}...")
+        try:
+            with httpx.stream(
+                "POST",
+                f"{ollama_url}/api/pull",
+                json={"name": model},
+                timeout=None,
+            ) as resp:
+                for line in resp.iter_lines():
+                    if line:
+                        import json
+                        try:
+                            data = json.loads(line)
+                            status = data.get("status", "")
+                            if "pulling" in status:
+                                total = data.get("total", 0)
+                                completed = data.get("completed", 0)
+                                if total > 0:
+                                    pct = completed / total * 100
+                                    bar = "█" * int(pct // 5) + "░" * (20 - int(pct // 5))
+                                    print(f"\r     {bar} {pct:.0f}%  ", end="", flush=True)
+                            elif status:
+                                print(f"\r     {status}              ", end="", flush=True)
+                        except json.JSONDecodeError:
+                            pass
+            print(f"\r  ✓  {model} — pulled                    ")
+        except Exception as e:
+            print(f"\r  ✗  {model} — failed: {e}               ")
+
+    print()
+    print("  Done. Run 'beigebox dial' to start the proxy.")
 
 
 def cmd_ring(args):
@@ -269,6 +345,25 @@ def cmd_tone(args):
     print(BANNER)
 
 
+def cmd_build_centroids(args):
+    """Build embedding classifier centroids from seed prompts."""
+    from beigebox.agents.embedding_classifier import EmbeddingClassifier
+
+    print(BANNER)
+    print("  Building embedding classifier centroids...")
+    print()
+
+    classifier = EmbeddingClassifier()
+    success = classifier.build_centroids()
+
+    if success:
+        print("  ✓  Centroids built successfully")
+        print("     The embedding classifier is now ready for fast routing.")
+    else:
+        print("  ✗  Failed to build centroids")
+        print("     Make sure Ollama is running with the embedding model loaded.")
+
+
 # ---------------------------------------------------------------------------
 # Parser with aliases
 # ---------------------------------------------------------------------------
@@ -308,6 +403,14 @@ def main():
 
     _add_command(sub, ["dial", "start", "serve", "up"],
                  "Start the BeigeBox proxy server", cmd_dial, setup_dial)
+
+    # setup / install / pull
+    def setup_setup(p):
+        p.add_argument("--model", "-m", action="append", default=None,
+                        help="Additional model to pull (can specify multiple times)")
+
+    _add_command(sub, ["setup", "install", "pull"],
+                 "Pull required models into Ollama", cmd_setup, setup_setup)
 
     # tap / log / tail / watch
     def setup_tap(p):
@@ -351,6 +454,10 @@ def main():
     # tone / banner
     _add_command(sub, ["tone", "banner"],
                  "Print the BeigeBox banner", cmd_tone)
+
+    # build-centroids
+    _add_command(sub, ["build-centroids", "centroids"],
+                 "Build embedding classifier centroids from seed prompts", cmd_build_centroids)
 
     args = parser.parse_args()
     if not args.command:

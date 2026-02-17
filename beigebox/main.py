@@ -22,6 +22,7 @@ from beigebox.storage.sqlite_store import SQLiteStore
 from beigebox.storage.vector_store import VectorStore
 from beigebox.tools.registry import ToolRegistry
 from beigebox.agents.decision import DecisionAgent
+from beigebox.agents.embedding_classifier import get_embedding_classifier
 from beigebox.hooks import HookManager
 
 
@@ -109,12 +110,18 @@ async def lifespan(app: FastAPI):
         hook_configs=hooks_cfg.get("hooks", []),
     )
 
-    # Proxy (with decision agent and hooks)
+    # Embedding classifier (fast path for routing)
+    embedding_classifier = get_embedding_classifier()
+    ec_status = "ready" if embedding_classifier.ready else "no centroids (run beigebox build-centroids)"
+
+    # Proxy (with decision agent, hooks, embedding classifier, and tools)
     proxy = Proxy(
         sqlite=sqlite_store,
         vector=vector_store,
         decision_agent=decision_agent,
         hook_manager=hook_manager,
+        embedding_classifier=embedding_classifier,
+        tool_registry=tool_registry,
     )
 
     logger.info(
@@ -127,6 +134,8 @@ async def lifespan(app: FastAPI):
     logger.info("Tools: %s", tool_registry.list_tools())
     logger.info("Hooks: %s", hook_manager.list_hooks())
     logger.info("Decision LLM: %s", "enabled" if decision_agent.enabled else "disabled")
+    logger.info("Embedding classifier: %s", ec_status)
+    logger.info("Z-commands: enabled (prefix messages with 'z: <directive>')")
 
     # Preload models in background
     await _preload_embedding_model(cfg)

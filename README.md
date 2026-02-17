@@ -1,19 +1,20 @@
-# BeigeBox - Local LLM Conversation Proxy
+# BeigeBox
 
-A transparent proxy that sits between your LLM frontend (Open WebUI) and your LLM backend (Ollama/llama.cpp), intercepting and storing every conversation while providing extensible tooling via LangChain.
+**Tap the line. Own the conversation.**
+
+A transparent middleware proxy for local LLM stacks. Sits between your frontend (Open WebUI, etc.) and your backend (Ollama, llama.cpp, etc.), intercepting and storing every conversation while providing intelligent routing, extensible tooling, and user-level overrides.
 
 ```
 +---------------+         +--------------------------------------+         +-----------------+
-|               |  HTTP   |          BEIGEBOX               |  HTTP   |                 |
+|               |  HTTP   |            BEIGEBOX                  |  HTTP   |                 |
 |  Open WebUI   |-------->|                                      |-------->|  Ollama /        |
 |  (Frontend)   |<--------|  FastAPI Proxy                       |<--------|  llama.cpp       |
-|               |         |  +----------------------------------+|         |  (Backend)       |
-|  Port 3000    |         |  | Intercept Layer                  ||         |  Port 11434      |
-+---------------+         |  |  - Log user message              ||         +-----------------+
-                          |  |  - Log assistant response        ||
-                          |  |  - Embed both -> ChromaDB        ||
-                          |  |  - (Future) Decision LLM         ||
-                          |  +----------------------------------+|
+|               |         |                                      |         |  (Backend)       |
+|  Port 3000    |         |  +------ Hybrid Router -----------+  |         |  Port 11434      |
++---------------+         |  | 1. Z-Commands     (instant)    |  |         +-----------------+
+                          |  | 2. Embedding Class (~50ms)     |  |
+                          |  | 3. Decision LLM   (~500ms-2s)  |  |
+                          |  +---------------------------------+  |
                           |                                      |
                           |  +----------+  +-------------------+ |
                           |  | SQLite   |  | ChromaDB          | |
@@ -21,13 +22,12 @@ A transparent proxy that sits between your LLM frontend (Open WebUI) and your LL
                           |  |  convos) |  |  embeddings)      | |
                           |  +----------+  +-------------------+ |
                           |                                      |
-                          |  +----------------------------------+|
-                          |  | LangChain Tools                  ||
-                          |  |  - DuckDuckGo Search             ||
-                          |  |  - Web Scraper (BeautifulSoup)   ||
-                          |  |  - Google Search (mock/future)   ||
-                          |  |  - (Extensible tool registry)    ||
-                          |  +----------------------------------+|
+                          |  +------ Tool Registry ------------+ |
+                          |  | Web Search  | Calculator         | |
+                          |  | Web Scraper | DateTime           | |
+                          |  | Memory/RAG  | System Info        | |
+                          |  | Notifier    | (extensible)       | |
+                          |  +---------------------------------+ |
                           |                          Port 8000   |
                           +--------------------------------------+
 ```
@@ -36,126 +36,152 @@ A transparent proxy that sits between your LLM frontend (Open WebUI) and your LL
 
 ## Table of Contents
 
-1. [Why This Exists - Design Decisions](#why-this-exists---design-decisions)
+1. [What It Does](#what-it-does)
 2. [Architecture](#architecture)
-3. [Project Structure](#project-structure)
-4. [Core Components](#core-components)
-5. [CLI Commands](#cli-commands)
-6. [Configuration](#configuration)
-7. [Setup and Installation](#setup-and-installation)
-8. [Usage](#usage)
-9. [Roadmap](#roadmap)
-10. [Hardware Context](#hardware-context)
+3. [Hybrid Routing](#hybrid-routing)
+4. [Z-Commands](#z-commands)
+5. [Project Structure](#project-structure)
+6. [Core Components](#core-components)
+7. [CLI Commands](#cli-commands)
+8. [Configuration](#configuration)
+9. [Setup and Installation](#setup-and-installation)
+10. [Docker Quickstart](#docker-quickstart)
+11. [Usage](#usage)
+12. [Roadmap](#roadmap)
+13. [Docs](#docs)
 
 ---
 
-## Why This Exists - Design Decisions
+## What It Does
 
-This section documents the reasoning behind every major design choice, captured over multiple brainstorming sessions. These are the decisions we came to and WHY, so future-us does not have to re-derive them.
+BeigeBox is a proxy that makes your local LLM stack smarter without changing anything about how you use it.
 
-### The Core Problem
+Your frontend thinks it's talking to Ollama. Ollama thinks it's getting requests from your frontend. BeigeBox sits in the middle, transparently intercepting every message to:
 
-Open WebUI stores conversations in its own SQLite database in its own format. That data is locked inside their schema. If we switch frontends, that history is gone. If we want to search across conversations semantically, we cannot. If we want to augment requests with web data or tool output before they hit the LLM, there is no hook for that.
+- **Store** every conversation in portable SQLite + semantic ChromaDB (you own the data, not the frontend)
+- **Route** requests to the right model based on complexity (fast model for simple questions, large model for hard ones, code model for programming)
+- **Augment** requests with tool output before they hit the LLM (web search, conversation memory, math, system info)
+- **Override** any decision with user-level z-commands when you know better than the router
 
-We need a layer we control that owns the conversation data in a portable, standard format and can extend what the LLM sees and does.
-
-### Decision: Build a Proxy, Not a Plugin
-
-We considered three approaches:
-
-- **Open WebUI plugin**: Tied to their plugin API, breaks when they update, cannot use it with other frontends.
-- **OpenRouter / LiteLLM**: Third-party routing. Great for multi-provider access, but we do not need to pay for routing to local models. Does not solve the conversation ownership problem. OpenRouter takes a 5% + $0.35 fee on credit purchases and their ToS allows licensing user content for commercial purposes when logging is opted into.
-- **Custom proxy middleware**: Sits between any frontend and any backend. Frontend-agnostic, backend-agnostic. We own every byte.
-
-**We chose the proxy** because it gives us the most control and future flexibility. Open WebUI thinks it is talking to Ollama. Ollama thinks it is getting requests from Open WebUI. Our middleware transparently intercepts everything.
-
-### Decision: OpenAI-Compatible API as the Lingua Franca
-
-Ollama already exposes an OpenAI-compatible API at `/v1/chat/completions`. Open WebUI can connect to any OpenAI-compatible endpoint. Almost every LLM tool on the planet speaks this format.
-
-By implementing the OpenAI-compatible API in our middleware, we get automatic compatibility with virtually any frontend or backend that exists now or will exist in the future. No custom protocols, no vendor lock-in.
-
-This was a core requirement from the start: **generic interfaces, portable everywhere**.
-
-### Decision: Dual Storage - SQLite + ChromaDB
-
-We debated: do we need both SQL and vector storage?
-
-- **SQLite** gives us the raw conversation record. Every message, every timestamp, every model used. It is a single portable file we can copy, query with standard SQL, export to JSON, or migrate to Postgres later. This is our source of truth. Open WebUI itself uses SQLite internally, so we already know the format works and is portable.
-- **ChromaDB** gives us semantic search over those conversations. "What did I discuss about Docker networking last month?" becomes a vector similarity query instead of a keyword grep. ChromaDB is also a file-based database - no external server needed. Open WebUI already uses ChromaDB internally for its RAG pipeline, so this is a proven pairing.
-
-**We chose both** because they serve fundamentally different purposes. SQLite is for structured queries and export. ChromaDB is for semantic retrieval and future RAG pipelines. The overhead of maintaining both is minimal since we are writing to them at the same time anyway.
-
-### Decision: nomic-embed-text for Embeddings
-
-Requirements: open source, runs locally via Ollama, likely to still be the standard in 5 years.
-
-- **nomic-embed-text**: Apache 2.0, open weights, open training data, 768 dimensions, 8192 token context. Already runs natively in Ollama. Strong benchmark performance competitive with OpenAI text-embedding-3-small. Nomic is deeply invested in the open embedding ecosystem.
-- **mxbai-embed-large**: Good alternative, also in Ollama, but less ecosystem momentum.
-- **OpenAI text-embedding-3-small**: Proprietary, requires API key and internet, costs money. Violates our local-first principle.
-
-**We chose nomic-embed-text** for the combination of open license, local execution, benchmark quality, and ecosystem trajectory.
-
-### Decision: LangChain for Tooling (Not Everything)
-
-Early on, we discussed whether to go raw Python or adopt a framework. The conclusion:
-
-- **LangChain** handles the tool ecosystem well - DuckDuckGo, web scraping, Google search, document loaders. Re-implementing all of that from scratch is pointless.
-- **LangChain does NOT become the core architecture**. The proxy, the storage, the routing - that is all our code, plain Python and FastAPI. LangChain is a tool provider that we call when we need tools.
-
-This means if LangChain falls out of favor or a better tool framework emerges, we swap out one module. The middleware itself does not care.
-
-We originally wanted to "understand the underlying primitives before adopting frameworks like LangChain" - and we did. We built the agent loop from scratch, we understand message passing, context windows, and tool calling at the raw API level. We built a working autonomous agent (agent.py) that executes shell commands in LXC containers using raw Ollama tool calls. Now we are adopting LangChain specifically for its tool integrations, not as a crutch.
-
-### Decision: Config-Driven, Model as a Variable
-
-From the start, the requirement was: "make the model a variable I can modify by changing a config file." No hardcoded model names anywhere in the codebase. The middleware reads `config.yaml` at startup and uses whatever is specified there.
-
-This also applies to the embedding model, the backend URL, tool toggles, and storage paths. If it might change, it is in the config.
-
-### Decision: Default to Capturing Everything
-
-The middleware captures both sides of every conversation by default - user messages and assistant responses. No opt-in, no toggle to remember. The storage is local, the data is ours. We can always filter or delete later. We cannot recover conversations we did not capture.
-
-### Decision: Future Decision LLM in the Middleware
-
-The long-term vision is to have a small, fast LLM running inside the middleware itself that makes routing and augmentation decisions. For example:
-
-- User asks a question -> decision LLM determines "this needs web search" -> LangChain fetches data -> augmented prompt goes to the main LLM
-- User asks a coding question -> decision LLM routes to the coder model (e.g., qwen2.5-coder:14b)
-- User asks a general question -> decision LLM routes to the general model (e.g., qwen3:32b)
-
-We are NOT building this yet. The architecture supports it - the intercept layer is where this logic will live. For now, LangChain tools are invoked based on configuration, not LLM decisions. The Qwen3-30B-A3B MoE model (only 3B active parameters per token) is a strong candidate for this role when we get there - fast enough for inline decisions without competing for GPU resources with the main model.
+Everything degrades gracefully. If routing is disabled, BeigeBox is a transparent proxy. If tools are disabled, requests pass through unaugmented. If storage fails, the conversation still works. Each feature is independent and optional.
 
 ---
 
 ## Architecture
 
-### Data Flow - Chat Request
+### Data Flow
 
 ```
 1. User types message in Open WebUI
-2. Open WebUI sends POST /v1/chat/completions to middleware (port 8000)
-3. Middleware intercepts:
-   a. Logs user message to SQLite
-   b. Embeds user message via nomic-embed-text -> ChromaDB
-   c. (If enabled) Runs LangChain tools to augment the request
-   d. Forwards (possibly augmented) request to Ollama (port 11434)
+2. Open WebUI sends POST /v1/chat/completions to BeigeBox (port 8000)
+3. BeigeBox intercepts:
+   a. Check for z-command override (instant)
+   b. Run embedding classifier (fast path, ~50ms)
+   c. If borderline, escalate to decision LLM (slow path, ~500ms-2s)
+   d. Execute any forced/decided tools
+   e. Log user message to SQLite + embed to ChromaDB
+   f. Forward (possibly augmented, possibly rerouted) request to Ollama
 4. Ollama returns response (streamed)
-5. Middleware intercepts response:
-   a. Logs assistant message to SQLite
-   b. Embeds assistant message -> ChromaDB
-   c. Streams response back to Open WebUI
-6. User sees response in Open WebUI (no idea middleware exists)
+5. BeigeBox intercepts response:
+   a. Log assistant message to SQLite + embed to ChromaDB
+   b. Track token usage
+   c. Stream response back to Open WebUI
+6. User sees response (no idea BeigeBox exists)
 ```
 
-### Data Flow - Streaming
+### OpenAI-Compatible API
 
-Ollama streams responses by default (Server-Sent Events). The middleware must handle streaming transparently - it buffers the full response for logging/embedding while simultaneously streaming chunks back to the frontend so the user does not experience added latency.
+BeigeBox implements the OpenAI-compatible API (`/v1/chat/completions`, `/v1/models`). This means it works with any frontend or backend that speaks this format — which is virtually everything in the LLM ecosystem. No custom protocols, no vendor lock-in.
 
-### Why Not Just Use Open WebUI's Built-in RAG?
+### Dual Storage
 
-Open WebUI has RAG built in (document upload, embedding, vector search). But it is their implementation, their schema, their pipeline. If we move to a different frontend, or want to search conversations from a CLI tool, or want to feed conversation context into an agent running outside the browser, Open WebUI's internal ChromaDB is not accessible. Our middleware stores everything independently and exposes it however we want.
+- **SQLite**: Source of truth. Every message, timestamp, model, token count. Portable single file you can query with standard SQL or export to JSON.
+- **ChromaDB**: Semantic search over conversation history. Embeddings generated asynchronously so they never add latency. Enables RAG and the `beigebox sweep` semantic search command.
+
+Both use `nomic-embed-text` for embeddings, which runs locally via Ollama with no external API calls.
+
+---
+
+## Hybrid Routing
+
+BeigeBox routes requests through a three-tier system with graceful degradation at every level:
+
+### Tier 1: Z-Commands (instant)
+
+User-level overrides via `z:` prefix. Absolute priority — bypasses all automated routing. See [Z-Commands](#z-commands) below.
+
+### Tier 2: Embedding Classifier (~50ms)
+
+Inspired by [NadirClaw](https://github.com/doramirdor/NadirClaw). Pre-computed centroid vectors classify prompts as simple or complex using cosine similarity in embedding space. Handles ~80% of requests without needing the heavier decision LLM.
+
+Uses the same `nomic-embed-text` model already loaded for ChromaDB — zero new dependencies, zero new models to pull.
+
+Run `beigebox build-centroids` once to generate the centroid vectors from built-in seed prompts. If centroids aren't built, this tier is skipped and everything falls through to Tier 3.
+
+### Tier 3: Decision LLM (~500ms–2s)
+
+A small, fast model reads the prompt and outputs structured JSON: which route to use, whether tools are needed, confidence level. Only called for borderline cases where the embedding classifier isn't confident enough.
+
+Requires pulling a small model and setting `decision_llm.enabled: true` in config. If disabled, BeigeBox uses the default model for everything.
+
+### Degradation Path
+
+```
+Z-command found?  → Use it. Done.
+Centroids loaded? → Run embedding classifier
+  Clear result?   → Route accordingly. Done.
+  Borderline?     → Fall through to decision LLM
+Decision LLM on?  → Run it. Route accordingly.
+Nothing worked?   → Use default model. Conversation still works.
+```
+
+Every tier is independently optional. BeigeBox works as a simple passthrough proxy with everything disabled, and gains intelligence as you enable features.
+
+---
+
+## Z-Commands
+
+Override any routing decision by prefixing your message with `z:`. The prefix is stripped before the LLM sees your message. All overrides are logged to the wiretap for debugging.
+
+### Routing
+
+```
+z: simple    → force fast/simple model
+z: complex   → force large/complex model
+z: code      → force code model
+z: <model>   → force exact model by name:tag
+```
+
+Aliases: `easy`/`fast` → simple route, `hard`/`large` → complex route, `coding` → code route.
+
+### Tools
+
+```
+z: search              → force web search augmentation
+z: memory              → search past conversations (RAG)
+z: calc <expression>   → evaluate math expression
+z: time                → get current date/time
+z: sysinfo             → get system resource stats
+```
+
+Aliases: `websearch` → search, `rag`/`recall` → memory, `math` → calc, `date`/`clock` → time, `system`/`status` → sysinfo.
+
+### Chaining
+
+Combine directives with commas:
+
+```
+z: complex,search What's the latest news on AI safety?
+z: code,memory How did we implement the proxy last time?
+```
+
+### Meta
+
+```
+z: help    → show all available z-commands (returned directly, doesn't hit LLM)
+```
+
+Z-commands are case-insensitive and whitespace-tolerant.
 
 ---
 
@@ -163,165 +189,166 @@ Open WebUI has RAG built in (document upload, embedding, vector search). But it 
 
 ```
 beigebox/
-|-- README.md                  # This file - the plan, the why, the how
-|-- LICENSE                    # MIT - do whatever you want, don't sue me
-|-- config.yaml                # All user-configurable settings
-|-- pyproject.toml             # Package metadata + CLI entry point
-|-- requirements.txt           # Python dependencies
-|-- .env.example               # Environment variables template
-|-- .gitignore                 # Standard Python + data exclusions
+|-- README.md
+|-- LICENSE                        # MIT
+|-- config.yaml                    # All runtime configuration
+|-- pyproject.toml                 # Package metadata + CLI entry point
+|-- requirements.txt
+|-- setup.sh                       # Interactive setup script
 |
 |-- beigebox/
 |   |-- __init__.py
-|   |-- __main__.py            # python -m beigebox entry point
-|   |-- cli.py                 # CLI commands (dial, tap, ring, sweep, etc.)
-|   |-- main.py                # FastAPI app - the proxy entry point
-|   |-- proxy.py               # Request/response interception and forwarding
-|   |-- config.py              # Config loader (reads config.yaml)
-|   |-- wiretap.py             # Structured wire log + live tap viewer
-|   |
-|   |-- storage/
-|   |   |-- __init__.py
-|   |   |-- sqlite_store.py    # Raw conversation storage (SQLite)
-|   |   |-- vector_store.py    # Embedding storage (ChromaDB + nomic)
-|   |   |-- models.py          # Data models / schemas
-|   |
-|   |-- tools/
-|   |   |-- __init__.py
-|   |   |-- registry.py        # Tool registration and dispatch
-|   |   |-- web_search.py      # DuckDuckGo search via LangChain
-|   |   |-- web_scraper.py     # URL content extraction (BeautifulSoup)
-|   |   |-- google_search.py   # Google search (mock now, API key later)
+|   |-- __main__.py                # python -m beigebox entry
+|   |-- cli.py                     # CLI commands (dial, tap, ring, sweep, etc.)
+|   |-- main.py                    # FastAPI app initialization
+|   |-- proxy.py                   # Request interception, hybrid routing, forwarding
+|   |-- config.py                  # Config loader
+|   |-- wiretap.py                 # Structured JSONL wire log
 |   |
 |   |-- agents/
-|       |-- __init__.py
-|       |-- decision.py        # (Future) Decision LLM for routing/augmentation
+|   |   |-- decision.py            # Decision LLM (Tier 3 router)
+|   |   |-- embedding_classifier.py # Embedding classifier (Tier 2 router)
+|   |   |-- zcommand.py            # Z-command parser (Tier 1 overrides)
+|   |   |-- centroids/             # Pre-computed centroid .npy files
+|   |
+|   |-- storage/
+|   |   |-- sqlite_store.py        # Raw conversation storage
+|   |   |-- vector_store.py        # ChromaDB embedding storage
+|   |   |-- models.py              # Data models / schemas
+|   |
+|   |-- tools/
+|       |-- registry.py            # Tool registration and dispatch
+|       |-- web_search.py          # DuckDuckGo search (LangChain)
+|       |-- web_scraper.py         # URL content extraction
+|       |-- google_search.py       # Google search (stub, API key optional)
+|       |-- calculator.py          # Safe math expression evaluator
+|       |-- datetime_tool.py       # Time, date, timezone tools
+|       |-- system_info.py         # Host system stats
+|       |-- memory.py              # Semantic search over past conversations
+|       |-- notifier.py            # Webhook/notification dispatch
 |
-|-- data/                      # Created at runtime, gitignored
-|   |-- conversations.db       # SQLite database
-|   |-- chroma/                # ChromaDB persistent storage
-|   |-- wire.jsonl             # Wiretap log (structured JSONL)
+|-- hooks/
+|   |-- filter_synthetic.py        # Filter synthetic/internal requests
+|   |-- rag_context.py             # RAG context injection template
 |
 |-- scripts/
-|   |-- export_conversations.py    # Export SQLite -> JSON (OpenAI format)
-|   |-- search_conversations.py    # CLI semantic search over conversations
-|   |-- migrate_open_webui.py      # Import Open WebUI history into BeigeBox
+|   |-- export_conversations.py    # SQLite → JSON export
+|   |-- search_conversations.py    # CLI semantic search
+|   |-- migrate_open_webui.py      # Import Open WebUI history
+|
+|-- docker/
+|   |-- Dockerfile
+|   |-- docker-compose.yaml        # Full stack deployment
+|   |-- config.docker.yaml
+|
+|-- docs/
+|   |-- 2600/                      # Design notes, research, theorycrafting
 |
 |-- tests/
 |   |-- test_proxy.py
 |   |-- test_storage.py
 |   |-- test_tools.py
-|   |-- test_wiretap.py
+|   |-- test_decision.py
+|   |-- test_hooks.py
+|   |-- test_new_tools.py
+|   |-- test_zcommand.py
 |
-|-- docker/
-    |-- Dockerfile             # BeigeBox container
-    |-- docker-compose.yaml    # Full stack: beigebox + ollama + open-webui
+|-- data/                          # Created at runtime, gitignored
+    |-- conversations.db           # SQLite database
+    |-- chroma/                    # ChromaDB storage
+    |-- wire.jsonl                 # Wiretap log
 ```
 
 ---
 
 ## Core Components
 
-### 1. FastAPI Proxy (beigebox/main.py, beigebox/proxy.py)
+### FastAPI Proxy (`proxy.py`)
 
-Implements the OpenAI-compatible `/v1/chat/completions` and `/v1/models` endpoints. Acts as a transparent pass-through with interception hooks. Handles both streaming and non-streaming responses.
+Implements OpenAI-compatible endpoints. Handles streaming transparently — buffers the full response for logging/embedding while streaming chunks back to the frontend in real time. Integrates the three-tier hybrid router.
 
-Open WebUI connects to `http://localhost:8000/v1` as its "OpenAI-compatible" backend. The middleware forwards to Ollama at `http://localhost:11434/v1`.
+### Dual Storage (`storage/`)
 
-We chose FastAPI over Flask because it has native async support (critical for streaming proxy behavior) and built-in OpenAPI docs for free.
+SQLite for structured queries and export. ChromaDB for semantic search and RAG. Embeddings are generated asynchronously after the response streams back, adding zero latency to the conversation.
 
-### 2. SQLite Storage (beigebox/storage/sqlite_store.py)
+### Tool Registry (`tools/`)
 
-Stores every conversation turn with: message ID, conversation ID, role (user/assistant/system), content, model used, timestamp, and token counts. Schema is intentionally simple and portable - designed for easy export to JSON in OpenAI message format.
+Modular tool system. Each tool is a self-contained module registered at startup. Tools can be invoked by the decision LLM, forced via z-commands, or triggered by hooks. New tools are added by dropping a file in the tools directory and registering it.
 
-The export format matches the OpenAI messages array structure: `[{role, content, timestamp, model}]`. This is the most portable format in the LLM ecosystem - import it into any tool that speaks OpenAI API.
+Built-in tools: web search (DuckDuckGo), web scraper, calculator, datetime, system info, conversation memory, notifier. Google search is stubbed for future API key integration.
 
-### 3. Vector Storage (beigebox/storage/vector_store.py)
+### Agents (`agents/`)
 
-Every message gets embedded via Ollama's `/api/embeddings` endpoint using `nomic-embed-text` and stored in ChromaDB with metadata linking back to the SQLite record. Enables semantic search across all conversation history.
+The routing brain. Three independent classifiers that work together:
+- **Z-Command Parser**: Regex-based, instant, user-controlled
+- **Embedding Classifier**: Vector similarity, fast, handles the majority of requests
+- **Decision LLM**: Full model inference, slow, handles edge cases
 
-Embeddings are generated asynchronously after the response is streamed back to the user, so they never add latency to the conversation.
+### Hooks (`hooks/`)
 
-### 4. LangChain Tools (beigebox/tools/)
+Pre/post processing pipeline. Drop Python scripts in the hooks directory to extend the proxy's behavior. Built-in hooks include synthetic request filtering and RAG context injection.
 
-Tool integrations for extending what the LLM can do:
+### Wiretap (`wiretap.py`)
 
-- **DuckDuckGo Search**: Free, no API key. Default web search tool. This was chosen as the primary search because it requires zero setup.
-- **Web Scraper**: Given a URL, fetches and extracts clean text content. Uses BeautifulSoup (requests + bs4).
-- **Google Search**: Stubbed out with a mock function. Swap in a real API key when ready. The mock returns realistic-looking results so the rest of the pipeline can be tested without an API key.
-- **Tool Registry**: Central registry so new tools can be added by dropping a file in the tools directory and adding it to config.yaml.
-
-Tools are invoked by the middleware before forwarding the request to Ollama. The tool output gets injected into the system prompt or appended to the message context.
-
-### 5. Decision LLM (Future - beigebox/agents/decision.py)
-
-Placeholder module for the future routing/augmentation LLM. The plan is to run a small, fast model (e.g., Qwen 3B MoE or similar) that reads the user input and decides: does this need web search? Should it route to the coder model or general model? Should it pull from conversation history via RAG?
-
-This is the "brain" of the middleware - but we build the body first.
-
-### 6. Wiretap (beigebox/wiretap.py)
-
-Structured JSONL log of every message that crosses the wire. Separate from the debug log — this is a clean, parseable record of exactly what was said, by whom, to which model, and when. The `beigebox tap` command reads this file and renders a color-coded live view, like tcpdump for LLM conversations.
+Structured JSONL log of every message that crosses the wire. The `beigebox tap` command renders a color-coded live view — like tcpdump for LLM conversations.
 
 ---
 
 ## CLI Commands
 
-Every command has a phreaker name and standard aliases. Use whichever you prefer.
+Every command has a phreaker name and standard aliases.
 
 ```
-PHREAKER        STANDARD            WHAT IT DOES
---------        --------            ----------------------------------
-dial            start, serve, up    Start the BeigeBox proxy server
-tap             log, tail, watch    Live wiretap - watch the wire
-ring            status, ping        Ping a running instance
-sweep           search, find        Semantic search over conversations
-dump            export              Export conversations to JSON
-flash           info, config        Show stats and config at a glance
-tone            banner              Print the BeigeBox banner
+PHREAKER        STANDARD              WHAT IT DOES
+--------        --------              ----------------------------------
+dial            start, serve, up      Start the BeigeBox proxy server
+tap             log, tail, watch      Live wiretap — watch the wire
+ring            status, ping          Ping a running instance
+sweep           search, find          Semantic search over conversations
+dump            export                Export conversations to JSON
+flash           info, config          Show stats and config at a glance
+tone            banner                Print the BeigeBox banner
+build-centroids centroids             Generate embedding classifier centroids
+setup           init                  Interactive first-time setup
 ```
 
-### Quick examples
+### Quick Examples
 
 ```bash
-# Start the server (these are identical)
+# Start the proxy
 beigebox dial
-beigebox start
-beigebox serve --port 9000
 
 # Watch conversations flow in real-time
-beigebox tap                        # follow mode (like tail -f)
-beigebox tail --no-follow -n 50     # last 50 entries, then exit
-beigebox log --role user --raw      # raw JSONL, users only
+beigebox tap
 
 # Check if BeigeBox is running
 beigebox ring
-beigebox ping --url http://myserver:8000
 
-# Semantic search
+# Semantic search across all stored conversations
 beigebox sweep "docker networking"
-beigebox search "python async" -n 10 --role assistant
 
-# Export / info
+# Export conversations to portable JSON
 beigebox dump --output backup.json --pretty
+
+# Build embedding classifier centroids (one-time)
+beigebox build-centroids
+
+# Show stats
 beigebox flash
-beigebox --version
 ```
 
 ---
 
 ## Configuration
 
-All configuration lives in `config.yaml` at the project root. No hardcoded values in the codebase.
+All configuration lives in `config.yaml`. No hardcoded values in the codebase.
 
 ```yaml
-# config.yaml
-
 # --- Backend ---
 backend:
-  url: "http://localhost:11434"    # Ollama base URL
-  default_model: "qwen3:32b"       # Default model if none specified
-  timeout: 120                      # Request timeout in seconds
+  url: "http://localhost:11434"
+  default_model: "your-model-here"     # Fallback if no routing decision is made
+  timeout: 120
 
 # --- Middleware Server ---
 server:
@@ -330,74 +357,83 @@ server:
 
 # --- Embedding ---
 embedding:
-  model: "nomic-embed-text"         # Embedding model (must be pulled in Ollama)
-  backend_url: "http://localhost:11434"  # Can be separate from chat backend
+  model: "nomic-embed-text"
+  backend_url: "http://localhost:11434"
 
 # --- Storage ---
 storage:
   sqlite_path: "./data/conversations.db"
   chroma_path: "./data/chroma"
-  log_conversations: true           # Master switch for conversation capture
+  log_conversations: true
 
 # --- Tools ---
 tools:
-  enabled: true                     # Master switch for tool augmentation
+  enabled: true
   web_search:
     enabled: true
-    provider: "duckduckgo"          # "duckduckgo" or "google"
+    provider: "duckduckgo"
     max_results: 5
   web_scraper:
     enabled: true
-    max_content_length: 10000       # Chars to extract per page
-  google_search:
-    enabled: false
-    api_key: ""                     # Set in .env, referenced here
-    cse_id: ""
+  calculator:
+    enabled: true
+  datetime:
+    enabled: true
+  system_info:
+    enabled: true
+  memory:
+    enabled: true
+    max_results: 3
+    min_score: 0.3
 
-# --- Decision LLM (Future) ---
+# --- Decision LLM ---
 decision_llm:
-  enabled: false
-  model: "qwen3:3b"                # Small fast model for routing decisions
+  enabled: false                        # Enable after pulling a small routing model
+  model: "your-router-model"            # A small, fast model for routing decisions
   backend_url: "http://localhost:11434"
+  timeout: 5
+  max_tokens: 256
+  routes:
+    default:
+      model: "your-default-model"
+      description: "General purpose"
+    code:
+      model: "your-code-model"
+      description: "Code generation and debugging"
+    large:
+      model: "your-large-model"
+      description: "Complex reasoning and analysis"
+    fast:
+      model: "your-fast-model"
+      description: "Quick responses, simple questions"
 
-# --- Logging ---
-logging:
-  level: "INFO"                     # DEBUG, INFO, WARNING, ERROR
-  file: "./data/middleware.log"
+# --- Hooks ---
+hooks:
+  directory: "./hooks"
 
 # --- Wiretap ---
 wiretap:
-  path: "./data/wire.jsonl"         # Structured conversation log for 'beigebox tap'
+  path: "./data/wire.jsonl"
 ```
+
+Models are referenced by route name throughout the codebase, never by model string. Change models by editing the routes in config.yaml — no code changes needed.
 
 ---
 
 ## Setup and Installation
 
-### Preflight Checklist
+### Prerequisites
 
-Before you can run BeigeBox, you need two things already running on your machine:
-
-1. **Ollama** with at least one chat model and the embedding model:
+1. **Ollama** (or any OpenAI-compatible backend):
    ```bash
-   # Install Ollama (if not already)
    curl -fsSL https://ollama.com/install.sh | sh
-
-   # Pull your chat model (pick one)
-   ollama pull qwen3:32b          # Needs partial GPU offload on 16GB VRAM
-   ollama pull qwen3:14b          # Fits entirely on 16GB VRAM, faster
-   ollama pull qwen3:30b-a3b      # MoE variant, 3B active params, very fast
-
-   # Pull the embedding model (required)
-   ollama pull nomic-embed-text
-
-   # Verify Ollama is running
-   curl http://localhost:11434/v1/models
+   ollama pull nomic-embed-text          # Required for embeddings
+   ollama pull <your-preferred-model>    # At least one chat model
    ```
 
-2. **Open WebUI** (or any OpenAI-compatible frontend):
+2. **A frontend** (optional — you can also curl the API directly):
    ```bash
-   # Easiest: Docker
+   # Open WebUI via Docker
    docker run -d -p 3000:8080 \
      --add-host=host.docker.internal:host-gateway \
      -v open-webui:/app/backend/data \
@@ -405,66 +441,50 @@ Before you can run BeigeBox, you need two things already running on your machine
      ghcr.io/open-webui/open-webui:main
    ```
 
-That's it for external dependencies. BeigeBox itself is pure Python.
-
-### Install BeigeBox
+### Install
 
 ```bash
-# Clone the repo
-git clone https://github.com/YOUR_USERNAME/beigebox.git
+git clone https://github.com/RALaBarge/beigebox.git
 cd beigebox
 
-# Create virtual environment
 python -m venv venv
 source venv/bin/activate
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Copy environment template
-cp .env.example .env
 ```
+
+Or use the interactive setup: `./setup.sh`
 
 ### Configure
 
-Edit `config.yaml` to match your setup. At minimum, verify:
-
-- `backend.url` points to your Ollama instance (default: `http://localhost:11434`)
-- `backend.default_model` matches a model you have pulled
-- `storage` paths are writable
+Edit `config.yaml` to point at your backend and specify your models. At minimum set `backend.url` and `backend.default_model`.
 
 ### Run
 
 ```bash
-# Start BeigeBox (all equivalent)
 beigebox dial
-beigebox start
-python -m beigebox dial
-python -m beigebox start
-
-# BeigeBox is now listening on port 8000
 ```
 
-### Connect Open WebUI
+BeigeBox is now listening. Point your frontend at `http://localhost:8000/v1` as an OpenAI-compatible connection (any non-empty string for the API key).
 
-In Open WebUI settings, add an OpenAI-compatible connection:
-
-- **API Base URL**: `http://localhost:8000/v1`
-- **API Key**: `not-needed` (any non-empty string)
-
-Open WebUI will now route all requests through BeigeBox. It has no idea — it thinks it is talking to Ollama.
-
-### Verify It Works
-
-In a second terminal:
+### Optional: Enable Hybrid Routing
 
 ```bash
-# Check BeigeBox is up
-beigebox ring
+# Build embedding classifier centroids (one-time, requires Ollama + nomic-embed-text)
+beigebox build-centroids
 
-# Watch the wire while you chat in Open WebUI
-beigebox tap
+# For Tier 3: pull a small model, then set decision_llm.enabled: true in config.yaml
 ```
+
+---
+
+## Docker Quickstart
+
+```bash
+cd docker
+docker compose up -d
+```
+
+The compose file brings up BeigeBox + Ollama + Open WebUI with health checks and auto-restart. See `docker/docker-compose.yaml` for details.
 
 ---
 
@@ -473,111 +493,91 @@ beigebox tap
 ### Watching the Wire
 
 ```bash
-# Live follow (default) — like tail -f but for LLM conversations
-beigebox tap
-
-# Show last 50 entries, don't follow
-beigebox tail --no-follow -n 50
-
-# Filter to only user messages, raw JSONL for piping
-beigebox log --role user --raw | jq .
-
-# Filter to assistant responses only
-beigebox tap --role assistant
+beigebox tap                        # Live follow (like tail -f for LLM conversations)
+beigebox tail --no-follow -n 50     # Last 50 entries, then exit
+beigebox log --role user --raw      # Raw JSONL, pipe to jq
 ```
 
 ### Searching Conversations
 
 ```bash
-# Semantic search (uses nomic-embed-text to find similar content)
-beigebox sweep "docker networking issue"
-beigebox search "python async patterns" -n 10
-
-# Filter by role
-beigebox find "error message" --role assistant
+beigebox sweep "docker networking"
+beigebox search "python async" -n 10
 ```
 
 ### Exporting Data
 
 ```bash
-# Export all conversations to portable JSON (OpenAI format)
-beigebox dump --output my_conversations.json --pretty
+beigebox dump --output backup.json --pretty
+```
 
-# Import existing Open WebUI history into BeigeBox
-python scripts/migrate_open_webui.py --source ~/.config/open-webui/webui.db --dry-run
+### Importing Open WebUI History
+
+```bash
 python scripts/migrate_open_webui.py --source ~/.config/open-webui/webui.db
 ```
 
-### Adding New Tools
+### Using Z-Commands
 
-1. Create a new file in `beigebox/tools/` (e.g., `arxiv_search.py`)
-2. Implement the tool following the pattern in existing tools
-3. Register it in `beigebox/tools/registry.py`
-4. Add configuration for it in `config.yaml`
-5. Restart BeigeBox
+In your chat frontend, prefix any message:
+
+```
+z: code Write a binary tree in Rust
+z: complex,search What's happening in AI research?
+z: calc 2**16 + 3**10
+z: help
+```
 
 ---
 
 ## Roadmap
 
-### Phase 1: Foundation (Current)
-- [ x] FastAPI proxy with OpenAI-compatible endpoints
-- [ x] Transparent request/response forwarding with streaming
-- [ x] SQLite conversation logging
-- [ x] ChromaDB embedding storage with nomic-embed-text
-- [ x] Basic config.yaml loader
-- [ x] LangChain DuckDuckGo search integration
-- [ x] LangChain web scraper integration
-- [ x] Google search mock/stub
-- [ x] Conversation export script (SQLite to JSON)
+### Done
+- [x] FastAPI proxy with OpenAI-compatible endpoints
+- [x] Transparent streaming request/response forwarding
+- [x] SQLite conversation logging + ChromaDB embeddings
+- [x] Config-driven architecture (no hardcoded model names)
+- [x] Tool registry with built-in tools (search, scraper, calc, datetime, sysinfo, memory, notifier)
+- [x] Decision LLM for N-way routing and tool detection
+- [x] Embedding classifier (NadirClaw-inspired fast path)
+- [x] Z-command user overrides with chaining
+- [x] Three-tier hybrid routing with graceful degradation
+- [x] Hooks plugin system
+- [x] Token tracking
+- [x] Synthetic request filtering
+- [x] Docker quickstart with health checks
+- [x] Wiretap logging with CLI viewer
+- [x] Conversation export and Open WebUI migration scripts
 
-### Phase 2: Intelligence
-- [ ] Decision LLM for tool invocation ("does this need a web search?")
-- [ ] RAG over conversation history (inject relevant past context)
-- [ ] Model cascading (try local model, escalate to bigger/paid if needed)
-- [ ] Smart routing (coder model for code questions, general for general)
+### Next
+- [ ] Web search augmentation wiring
+- [ ] RAG context injection
+- [ ] Cost tracking for paid API backends
+- [ ] Session-aware routing (sticky model within a conversation)
+- [ ] Multi-class centroids (N-way embedding classification)
 
-### Phase 3: Advanced Features
+### Future
 - [ ] Conversation summarization for context window management
+- [ ] Web dashboard for browsing stored conversations
 - [ ] Multi-model voting / ensemble responses
-- [ ] Open WebUI history migration script
-- [ ] Web dashboard for searching/browsing stored conversations
-- [ ] Conversation memory extraction (extract facts, similar to how Claude builds userMemories)
-
-### Phase 4: Ecosystem
-- [ ] Docker Compose for full stack deployment
-- [ ] Multiple simultaneous frontends (Open WebUI + CLI + API clients)
-- [ ] Voice pipeline integration (Whisper STT -> middleware -> TTS)
-- [ ] Fine-tuning data export (conversations to training format)
-- [ ] Agent framework with shell/code execution in sandboxed LXC containers
+- [ ] Voice pipeline integration
+- [ ] Fine-tuning data export
+- [ ] Agent framework with sandboxed execution
 
 ---
 
-## Hardware Context
+## Docs
 
-This project is built for and tested on:
-
-- **CPU**: AMD 5800X3D
-- **RAM**: 128 GB system memory
-- **GPU**: NVIDIA RTX 4070 Ti Super (16 GB VRAM)
-- **OS**: Pop!_OS (Ubuntu-based)
-- **Backend**: Ollama with Qwen models (32B Q4 with GPU offload, 14B full GPU)
-
-The middleware itself has negligible resource requirements. Embedding with nomic-embed-text is fast and lightweight. All the heavy lifting happens in Ollama.
-
-For the 32B model: Ollama handles the CPU/GPU split gracefully. The model partially loads into 16GB VRAM and spills the rest into system RAM. For a 14B model, it fits entirely on GPU for fast inference. This was a key factor in choosing Ollama over vLLM (which cannot spill to system RAM) or raw llama.cpp (which requires manual layer configuration).
+Design notes, research, and theorycrafting live in `docs/2600/`:
+- `routing-theory.md` — NadirClaw analysis, embedding classifier design, centroid generation
+- `design-decisions.md` — Architectural decisions and alternatives considered
 
 ---
 
-## Key References
+## License
 
-- Ollama API docs: https://github.com/ollama/ollama/blob/main/docs/api.md
-- OpenAI API spec (what we implement): https://platform.openai.com/docs/api-reference/chat
-- ChromaDB docs: https://docs.trychroma.com/
-- Nomic Embed: https://huggingface.co/nomic-ai/nomic-embed-text-v1.5
-- LangChain tools: https://python.langchain.com/docs/integrations/tools/
-- Open WebUI docs: https://docs.openwebui.com/
+MIT. Do whatever you want, don't sue me.
 
 ---
 
-*This README serves as the project plan and architectural record. Update it as decisions evolve.*
+*BeigeBox — because the most interesting box on the network is the one nobody knows is there.*

@@ -5,7 +5,7 @@ This is the portable format — import it into any tool that speaks OpenAI API.
 
 Usage:
     python scripts/export_conversations.py --output my_conversations.json
-    python scripts/export_conversations.py --pretty --model qwen3:32b
+    python scripts/export_conversations.py --pretty --model <model-name>
 """
 
 import argparse
