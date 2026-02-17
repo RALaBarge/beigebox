@@ -521,15 +521,15 @@ python scripts/migrate_open_webui.py --source ~/.config/open-webui/webui.db
 ## Roadmap
 
 ### Phase 1: Foundation (Current)
-- [ ] FastAPI proxy with OpenAI-compatible endpoints
-- [ ] Transparent request/response forwarding with streaming
-- [ ] SQLite conversation logging
-- [ ] ChromaDB embedding storage with nomic-embed-text
-- [ ] Basic config.yaml loader
-- [ ] LangChain DuckDuckGo search integration
-- [ ] LangChain web scraper integration
-- [ ] Google search mock/stub
-- [ ] Conversation export script (SQLite to JSON)
+- [ x] FastAPI proxy with OpenAI-compatible endpoints
+- [ x] Transparent request/response forwarding with streaming
+- [ x] SQLite conversation logging
+- [ x] ChromaDB embedding storage with nomic-embed-text
+- [ x] Basic config.yaml loader
+- [ x] LangChain DuckDuckGo search integration
+- [ x] LangChain web scraper integration
+- [ x] Google search mock/stub
+- [ x] Conversation export script (SQLite to JSON)
 
 ### Phase 2: Intelligence
 - [ ] Decision LLM for tool invocation ("does this need a web search?")
