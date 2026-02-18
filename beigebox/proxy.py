@@ -27,6 +27,7 @@ from beigebox.agents.zcommand import parse_z_command, ZCommand, HELP_TEXT
 from beigebox.agents.embedding_classifier import EmbeddingClassifier, EmbeddingDecision
 from beigebox.hooks import HookManager
 from beigebox.wiretap import WireLog
+from beigebox.agents.agentic_scorer import score_agentic_intent
 
 logger = logging.getLogger(__name__)
 
@@ -307,9 +308,10 @@ class Proxy:
     async def _hybrid_route(self, body: dict, zcmd: ZCommand) -> tuple[dict, Decision | None]:
         """
         Hybrid routing pipeline:
-          1. z-command (user override) — highest priority, skips everything
-          2. Embedding classifier (fast path) — ~50ms, handles clear cases
-          3. Decision LLM (slow path) — only for borderline cases
+          1. z-command (user override) — highest priority, skips everything'
+	  2. Try embedding classifier first (fast path)
+          3. Embedding classifier (fast path) — ~50ms, handles clear cases
+          4. Decision LLM (slow path) — only for borderline cases
 
         Returns (modified body, decision or None).
         """
@@ -317,6 +319,22 @@ class Proxy:
         if zcmd.active and (zcmd.route or zcmd.model):
             body = self._apply_z_command(body, zcmd)
             return body, None
+
+        # 1.5. Agentic pre-filter — near-zero cost, runs before embedding classifier
+        #      High agentic score means the user wants tool use — log it and let
+        #      the embedding classifier / decision LLM decide the route, but the
+        #      score is available for future forced-tool logic.
+        user_msg_for_scoring = self._get_latest_user_message(body)
+        if user_msg_for_scoring and not (zcmd.active and (zcmd.route or zcmd.model)):
+            agentic = score_agentic_intent(user_msg_for_scoring)
+            if agentic.is_agentic:
+                self.wire.log(
+                    direction="internal",
+                    role="decision",
+                    content=f"agentic_scorer: score={agentic.score:.2f} matched={agentic.matched}",
+                    model="agentic-scorer",
+                    conversation_id="",
+                )
 
         # 2. Try embedding classifier first (fast path)
         if self.embedding_classifier and self.embedding_classifier.ready:
@@ -361,15 +379,30 @@ class Proxy:
         if decision.model:
             body["model"] = decision.model
 
-        # Run requested tools and inject results
-        if decision.tools and self.hook_manager:
-            # Tools are handled through the hook/tool pipeline
-            pass
+	# Run requested tools and inject results
+        if decision.tools and self.tool_registry:
+            tool_results = []
+            for tool_name in decision.tools:
+                result = self.tool_registry.run_tool(tool_name, self._get_latest_user_message(body))
+                if result:
+                    tool_results.append(f"[{tool_name}]: {result}")
+            if tool_results:
+                body = self._inject_tool_context(body, "\n".join(tool_results))
 
-        # Web search augmentation
-        if decision.needs_search:
-            # TODO: invoke web search tool, inject results into context
-            logger.debug("Decision requested web search (not yet wired)")
+	# Web search augmentation
+        if decision.needs_search and self.tool_registry:
+            user_msg = self._get_latest_user_message(body)
+            if user_msg:
+                search_results = self.tool_registry.run_tool("web_search", user_msg)
+                if search_results:
+                    body = self._inject_tool_context(body, f"[web_search]: {search_results}")
+                    self.wire.log(
+                        direction="internal",
+                        role="tool",
+                        content=f"web_search injected ({len(search_results)} chars)",
+                        model="",
+                        conversation_id="",
+                    )
 
         return body
 

@@ -388,19 +388,6 @@ def cmd_operator(args):
     except KeyboardInterrupt:
         print("\\n  [line disconnected]")
 
-    # Hooks
-    hooks_cfg = cfg.get("hooks", {})
-    hooks_dir = hooks_cfg.get("directory", "./hooks")
-    from pathlib import Path
-    hook_files = []
-    hooks_path = Path(hooks_dir)
-    if hooks_path.exists():
-        hook_files = [f.stem for f in sorted(hooks_path.glob("*.py")) if not f.name.startswith("_")]
-
-    print()
-    print("  Hooks")
-    print(f"  └─ {', '.join(hook_files) if hook_files else 'none'} (dir: {hooks_dir})")
-
 
 def cmd_tone(args):
     """Print the banner."""

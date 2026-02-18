@@ -17,6 +17,7 @@ from textual.widgets import Footer, Header, Static, TabbedContent, TabPane
 from textual.reactive import reactive
 from beigebox.tui.screens.tap import TapScreen
 from beigebox.tui.screens.config import ConfigScreen
+
 # ---------------------------------------------------------------------------
 # Screen registry — add new screens here to extend the TUI
 # Each entry: (key, label, phreaker_name, screen_class)
@@ -30,7 +31,7 @@ SCREEN_REGISTRY: list[tuple[str, str, str, type[Screen]]] = [
 ]
 class BeigeBoxApp(App):
     """BeigeBox hacker TUI."""
-    CSS_PATH = "styles/main.tcss"
+    CSS_PATH = str(Path(__file__).parent / "styles" / "main.tcss")
     TITLE = "BeigeBox Console"
     SUB_TITLE = "tap the line · own the conversation"
     BINDINGS: ClassVar[list[Binding]] = [
