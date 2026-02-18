@@ -97,3 +97,42 @@ logging:
 # --- Wiretap (structured conversation log for `beigebox tap`) ---
 wiretap:
   path: "./data/wire.jsonl"            # JSONL log of every message on the wire
+
+
+###---- Move this to where it needs to be when finished:
+
+operator:
+  model: ""              # which Ollama model to use (defaults to backend.default_model)
+  max_iterations: 10
+  shell:
+    enabled: true
+    allowed_commands:    # ONLY these base commands can be called — you edit this list
+      - ls
+      - cat
+      - grep
+      - ps
+      - df
+      - free
+      - ollama
+      - beigebox
+    blocked_patterns:    # extra safety — reject even allowlisted commands if they match
+      - "rm -rf"
+      - "sudo"
+      - "> /etc"
+  data:
+    sqlite_queries:      # named query templates the agent can call by name
+      recent_conversations: >
+        SELECT c.id, c.created_at, COUNT(m.id) as msg_count
+        FROM conversations c JOIN messages m ON m.conversation_id = c.id
+        GROUP BY c.id ORDER BY c.created_at DESC LIMIT 10
+      token_usage_by_model: >
+        SELECT model, SUM(token_count) as tokens, COUNT(*) as messages
+        FROM messages GROUP BY model ORDER BY tokens DESC
+      search_messages: >
+        SELECT role, content, model, timestamp FROM messages
+        WHERE content LIKE ? ORDER BY timestamp DESC LIMIT 20
+      todays_conversations: >
+        SELECT c.id, c.created_at, COUNT(m.id) as msg_count
+        FROM conversations c JOIN messages m ON m.conversation_id = c.id
+        WHERE date(c.created_at) = date('now')
+        GROUP BY c.id ORDER BY c.created_at DESC

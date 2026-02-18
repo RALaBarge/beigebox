@@ -331,6 +331,63 @@ def cmd_flash(args):
     else:
         print("  └─ disabled")
 
+###--- Lets get the above renamed to the 'operator standard'
+
+def cmd_operator(args):
+    """
+    Launch the BeigeBox Operator agent — interactive REPL or single query.
+    """
+    from beigebox.config import get_config
+    from beigebox.storage.vector_store import VectorStore
+    from beigebox.agents.operator import Operator
+    print(BANNER)
+    print("  Operator online. Type 'exit' or Ctrl-C to disconnect.\\n")
+    cfg = get_config()
+    # Stand up the vector store for semantic search
+    try:
+        vector_store = VectorStore(
+            chroma_path=cfg["storage"]["chroma_path"],
+            embedding_model=cfg["embedding"]["model"],
+            embedding_url=cfg["embedding"]["backend_url"],
+        )
+    except Exception as e:
+        print(f"  ⚠ Vector store unavailable: {e}")
+        vector_store = None
+    try:
+        op = Operator(vector_store=vector_store)
+    except Exception as e:
+        print(f"  ✗ Failed to initialize Operator: {e}")
+        print("    Make sure Ollama is running and a model is configured.")
+        return
+    # Single-shot mode
+    if args.query:
+        question = " ".join(args.query)
+        print(f"  ▶ {question}\\n")
+        answer = op.run(question)
+        print(f"\\n  ◀ {answer}\\n")
+        return
+    # REPL mode
+    print("  Tools available:")
+    for tool in op.tools:
+        print(f"    ⚡ {tool.name}")
+    print()
+    try:
+        while True:
+            try:
+                question = input("  op> ").strip()
+            except EOFError:
+                break
+            if not question:
+                continue
+            if question.lower() in ("exit", "quit", "q", "disconnect"):
+                print("  [line disconnected]")
+                break
+            print()
+            answer = op.run(question)
+            print(f"\\n  ◀ {answer}\\n")
+    except KeyboardInterrupt:
+        print("\\n  [line disconnected]")
+
     # Hooks
     hooks_cfg = cfg.get("hooks", {})
     hooks_dir = hooks_cfg.get("directory", "./hooks")
@@ -465,12 +522,12 @@ def main():
                  "Build embedding classifier centroids from seed prompts", cmd_build_centroids)
 
     # jack / console / tui
-_add_command(
-    sub,
-    ["jack", "console", "tui"],
-    "Launch the interactive TUI console",
-    cmd_jack,
-)
+    _add_command(sub, ["jack", "console", "tui"], "Launch the interactive TUI console", cmd_jack)
+
+    # operator / op
+    def setup_operator(p):
+        p.add_argument("query", nargs="*", help="Question to ask (omit for interactive REPL)") 
+	_add_command(sub, ["operator", "op"], "Launch the Operator agent (web, data, shell)", cmd_operator, setup_operator,)
 
     args = parser.parse_args()
     if not args.command:
