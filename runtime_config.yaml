@@ -1,0 +1,26 @@
+# runtime_config.yaml — TEMPORARY overrides for beigebox
+# Updated at runtime by z: set commands and the TUI.
+# Changes are hot-reloaded on the next request (mtime check — no restart needed).
+# This file is intentionally separate from config.yaml so permanent
+# settings are never clobbered by session tweaks.
+#
+# Workflow:
+#   1. Use `z: set <key> <value>` in chat, or edit this file manually / via TUI
+#   2. Changes apply automatically on the next proxy request
+#   3. Permanent changes go in config.yaml, not here
+#   4. `source ~/.bashrc` only needed if you changed log_level and use env-based logging
+runtime:
+  # Override the active default model for this session
+  default_model: ""          # e.g. "llama3:8b" — blank = use config.yaml value
+  # Embedding classifier borderline threshold tweak
+  border_threshold: null     # null = use config.yaml value (default 0.04)
+  # Agentic scorer threshold (0.0-1.0)
+  agentic_threshold: null    # null = 0.5 default
+  # Force a route for all requests this session (overrides classifier)
+  force_route: ""            # "simple" | "complex" | "code" | "large" | "" = off
+  # Disable specific tools for this session
+  tools_disabled: []         # e.g. ["web_search", "memory"]
+  # Extra system prompt injected before every request (blank = none)
+  system_prompt_prefix: ""
+  # Log level override for this session
+  log_level: ""              # "DEBUG" | "INFO" | "WARNING" | "ERROR" | "" = use config.yaml
