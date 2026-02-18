@@ -254,9 +254,19 @@ beigebox/
 |   |-- test_zcommand.py
 |
 |-- data/                          # Created at runtime, gitignored
-    |-- conversations.db           # SQLite database
-    |-- chroma/                    # ChromaDB storage
-    |-- wire.jsonl                 # Wiretap log
+|   |-- conversations.db           # SQLite database
+|   |-- chroma/                    # ChromaDB storage
+|   |-- wire.jsonl                 # Wiretap log
+└── tui/
+    ├── __init__.py
+    ├── app.py              ← BeigeBoxApp, SCREEN_REGISTRY
+    ├── styles/
+    │   └── main.tcss       ← all styling, lavender palette
+    └── screens/
+        ├── __init__.py
+        ├── base.py         ← BeigeBoxPane base class
+        ├── config.py       ← Config panel (flash → TUI)
+        └── tap.py          ← Tap panel (live wire feed)
 ```
 
 ---
@@ -548,6 +558,7 @@ z: help
 - [x] Docker quickstart with health checks
 - [x] Wiretap logging with CLI viewer
 - [x] Conversation export and Open WebUI migration scripts
+- [x] TUI Interface with appealing LAVENDER highlights!
 
 ### Next
 - [ ] Web search augmentation wiring
