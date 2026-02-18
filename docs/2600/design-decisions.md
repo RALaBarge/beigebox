@@ -21,8 +21,8 @@
 **Rationale**: No classifier is perfect. Power users will develop intuition for when the router is wrong. Rather than forcing them to fight the system, give them an escape hatch. The `z:` prefix was chosen because:
 - Short to type
 - Unlikely to appear in natural language
-- Evokes the phreaker theme (like "zero out" or "zone")
-- Case-insensitive, whitespace-tolerant — hard to get wrong
+- I've used the z prefix for all of my text expanders for a decade and never have had a real world collision!
+  
 
 ## Decision LLM: Structured JSON Output (not free-text)
 
@@ -43,7 +43,7 @@
 
 **Decision**: All model names live in config.yaml under `decision_llm.routes`. Code references routes by name ("fast", "large", "code"), never by model string.
 
-**Rationale**: Model names change constantly. New quantizations, new versions, new providers. If "the fast model" is hardcoded as a specific model throughout the codebase, every model swap requires a code change. With named routes, you edit one line in config.yaml.
+**Rationale**: Model names change constantly. New quantizations, new versions, new providers. If "the fast model" is hardcoded as a specific model throughout the codebase, every model swap requires a code change. With named routes, you edit one line in config.yaml.  Its hard enough to keep up on everything else -- lets just make it generic as possible please, ok?
 
 ---
 
