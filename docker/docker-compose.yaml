@@ -38,11 +38,11 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s #load gpu drivers
   # ---------------------------------------------------------------------------
   # BeigeBox — transparent LLM proxy + middleware
   # ---------------------------------------------------------------------------
@@ -62,7 +62,7 @@ services:
       - OLLAMA_HOST=ollama
     depends_on:
       ollama:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/beigebox/health"]
@@ -90,7 +90,7 @@ services:
       - WEBUI_AUTH=${WEBUI_AUTH:-false}
     depends_on:
       beigebox:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
 
 volumes:
