@@ -35,23 +35,23 @@ class VectorStore:
     def _get_embedding(self, text: str) -> list[float]:
         """Get embedding vector from Ollama API."""
         resp = httpx.post(
-            f"{self.embedding_url}/api/embeddings",
-            json={"model": self.embedding_model, "prompt": text},
+            f"{self.embedding_url}/api/embed",
+            json={"model": self.embedding_model, "input": text},
             timeout=30.0,
         )
         resp.raise_for_status()
-        return resp.json()["embedding"]
+        return resp.json()["embeddings"][0]
 
     async def _get_embedding_async(self, text: str) -> list[float]:
         """Async version for use in the request pipeline."""
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                f"{self.embedding_url}/api/embeddings",
-                json={"model": self.embedding_model, "prompt": text},
+                f"{self.embedding_url}/api/embed",
+                json={"model": self.embedding_model, "input": text},
                 timeout=30.0,
             )
             resp.raise_for_status()
-            return resp.json()["embedding"]
+            return resp.json()["embeddings"][0]
 
     def store_message(
         self,

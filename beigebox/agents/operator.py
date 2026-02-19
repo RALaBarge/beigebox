@@ -19,9 +19,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from langchain.agents import AgentExecutor, create_react_agent
-from langchain.prompts import PromptTemplate
-from langchain.tools import Tool
+from langgraph.prebuilt import create_react_agent
+from langchain_core.tools import Tool
 from langchain_ollama import ChatOllama
 from langchain_community.tools import DuckDuckGoSearchResults
 
@@ -30,39 +29,16 @@ from beigebox.config import get_config
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# System prompt
-# ---------------------------------------------------------------------------
-
 _SYSTEM_PROMPT = """\
 You are the BeigeBox Operator — a local AI assistant with access to the \
 BeigeBox proxy's data stores, web search, and a restricted terminal.
 
-You have access to the following tools:
-{tools}
-
-Use the following format strictly:
-
-Question: the input question you must answer
-Thought: your reasoning about what to do
-Action: the exact name of the tool to use — must be one of [{tool_names}]
-Action Input: the input to the tool
-Observation: the result of the tool
-... (repeat Thought/Action/Action Input/Observation as needed)
-Thought: I now have enough information to answer
-Final Answer: your complete answer
-
 Rules:
 - Only use tools when you actually need them
 - Prefer data store tools over web search for questions about past conversations
-- Be concise in Final Answer — the user is a developer, not a civilian
+- Be concise — the user is a developer, not a civilian
 - If a shell command fails or is blocked, say so and suggest an alternative
-- Never make up results — if a tool returns nothing, say so
-
-Begin.
-
-Question: {input}
-Thought: {agent_scratchpad}"""
+- Never make up results — if a tool returns nothing, say so"""
 
 
 # ---------------------------------------------------------------------------
@@ -70,12 +46,6 @@ Thought: {agent_scratchpad}"""
 # ---------------------------------------------------------------------------
 
 class AllowlistedShell:
-    """
-    Runs shell commands only if the base command is in the allowlist
-    and no blocked patterns appear in the full command string.
-    Configure via config.yaml under operator.shell.
-    """
-
     def __init__(self, allowed_commands: list[str], blocked_patterns: list[str]):
         self.allowed = set(allowed_commands)
         self.blocked = blocked_patterns
@@ -90,10 +60,8 @@ class AllowlistedShell:
         except ValueError as e:
             return f"Error: could not parse command: {e}"
 
-        # Strip any path prefix (e.g. /usr/bin/ls → ls)
         base = Path(parts[0]).name
 
-        # Allowlist check
         if base not in self.allowed:
             return (
                 f"Blocked: '{base}' is not in the allowed command list.\n"
@@ -101,12 +69,10 @@ class AllowlistedShell:
                 f"Edit operator.shell.allowed_commands in config.yaml to add it."
             )
 
-        # Blocked pattern check
         for pattern in self.blocked:
             if pattern.lower() in command.lower():
                 return f"Blocked: command contains disallowed pattern '{pattern}'"
 
-        # Execute — no shell=True, tight timeout
         try:
             result = subprocess.run(
                 parts,
@@ -133,12 +99,6 @@ class AllowlistedShell:
 # ---------------------------------------------------------------------------
 
 class SQLiteQueryTool:
-    """
-    Runs named query templates from config.yaml against the conversation DB.
-    Agent references queries by name — no raw SQL passthrough.
-    Add queries under operator.data.sqlite_queries in config.yaml.
-    """
-
     def __init__(self, db_path: str, named_queries: dict[str, str]):
         self.db_path = Path(db_path)
         self.named_queries = named_queries
@@ -154,11 +114,9 @@ class SQLiteQueryTool:
     def run(self, query_name: str) -> str:
         query_name = query_name.strip()
 
-        # Help / list
         if query_name.lower() in ("list", "help", "?", ""):
             return self.list_queries()
 
-        # Optional param: "query_name | param_value"
         param = None
         if "|" in query_name:
             parts = query_name.split("|", 1)
@@ -206,8 +164,6 @@ class SQLiteQueryTool:
 # ---------------------------------------------------------------------------
 
 class SemanticSearchTool:
-    """Wraps VectorStore for semantic search over conversation history."""
-
     def __init__(self, vector_store):
         self.vs = vector_store
 
@@ -239,14 +195,11 @@ class SemanticSearchTool:
 
 class Operator:
     """
-    LangChain ReAct agent with web, data, and shell tools.
+    LangGraph ReAct agent with web, data, and shell tools.
 
     Usage:
         op = Operator()
         result = op.run("What have we talked about regarding Docker networking?")
-
-    All tool availability and limits are configured in config.yaml
-    under the `operator` block.
     """
 
     def __init__(self, vector_store=None):
@@ -254,30 +207,19 @@ class Operator:
         op_cfg = cfg.get("operator", {})
         model_name = op_cfg.get("model") or cfg["backend"].get("default_model", "")
         backend_url = cfg["backend"]["url"].rstrip("/")
-        max_iterations = op_cfg.get("max_iterations", 10)
 
-        # LLM — local Ollama
         self.llm = ChatOllama(
             model=model_name,
             base_url=backend_url,
             temperature=0.1,
         )
 
-        # Build tools
         self.tools = self._build_tools(cfg, op_cfg, vector_store)
 
-        # ReAct prompt
-        prompt = PromptTemplate.from_template(_SYSTEM_PROMPT)
-
-        # Agent executor
-        agent = create_react_agent(self.llm, self.tools, prompt)
-        self.executor = AgentExecutor(
-            agent=agent,
-            tools=self.tools,
-            max_iterations=max_iterations,
-            verbose=True,
-            handle_parsing_errors=True,
-            return_intermediate_steps=False,
+        self.executor = create_react_agent(
+            self.llm,
+            self.tools,
+            prompt=_SYSTEM_PROMPT,
         )
 
         logger.info(
@@ -289,7 +231,7 @@ class Operator:
     def _build_tools(self, cfg: dict, op_cfg: dict, vector_store) -> list[Tool]:
         tools: list[Tool] = []
 
-        # ── Web search (DDG — no API key needed) ─────────────────────────────
+        # Web search
         try:
             ddg = DuckDuckGoSearchResults(max_results=5)
             tools.append(Tool(
@@ -304,7 +246,7 @@ class Operator:
         except Exception as e:
             logger.warning("DDG search tool unavailable: %s", e)
 
-        # ── Web scraper ───────────────────────────────────────────────────────
+        # Web scraper
         try:
             from beigebox.tools.web_scraper import WebScraperTool
             scraper = WebScraperTool()
@@ -320,7 +262,7 @@ class Operator:
         except Exception as e:
             logger.warning("Web scraper tool unavailable: %s", e)
 
-        # ── Semantic search over ChromaDB ─────────────────────────────────────
+        # Semantic search
         if vector_store is not None:
             sem = SemanticSearchTool(vector_store)
             tools.append(Tool(
@@ -333,7 +275,7 @@ class Operator:
                 ),
             ))
 
-        # ── SQLite named queries ──────────────────────────────────────────────
+        # SQLite named queries
         data_cfg = op_cfg.get("data", {})
         named_queries = data_cfg.get("sqlite_queries", {})
         db_path = cfg["storage"]["sqlite_path"]
@@ -350,7 +292,7 @@ class Operator:
             ),
         ))
 
-        # ── Shell (allowlisted) ───────────────────────────────────────────────
+        # Shell (allowlisted)
         shell_cfg = op_cfg.get("shell", {})
         if shell_cfg.get("enabled", False):
             shell = AllowlistedShell(
@@ -373,8 +315,10 @@ class Operator:
     def run(self, question: str) -> str:
         """Run the agent on a single question. Returns the final answer."""
         try:
-            result = self.executor.invoke({"input": question})
-            return result.get("output", "(no output)")
+            result = self.executor.invoke(
+                {"messages": [{"role": "user", "content": question}]}
+            )
+            return result["messages"][-1].content
         except Exception as e:
             logger.error("Operator failed: %s", e)
             return f"Error: {e}"
@@ -386,14 +330,15 @@ class Operator:
         Used by the TUI OperatorScreen for live display.
         """
         try:
-            for step in self.executor.stream({"input": question}):
-                if "output" in step:
-                    yield ("answer", step["output"])
-                elif "actions" in step:
-                    for action in step["actions"]:
-                        yield ("action", f"{action.tool}({action.tool_input})")
-                elif "steps" in step:
-                    for s in step["steps"]:
-                        yield ("observation", str(s.observation)[:400])
+            for chunk in self.executor.stream(
+                {"messages": [{"role": "user", "content": question}]}
+            ):
+                if "agent" in chunk:
+                    for msg in chunk["agent"].get("messages", []):
+                        if msg.content:
+                            yield ("answer", msg.content)
+                elif "tools" in chunk:
+                    for msg in chunk["tools"].get("messages", []):
+                        yield ("observation", str(msg.content)[:400])
         except Exception as e:
             yield ("error", str(e))

@@ -27,7 +27,7 @@ import os
 import time
 from dataclasses import dataclass
 from typing import Optional, Tuple
-
+from pathlib import Path
 import numpy as np
 import httpx
 
@@ -165,12 +165,13 @@ CREATIVE_PROTOTYPES = [
     "Help me write a LinkedIn post about my promotion",
 ]
 
+
 class EmbeddingClassifier:
     """
-    Fast binary prompt classifier using embedding cosine similarity.
+    Fast prompt classifier using embedding cosine similarity.
 
     Uses the nomic-embed-text model already loaded in Ollama to embed
-    prompts and compare against pre-computed simple/complex centroids.
+    prompts and compare against pre-computed centroids for each route.
     """
 
     def __init__(self):
@@ -193,25 +194,24 @@ class EmbeddingClassifier:
         self._complex_centroid: Optional[np.ndarray] = None
         self._load_centroids()
 
-def _load_centroids(self):
-    """Load all available centroid vectors."""
-    # Multi-class centroids
-    self._centroids: dict[str, np.ndarray] = {}
-    for npy_file in Path(_CENTROID_DIR).glob("*_centroid.npy"):
-        route_name = npy_file.stem.replace("_centroid", "")
-        self._centroids[route_name] = np.load(str(npy_file))
-        logger.info("Loaded centroid: %s", route_name)
+    def _load_centroids(self):
+        """Load all available centroid vectors."""
+        self._centroids: dict[str, np.ndarray] = {}
+        for npy_file in Path(_CENTROID_DIR).glob("*_centroid.npy"):
+            route_name = npy_file.stem.replace("_centroid", "")
+            self._centroids[route_name] = np.load(str(npy_file))
+            logger.info("Loaded centroid: %s", route_name)
 
-    # Backward compat aliases
-    self._simple_centroid = self._centroids.get("simple")
-    self._complex_centroid = self._centroids.get("complex")
+        # Backward compat aliases
+        self._simple_centroid = self._centroids.get("simple")
+        self._complex_centroid = self._centroids.get("complex")
 
-    if not self._centroids:
-        logger.warning(
-            "No centroid files found in %s. "
-            "Run 'beigebox build-centroids' to generate them.",
-            _CENTROID_DIR,
-        )
+        if not self._centroids:
+            logger.warning(
+                "No centroid files found in %s. "
+                "Run 'beigebox build-centroids' to generate them.",
+                _CENTROID_DIR,
+            )
 
     @property
     def ready(self) -> bool:
@@ -230,7 +230,6 @@ def _load_centroids(self):
             embeddings = data.get("embeddings", [[]])
             if embeddings and embeddings[0]:
                 vec = np.array(embeddings[0], dtype=np.float32)
-                # Normalize
                 norm = np.linalg.norm(vec)
                 if norm > 0:
                     vec = vec / norm
@@ -266,7 +265,6 @@ def _load_centroids(self):
         """Resolve any route name to a model string via config routes."""
         if route_name in self.routes:
             return self.routes[route_name].get("model", self.default_model)
-        # Fallbacks for binary tiers
         if route_name == "simple":
             return self.routes.get("fast", {}).get("model", self.default_model)
         if route_name == "complex":
@@ -289,7 +287,6 @@ def _load_centroids(self):
         }
 
         best_route = max(scores, key=scores.get)
-        best_score = scores[best_route]
         scores_sorted = sorted(scores.values(), reverse=True)
         confidence = scores_sorted[0] - scores_sorted[1] if len(scores_sorted) > 1 else 1.0
 
@@ -302,7 +299,7 @@ def _load_centroids(self):
 
         logger.debug(
             "Embedding classify: best=%s confidence=%.4f borderline=%s scores=%s (%dms)",
-            best_route, confidence, borderline, 
+            best_route, confidence, borderline,
             {k: f"{v:.3f}" for k, v in scores.items()}, latency_ms,
         )
 
@@ -314,42 +311,43 @@ def _load_centroids(self):
             borderline=borderline,
         )
 
-def build_centroids(self) -> bool:
-    """
-    Generate centroid vectors from seed prototypes for all routes.
-    Saves one .npy file per route to the centroids directory.
-    """
-    prototype_sets = {
-        "simple":   SIMPLE_PROTOTYPES,
-        "complex":  COMPLEX_PROTOTYPES,
-        "code":     CODE_PROTOTYPES,
-        "creative": CREATIVE_PROTOTYPES,
-    }
+    def build_centroids(self) -> bool:
+        """
+        Generate centroid vectors from seed prototypes for all routes.
+        Saves one .npy file per route to the centroids directory.
+        """
+        prototype_sets = {
+            "simple":   SIMPLE_PROTOTYPES,
+            "complex":  COMPLEX_PROTOTYPES,
+            "code":     CODE_PROTOTYPES,
+            "creative": CREATIVE_PROTOTYPES,
+        }
 
-    logger.info("Building centroids for routes: %s", list(prototype_sets.keys()))
+        logger.info("Building centroids for routes: %s", list(prototype_sets.keys()))
 
-    self._centroids = {}
-    for route_name, prototypes in prototype_sets.items():
-        embs = self._embed_batch(prototypes)
-        if not embs:
-            logger.error("Failed to embed prototypes for route '%s'", route_name)
-            return False
+        self._centroids = {}
+        for route_name, prototypes in prototype_sets.items():
+            embs = self._embed_batch(prototypes)
+            if not embs:
+                logger.error("Failed to embed prototypes for route '%s'", route_name)
+                return False
 
-        centroid = np.mean(embs, axis=0).astype(np.float32)
-        centroid = centroid / np.linalg.norm(centroid)
+            centroid = np.mean(embs, axis=0).astype(np.float32)
+            centroid = centroid / np.linalg.norm(centroid)
 
-        path = os.path.join(_CENTROID_DIR, f"{route_name}_centroid.npy")
-        os.makedirs(_CENTROID_DIR, exist_ok=True)
-        np.save(path, centroid)
-        logger.info("Centroid saved: %s (dim=%d)", path, len(centroid))
+            path = os.path.join(_CENTROID_DIR, f"{route_name}_centroid.npy")
+            os.makedirs(_CENTROID_DIR, exist_ok=True)
+            np.save(path, centroid)
+            logger.info("Centroid saved: %s (dim=%d)", path, len(centroid))
 
-    # Keep backward-compat binary centroids
-    self._simple_centroid = self._centroids.get("simple") or \
-        np.load(os.path.join(_CENTROID_DIR, "simple_centroid.npy"))
-    self._complex_centroid = self._centroids.get("complex") or \
-        np.load(os.path.join(_CENTROID_DIR, "complex_centroid.npy"))
+        # Keep backward-compat binary centroids
+        self._simple_centroid = self._centroids.get("simple") or \
+            np.load(os.path.join(_CENTROID_DIR, "simple_centroid.npy"))
+        self._complex_centroid = self._centroids.get("complex") or \
+            np.load(os.path.join(_CENTROID_DIR, "complex_centroid.npy"))
 
-    return True
+        return True
+
 
 # ---------------------------------------------------------------------------
 # Singleton

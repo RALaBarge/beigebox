@@ -1,4 +1,4 @@
-
+"""
 Config loader for beigebox.
 Reads config.yaml once at startup. All other modules import from here.
 runtime_config.yaml is hot-reloaded on every call to get_runtime_config()

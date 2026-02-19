@@ -56,7 +56,7 @@ tools:
 # Set enabled: true and pull the model to activate.
 decision_llm:
   enabled: false                       # Set to true after pulling the model
-  model: ""                           # A small, fast model for routing (e.g. MoE variant with low active params)
+  model: "llama3.2:3b"                           # A small, fast model for routing (e.g. MoE variant with low active params)
   backend_url: "http://localhost:11434"
   timeout: 5                           # Seconds — if router is slow, skip and forward raw
   max_tokens: 256                      # Routing decisions should be tiny
@@ -104,7 +104,7 @@ routing:
 ###---- Move this to where it needs to be when finished:
 
 operator:
-  model: ""              # which Ollama model to use (defaults to backend.default_model)
+  model: "llama3.2:3b"              # which Ollama model to use (defaults to backend.default_model)
   max_iterations: 10
   shell:
     enabled: true

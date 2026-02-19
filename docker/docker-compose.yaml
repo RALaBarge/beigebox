@@ -43,6 +43,13 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s #load gpu drivers
+  ollama-init:
+    image: curlimages/curl
+    depends_on: [ollama]
+    command: >
+      sh -c "sleep 3 && curl -s http://ollama:11434/api/pull -d '{\"name\":\"nomic-embed-text\"}'"
+    restart: "no"
+
   # ---------------------------------------------------------------------------
   # BeigeBox — transparent LLM proxy + middleware
   # ---------------------------------------------------------------------------

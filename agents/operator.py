@@ -15,7 +15,11 @@ import subprocess
 import sqlite3
 from pathlib import Path
 from typing import Any
-from langchain.agents import AgentExecutor, create_react_agent
+from langchain.agents import create_react_agent
+try:
+    from langchain.agents import AgentExecutor
+except ImportError:
+    from langchain_core.agents import AgentExecutor
 from langchain.prompts import PromptTemplate
 from langchain.tools import Tool
 from langchain_ollama import ChatOllama

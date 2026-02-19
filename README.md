@@ -11,9 +11,11 @@ A transparent middleware proxy for local LLM stacks. Sits between your frontend 
 |  (Frontend)   |<--------|  FastAPI Proxy                       |<--------|  llama.cpp       |
 |               |         |                                      |         |  (Backend)       |
 |  Port 3000    |         |  +------ Hybrid Router -----------+  |         |  Port 11434      |
-+---------------+         |  | 1. Z-Commands     (instant)    |  |         +-----------------+
-                          |  | 2. Embedding Class (~50ms)     |  |
-                          |  | 3. Decision LLM   (~500ms-2s)  |  |
++---------------+         |  | 0. Session Cache  (instant)    |  |         +-----------------+
+                          |  | 1. Z-Commands     (instant)    |  |
+                          |  | 2. Agentic Scorer (instant)    |  |
+                          |  | 3. Embedding Class (~50ms)     |  |
+                          |  | 4. Decision LLM   (~500ms-2s)  |  |
                           |  +---------------------------------+  |
                           |                                      |
                           |  +----------+  +-------------------+ |
@@ -23,10 +25,18 @@ A transparent middleware proxy for local LLM stacks. Sits between your frontend 
                           |  +----------+  +-------------------+ |
                           |                                      |
                           |  +------ Tool Registry ------------+ |
-                          |  | Web Search  | Calculator         | |
-                          |  | Web Scraper | DateTime           | |
-                          |  | Memory/RAG  | System Info        | |
-                          |  | Notifier    | (extensible)       | |
+                          |  | Web Search  | Calculator        | |
+                          |  | Web Scraper | DateTime          | |
+                          |  | Memory/RAG  | System Info       | |
+                          |  | Notifier    | (extensible)      | |
+                          |  +--------------------------------- + |
+                          |                                      |
+                          |  +------ Operator Agent ----------+ |
+                          |  | LangChain ReAct agent          | |
+                          |  | Web search + scrape            | |
+                          |  | Semantic conversation search   | |
+                          |  | Named SQLite queries           | |
+                          |  | Allowlisted shell              | |
                           |  +---------------------------------+ |
                           |                          Port 8000   |
                           +--------------------------------------+
@@ -40,15 +50,16 @@ A transparent middleware proxy for local LLM stacks. Sits between your frontend 
 2. [Architecture](#architecture)
 3. [Hybrid Routing](#hybrid-routing)
 4. [Z-Commands](#z-commands)
-5. [Project Structure](#project-structure)
-6. [Core Components](#core-components)
-7. [CLI Commands](#cli-commands)
-8. [Configuration](#configuration)
-9. [Setup and Installation](#setup-and-installation)
-10. [Docker Quickstart](#docker-quickstart)
-11. [Usage](#usage)
-12. [Roadmap](#roadmap)
-13. [Docs](#docs)
+5. [Operator Agent](#operator-agent)
+6. [Project Structure](#project-structure)
+7. [Core Components](#core-components)
+8. [CLI Commands](#cli-commands)
+9. [Configuration](#configuration)
+10. [Setup and Installation](#setup-and-installation)
+11. [Docker Quickstart](#docker-quickstart)
+12. [Usage](#usage)
+13. [Roadmap](#roadmap)
+14. [Docs](#docs)
 
 ---
 
@@ -59,9 +70,10 @@ BeigeBox is a proxy that makes your local LLM stack smarter without changing any
 Your frontend thinks it's talking to Ollama. Ollama thinks it's getting requests from your frontend. BeigeBox sits in the middle, transparently intercepting every message to:
 
 - **Store** every conversation in portable SQLite + semantic ChromaDB (you own the data, not the frontend)
-- **Route** requests to the right model based on complexity (fast model for simple questions, large model for hard ones, code model for programming)
+- **Route** requests to the right model based on complexity (fast model for simple questions, large model for hard ones, code model for programming, creative model for writing)
 - **Augment** requests with tool output before they hit the LLM (web search, conversation memory, math, system info)
 - **Override** any decision with user-level z-commands when you know better than the router
+- **Persist** routing decisions within a conversation so the model doesn't switch mid-thread
 
 Everything degrades gracefully. If routing is disabled, BeigeBox is a transparent proxy. If tools are disabled, requests pass through unaugmented. If storage fails, the conversation still works. Each feature is independent and optional.
 
@@ -75,12 +87,14 @@ Everything degrades gracefully. If routing is disabled, BeigeBox is a transparen
 1. User types message in Open WebUI
 2. Open WebUI sends POST /v1/chat/completions to BeigeBox (port 8000)
 3. BeigeBox intercepts:
-   a. Check for z-command override (instant)
-   b. Run embedding classifier (fast path, ~50ms)
-   c. If borderline, escalate to decision LLM (slow path, ~500ms-2s)
-   d. Execute any forced/decided tools
-   e. Log user message to SQLite + embed to ChromaDB
-   f. Forward (possibly augmented, possibly rerouted) request to Ollama
+   a. Check session cache — same conversation? Use the same model. (instant)
+   b. Check for z-command override (instant)
+   c. Run agentic scorer — flag tool-intent prompts (instant)
+   d. Run embedding classifier (fast path, ~50ms)
+   e. If borderline, escalate to decision LLM (slow path, ~500ms-2s)
+   f. Execute any forced/decided tools (web search, RAG, etc.)
+   g. Log user message to SQLite + embed to ChromaDB
+   h. Forward (possibly augmented, possibly rerouted) request to Ollama
 4. Ollama returns response (streamed)
 5. BeigeBox intercepts response:
    a. Log assistant message to SQLite + embed to ChromaDB
@@ -104,35 +118,45 @@ Both use `nomic-embed-text` for embeddings, which runs locally via Ollama with n
 
 ## Hybrid Routing
 
-BeigeBox routes requests through a three-tier system with graceful degradation at every level:
+BeigeBox routes requests through a four-tier system with graceful degradation at every level:
+
+### Tier 0: Session Cache (instant)
+
+Once a routing decision has been made for a conversation, it's cached. Subsequent messages in the same thread skip the entire routing pipeline and go straight to the same model. TTL is configurable (default 30 minutes). This prevents mid-conversation model switches that would break context and tone.
 
 ### Tier 1: Z-Commands (instant)
 
-User-level overrides via `z:` prefix. Absolute priority — bypasses all automated routing. See [Z-Commands](#z-commands) below.
+User-level overrides via `z:` prefix. Absolute priority — bypasses all automated routing. See [Z-Commands](#z-commands) below. Z-command overrides are intentionally not cached, since the user is being explicit.
 
-### Tier 2: Embedding Classifier (~50ms)
+### Tier 2: Agentic Scorer (instant)
 
-Inspired by [NadirClaw](https://github.com/doramirdor/NadirClaw). Pre-computed centroid vectors classify prompts as simple or complex using cosine similarity in embedding space. Handles ~80% of requests without needing the heavier decision LLM.
+A lightweight keyword scorer that flags prompts with high tool-use intent before the embedding classifier runs. Near-zero cost. High agentic scores are logged to the wiretap and available for future forced-tool routing logic.
 
-Uses the same `nomic-embed-text` model already loaded for ChromaDB — zero new dependencies, zero new models to pull.
+### Tier 3: Embedding Classifier (~50ms)
 
-Run `beigebox build-centroids` once to generate the centroid vectors from built-in seed prompts. If centroids aren't built, this tier is skipped and everything falls through to Tier 3.
+Inspired by [NadirClaw](https://github.com/doramirdor/NadirClaw). Pre-computed centroid vectors classify prompts into one of four routes — simple, complex, code, or creative — using cosine similarity in embedding space. Handles the majority of requests without needing the heavier decision LLM.
 
-### Tier 3: Decision LLM (~500ms–2s)
+Uses the same `nomic-embed-text` model already loaded for ChromaDB — zero new dependencies, zero new models to pull. The classifier picks the best-matching route and computes a confidence gap between the top two scores. Clear wins skip Tier 4; borderline cases escalate.
+
+Run `beigebox build-centroids` once to generate the centroid vectors from built-in seed prompts.
+
+### Tier 4: Decision LLM (~500ms–2s)
 
 A small, fast model reads the prompt and outputs structured JSON: which route to use, whether tools are needed, confidence level. Only called for borderline cases where the embedding classifier isn't confident enough.
 
-Requires pulling a small model and setting `decision_llm.enabled: true` in config. If disabled, BeigeBox uses the default model for everything.
+Requires pulling a small model and setting `decision_llm.enabled: true` in config. The decision LLM can also trigger tool augmentation — web search, RAG context, or arbitrary registered tools — which are injected into the request before forwarding.
 
 ### Degradation Path
 
 ```
-Z-command found?  → Use it. Done.
-Centroids loaded? → Run embedding classifier
-  Clear result?   → Route accordingly. Done.
-  Borderline?     → Fall through to decision LLM
-Decision LLM on?  → Run it. Route accordingly.
-Nothing worked?   → Use default model. Conversation still works.
+Session cache hit?   → Use cached model. Done.
+Z-command found?     → Use it. Done.
+Agentic scorer runs  → Log if flagged. Continue.
+Centroids loaded?    → Run embedding classifier
+  Clear result?      → Route accordingly. Cache result. Done.
+  Borderline?        → Fall through to decision LLM
+Decision LLM on?     → Run it. Route + augment accordingly. Cache result.
+Nothing worked?      → Use default model. Conversation still works.
 ```
 
 Every tier is independently optional. BeigeBox works as a simple passthrough proxy with everything disabled, and gains intelligence as you enable features.
@@ -149,6 +173,7 @@ Override any routing decision by prefixing your message with `z:`. The prefix is
 z: simple    → force fast/simple model
 z: complex   → force large/complex model
 z: code      → force code model
+z: creative  → force creative model
 z: <model>   → force exact model by name:tag
 ```
 
@@ -185,88 +210,114 @@ Z-commands are case-insensitive and whitespace-tolerant.
 
 ---
 
+## Operator Agent
+
+`beigebox operator` launches an interactive LangChain ReAct agent with access to five tools:
+
+- **web_search** — DuckDuckGo search
+- **web_scrape** — fetch and extract content from a URL
+- **conversation_search** — semantic search over stored conversations (ChromaDB)
+- **database_query** — named queries from config (no raw SQL passthrough)
+- **shell** — allowlisted commands only, 15s timeout, pattern blocklist
+
+```bash
+# Interactive REPL
+beigebox operator
+
+# One-shot query
+beigebox op "summarise everything we discussed about docker last week"
+```
+
+The shell tool only runs binaries explicitly listed in `config.yaml` under `operator.shell_allowlist`. Dangerous patterns (pipes to shell, command substitution, etc.) are blocked regardless of allowlist.
+
+---
+
 ## Project Structure
 
 ```
 beigebox/
-|-- README.md
-|-- LICENSE                        # MIT
-|-- config.yaml                    # All runtime configuration
-|-- pyproject.toml                 # Package metadata + CLI entry point
-|-- requirements.txt
-|-- setup.sh                       # Interactive setup script
-|
-|-- beigebox/
-|   |-- __init__.py
-|   |-- __main__.py                # python -m beigebox entry
-|   |-- cli.py                     # CLI commands (dial, tap, ring, sweep, etc.)
-|   |-- main.py                    # FastAPI app initialization
-|   |-- proxy.py                   # Request interception, hybrid routing, forwarding
-|   |-- config.py                  # Config loader
-|   |-- wiretap.py                 # Structured JSONL wire log
-|   |
-|   |-- agents/
-|   |   |-- decision.py            # Decision LLM (Tier 3 router)
-|   |   |-- embedding_classifier.py # Embedding classifier (Tier 2 router)
-|   |   |-- zcommand.py            # Z-command parser (Tier 1 overrides)
-|   |   |-- centroids/             # Pre-computed centroid .npy files
-|   |
-|   |-- storage/
-|   |   |-- sqlite_store.py        # Raw conversation storage
-|   |   |-- vector_store.py        # ChromaDB embedding storage
-|   |   |-- models.py              # Data models / schemas
-|   |
-|   |-- tools/
-|       |-- registry.py            # Tool registration and dispatch
-|       |-- web_search.py          # DuckDuckGo search (LangChain)
-|       |-- web_scraper.py         # URL content extraction
-|       |-- google_search.py       # Google search (stub, API key optional)
-|       |-- calculator.py          # Safe math expression evaluator
-|       |-- datetime_tool.py       # Time, date, timezone tools
-|       |-- system_info.py         # Host system stats
-|       |-- memory.py              # Semantic search over past conversations
-|       |-- notifier.py            # Webhook/notification dispatch
-|
-|-- hooks/
-|   |-- filter_synthetic.py        # Filter synthetic/internal requests
-|   |-- rag_context.py             # RAG context injection template
-|
-|-- scripts/
-|   |-- export_conversations.py    # SQLite → JSON export
-|   |-- search_conversations.py    # CLI semantic search
-|   |-- migrate_open_webui.py      # Import Open WebUI history
-|
-|-- docker/
-|   |-- Dockerfile
-|   |-- docker-compose.yaml        # Full stack deployment
-|   |-- config.docker.yaml
-|
-|-- docs/
-|   |-- 2600/                      # Design notes, research, theorycrafting
-|
-|-- tests/
-|   |-- test_proxy.py
-|   |-- test_storage.py
-|   |-- test_tools.py
-|   |-- test_decision.py
-|   |-- test_hooks.py
-|   |-- test_new_tools.py
-|   |-- test_zcommand.py
-|
-|-- data/                          # Created at runtime, gitignored
-|   |-- conversations.db           # SQLite database
-|   |-- chroma/                    # ChromaDB storage
-|   |-- wire.jsonl                 # Wiretap log
-└── tui/
-    ├── __init__.py
-    ├── app.py              ← BeigeBoxApp, SCREEN_REGISTRY
-    ├── styles/
-    │   └── main.tcss       ← all styling, lavender palette
-    └── screens/
-        ├── __init__.py
-        ├── base.py         ← BeigeBoxPane base class
-        ├── config.py       ← Config panel (flash → TUI)
-        └── tap.py          ← Tap panel (live wire feed)
+├── README.md
+├── LICENSE                        # MIT
+├── config.yaml                    # All runtime configuration
+├── runtime_config.yaml            # Hot-reloaded overrides (no restart needed)
+├── pyproject.toml                 # Package metadata + CLI entry point
+├── requirements.txt
+├── setup.sh                       # Interactive setup script
+│
+├── beigebox/
+│   ├── __init__.py
+│   ├── __main__.py                # python -m beigebox entry
+│   ├── cli.py                     # CLI commands
+│   ├── main.py                    # FastAPI app initialization
+│   ├── proxy.py                   # Request interception, hybrid routing, forwarding
+│   ├── config.py                  # Config loader with hot-reload support
+│   ├── wiretap.py                 # Structured JSONL wire log
+│   │
+│   ├── agents/
+│   │   ├── decision.py            # Decision LLM (Tier 4 router)
+│   │   ├── embedding_classifier.py # Embedding classifier (Tier 3 router)
+│   │   ├── zcommand.py            # Z-command parser (Tier 1 overrides)
+│   │   ├── agentic_scorer.py      # Agentic intent scorer (Tier 2 pre-filter)
+│   │   ├── operator.py            # LangChain ReAct operator agent
+│   │   └── centroids/             # Pre-computed centroid .npy files
+│   │
+│   ├── storage/
+│   │   ├── sqlite_store.py        # Raw conversation storage
+│   │   ├── vector_store.py        # ChromaDB embedding storage
+│   │   └── models.py              # Data models / schemas
+│   │
+│   ├── tools/
+│   │   ├── registry.py            # Tool registration and dispatch
+│   │   ├── web_search.py          # DuckDuckGo search (LangChain)
+│   │   ├── web_scraper.py         # URL content extraction
+│   │   ├── google_search.py       # Google search (stub, API key optional)
+│   │   ├── calculator.py          # Safe math expression evaluator
+│   │   ├── datetime_tool.py       # Time, date, timezone tools
+│   │   ├── system_info.py         # Host system stats
+│   │   ├── memory.py              # Semantic search over past conversations
+│   │   └── notifier.py            # Webhook/notification dispatch
+│   │
+│   └── tui/
+│       ├── __init__.py
+│       ├── app.py                 # BeigeBoxApp, SCREEN_REGISTRY
+│       ├── styles/
+│       │   └── main.tcss          # All styling, lavender palette
+│       └── screens/
+│           ├── __init__.py
+│           ├── base.py            # BeigeBoxPane base class
+│           ├── config.py          # Config panel
+│           └── tap.py             # Live wire feed panel
+│
+├── hooks/
+│   ├── filter_synthetic.py        # Filter synthetic/internal requests
+│   └── rag_context.py             # RAG context injection template
+│
+├── scripts/
+│   ├── export_conversations.py    # SQLite → JSON export
+│   ├── search_conversations.py    # CLI semantic search
+│   └── migrate_open_webui.py      # Import Open WebUI history
+│
+├── docker/
+│   ├── Dockerfile
+│   ├── docker-compose.yaml        # Full stack deployment
+│   └── config.docker.yaml
+│
+├── docs/
+│   └── 2600/                      # Design notes, research, theorycrafting
+│
+├── tests/
+│   ├── test_proxy.py
+│   ├── test_storage.py
+│   ├── test_tools.py
+│   ├── test_decision.py
+│   ├── test_hooks.py
+│   ├── test_new_tools.py
+│   └── test_zcommand.py
+│
+└── data/                          # Created at runtime, gitignored
+    ├── conversations.db           # SQLite database
+    ├── chroma/                    # ChromaDB storage
+    └── wire.jsonl                 # Wiretap log
 ```
 
 ---
@@ -275,7 +326,7 @@ beigebox/
 
 ### FastAPI Proxy (`proxy.py`)
 
-Implements OpenAI-compatible endpoints. Handles streaming transparently — buffers the full response for logging/embedding while streaming chunks back to the frontend in real time. Integrates the three-tier hybrid router.
+Implements OpenAI-compatible endpoints. Handles streaming transparently — buffers the full response for logging/embedding while streaming chunks back to the frontend in real time. Integrates the full four-tier hybrid router including session cache, agentic scorer, embedding classifier, and decision LLM. All three decision LLM outputs (`tools`, `needs_search`, `needs_rag`) are fully wired and act on every request.
 
 ### Dual Storage (`storage/`)
 
@@ -289,10 +340,16 @@ Built-in tools: web search (DuckDuckGo), web scraper, calculator, datetime, syst
 
 ### Agents (`agents/`)
 
-The routing brain. Three independent classifiers that work together:
+The routing brain. Four independent classifiers that work together:
+- **Session Cache**: In-memory, TTL-based, stickiness within a conversation
 - **Z-Command Parser**: Regex-based, instant, user-controlled
-- **Embedding Classifier**: Vector similarity, fast, handles the majority of requests
-- **Decision LLM**: Full model inference, slow, handles edge cases
+- **Agentic Scorer**: Keyword-based intent detection, flags tool-use prompts
+- **Embedding Classifier**: 4-way vector similarity (simple/complex/code/creative)
+- **Decision LLM**: Full model inference, handles edge cases, triggers tool augmentation
+
+### Operator Agent (`agents/operator.py`)
+
+LangChain ReAct agent for interactive data and system queries. Accessible via `beigebox operator`. Five tools: web search, web scrape, conversation search, named database queries, allowlisted shell.
 
 ### Hooks (`hooks/`)
 
@@ -300,7 +357,15 @@ Pre/post processing pipeline. Drop Python scripts in the hooks directory to exte
 
 ### Wiretap (`wiretap.py`)
 
-Structured JSONL log of every message that crosses the wire. The `beigebox tap` command renders a color-coded live view — like tcpdump for LLM conversations.
+Structured JSONL log of every message that crosses the wire — including internal routing decisions, tool injections, and session cache hits. The `beigebox tap` command renders a color-coded live view.
+
+### TUI (`tui/`)
+
+Textual-based terminal UI with lavender palette. Launch with `beigebox jack`. Screens: live wire tap feed, config viewer.
+
+### Config Hot-Reload (`config.py`)
+
+`get_runtime_config()` checks the mtime of `runtime_config.yaml` on every call and reloads if changed. Override routing behavior, tool settings, or session TTL without restarting the proxy.
 
 ---
 
@@ -312,6 +377,7 @@ Every command has a phreaker name and standard aliases.
 PHREAKER        STANDARD              WHAT IT DOES
 --------        --------              ----------------------------------
 dial            start, serve, up      Start the BeigeBox proxy server
+jack            tui, ui               Launch the TUI interface
 tap             log, tail, watch      Live wiretap — watch the wire
 ring            status, ping          Ping a running instance
 sweep           search, find          Semantic search over conversations
@@ -319,6 +385,7 @@ dump            export                Export conversations to JSON
 flash           info, config          Show stats and config at a glance
 tone            banner                Print the BeigeBox banner
 build-centroids centroids             Generate embedding classifier centroids
+operator        op                    Launch the Operator agent (REPL or one-shot)
 setup           init                  Interactive first-time setup
 ```
 
@@ -328,8 +395,15 @@ setup           init                  Interactive first-time setup
 # Start the proxy
 beigebox dial
 
+# Launch the TUI
+beigebox jack
+
 # Watch conversations flow in real-time
 beigebox tap
+
+# Launch the Operator agent
+beigebox operator
+beigebox op "what did we discuss about authentication last week?"
 
 # Check if BeigeBox is running
 beigebox ring
@@ -340,7 +414,7 @@ beigebox sweep "docker networking"
 # Export conversations to portable JSON
 beigebox dump --output backup.json --pretty
 
-# Build embedding classifier centroids (one-time)
+# Build embedding classifier centroids (one-time, requires Ollama running)
 beigebox build-centroids
 
 # Show stats
@@ -351,13 +425,13 @@ beigebox flash
 
 ## Configuration
 
-All configuration lives in `config.yaml`. No hardcoded values in the codebase.
+All configuration lives in `config.yaml`. No hardcoded values in the codebase. `runtime_config.yaml` is hot-reloaded on every request — change values there without restarting.
 
 ```yaml
 # --- Backend ---
 backend:
   url: "http://localhost:11434"
-  default_model: "your-model-here"     # Fallback if no routing decision is made
+  default_model: "your-model-here"
   timeout: 120
 
 # --- Middleware Server ---
@@ -375,6 +449,10 @@ storage:
   sqlite_path: "./data/conversations.db"
   chroma_path: "./data/chroma"
   log_conversations: true
+
+# --- Routing ---
+routing:
+  session_ttl_seconds: 1800        # Sticky model per conversation (30 min)
 
 # --- Tools ---
 tools:
@@ -398,8 +476,8 @@ tools:
 
 # --- Decision LLM ---
 decision_llm:
-  enabled: false                        # Enable after pulling a small routing model
-  model: "your-router-model"            # A small, fast model for routing decisions
+  enabled: false
+  model: "your-router-model"
   backend_url: "http://localhost:11434"
   timeout: 5
   max_tokens: 256
@@ -410,12 +488,28 @@ decision_llm:
     code:
       model: "your-code-model"
       description: "Code generation and debugging"
+    creative:
+      model: "your-creative-model"
+      description: "Writing, brainstorming, creative tasks"
     large:
       model: "your-large-model"
       description: "Complex reasoning and analysis"
     fast:
       model: "your-fast-model"
       description: "Quick responses, simple questions"
+
+# --- Operator Agent ---
+operator:
+  model: "your-operator-model"
+  shell_allowlist:
+    - "ls"
+    - "cat"
+    - "grep"
+    - "find"
+    - "df"
+    - "free"
+    - "ps"
+    - "git"
 
 # --- Hooks ---
 hooks:
@@ -443,7 +537,6 @@ Models are referenced by route name throughout the codebase, never by model stri
 
 2. **A frontend** (optional — you can also curl the API directly):
    ```bash
-   # Open WebUI via Docker
    docker run -d -p 3000:8080 \
      --add-host=host.docker.internal:host-gateway \
      -v open-webui:/app/backend/data \
@@ -457,9 +550,15 @@ Models are referenced by route name throughout the codebase, never by model stri
 git clone https://github.com/RALaBarge/beigebox.git
 cd beigebox
 
+pip install -e .
+```
+
+Or with a virtualenv:
+
+```bash
 python -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
 ```
 
 Or use the interactive setup: `./setup.sh`
@@ -474,15 +573,15 @@ Edit `config.yaml` to point at your backend and specify your models. At minimum 
 beigebox dial
 ```
 
-BeigeBox is now listening. Point your frontend at `http://localhost:8000/v1` as an OpenAI-compatible connection (any non-empty string for the API key).
+BeigeBox is now listening on port 8000. Point your frontend at `http://localhost:8000/v1` as an OpenAI-compatible connection (any non-empty string for the API key).
 
 ### Optional: Enable Hybrid Routing
 
 ```bash
-# Build embedding classifier centroids (one-time, requires Ollama + nomic-embed-text)
+# Build embedding classifier centroids (one-time, requires Ollama + nomic-embed-text running)
 beigebox build-centroids
 
-# For Tier 3: pull a small model, then set decision_llm.enabled: true in config.yaml
+# For Tier 4: pull a small model, then set decision_llm.enabled: true in config.yaml
 ```
 
 ---
@@ -538,6 +637,15 @@ z: calc 2**16 + 3**10
 z: help
 ```
 
+### Operator Agent
+
+```bash
+beigebox operator
+# > what models have I been using most this week?
+# > search the web for llama 3.2 benchmarks and summarise
+# > show me all conversations where we discussed authentication
+```
+
 ---
 
 ## Roadmap
@@ -549,23 +657,27 @@ z: help
 - [x] Config-driven architecture (no hardcoded model names)
 - [x] Tool registry with built-in tools (search, scraper, calc, datetime, sysinfo, memory, notifier)
 - [x] Decision LLM for N-way routing and tool detection
-- [x] Embedding classifier (NadirClaw-inspired fast path)
+- [x] Multi-class embedding classifier (simple / complex / code / creative)
 - [x] Z-command user overrides with chaining
-- [x] Three-tier hybrid routing with graceful degradation
+- [x] Four-tier hybrid routing with graceful degradation
+- [x] Session-aware routing (sticky model within a conversation)
+- [x] Agentic intent scorer (pre-filter before embedding classifier)
+- [x] Web search augmentation (wired end-to-end)
+- [x] RAG context injection (wired end-to-end)
+- [x] Decision LLM tool dispatch (all three outputs act)
+- [x] Runtime config hot-reload (no restart needed)
 - [x] Hooks plugin system
 - [x] Token tracking
 - [x] Synthetic request filtering
 - [x] Docker quickstart with health checks
 - [x] Wiretap logging with CLI viewer
 - [x] Conversation export and Open WebUI migration scripts
-- [x] TUI Interface with appealing LAVENDER highlights!
+- [x] TUI interface (lavender palette, live tap + config screens)
+- [x] Operator agent (LangChain ReAct, web + data + shell)
 
 ### Next
-- [ ] Web search augmentation wiring
-- [ ] RAG context injection
-- [ ] Cost tracking for paid API backends
-- [ ] Session-aware routing (sticky model within a conversation)
-- [ ] Multi-class centroids (N-way embedding classification)
+- [ ] Cost tracking for paid API backends (token × price per model → SQLite)
+- [ ] Busybox in Dockerfile for predictable operator shell surface
 
 ### Future
 - [ ] Conversation summarization for context window management
