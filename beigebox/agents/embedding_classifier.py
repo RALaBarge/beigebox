@@ -129,6 +129,41 @@ COMPLEX_PROTOTYPES = [
     "Evaluate migrating from REST to GraphQL with migration plan",
 ]
 
+CODE_PROTOTYPES = [
+    "Write a Python function to parse JSON",
+    "Debug this segfault in my C++ code",
+    "Implement a REST API endpoint in FastAPI",
+    "How do I use async/await in JavaScript?",
+    "Write a SQL query to find duplicate rows",
+    "Refactor this class to use dependency injection",
+    "What's the difference between a list and a tuple?",
+    "Write a bash script to backup a directory",
+    "How do I set up a virtual environment in Python?",
+    "Explain how Git rebase works",
+    "Write unit tests for this function",
+    "How do I handle exceptions in Python?",
+    "What is a Docker volume?",
+    "Write a regex to validate an email address",
+    "How do I connect to a PostgreSQL database in Python?",
+]
+
+CREATIVE_PROTOTYPES = [
+    "Write a short story about a lonely robot",
+    "Compose a poem about autumn rain",
+    "Help me brainstorm names for my startup",
+    "Write a product description for noise-canceling headphones",
+    "Create a metaphor for explaining machine learning",
+    "Write a haiku about debugging code",
+    "Help me write a cover letter",
+    "Suggest some themes for a sci-fi novel",
+    "Write dialogue between two strangers on a train",
+    "Create a tagline for a coffee shop",
+    "Help me write a toast for a wedding",
+    "Describe a sunset in the style of Hemingway",
+    "Write a children's story about a brave mouse",
+    "Create five names for a fantasy kingdom",
+    "Help me write a LinkedIn post about my promotion",
+]
 
 class EmbeddingClassifier:
     """
@@ -158,26 +193,29 @@ class EmbeddingClassifier:
         self._complex_centroid: Optional[np.ndarray] = None
         self._load_centroids()
 
-    def _load_centroids(self):
-        """Load pre-computed centroid vectors."""
-        simple_path = os.path.join(_CENTROID_DIR, "simple_centroid.npy")
-        complex_path = os.path.join(_CENTROID_DIR, "complex_centroid.npy")
+def _load_centroids(self):
+    """Load all available centroid vectors."""
+    # Multi-class centroids
+    self._centroids: dict[str, np.ndarray] = {}
+    for npy_file in Path(_CENTROID_DIR).glob("*_centroid.npy"):
+        route_name = npy_file.stem.replace("_centroid", "")
+        self._centroids[route_name] = np.load(str(npy_file))
+        logger.info("Loaded centroid: %s", route_name)
 
-        if os.path.exists(simple_path) and os.path.exists(complex_path):
-            self._simple_centroid = np.load(simple_path)
-            self._complex_centroid = np.load(complex_path)
-            logger.info("Embedding classifier loaded centroids")
-        else:
-            logger.warning(
-                "Centroid files not found in %s. "
-                "Run 'beigebox build-centroids' to generate them.",
-                _CENTROID_DIR,
-            )
+    # Backward compat aliases
+    self._simple_centroid = self._centroids.get("simple")
+    self._complex_centroid = self._centroids.get("complex")
+
+    if not self._centroids:
+        logger.warning(
+            "No centroid files found in %s. "
+            "Run 'beigebox build-centroids' to generate them.",
+            _CENTROID_DIR,
+        )
 
     @property
     def ready(self) -> bool:
-        """True if centroids are loaded and classifier is operational."""
-        return self._simple_centroid is not None and self._complex_centroid is not None
+        return bool(self._centroids)
 
     def _embed(self, text: str) -> Optional[np.ndarray]:
         """Get embedding vector from Ollama."""
@@ -224,53 +262,48 @@ class EmbeddingClassifier:
             logger.error("Batch embedding failed: %s", e)
             return []
 
-    def _resolve_model(self, tier: str) -> str:
-        """Resolve a tier name to a model string via config routes."""
-        route_name = "fast" if tier == "simple" else "large"
+    def _resolve_model(self, route_name: str) -> str:
+        """Resolve any route name to a model string via config routes."""
         if route_name in self.routes:
             return self.routes[route_name].get("model", self.default_model)
-        # Fallback to default route
-        if "default" in self.routes:
-            return self.routes["default"].get("model", self.default_model)
+        # Fallbacks for binary tiers
+        if route_name == "simple":
+            return self.routes.get("fast", {}).get("model", self.default_model)
+        if route_name == "complex":
+            return self.routes.get("large", {}).get("model", self.default_model)
         return self.default_model
 
     def classify(self, prompt: str) -> EmbeddingDecision:
-        """
-        Classify a prompt as simple or complex.
-
-        Returns an EmbeddingDecision with tier, confidence, and model.
-        Borderline cases (confidence < threshold) are flagged for
-        escalation to the decision LLM.
-        """
         if not self.ready:
             return EmbeddingDecision(tier="default", borderline=True)
 
         start = time.monotonic()
-
         emb = self._embed(prompt)
         if emb is None:
             return EmbeddingDecision(tier="default", borderline=True)
 
-        sim_simple = float(np.dot(emb, self._simple_centroid))
-        sim_complex = float(np.dot(emb, self._complex_centroid))
-        confidence = abs(sim_complex - sim_simple)
+        # Score against all available centroids
+        scores = {
+            name: float(np.dot(emb, centroid))
+            for name, centroid in self._centroids.items()
+        }
+
+        best_route = max(scores, key=scores.get)
+        best_score = scores[best_route]
+        scores_sorted = sorted(scores.values(), reverse=True)
+        confidence = scores_sorted[0] - scores_sorted[1] if len(scores_sorted) > 1 else 1.0
 
         latency_ms = int((time.monotonic() - start) * 1000)
+        borderline = confidence < self.threshold
 
-        if confidence < self.threshold:
-            # Borderline — flag for decision LLM escalation
-            tier = "complex"  # Default to complex when unsure
-            borderline = True
-        else:
-            tier = "complex" if sim_complex > sim_simple else "simple"
-            borderline = False
-
-        model = self._resolve_model(tier)
+        # Map route name to tier for backward compat
+        tier = best_route if best_route in ("simple", "complex") else "complex"
+        model = self._resolve_model(best_route)
 
         logger.debug(
-            "Embedding classify: tier=%s confidence=%.4f borderline=%s "
-            "sim_simple=%.4f sim_complex=%.4f (%dms)",
-            tier, confidence, borderline, sim_simple, sim_complex, latency_ms,
+            "Embedding classify: best=%s confidence=%.4f borderline=%s scores=%s (%dms)",
+            best_route, confidence, borderline, 
+            {k: f"{v:.3f}" for k, v in scores.items()}, latency_ms,
         )
 
         return EmbeddingDecision(
@@ -281,44 +314,42 @@ class EmbeddingClassifier:
             borderline=borderline,
         )
 
-    def build_centroids(self) -> bool:
-        """
-        Generate centroid vectors from seed prototypes.
+def build_centroids(self) -> bool:
+    """
+    Generate centroid vectors from seed prototypes for all routes.
+    Saves one .npy file per route to the centroids directory.
+    """
+    prototype_sets = {
+        "simple":   SIMPLE_PROTOTYPES,
+        "complex":  COMPLEX_PROTOTYPES,
+        "code":     CODE_PROTOTYPES,
+        "creative": CREATIVE_PROTOTYPES,
+    }
 
-        Embeds all simple and complex prototypes, averages each set,
-        normalizes, and saves to .npy files.
+    logger.info("Building centroids for routes: %s", list(prototype_sets.keys()))
 
-        Returns True on success.
-        """
-        logger.info("Building centroids from %d simple + %d complex prototypes...",
-                     len(SIMPLE_PROTOTYPES), len(COMPLEX_PROTOTYPES))
-
-        simple_embs = self._embed_batch(SIMPLE_PROTOTYPES)
-        complex_embs = self._embed_batch(COMPLEX_PROTOTYPES)
-
-        if not simple_embs or not complex_embs:
-            logger.error("Failed to embed prototypes — is Ollama running with %s?",
-                         self.embed_model)
+    self._centroids = {}
+    for route_name, prototypes in prototype_sets.items():
+        embs = self._embed_batch(prototypes)
+        if not embs:
+            logger.error("Failed to embed prototypes for route '%s'", route_name)
             return False
 
-        # Average and normalize
-        simple_centroid = np.mean(simple_embs, axis=0).astype(np.float32)
-        simple_centroid = simple_centroid / np.linalg.norm(simple_centroid)
+        centroid = np.mean(embs, axis=0).astype(np.float32)
+        centroid = centroid / np.linalg.norm(centroid)
 
-        complex_centroid = np.mean(complex_embs, axis=0).astype(np.float32)
-        complex_centroid = complex_centroid / np.linalg.norm(complex_centroid)
-
-        # Save
+        path = os.path.join(_CENTROID_DIR, f"{route_name}_centroid.npy")
         os.makedirs(_CENTROID_DIR, exist_ok=True)
-        np.save(os.path.join(_CENTROID_DIR, "simple_centroid.npy"), simple_centroid)
-        np.save(os.path.join(_CENTROID_DIR, "complex_centroid.npy"), complex_centroid)
+        np.save(path, centroid)
+        logger.info("Centroid saved: %s (dim=%d)", path, len(centroid))
 
-        self._simple_centroid = simple_centroid
-        self._complex_centroid = complex_centroid
+    # Keep backward-compat binary centroids
+    self._simple_centroid = self._centroids.get("simple") or \
+        np.load(os.path.join(_CENTROID_DIR, "simple_centroid.npy"))
+    self._complex_centroid = self._centroids.get("complex") or \
+        np.load(os.path.join(_CENTROID_DIR, "complex_centroid.npy"))
 
-        logger.info("Centroids saved to %s (dim=%d)", _CENTROID_DIR, len(simple_centroid))
-        return True
-
+    return True
 
 # ---------------------------------------------------------------------------
 # Singleton

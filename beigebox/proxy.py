@@ -2,22 +2,20 @@
 Proxy: the core of BeigeBox.
 Intercepts OpenAI-compatible requests, logs both sides, forwards to backend.
 Handles streaming (SSE) transparently.
-
 Now with:
   - Decision LLM routing (pick the right model per request)
   - Pre/post hooks (extensible processing pipeline)
   - Synthetic request filtering (skip Open WebUI's internal requests)
   - Token tracking (approximate token counts for stats)
+  - Session-aware routing (sticky model within a conversation)
 """
-
 import json
 import logging
 import asyncio
+import time
 from datetime import datetime, timezone
 from uuid import uuid4
-
 import httpx
-
 from beigebox.config import get_config
 from beigebox.storage.models import Message
 from beigebox.storage.sqlite_store import SQLiteStore
@@ -28,18 +26,12 @@ from beigebox.agents.embedding_classifier import EmbeddingClassifier, EmbeddingD
 from beigebox.hooks import HookManager
 from beigebox.wiretap import WireLog
 from beigebox.agents.agentic_scorer import score_agentic_intent
-
 logger = logging.getLogger(__name__)
-
-
 def _estimate_tokens(text: str) -> int:
     """Rough token estimate: ~4 chars per token for English text."""
     return max(1, len(text) // 4)
-
-
 class Proxy:
     """Transparent proxy between frontend and Ollama backend."""
-
     def __init__(
         self,
         sqlite: SQLiteStore,
@@ -60,14 +52,39 @@ class Proxy:
         self.timeout = self.cfg["backend"].get("timeout", 120)
         self.default_model = self.cfg["backend"].get("default_model", "")
         self.log_enabled = self.cfg["storage"].get("log_conversations", True)
-
         # Route config for z-command model resolution
         d_cfg = self.cfg.get("decision_llm", {})
         self.routes = d_cfg.get("routes", {})
-
         # Wire log — structured tap of everything on the line
         wire_path = self.cfg.get("wiretap", {}).get("path", "./data/wire.jsonl")
         self.wire = WireLog(wire_path)
+        # Session routing cache — sticky model within a conversation
+        # {conversation_id: (model_string, timestamp)}
+        self._session_cache: dict[str, tuple[str, float]] = {}
+        self._session_ttl: int = self.cfg.get("routing", {}).get("session_ttl_seconds", 1800)
+
+    # ------------------------------------------------------------------
+    # Session cache helpers
+    # ------------------------------------------------------------------
+
+    def _get_session_model(self, conversation_id: str) -> str | None:
+        """Return cached model for this conversation if still fresh."""
+        if not conversation_id or conversation_id not in self._session_cache:
+            return None
+        model, ts = self._session_cache[conversation_id]
+        if time.time() - ts > self._session_ttl:
+            del self._session_cache[conversation_id]
+            return None
+        return model
+
+    def _set_session_model(self, conversation_id: str, model: str):
+        """Cache the routing decision for this conversation."""
+        if conversation_id and model:
+            self._session_cache[conversation_id] = (model, time.time())
+
+    # ------------------------------------------------------------------
+    # Request helpers
+    # ------------------------------------------------------------------
 
     def _extract_conversation_id(self, body: dict) -> str:
         """
@@ -102,16 +119,13 @@ class Proxy:
         """Store the user messages from the request."""
         if not self.log_enabled:
             return
-
         for msg in messages:
             role = msg.get("role", "")
             content = msg.get("content", "")
             if not content or role == "system":
                 continue
-
             content_str = content if isinstance(content, str) else json.dumps(content)
             tokens = _estimate_tokens(content_str)
-
             message = Message(
                 conversation_id=conversation_id,
                 role=role,
@@ -120,7 +134,6 @@ class Proxy:
                 token_count=tokens,
             )
             self.sqlite.store_message(message)
-
             # Wire tap
             self.wire.log(
                 direction="inbound",
@@ -130,7 +143,6 @@ class Proxy:
                 conversation_id=conversation_id,
                 token_count=tokens,
             )
-
             # Embed in background
             self.vector.store_message(
                 message_id=message.id,
@@ -145,9 +157,7 @@ class Proxy:
         """Store the assistant response."""
         if not self.log_enabled or not content.strip():
             return
-
         tokens = _estimate_tokens(content)
-
         message = Message(
             conversation_id=conversation_id,
             role="assistant",
@@ -156,7 +166,6 @@ class Proxy:
             token_count=tokens,
         )
         self.sqlite.store_message(message)
-
         # Wire tap
         self.wire.log(
             direction="outbound",
@@ -166,7 +175,6 @@ class Proxy:
             conversation_id=conversation_id,
             token_count=tokens,
         )
-
         self.vector.store_message(
             message_id=message.id,
             conversation_id=conversation_id,
@@ -197,13 +205,10 @@ class Proxy:
         """Run the decision LLM if enabled."""
         if not self.decision_agent or not self.decision_agent.enabled:
             return None
-
         user_msg = self._get_latest_user_message(body)
         if not user_msg:
             return None
-
         decision = await self.decision_agent.decide(user_msg)
-
         # Log the decision to wiretap
         if not decision.fallback:
             self.wire.log(
@@ -214,7 +219,6 @@ class Proxy:
                 model=self.decision_agent.model,
                 conversation_id="",
             )
-
         return decision
 
     def _resolve_route_to_model(self, route_name: str) -> str:
@@ -230,10 +234,8 @@ class Proxy:
         """
         user_msg = self._get_latest_user_message(body)
         zcmd = parse_z_command(user_msg)
-
         if not zcmd.active:
             return zcmd, body
-
         # Log the z-command to wiretap
         self.wire.log(
             direction="internal",
@@ -243,7 +245,6 @@ class Proxy:
             model="z-command",
             conversation_id="",
         )
-
         # Strip the z: prefix from the actual message sent to the LLM
         if zcmd.message and not zcmd.is_help:
             messages = body.get("messages", [])
@@ -251,48 +252,40 @@ class Proxy:
                 if msg.get("role") == "user":
                     msg["content"] = zcmd.message
                     break
-
         return zcmd, body
 
     def _apply_z_command(self, body: dict, zcmd: ZCommand) -> dict:
         """Apply z-command routing overrides to the request body."""
         if not zcmd.active:
             return body
-
         # Help — return immediately (handled in forward methods)
         if zcmd.is_help:
             return body
-
         # Specific model override (e.g. z: llama3:8b)
         if zcmd.model:
             body["model"] = zcmd.model
             return body
-
         # Route alias override (e.g. z: complex → large route)
         if zcmd.route:
             body["model"] = self._resolve_route_to_model(zcmd.route)
-
         return body
 
     def _run_forced_tools(self, zcmd: ZCommand, user_msg: str) -> str:
         """Run tools forced by z-command and return results as context."""
         if not zcmd.tools or not self.tool_registry:
             return ""
-
         results = []
         for tool_name in zcmd.tools:
             tool_input = zcmd.tool_input if zcmd.tool_input else user_msg
             result = self.tool_registry.run_tool(tool_name, tool_input)
             if result:
                 results.append(f"[{tool_name}]: {result}")
-
         return "\n".join(results)
 
     def _inject_tool_context(self, body: dict, tool_results: str) -> dict:
         """Inject tool results as a system message into the request."""
         if not tool_results:
             return body
-
         messages = body.get("messages", [])
         # Insert tool results as a system message before the last user message
         tool_msg = {
@@ -305,19 +298,37 @@ class Proxy:
         body["messages"] = messages
         return body
 
-    async def _hybrid_route(self, body: dict, zcmd: ZCommand) -> tuple[dict, Decision | None]:
+    # ------------------------------------------------------------------
+    # Routing pipeline
+    # ------------------------------------------------------------------
+
+    async def _hybrid_route(self, body: dict, zcmd: ZCommand, conversation_id: str) -> tuple[dict, Decision | None]:
         """
         Hybrid routing pipeline:
-          1. z-command (user override) — highest priority, skips everything'
-	  2. Try embedding classifier first (fast path)
+          0. Session cache — if we've routed this conversation before, stay sticky
+          1. z-command (user override) — highest priority, skips everything
+          2. Agentic pre-filter — near-zero cost keyword scorer
           3. Embedding classifier (fast path) — ~50ms, handles clear cases
           4. Decision LLM (slow path) — only for borderline cases
-
         Returns (modified body, decision or None).
         """
+        # 0. Session cache — sticky model within a conversation
+        cached_model = self._get_session_model(conversation_id)
+        if cached_model:
+            body["model"] = cached_model
+            self.wire.log(
+                direction="internal",
+                role="decision",
+                content=f"session cache hit: model={cached_model}",
+                model="session-cache",
+                conversation_id=conversation_id,
+            )
+            return body, None
+
         # 1. Z-command takes absolute priority
         if zcmd.active and (zcmd.route or zcmd.model):
             body = self._apply_z_command(body, zcmd)
+            # Z-command overrides are not cached — user is being explicit
             return body, None
 
         # 1.5. Agentic pre-filter — near-zero cost, runs before embedding classifier
@@ -325,7 +336,7 @@ class Proxy:
         #      the embedding classifier / decision LLM decide the route, but the
         #      score is available for future forced-tool logic.
         user_msg_for_scoring = self._get_latest_user_message(body)
-        if user_msg_for_scoring and not (zcmd.active and (zcmd.route or zcmd.model)):
+        if user_msg_for_scoring:
             agentic = score_agentic_intent(user_msg_for_scoring)
             if agentic.is_agentic:
                 self.wire.log(
@@ -341,7 +352,6 @@ class Proxy:
             user_msg = self._get_latest_user_message(body)
             if user_msg:
                 emb_result = self.embedding_classifier.classify(user_msg)
-
                 self.wire.log(
                     direction="internal",
                     role="decision",
@@ -351,13 +361,12 @@ class Proxy:
                     model="embedding-classifier",
                     conversation_id="",
                 )
-
                 if not emb_result.borderline:
                     # Clear classification — use it, skip decision LLM
                     if emb_result.model:
                         body["model"] = emb_result.model
+                    self._set_session_model(conversation_id, body.get("model", self.default_model))
                     return body, None
-
                 # Borderline — fall through to decision LLM
                 logger.debug(
                     "Embedding borderline (confidence=%.4f), escalating to decision LLM",
@@ -368,6 +377,11 @@ class Proxy:
         decision = await self._run_decision(body)
         if decision and not decision.fallback:
             body = await self._apply_decision(body, decision)
+
+        # Cache whatever model we landed on
+        final_model = body.get("model", self.default_model)
+        self._set_session_model(conversation_id, final_model)
+
         return body, decision
 
     async def _apply_decision(self, body: dict, decision: Decision) -> dict:
@@ -379,7 +393,7 @@ class Proxy:
         if decision.model:
             body["model"] = decision.model
 
-	# Run requested tools and inject results
+        # Run requested tools and inject results
         if decision.tools and self.tool_registry:
             tool_results = []
             for tool_name in decision.tools:
@@ -389,7 +403,7 @@ class Proxy:
             if tool_results:
                 body = self._inject_tool_context(body, "\n".join(tool_results))
 
-	# Web search augmentation
+        # Web search augmentation
         if decision.needs_search and self.tool_registry:
             user_msg = self._get_latest_user_message(body)
             if user_msg:
@@ -403,7 +417,7 @@ class Proxy:
                         model="",
                         conversation_id="",
                     )
-        
+
         # RAG context injection
         if decision.needs_rag and self.tool_registry:
             user_msg = self._get_latest_user_message(body)
@@ -420,6 +434,10 @@ class Proxy:
                     )
 
         return body
+
+    # ------------------------------------------------------------------
+    # Public forwarding methods
+    # ------------------------------------------------------------------
 
     async def forward_chat_completion(self, body: dict) -> dict:
         """Forward a non-streaming chat completion request."""
@@ -450,8 +468,8 @@ class Proxy:
             if tool_results:
                 body = self._inject_tool_context(body, tool_results)
 
-        # Hybrid routing: z-command → embedding classifier → decision LLM
-        body, decision = await self._hybrid_route(body, zcmd)
+        # Hybrid routing: session cache → z-command → embedding classifier → decision LLM
+        body, decision = await self._hybrid_route(body, zcmd, conversation_id)
         model = body.get("model", model)  # Update model after routing
 
         # Log incoming user messages (skip synthetic)
@@ -517,7 +535,7 @@ class Proxy:
                 body = self._inject_tool_context(body, tool_results)
 
         # Hybrid routing
-        body, decision = await self._hybrid_route(body, zcmd)
+        body, decision = await self._hybrid_route(body, zcmd, conversation_id)
         model = body.get("model", model)
 
         # Log incoming user messages (skip synthetic)
@@ -526,7 +544,6 @@ class Proxy:
 
         # Buffer for the full response
         full_response = []
-
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             async with client.stream(
                 "POST",
@@ -537,10 +554,8 @@ class Proxy:
                 async for line in resp.aiter_lines():
                     if not line:
                         continue
-
                     # Yield raw SSE line to client
                     yield line + "\n"
-
                     # Parse to buffer content
                     if line.startswith("data: "):
                         data_str = line[6:]

@@ -98,6 +98,8 @@ logging:
 wiretap:
   path: "./data/wire.jsonl"            # JSONL log of every message on the wire
 
+routing:
+  session_ttl_seconds: 1800
 
 ###---- Move this to where it needs to be when finished:
 
