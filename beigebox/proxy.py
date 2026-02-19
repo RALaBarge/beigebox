@@ -403,6 +403,21 @@ class Proxy:
                         model="",
                         conversation_id="",
                     )
+        
+        # RAG context injection
+        if decision.needs_rag and self.tool_registry:
+            user_msg = self._get_latest_user_message(body)
+            if user_msg:
+                rag_results = self.tool_registry.run_tool("memory", user_msg)
+                if rag_results:
+                    body = self._inject_tool_context(body, f"[memory]: {rag_results}")
+                    self.wire.log(
+                        direction="internal",
+                        role="tool",
+                        content=f"memory/RAG injected ({len(rag_results)} chars)",
+                        model="",
+                        conversation_id="",
+                    )
 
         return body
 
