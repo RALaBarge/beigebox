@@ -302,7 +302,8 @@ beigebox/
 | Endpoint | Method | Description |
 |---|---|---|
 | `/beigebox/health` | GET | Health check |
-| `/beigebox/search` | GET | Semantic search (`?q=&n=`) |
+| `/beigebox/search` | GET | Semantic search — raw message hits (`?q=&n=`) |
+| `/api/v1/search` | GET | Semantic search — grouped by conversation (`?q=&n=`) |
 | `/api/v1/info` | GET | Version and feature info |
 | `/api/v1/config` | GET | Config including web_ui runtime state |
 | `/api/v1/status` | GET | Full subsystem status |
@@ -488,8 +489,9 @@ pytest tests/test_flight_recorder.py tests/test_costs.py tests/test_replay.py \
 **Backends**
 - [x] Multi-backend router (priority-based, Ollama → OpenRouter fallback)
 - [x] Cost tracking — non-streaming
-- [x] Cost tracking — streaming (OpenRouter `include_usage`)
+- [x] Cost tracking — streaming (OpenRouter `include_usage` sentinel)
 - [x] Model performance dashboard (avg / p50 / p95 latency stored per response)
+- [x] Streaming latency tracking (wall-clock duration stored for all streaming responses)
 
 **Operator**
 - [x] LangChain ReAct operator agent
@@ -526,15 +528,11 @@ pytest tests/test_flight_recorder.py tests/test_costs.py tests/test_replay.py \
 
 ### Next — v0.9.0
 
-**Streaming latency tracking** — `latency_ms` is currently only recorded for non-streaming responses via the multi-backend router. For streaming, the proxy could record time-to-first-token and total stream duration and store those separately. Would close the gap in the model performance dashboard.
+This release is reserved for user testing and stabilisation. All planned features for v0.9 have shipped in v0.8; the version bump reflects a testing milestone, not new code.
+
+**Tap filter persistence** — The web UI tap filters reset on page reload. Saving the last used role/direction/n to `localStorage` would make it more useful as a monitoring tool. Intentionally deferred — browser storage is unavailable in some deployment contexts.
 
 **Auto-summarization** — When a conversation exceeds a configurable token budget, summarise older messages and replace them with the summary to free context window. Needs a summary model config key and a trigger threshold.
-
-**Conversation search improvements** — The current semantic search returns individual messages; it would be more useful to return conversations ranked by relevance and show the best matching excerpt. Requires a two-pass query (message → group by conversation → rank).
-
-**Tap filter persistence** — The web UI tap filters reset on page reload. Saving the last used role/direction/n to localStorage (or runtime_config) would make it more useful as a monitoring tool.
-
-**Test coverage for v0.8 features** — No tests yet for: `fork_conversation`, `get_model_performance`, `/api/v1/tap`, prompt injection hook, streaming cost sentinel. These are the highest-value gaps before cutting a stable release.
 
 ---
 

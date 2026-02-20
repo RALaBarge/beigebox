@@ -10,6 +10,8 @@ Now with:
   - Session-aware routing (sticky model within a conversation)
   - Multi-backend routing with fallback (v0.6)
   - Cost tracking for API backends (v0.6)
+  - Streaming latency tracking — wall-clock duration stored as latency_ms (v0.8)
+  - Streaming cost capture via OpenRouter sentinel (v0.8)
 """
 import json
 import logging
@@ -28,6 +30,7 @@ from beigebox.agents.embedding_classifier import EmbeddingClassifier, EmbeddingD
 from beigebox.hooks import HookManager
 from beigebox.wiretap import WireLog
 from beigebox.agents.agentic_scorer import score_agentic_intent
+from beigebox.backends.openrouter import _COST_SENTINEL_PREFIX
 logger = logging.getLogger(__name__)
 def _estimate_tokens(text: str) -> int:
     """Rough token estimate: ~4 chars per token for English text."""
@@ -693,11 +696,21 @@ class Proxy:
 
         # Buffer for the full response
         full_response = []
+        stream_cost_usd: float | None = None
+        stream_t0 = time.monotonic()
 
         if self.backend_router:
             # Stream via multi-backend router
             async for line in self.backend_router.forward_stream(body):
                 if not line:
+                    continue
+                # Intercept cost sentinel — never forward to client
+                if line.startswith(_COST_SENTINEL_PREFIX):
+                    try:
+                        stream_cost_usd = float(line[len(_COST_SENTINEL_PREFIX):])
+                        logger.debug("Stream cost captured: $%.6f", stream_cost_usd)
+                    except (ValueError, TypeError):
+                        pass
                     continue
                 yield line + "\n"
                 # Parse to buffer content
@@ -747,13 +760,28 @@ class Proxy:
                             except (json.JSONDecodeError, IndexError):
                                 pass
 
+        # Wall-clock stream duration — stored as latency_ms for streaming responses
+        stream_latency_ms = round((time.monotonic() - stream_t0) * 1000, 1)
+
         # Log the complete response after streaming finishes (skip synthetic)
-        # Note: streaming doesn't capture per-response cost from the router;
-        # cost tracking for streams will be added when OpenRouter supports it
         if not is_synthetic:
             complete_text = "".join(full_response)
             if complete_text:
-                self._log_response(conversation_id, complete_text, model)
+                self._log_response(
+                    conversation_id,
+                    complete_text,
+                    model,
+                    cost_usd=stream_cost_usd,
+                    latency_ms=stream_latency_ms,
+                )
+                if stream_cost_usd:
+                    self.wire.log(
+                        direction="internal",
+                        role="system",
+                        content=f"stream cost_usd={stream_cost_usd:.6f} latency_ms={stream_latency_ms} model={model}",
+                        model="cost-tracker",
+                        conversation_id=conversation_id,
+                    )
 
     async def list_models(self) -> dict:
         """Forward /v1/models request to backend(s), optionally rewriting model names."""

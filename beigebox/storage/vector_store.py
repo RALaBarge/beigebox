@@ -138,6 +138,83 @@ class VectorStore:
             })
         return hits
 
+    def search_grouped(
+        self,
+        query: str,
+        n_conversations: int = 5,
+        candidates: int = 40,
+        role_filter: str | None = None,
+    ) -> list[dict]:
+        """
+        Semantic search grouped by conversation.
+
+        Two-pass approach:
+          1. Retrieve `candidates` message-level hits from ChromaDB.
+          2. Group by conversation_id, keep the best (lowest distance) hit per
+             conversation, sort by that score, return top `n_conversations`.
+
+        Returns a list of dicts:
+            {
+                "conversation_id": str,
+                "score": float,          # 0–1, higher = more relevant
+                "excerpt": str,          # best matching message content (truncated)
+                "role": str,             # role of the best matching message
+                "model": str,
+                "timestamp": str,
+                "match_count": int,      # how many messages in this conv matched
+            }
+        """
+        embedding = self._get_embedding(query)
+
+        where_filter = None
+        if role_filter:
+            where_filter = {"role": role_filter}
+
+        # Fetch more candidates than needed so grouping has enough to work with
+        fetch_n = min(max(candidates, n_conversations * 8), 200)
+
+        results = self.collection.query(
+            query_embeddings=[embedding],
+            n_results=fetch_n,
+            where=where_filter,
+            include=["documents", "metadatas", "distances"],
+        )
+
+        # Group by conversation — keep best score and count matches
+        groups: dict[str, dict] = {}
+        for i in range(len(results["ids"][0])):
+            meta = results["metadatas"][0][i]
+            conv_id = meta.get("conversation_id", "")
+            if not conv_id:
+                continue
+            distance = results["distances"][0][i]
+            score = max(0.0, round(1.0 - distance, 4))
+            content = results["documents"][0][i] or ""
+
+            if conv_id not in groups:
+                groups[conv_id] = {
+                    "conversation_id": conv_id,
+                    "score": score,
+                    "excerpt": content[:300],
+                    "role": meta.get("role", ""),
+                    "model": meta.get("model", ""),
+                    "timestamp": meta.get("timestamp", ""),
+                    "match_count": 1,
+                }
+            else:
+                groups[conv_id]["match_count"] += 1
+                # Update if this message is a better match
+                if score > groups[conv_id]["score"]:
+                    groups[conv_id]["score"] = score
+                    groups[conv_id]["excerpt"] = content[:300]
+                    groups[conv_id]["role"] = meta.get("role", "")
+                    groups[conv_id]["model"] = meta.get("model", "")
+                    groups[conv_id]["timestamp"] = meta.get("timestamp", "")
+
+        # Sort by best score descending, return top n
+        ranked = sorted(groups.values(), key=lambda x: x["score"], reverse=True)
+        return ranked[:n_conversations]
+
     def get_stats(self) -> dict:
         """Return collection stats."""
         return {

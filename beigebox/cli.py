@@ -22,7 +22,7 @@ Every command has a phreaker name and a standard alias:
 import argparse
 import sys
 
-__version__ = "0.7.0"
+__version__ = "0.9.0"
 
 BANNER = r"""
     ╔══════════════════════════════════════════════════╗
@@ -363,6 +363,39 @@ def cmd_flash(args):
             print("  └─ No API costs recorded (local models are $0.00)")
     except Exception:
         pass  # No DB yet, or cost_tracking not enabled in config
+
+    # Model performance — latency percentiles per model (v0.8+)
+    try:
+        perf_store = SQLiteStore(cfg["storage"]["sqlite_path"])
+        perf = perf_store.get_model_performance(days=days)
+        by_model_perf = perf.get("by_model", {})
+        if by_model_perf:
+            print()
+            print(f"  Model Performance (last {perf['days_queried']} days)")
+            # Header
+            print(f"  {'Model':<28} {'Reqs':>5}  {'Avg':>7}  {'p50':>7}  {'p95':>7}  {'$/msg':>8}")
+            print("  " + "─" * 68)
+            items = sorted(by_model_perf.items(), key=lambda x: x[1]["requests"], reverse=True)
+            for model, s in items:
+                avg_cost = (s["total_cost_usd"] / s["requests"]) if s["requests"] else 0
+                name = model[:26] + ".." if len(model) > 28 else model
+                # Colour-code p95: green <1s, yellow <3s, red ≥3s
+                p95 = s["p95_latency_ms"]
+                if p95 >= 3000:
+                    p95_col = "\033[91m"
+                elif p95 >= 1000:
+                    p95_col = "\033[93m"
+                else:
+                    p95_col = "\033[92m"
+                reset = "\033[0m"
+                p95_str = f"{p95_col}{p95:>5.0f}ms{reset}"
+                print(
+                    f"  {name:<28} {s['requests']:>5}  "
+                    f"{s['avg_latency_ms']:>5.0f}ms  {s['p50_latency_ms']:>5.0f}ms  "
+                    f"{p95_str}  ${avg_cost:>7.5f}"
+                )
+    except Exception:
+        pass  # No DB yet or no latency data
 
 
 def cmd_operator(args):

@@ -1309,9 +1309,9 @@ async function searchConvos() {
   el.innerHTML = '<div class="empty"><span class="spinner"></span> Searching…</div>';
   status.textContent = '';
   try {
-    const d = await api(`/beigebox/search?q=${encodeURIComponent(q)}&n=20`);
+    const d = await api(`/api/v1/search?q=${encodeURIComponent(q)}&n=10`);
     const results = d.results || [];
-    status.textContent = `${results.length} results`;
+    status.textContent = `${results.length} conversation${results.length !== 1 ? 's' : ''}`;
     if (!results.length) {
       el.innerHTML = '<div class="empty">No results found.</div>';
       return;
@@ -1319,10 +1319,14 @@ async function searchConvos() {
     let html = `<div class="section-header">Results for "${esc(q)}"</div>`;
     results.forEach(r => {
       const score = r.score != null ? (r.score * 100).toFixed(0) + '%' : '';
+      const matchBadge = r.match_count > 1
+        ? `<span class="badge badge-lav">${r.match_count} matches</span> `
+        : '';
+      const roleColor = r.role === 'user' ? 'var(--cyan)' : 'var(--yellow)';
       html += `<div class="conv-row" onclick="loadReplay('${esc(r.conversation_id || '')}')">
         <span class="conv-id">${esc((r.conversation_id || '').slice(0,16))}</span>
-        <span class="conv-preview">${esc(r.content || '')}</span>
-        <span class="conv-meta">${esc(r.role || '')} · ${fmtTs(r.timestamp)}</span>
+        <span class="conv-preview">${matchBadge}<span style="color:${roleColor};font-size:10px">${esc(r.role||'')}</span> ${esc((r.excerpt || '').slice(0,120))}</span>
+        <span class="conv-meta">${fmtTs(r.timestamp)} · ${esc(r.model||'')}</span>
         <span class="conv-score">${esc(score)}</span>
       </div>`;
     });

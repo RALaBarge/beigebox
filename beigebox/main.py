@@ -182,7 +182,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="BeigeBox",
     description="Tap the line. Control the carrier.",
-    version="0.8.0",
+    version="0.9.0",
     lifespan=lifespan,
 )
 
@@ -248,11 +248,23 @@ async def stats():
 
 @app.get("/beigebox/search")
 async def search_conversations(q: str, n: int = 5, role: str | None = None):
-    """Semantic search over stored conversations."""
+    """Semantic search over stored conversations (raw message hits)."""
     if not vector_store:
         return JSONResponse({"error": "Vector store not initialized"}, status_code=503)
     results = vector_store.search(q, n_results=n, role_filter=role)
     return JSONResponse({"query": q, "results": results})
+
+
+@app.get("/api/v1/search")
+async def api_search_conversations(q: str, n: int = 5, role: str | None = None):
+    """
+    Semantic search grouped by conversation.
+    Returns conversations ranked by best message match, with excerpt.
+    """
+    if not vector_store:
+        return JSONResponse({"error": "Vector store not initialized"}, status_code=503)
+    results = vector_store.search_grouped(q, n_conversations=n, role_filter=role)
+    return JSONResponse({"query": q, "results": results, "count": len(results)})
 
 
 @app.get("/beigebox/health")
@@ -260,7 +272,7 @@ async def health():
     """Health check."""
     return JSONResponse({
         "status": "ok",
-        "version": "0.8.0",
+        "version": "0.9.0",
         "decision_llm": decision_agent.enabled if decision_agent else False,
     })
 
@@ -274,7 +286,7 @@ async def api_info():
     """System info — what features are available."""
     cfg = get_config()
     return JSONResponse({
-        "version": "0.8.0",
+        "version": "0.9.0",
         "name": "BeigeBox",
         "description": "Transparent Pythonic LLM Proxy",
         "server": {
