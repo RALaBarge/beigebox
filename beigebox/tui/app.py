@@ -42,11 +42,18 @@ class BeigeBoxApp(App):
     ]
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with TabbedContent(initial="config"):
+        with TabbedContent():
             for _key, label, tab_id, screen_cls in SCREEN_REGISTRY:
                 with TabPane(label, id=tab_id):
                     yield screen_cls()
         yield Footer()
+
+    def on_mount(self) -> None:
+        """Set initial active tab after compose so IDs are fully registered."""
+        try:
+            self.query_one(TabbedContent).active = "config"
+        except Exception:
+            pass
     def action_switch_tab(self, tab_id: str) -> None:
         self.query_one(TabbedContent).active = tab_id
     def action_refresh_all(self) -> None:

@@ -3,7 +3,7 @@
 
 # --- Backend (where requests get forwarded) ---
 backend:
-  url: "http://localhost:11434"       # Ollama base URL
+  url: "http://192.168.1.214:11434"       # Ollama base URL
   default_model: "gpt-oss-20b-GGUF:Q4_K_M"                   # Fallback model if none specified in request (set to a model you have pulled)
   timeout: 120                         # Seconds before we give up on a backend response
 

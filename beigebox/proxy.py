@@ -81,6 +81,18 @@ class Proxy:
         """Cache the routing decision for this conversation."""
         if conversation_id and model:
             self._session_cache[conversation_id] = (model, time.time())
+            # Proactive eviction: sweep stale entries every ~100 writes
+            if len(self._session_cache) % 100 == 0:
+                self._evict_session_cache()
+
+    def _evict_session_cache(self):
+        """Remove all expired entries from the session cache."""
+        cutoff = time.time() - self._session_ttl
+        stale = [k for k, (_, ts) in self._session_cache.items() if ts < cutoff]
+        for k in stale:
+            del self._session_cache[k]
+        if stale:
+            logger.debug("Session cache evicted %d stale entries", len(stale))
 
     # ------------------------------------------------------------------
     # Request helpers
@@ -143,15 +155,15 @@ class Proxy:
                 conversation_id=conversation_id,
                 token_count=tokens,
             )
-            # Embed in background
-            self.vector.store_message(
+            # Embed async in background — avoids blocking the event loop
+            asyncio.create_task(self.vector.store_message_async(
                 message_id=message.id,
                 conversation_id=conversation_id,
                 role=role,
                 content=message.content,
                 model=model,
                 timestamp=message.timestamp,
-            )
+            ))
 
     def _log_response(self, conversation_id: str, content: str, model: str):
         """Store the assistant response."""
@@ -175,14 +187,15 @@ class Proxy:
             conversation_id=conversation_id,
             token_count=tokens,
         )
-        self.vector.store_message(
+        # Embed async in background — avoids blocking the event loop
+        asyncio.create_task(self.vector.store_message_async(
             message_id=message.id,
             conversation_id=conversation_id,
             role="assistant",
             content=content,
             model=model,
             timestamp=message.timestamp,
-        )
+        ))
 
     def _build_hook_context(
         self,
@@ -580,8 +593,41 @@ class Proxy:
                 self._log_response(conversation_id, complete_text, model)
 
     async def list_models(self) -> dict:
-        """Forward /v1/models request to backend."""
+        """Forward /v1/models request to backend, optionally rewriting model names."""
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(f"{self.backend_url}/v1/models")
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+        
+        # Apply model name transformation if configured
+        data = self._transform_model_names(data)
+        return data
+    
+    def _transform_model_names(self, data: dict) -> dict:
+        """
+        Rewrite model names in the response based on config.
+        Supports two modes:
+          1. advertise: prepend "beigebox:" to all model names
+          2. hidden: don't advertise beigebox's presence
+        """
+        cfg = self.cfg.get("model_advertising", {})
+        mode = cfg.get("mode", "hidden")  # "advertise" or "hidden"
+        prefix = cfg.get("prefix", "beigebox:")
+        
+        if mode == "hidden":
+            # Don't modify model names — just pass through
+            return data
+        
+        # Mode: advertise — prepend prefix to all models
+        if mode == "advertise" and "data" in data:
+            try:
+                for model in data.get("data", []):
+                    if "name" in model:
+                        model["name"] = f"{prefix}{model['name']}"
+                    if "model" in model:
+                        model["model"] = f"{prefix}{model['model']}"
+            except (TypeError, KeyError):
+                # If structure doesn't match, return unchanged
+                logger.warning("Could not rewrite model names — unexpected response structure")
+        
+        return data
