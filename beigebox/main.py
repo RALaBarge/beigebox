@@ -11,10 +11,12 @@ Now with:
 
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from beigebox.config import get_config
 from beigebox.proxy import Proxy
@@ -234,6 +236,179 @@ async def health():
         "version": "0.2.0",
         "decision_llm": decision_agent.enabled if decision_agent else False,
     })
+
+
+# ---------------------------------------------------------------------------
+# API v1 endpoints (for web UI and other clients)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v1/info")
+async def api_info():
+    """System info — what features are available."""
+    cfg = get_config()
+    return JSONResponse({
+        "version": "0.2.0",
+        "name": "BeigeBox",
+        "description": "Transparent Pythonic LLM Proxy",
+        "server": {
+            "host": cfg["server"].get("host", "0.0.0.0"),
+            "port": cfg["server"].get("port", 8000),
+        },
+        "backend": {
+            "url": cfg["backend"].get("url", ""),
+            "default_model": cfg["backend"].get("default_model", ""),
+        },
+        "features": {
+            "routing": True,
+            "decision_llm": decision_agent.enabled if decision_agent else False,
+            "embedding_classifier": embedding_classifier.ready if embedding_classifier else False,
+            "storage": sqlite_store is not None and vector_store is not None,
+            "tools": tool_registry is not None and cfg.get("tools", {}).get("enabled", False),
+            "hooks": hook_manager is not None,
+            "operator": True,  # Always available if Operator can init
+        },
+        "model_advertising": cfg.get("model_advertising", {}).get("mode", "hidden"),
+    })
+
+
+@app.get("/api/v1/config")
+async def api_config():
+    """Current configuration (safe to expose)."""
+    cfg = get_config()
+    return JSONResponse({
+        "backend": cfg.get("backend", {}),
+        "server": cfg.get("server", {}),
+        "embedding": {"model": cfg.get("embedding", {}).get("model", "")},
+        "storage": {
+            "log_conversations": cfg.get("storage", {}).get("log_conversations", True),
+        },
+        "tools": {
+            "enabled": cfg.get("tools", {}).get("enabled", False),
+        },
+        "decision_llm": {
+            "enabled": decision_agent.enabled if decision_agent else False,
+            "model": decision_agent.model if decision_agent else "",
+        },
+        "model_advertising": cfg.get("model_advertising", {}),
+    })
+
+
+@app.get("/api/v1/tools")
+async def api_tools():
+    """List available tools."""
+    if not tool_registry:
+        return JSONResponse({"tools": []})
+    tools = tool_registry.list_tools()
+    return JSONResponse({
+        "tools": tools,
+        "enabled": get_config().get("tools", {}).get("enabled", False),
+    })
+
+
+@app.get("/api/v1/status")
+async def api_status():
+    """Detailed status of all subsystems."""
+    cfg = get_config()
+    return JSONResponse({
+        "proxy": {
+            "running": proxy is not None,
+            "backend_url": proxy.backend_url if proxy else "",
+            "default_model": proxy.default_model if proxy else "",
+        },
+        "storage": {
+            "sqlite": sqlite_store is not None,
+            "vector": vector_store is not None,
+            "stats": sqlite_store.get_stats() if sqlite_store else {},
+        },
+        "routing": {
+            "decision_llm": {
+                "enabled": decision_agent.enabled if decision_agent else False,
+                "model": decision_agent.model if decision_agent else "",
+            },
+            "embedding_classifier": {
+                "ready": embedding_classifier.ready if embedding_classifier else False,
+            },
+        },
+        "tools": {
+            "enabled": cfg.get("tools", {}).get("enabled", False),
+            "available": tool_registry.list_tools() if tool_registry else [],
+        },
+        "operator": {
+            "model": cfg.get("operator", {}).get("model", ""),
+            "shell_enabled": cfg.get("operator", {}).get("shell", {}).get("enabled", False),
+        },
+    })
+
+
+@app.get("/api/v1/stats")
+async def api_stats():
+    """Statistics about conversations and usage."""
+    sqlite_stats = sqlite_store.get_stats() if sqlite_store else {}
+    vector_stats = vector_store.get_stats() if vector_store else {}
+    return JSONResponse({
+        "conversations": sqlite_stats,
+        "embeddings": vector_stats,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+@app.post("/api/v1/operator")
+async def api_operator(request: Request):
+    """
+    Run the operator agent.
+    Body: {"query": "your question"}
+    """
+    try:
+        body = await request.json()
+        question = body.get("query", "").strip()
+        if not question:
+            return JSONResponse({"error": "query required"}, status_code=400)
+        
+        from beigebox.storage.vector_store import VectorStore
+        from beigebox.agents.operator import Operator
+        
+        cfg = get_config()
+        try:
+            vs = VectorStore(
+                chroma_path=cfg["storage"]["chroma_path"],
+                embedding_model=cfg["embedding"]["model"],
+                embedding_url=cfg["embedding"]["backend_url"],
+            )
+        except:
+            vs = None
+        
+        try:
+            op = Operator(vector_store=vs)
+            answer = op.run(question)
+            return JSONResponse({
+                "success": True,
+                "query": question,
+                "answer": answer,
+            })
+        except Exception as e:
+            return JSONResponse({
+                "success": False,
+                "error": str(e),
+                "query": question,
+            }, status_code=503)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+# ---------------------------------------------------------------------------
+# Web UI — simple HTML chat interface
+# ---------------------------------------------------------------------------
+
+@app.get("/")
+async def root():
+    """Serve the web UI."""
+    return FileResponse("beigebox/web/index.html", media_type="text/html")
+
+
+@app.get("/ui")
+async def ui():
+    """Alias for root."""
+    return FileResponse("beigebox/web/index.html", media_type="text/html")
 
 
 # ---------------------------------------------------------------------------

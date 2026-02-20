@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BeigeBox</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #0a0e27;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #1a1f3a 0%, #2d2755 100%);
+            border-bottom: 1px solid #8b7dd6;
+            padding: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .header-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #8b7dd6;
+            letter-spacing: 2px;
+        }
+
+        .header-subtitle {
+            font-size: 0.75rem;
+            color: #a89dd6;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #4ade80;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.error {
+            background: #f87171;
+            animation: none;
+        }
+
+        .status-text {
+            font-size: 0.85rem;
+            color: #a89dd6;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .model-selector {
+            background: #1a1f3a;
+            border: 1px solid #8b7dd6;
+            color: #e0e0e0;
+            padding: 0.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            min-width: 150px;
+            font-size: 0.9rem;
+        }
+
+        .model-selector:hover {
+            border-color: #a89dd6;
+        }
+
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .message {
+            display: flex;
+            gap: 0.75rem;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message-content {
+            max-width: 70%;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            word-wrap: break-word;
+            line-height: 1.4;
+        }
+
+        .message.user .message-content {
+            background: linear-gradient(135deg, #8b7dd6 0%, #6d5f9d 100%);
+            color: white;
+            border-bottom-right-radius: 2px;
+        }
+
+        .message.assistant .message-content {
+            background: #1a1f3a;
+            border: 1px solid #8b7dd6;
+            border-bottom-left-radius: 2px;
+            color: #e0e0e0;
+        }
+
+        .message.error .message-content {
+            background: #7f1d1d;
+            border: 1px solid #f87171;
+            color: #fecaca;
+        }
+
+        .message.info .message-content {
+            background: #1e3a8a;
+            border: 1px solid #3b82f6;
+            color: #93c5fd;
+            font-size: 0.9rem;
+        }
+
+        .message-role {
+            font-size: 0.75rem;
+            color: #8b7dd6;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 0.25rem;
+        }
+
+        .loading {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+
+        .loading span {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #8b7dd6;
+            animation: bounce 1.4s infinite;
+        }
+
+        .loading span:nth-child(1) { animation-delay: 0s; }
+        .loading span:nth-child(2) { animation-delay: 0.2s; }
+        .loading span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes bounce {
+            0%, 100% { opacity: 0.3; transform: translateY(0); }
+            50% { opacity: 1; transform: translateY(-6px); }
+        }
+
+        .input-area {
+            background: #1a1f3a;
+            border-top: 1px solid #8b7dd6;
+            padding: 1rem;
+            display: flex;
+            gap: 0.5rem;
+            flex-shrink: 0;
+        }
+
+        .input-wrapper {
+            flex: 1;
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .input-box {
+            flex: 1;
+            background: #0a0e27;
+            border: 1px solid #8b7dd6;
+            color: #e0e0e0;
+            padding: 0.75rem 1rem;
+            border-radius: 4px;
+            font-size: 0.95rem;
+            font-family: inherit;
+            resize: none;
+            max-height: 100px;
+        }
+
+        .input-box:focus {
+            outline: none;
+            border-color: #a89dd6;
+            box-shadow: 0 0 0 2px rgba(139, 125, 214, 0.1);
+        }
+
+        .input-box::placeholder {
+            color: #666;
+        }
+
+        button {
+            background: linear-gradient(135deg, #8b7dd6 0%, #6d5f9d 100%);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        button:hover:not(:disabled) {
+            background: linear-gradient(135deg, #a89dd6 0%, #8b7dd6 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(139, 125, 214, 0.3);
+        }
+
+        button:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .info-bar {
+            background: #1a1f3a;
+            border-top: 1px solid #8b7dd6;
+            padding: 0.75rem 1rem;
+            font-size: 0.85rem;
+            color: #a89dd6;
+            display: flex;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+
+        .info-left {
+            display: flex;
+            gap: 1.5rem;
+        }
+
+        .scrollbar-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #0a0e27;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #8b7dd6;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a89dd6;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-left">
+            <div>
+                <div class="header-title">BeigeBox</div>
+                <div class="header-subtitle">Tap the line</div>
+            </div>
+        </div>
+        <div class="header-right">
+            <select id="modelSelect" class="model-selector">
+                <option value="">Loading models...</option>
+            </select>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <div class="status-indicator" id="statusIndicator"></div>
+                <span class="status-text" id="statusText">Connecting...</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="chat-container">
+        <div class="messages scrollbar-hide" id="messages"></div>
+    </div>
+
+    <div class="input-area">
+        <div class="input-wrapper">
+            <textarea
+                id="inputBox"
+                class="input-box"
+                placeholder="z: operator what models are loaded? | Type a message... Press Ctrl+Enter to send"
+                rows="1"
+            ></textarea>
+        </div>
+        <button id="sendBtn" onclick="sendMessage()">Send</button>
+    </div>
+
+    <div class="info-bar">
+        <div class="info-left">
+            <span id="conversationId">Conv: <code style="color: #8b7dd6;"></code></span>
+            <span id="tokenCount">Tokens: <code style="color: #8b7dd6;">0</code></span>
+        </div>
+        <span id="connectionStatus">🔗 Connected to BeigeBox</span>
+    </div>
+
+    <script>
+        const messagesContainer = document.getElementById('messages');
+        const inputBox = document.getElementById('inputBox');
+        const sendBtn = document.getElementById('sendBtn');
+        const modelSelect = document.getElementById('modelSelect');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        const conversationIdSpan = document.getElementById('conversationId');
+        const tokenCountSpan = document.getElementById('tokenCount');
+        const connectionStatus = document.getElementById('connectionStatus');
+
+        let conversationId = generateUUID();
+        let selectedModel = '';
+        let messages = [];
+        let isWaiting = false;
+
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = (Math.random() * 16) | 0;
+                const v = c === 'x' ? r : (r & 0x3) | 0x8;
+                return v.toString(16);
+            });
+        }
+
+        // Update conv ID display
+        conversationIdSpan.innerHTML = `Conv: <code style="color: #8b7dd6;">${conversationId.slice(0, 8)}</code>`;
+
+        // Load models on startup
+        async function loadModels() {
+            try {
+                const response = await fetch('/v1/models');
+                const data = await response.json();
+                const models = data.data || [];
+
+                modelSelect.innerHTML = '';
+                if (models.length === 0) {
+                    modelSelect.innerHTML = '<option value="">No models available</option>';
+                    setStatus('error', 'No models available');
+                    return;
+                }
+
+                models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model.id || model.name || model.model;
+                    option.textContent = model.id || model.name || model.model;
+                    modelSelect.appendChild(option);
+                });
+
+                if (models.length > 0) {
+                    selectedModel = models[0].id || models[0].name || models[0].model;
+                    modelSelect.value = selectedModel;
+                    setStatus('ok', `Ready • ${models.length} model${models.length > 1 ? 's' : ''}`);
+                }
+            } catch (error) {
+                console.error('Failed to load models:', error);
+                modelSelect.innerHTML = '<option value="">Failed to load models</option>';
+                setStatus('error', 'Connection error');
+            }
+        }
+
+        // Reload models when dropdown opens
+        modelSelect.addEventListener('click', loadModels);
+
+        // Update selected model
+        modelSelect.addEventListener('change', (e) => {
+            selectedModel = e.target.value;
+        });
+
+        function setStatus(type, text) {
+            statusIndicator.className = type === 'ok' ? 'status-indicator' : 'status-indicator error';
+            statusText.textContent = text;
+        }
+
+        function addMessage(content, role, error = false) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role} ${error ? 'error' : ''}`;
+
+            const roleLabel = document.createElement('div');
+            roleLabel.className = 'message-role';
+            roleLabel.textContent = role;
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+
+            if (role === 'loading') {
+                contentDiv.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>';
+            } else {
+                contentDiv.textContent = content;
+            }
+
+            messageDiv.appendChild(roleLabel);
+            messageDiv.appendChild(contentDiv);
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+            return messageDiv;
+        }
+
+        async function sendMessage() {
+            const text = inputBox.value.trim();
+            if (!text || isWaiting) return;
+
+            if (!selectedModel) {
+                addMessage('Please select a model first', 'error', true);
+                return;
+            }
+
+            isWaiting = true;
+            sendBtn.disabled = true;
+
+            // Add user message
+            addMessage(text, 'user');
+            messages.push({ role: 'user', content: text });
+
+            // Clear input
+            inputBox.value = '';
+            inputBox.style.height = 'auto';
+
+            // Show loading
+            const loadingDiv = addMessage('', 'loading');
+
+            try {
+                const response = await fetch('/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        model: selectedModel,
+                        messages: messages,
+                        stream: false,
+                        conversation_id: conversationId,
+                    }),
+                });
+
+                if (!response.ok) {
+                    loadingDiv.remove();
+                    const errorData = await response.json().catch(() => ({}));
+                    addMessage(`Error: ${response.statusText} - ${errorData.error || 'Unknown error'}`, 'assistant', true);
+                    setStatus('error', 'Request failed');
+                    isWaiting = false;
+                    sendBtn.disabled = false;
+                    return;
+                }
+
+                const data = await response.json();
+                loadingDiv.remove();
+
+                const assistantContent = data.choices?.[0]?.message?.content || 'No response';
+                addMessage(assistantContent, 'assistant');
+                messages.push({ role: 'assistant', content: assistantContent });
+
+                // Update token count (rough estimate)
+                const totalTokens = messages.reduce((sum, msg) => sum + Math.ceil(msg.content.length / 4), 0);
+                tokenCountSpan.innerHTML = `Tokens: <code style="color: #8b7dd6;">${totalTokens}</code>`;
+
+                setStatus('ok', 'Ready');
+            } catch (error) {
+                loadingDiv.remove();
+                console.error('Error:', error);
+                addMessage(`Error: ${error.message}`, 'assistant', true);
+                setStatus('error', 'Connection error');
+            }
+
+            isWaiting = false;
+            sendBtn.disabled = false;
+            inputBox.focus();
+        }
+
+        // Handle Enter (Ctrl+Enter or Cmd+Enter to send)
+        inputBox.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                sendMessage();
+                e.preventDefault();
+            }
+            // Auto-resize textarea
+            inputBox.style.height = 'auto';
+            inputBox.style.height = Math.min(inputBox.scrollHeight, 100) + 'px';
+        });
+
+        // Initialize
+        window.addEventListener('load', () => {
+            loadModels();
+            inputBox.focus();
+            addMessage('Welcome to BeigeBox. Select a model and start chatting. Use "z: operator your question" to query the operator agent.', 'info');
+        });
+    </script>
+</body>
+</html>
