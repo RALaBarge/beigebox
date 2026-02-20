@@ -36,13 +36,13 @@ class BeigeBoxApp(App):
     SUB_TITLE = "tap the line · own the conversation"
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("q", "quit", "Disconnect", priority=True),
-        Binding("1", "switch_tab('config')",  "Config",  show=True),
-        Binding("2", "switch_tab('tap')",     "Tap",     show=True),
-        Binding("r", "refresh_all",           "Refresh", show=True),
+        Binding("1", "switch_tab('flash')",   "Config",  show=True),
+        Binding("2", "switch_tab('tap')",      "Tap",     show=True),
+        Binding("r", "refresh_all",            "Refresh", show=True),
     ]
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with TabbedContent():
+        with TabbedContent(initial=""):
             for _key, label, tab_id, screen_cls in SCREEN_REGISTRY:
                 with TabPane(label, id=tab_id):
                     yield screen_cls()
@@ -51,7 +51,9 @@ class BeigeBoxApp(App):
     def on_mount(self) -> None:
         """Set initial active tab after compose so IDs are fully registered."""
         try:
-            self.query_one(TabbedContent).active = "config"
+            tabs = self.query_one(TabbedContent)
+            # Use call_after_refresh to ensure all tab IDs exist in the DOM
+            self.call_after_refresh(setattr, tabs, "active", "flash")
         except Exception:
             pass
     def action_switch_tab(self, tab_id: str) -> None:

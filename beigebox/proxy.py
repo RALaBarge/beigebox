@@ -8,6 +8,8 @@ Now with:
   - Synthetic request filtering (skip Open WebUI's internal requests)
   - Token tracking (approximate token counts for stats)
   - Session-aware routing (sticky model within a conversation)
+  - Multi-backend routing with fallback (v0.6)
+  - Cost tracking for API backends (v0.6)
 """
 import json
 import logging
@@ -40,6 +42,7 @@ class Proxy:
         hook_manager: HookManager | None = None,
         embedding_classifier: EmbeddingClassifier | None = None,
         tool_registry=None,
+        backend_router=None,
     ):
         self.sqlite = sqlite
         self.vector = vector
@@ -47,11 +50,14 @@ class Proxy:
         self.hook_manager = hook_manager
         self.embedding_classifier = embedding_classifier
         self.tool_registry = tool_registry
+        self.backend_router = backend_router  # MultiBackendRouter or None
         self.cfg = get_config()
         self.backend_url = self.cfg["backend"]["url"].rstrip("/")
         self.timeout = self.cfg["backend"].get("timeout", 120)
         self.default_model = self.cfg["backend"].get("default_model", "")
         self.log_enabled = self.cfg["storage"].get("log_conversations", True)
+        # Cost tracking config
+        self._cost_tracking = self.cfg.get("cost_tracking", {}).get("enabled", False)
         # Route config for z-command model resolution
         d_cfg = self.cfg.get("decision_llm", {})
         self.routes = d_cfg.get("routes", {})
@@ -165,7 +171,7 @@ class Proxy:
                 timestamp=message.timestamp,
             ))
 
-    def _log_response(self, conversation_id: str, content: str, model: str):
+    def _log_response(self, conversation_id: str, content: str, model: str, cost_usd: float | None = None):
         """Store the assistant response."""
         if not self.log_enabled or not content.strip():
             return
@@ -177,8 +183,9 @@ class Proxy:
             model=model,
             token_count=tokens,
         )
-        self.sqlite.store_message(message)
+        self.sqlite.store_message(message, cost_usd=cost_usd)
         # Wire tap
+        cost_info = f" cost=${cost_usd:.6f}" if cost_usd else ""
         self.wire.log(
             direction="outbound",
             role="assistant",
@@ -187,6 +194,14 @@ class Proxy:
             conversation_id=conversation_id,
             token_count=tokens,
         )
+        if cost_usd:
+            self.wire.log(
+                direction="internal",
+                role="system",
+                content=f"cost_usd={cost_usd:.6f} model={model}",
+                model="cost-tracker",
+                conversation_id=conversation_id,
+            )
         # Embed async in background — avoids blocking the event loop
         asyncio.create_task(self.vector.store_message_async(
             message_id=message.id,
@@ -489,21 +504,42 @@ class Proxy:
         if not is_synthetic:
             self._log_messages(conversation_id, body.get("messages", []), model)
 
-        # Forward to backend
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.post(
-                f"{self.backend_url}/v1/chat/completions",
-                json=body,
+        # Forward to backend — use router if available, otherwise direct
+        cost_usd = None
+        if self.backend_router:
+            response = await self.backend_router.forward(body)
+            if not response.ok:
+                # Return error as a chat response so clients handle it gracefully
+                return {
+                    "choices": [{"message": {"role": "assistant",
+                                             "content": f"[BeigeBox] Backend error: {response.error}"}}],
+                    "model": model,
+                }
+            data = response.data
+            cost_usd = response.cost_usd
+            # Log backend used to wiretap
+            self.wire.log(
+                direction="internal",
+                role="system",
+                content=f"routed to backend '{response.backend_name}' ({response.latency_ms:.0f}ms)",
+                model=model,
+                conversation_id=conversation_id,
             )
-            resp.raise_for_status()
-            data = resp.json()
+        else:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(
+                    f"{self.backend_url}/v1/chat/completions",
+                    json=body,
+                )
+                resp.raise_for_status()
+                data = resp.json()
 
         # Log assistant response (skip synthetic)
         if not is_synthetic:
             choices = data.get("choices", [])
             if choices:
                 assistant_content = choices[0].get("message", {}).get("content", "")
-                self._log_response(conversation_id, assistant_content, model)
+                self._log_response(conversation_id, assistant_content, model, cost_usd=cost_usd)
 
         # Post-response hooks
         if self.hook_manager and not is_synthetic:
@@ -557,47 +593,78 @@ class Proxy:
 
         # Buffer for the full response
         full_response = []
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            async with client.stream(
-                "POST",
-                f"{self.backend_url}/v1/chat/completions",
-                json=body,
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line:
+
+        if self.backend_router:
+            # Stream via multi-backend router
+            async for line in self.backend_router.forward_stream(body):
+                if not line:
+                    continue
+                yield line + "\n"
+                # Parse to buffer content
+                if line.startswith("data: "):
+                    data_str = line[6:]
+                    if data_str.strip() == "[DONE]":
                         continue
-                    # Yield raw SSE line to client
-                    yield line + "\n"
-                    # Parse to buffer content
-                    if line.startswith("data: "):
-                        data_str = line[6:]
-                        if data_str.strip() == "[DONE]":
+                    try:
+                        chunk = json.loads(data_str)
+                        delta = (
+                            chunk.get("choices", [{}])[0]
+                            .get("delta", {})
+                            .get("content", "")
+                        )
+                        if delta:
+                            full_response.append(delta)
+                    except (json.JSONDecodeError, IndexError):
+                        pass
+        else:
+            # Direct backend (legacy single-backend path)
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.backend_url}/v1/chat/completions",
+                    json=body,
+                ) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line:
                             continue
-                        try:
-                            chunk = json.loads(data_str)
-                            delta = (
-                                chunk.get("choices", [{}])[0]
-                                .get("delta", {})
-                                .get("content", "")
-                            )
-                            if delta:
-                                full_response.append(delta)
-                        except (json.JSONDecodeError, IndexError):
-                            pass
+                        # Yield raw SSE line to client
+                        yield line + "\n"
+                        # Parse to buffer content
+                        if line.startswith("data: "):
+                            data_str = line[6:]
+                            if data_str.strip() == "[DONE]":
+                                continue
+                            try:
+                                chunk = json.loads(data_str)
+                                delta = (
+                                    chunk.get("choices", [{}])[0]
+                                    .get("delta", {})
+                                    .get("content", "")
+                                )
+                                if delta:
+                                    full_response.append(delta)
+                            except (json.JSONDecodeError, IndexError):
+                                pass
 
         # Log the complete response after streaming finishes (skip synthetic)
+        # Note: streaming doesn't capture per-response cost from the router;
+        # cost tracking for streams will be added when OpenRouter supports it
         if not is_synthetic:
             complete_text = "".join(full_response)
             if complete_text:
                 self._log_response(conversation_id, complete_text, model)
 
     async def list_models(self) -> dict:
-        """Forward /v1/models request to backend, optionally rewriting model names."""
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(f"{self.backend_url}/v1/models")
-            resp.raise_for_status()
-            data = resp.json()
+        """Forward /v1/models request to backend(s), optionally rewriting model names."""
+        if self.backend_router:
+            # Aggregate models from all backends
+            data = await self.backend_router.list_all_models()
+        else:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(f"{self.backend_url}/v1/models")
+                resp.raise_for_status()
+                data = resp.json()
         
         # Apply model name transformation if configured
         data = self._transform_model_names(data)

@@ -7,6 +7,8 @@ Now with:
   - Hook manager setup
   - Embedding model preloading
   - Enhanced stats with token tracking
+  - Multi-backend routing with fallback (v0.6)
+  - Cost tracking for API backends (v0.6)
 """
 
 import logging
@@ -26,6 +28,8 @@ from beigebox.tools.registry import ToolRegistry
 from beigebox.agents.decision import DecisionAgent
 from beigebox.agents.embedding_classifier import get_embedding_classifier
 from beigebox.hooks import HookManager
+from beigebox.backends.router import MultiBackendRouter
+from beigebox.costs import CostTracker
 
 
 # ---------------------------------------------------------------------------
@@ -37,6 +41,8 @@ sqlite_store: SQLiteStore | None = None
 vector_store: VectorStore | None = None
 decision_agent: DecisionAgent | None = None
 hook_manager: HookManager | None = None
+backend_router: MultiBackendRouter | None = None
+cost_tracker: CostTracker | None = None
 
 
 def _setup_logging(cfg: dict):
@@ -83,7 +89,7 @@ async def _preload_embedding_model(cfg: dict):
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     global proxy, tool_registry, sqlite_store, vector_store
-    global decision_agent, hook_manager
+    global decision_agent, hook_manager, backend_router, cost_tracker
 
     cfg = get_config()
     _setup_logging(cfg)
@@ -116,7 +122,27 @@ async def lifespan(app: FastAPI):
     embedding_classifier = get_embedding_classifier()
     ec_status = "ready" if embedding_classifier.ready else "no centroids (run beigebox build-centroids)"
 
-    # Proxy (with decision agent, hooks, embedding classifier, and tools)
+    # Multi-backend router (v0.6)
+    backend_router = None
+    if cfg.get("backends_enabled", False):
+        backends_cfg = cfg.get("backends", [])
+        if backends_cfg:
+            backend_router = MultiBackendRouter(backends_cfg)
+            logger.info("Multi-backend router: enabled (%d backends)", len(backend_router.backends))
+        else:
+            logger.warning("backends_enabled=true but no backends configured")
+    else:
+        logger.info("Multi-backend router: disabled")
+
+    # Cost tracker (v0.6)
+    cost_tracker = None
+    if cfg.get("cost_tracking", {}).get("enabled", False):
+        cost_tracker = CostTracker(sqlite_store)
+        logger.info("Cost tracking: enabled")
+    else:
+        logger.info("Cost tracking: disabled")
+
+    # Proxy (with decision agent, hooks, embedding classifier, tools, and router)
     proxy = Proxy(
         sqlite=sqlite_store,
         vector=vector_store,
@@ -124,6 +150,7 @@ async def lifespan(app: FastAPI):
         hook_manager=hook_manager,
         embedding_classifier=embedding_classifier,
         tool_registry=tool_registry,
+        backend_router=backend_router,
     )
 
     logger.info(
@@ -155,7 +182,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="BeigeBox",
     description="Tap the line. Own the conversation.",
-    version="0.2.0",
+    version="0.6.0-dev",
     lifespan=lifespan,
 )
 
@@ -233,7 +260,7 @@ async def health():
     """Health check."""
     return JSONResponse({
         "status": "ok",
-        "version": "0.2.0",
+        "version": "0.6.0-dev",
         "decision_llm": decision_agent.enabled if decision_agent else False,
     })
 
@@ -247,7 +274,7 @@ async def api_info():
     """System info — what features are available."""
     cfg = get_config()
     return JSONResponse({
-        "version": "0.2.0",
+        "version": "0.6.0-dev",
         "name": "BeigeBox",
         "description": "Transparent Pythonic LLM Proxy",
         "server": {
@@ -349,6 +376,40 @@ async def api_stats():
         "conversations": sqlite_stats,
         "embeddings": vector_stats,
         "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+@app.get("/api/v1/costs")
+async def api_costs(days: int = 30):
+    """
+    Cost tracking stats.
+    Query params: ?days=30 (default 30)
+    Returns total, by_model, by_day, by_conversation breakdown.
+    """
+    if not cost_tracker:
+        return JSONResponse({
+            "enabled": False,
+            "message": "Cost tracking is disabled. Set cost_tracking.enabled: true in config.",
+        })
+    stats = cost_tracker.get_stats(days=days)
+    stats["enabled"] = True
+    return JSONResponse(stats)
+
+
+@app.get("/api/v1/backends")
+async def api_backends():
+    """Health and status of all configured backends."""
+    if not backend_router:
+        cfg = get_config()
+        return JSONResponse({
+            "enabled": False,
+            "message": "Multi-backend routing is disabled. Set backends_enabled: true in config.",
+            "primary_backend": cfg.get("backend", {}).get("url", ""),
+        })
+    health = await backend_router.health()
+    return JSONResponse({
+        "enabled": True,
+        "backends": health,
     })
 
 

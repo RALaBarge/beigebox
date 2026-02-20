@@ -7,10 +7,10 @@ A transparent middleware proxy for local LLM stacks. Sits between your frontend 
 ```
 +---------------+         +--------------------------------------+         +---------------+
 |               |  HTTP   |            BEIGEBOX                  |  HTTP   |               |
-|  Open WebUI   | ------->|                                      | ------- |  Ollama /      |
-|  (Frontend)   |<------- |  FastAPI Proxy                       |<------- |  llama.cpp       |
-|               |         |                                      |         |  (Backend)     |
-|  Port 3000    |         |  +------ Hybrid Router -----------+  |         |  Port 11434    |
+|  Open WebUI   | ------->|                                      | ------- |  Ollama /     |
+|  (Frontend)   |<------- |  FastAPI Proxy                       |<------- |  llama.cpp    |
+|               |         |                                      |         |  (Backend)    |
+|  Port 3000    |         |  +------ Hybrid Router -----------+  |         |  Port 11434   |
 +---------------+         |  | 0. Session Cache  (instant)    |  |         +---------------+
                           |  | 1. Z-Commands     (instant)    |  |
                           |  | 2. Agentic Scorer (instant)    |  |
@@ -302,8 +302,7 @@ beigebox/
 │   ├── docker-compose.yaml        # Full stack deployment
 │   └── config.docker.yaml
 │
-├── docs/
-│   └── 2600/                      # Design notes, research, theorycrafting
+├── 2600/                      # Design notes, research, theorycrafting
 │
 ├── tests/
 │   ├── test_proxy.py

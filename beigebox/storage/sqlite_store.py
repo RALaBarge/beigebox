@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS messages (
     model TEXT DEFAULT '',
     timestamp TEXT NOT NULL,
     token_count INTEGER DEFAULT 0,
+    cost_usd REAL DEFAULT NULL,
+    custom_field_1 TEXT DEFAULT NULL,
+    custom_field_2 TEXT DEFAULT NULL,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id)
 );
 
@@ -38,6 +41,13 @@ CREATE INDEX IF NOT EXISTS idx_messages_timestamp
 CREATE INDEX IF NOT EXISTS idx_messages_role
     ON messages(role);
 """
+
+# v0.6 migration: add columns to existing databases (safe to re-run)
+MIGRATIONS = [
+    "ALTER TABLE messages ADD COLUMN cost_usd REAL DEFAULT NULL",
+    "ALTER TABLE messages ADD COLUMN custom_field_1 TEXT DEFAULT NULL",
+    "ALTER TABLE messages ADD COLUMN custom_field_2 TEXT DEFAULT NULL",
+]
 
 
 class SQLiteStore:
@@ -51,6 +61,13 @@ class SQLiteStore:
     def _init_db(self):
         with self._connect() as conn:
             conn.executescript(CREATE_TABLES)
+            # Run migrations for existing databases (safe if columns already exist)
+            for migration in MIGRATIONS:
+                try:
+                    conn.execute(migration)
+                except sqlite3.OperationalError as e:
+                    if "duplicate column" not in str(e).lower():
+                        logger.warning("Migration skipped: %s", e)
         logger.info("SQLite store initialized at %s", self.db_path)
 
     @contextmanager
@@ -74,16 +91,16 @@ class SQLiteStore:
                 (conversation_id, created_at),
             )
 
-    def store_message(self, msg: Message):
+    def store_message(self, msg: Message, cost_usd: float | None = None):
         """Store a single message. Creates conversation if needed."""
         self.ensure_conversation(msg.conversation_id, msg.timestamp)
         with self._connect() as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO messages
-                   (id, conversation_id, role, content, model, timestamp, token_count)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (id, conversation_id, role, content, model, timestamp, token_count, cost_usd)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (msg.id, msg.conversation_id, msg.role, msg.content,
-                 msg.model, msg.timestamp, msg.token_count),
+                 msg.model, msg.timestamp, msg.token_count, cost_usd),
             )
         logger.debug("Stored message %s (role=%s, conv=%s)", msg.id, msg.role, msg.conversation_id)
 
@@ -156,16 +173,22 @@ class SQLiteStore:
             model_rows = conn.execute(
                 """SELECT model,
                           COUNT(*) as messages,
-                          COALESCE(SUM(token_count), 0) as tokens
+                          COALESCE(SUM(token_count), 0) as tokens,
+                          COALESCE(SUM(cost_usd), 0) as cost
                    FROM messages
                    WHERE model != ''
                    GROUP BY model
                    ORDER BY messages DESC"""
             ).fetchall()
             models = {
-                row["model"]: {"messages": row["messages"], "tokens": row["tokens"]}
+                row["model"]: {"messages": row["messages"], "tokens": row["tokens"], "cost_usd": row["cost"]}
                 for row in model_rows
             }
+
+            # Total cost
+            total_cost = conn.execute(
+                "SELECT COALESCE(SUM(cost_usd), 0) FROM messages"
+            ).fetchone()[0]
 
         return {
             "conversations": conv_count,
@@ -177,5 +200,6 @@ class SQLiteStore:
                 "user": user_tokens,
                 "assistant": asst_tokens,
             },
+            "cost_usd": total_cost,
             "models": models,
         }

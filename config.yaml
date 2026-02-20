@@ -101,7 +101,98 @@ wiretap:
 routing:
   session_ttl_seconds: 1800
 
+# --- Model Advertising ---
+# Control whether BeigeBox advertises its presence in the model list.
+# This affects what Open WebUI shows in the model dropdown.
+model_advertising:
+  mode: "hidden"                   # "advertise" or "hidden"
+  # hidden:    Shows: [llama3.2, gpt-oss-20b, claude]
+  #            (BeigeBox is transparent, user doesn't know it's there)
+  # advertise: Shows: [beigebox:llama3.2, beigebox:gpt-oss-20b, beigebox:claude]
+  #            (User knows they're talking through the middleware)
+  
+  prefix: "beigebox:"              # Prefix to add in advertise mode
+  #                                # Examples: "🔗 ", "[middleware] ", "beigebox:" etc.
+
+# --- Multi-Backend Support (v0.6.0) ---
+# Support for multiple backends with priority-based fallback
+# Currently supports: Ollama (local), OpenRouter (API)
+backends:
+  - name: "local"
+    url: "http://localhost:11434"
+    provider: "ollama"
+    priority: 1
+    timeout: 120
+    
+  - name: "openrouter"
+    url: "https://openrouter.ai/api/v1"
+    provider: "openrouter"
+    api_key: "${OPENROUTER_API_KEY}"
+    priority: 2
+    timeout: 60
+    # Note: API key from environment, not config file (security)
+
+backends_enabled: false
+
+# --- Cost Tracking (v0.6.0) ---
+# Track costs for OpenRouter API calls (local models are $0)
+# OpenRouter returns cost_usd with each response
+cost_tracking:
+  enabled: false
+  track_openrouter: true
+  track_local: false
+
+# --- Orchestrator (v0.6.0) ---
+# Allow Operator agent to spawn parallel LLM tasks
+# Useful for divide-and-conquer on complex problems
+orchestrator:
+  enabled: false
+  max_parallel_tasks: 5
+  task_timeout_seconds: 120
+  total_timeout_seconds: 300
+
+# --- Flight Recorder (v0.6.0) ---
+# Record detailed timeline of each request's lifecycle
+# Helps debug routing decisions and performance bottlenecks
+flight_recorder:
+  enabled: false
+  retention_hours: 24
+  max_records: 1000
+
+# --- Conversation Replay (v0.6.0) ---
+# Reconstruct full conversations with routing decisions
+# Shows which model, why, what tools, confidence scores
+conversation_replay:
+  enabled: false
+
+# --- Semantic Conversation Map (v0.6.0) ---
+# Visualize conversation topics as a semantic graph
+# Shows topic clustering and discussion flow
+semantic_map:
+  enabled: false
+  similarity_threshold: 0.5
+  max_topics: 50
+
+# --- Reserved for v0.7.0+ ---
+# Add features below as they're implemented
+
+# prompt_injection_detection:
+#   enabled: false
+
+# fine_tuning_export:
+#   enabled: false
+
+# voice_pipeline:
+#   enabled: false
+
+# model_performance_dashboard:
+#   enabled: false
+
+# tap_filters:
+#   enabled: false
+
 ###---- Move this to where it needs to be when finished:
+
 
 operator:
   model: "llama3.2:3b"              # which Ollama model to use (defaults to backend.default_model)
