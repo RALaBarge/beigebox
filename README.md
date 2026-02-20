@@ -5,13 +5,13 @@
 A transparent middleware proxy for local LLM stacks. Sits between your frontend (Open WebUI, etc.) and your backend (Ollama, llama.cpp, etc.), intercepting and storing every conversation while providing intelligent routing, extensible tooling, and user-level overrides.
 
 ```
-+---------------+         +--------------------------------------+         +-----------------+
-|               |  HTTP   |            BEIGEBOX                  |  HTTP   |                 |
-|  Open WebUI   | ------->|                                      | ------- |  Ollama /        |
++---------------+         +--------------------------------------+         +---------------+
+|               |  HTTP   |            BEIGEBOX                  |  HTTP   |               |
+|  Open WebUI   | ------->|                                      | ------- |  Ollama /      |
 |  (Frontend)   |<------- |  FastAPI Proxy                       |<------- |  llama.cpp       |
-|               |         |                                      |         |  (Backend)       |
-|  Port 3000    |         |  +------ Hybrid Router -----------+  |         |  Port 11434      |
-+---------------+         |  | 0. Session Cache  (instant)    |  |         +-----------------+
+|               |         |                                      |         |  (Backend)     |
+|  Port 3000    |         |  +------ Hybrid Router -----------+  |         |  Port 11434    |
++---------------+         |  | 0. Session Cache  (instant)    |  |         +---------------+
                           |  | 1. Z-Commands     (instant)    |  |
                           |  | 2. Agentic Scorer (instant)    |  |
                           |  | 3. Embedding Class (~50ms)     |  |
