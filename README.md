@@ -7,8 +7,8 @@ A transparent middleware proxy for local LLM stacks. Sits between your frontend 
 ```
 +---------------+         +--------------------------------------+         +-----------------+
 |               |  HTTP   |            BEIGEBOX                  |  HTTP   |                 |
-|  Open WebUI   |-------->|                                      |-------->|  Ollama /        |
-|  (Frontend)   |<--------|  FastAPI Proxy                       |<--------|  llama.cpp       |
+|  Open WebUI   | ------->|                                      | ------- |  Ollama /        |
+|  (Frontend)   |<------- |  FastAPI Proxy                       |<------- |  llama.cpp       |
 |               |         |                                      |         |  (Backend)       |
 |  Port 3000    |         |  +------ Hybrid Router -----------+  |         |  Port 11434      |
 +---------------+         |  | 0. Session Cache  (instant)    |  |         +-----------------+
@@ -16,7 +16,7 @@ A transparent middleware proxy for local LLM stacks. Sits between your frontend 
                           |  | 2. Agentic Scorer (instant)    |  |
                           |  | 3. Embedding Class (~50ms)     |  |
                           |  | 4. Decision LLM   (~500ms-2s)  |  |
-                          |  +---------------------------------+  |
+                          |  +---------------------------------+ |
                           |                                      |
                           |  +----------+  +-------------------+ |
                           |  | SQLite   |  | ChromaDB          | |
@@ -24,21 +24,21 @@ A transparent middleware proxy for local LLM stacks. Sits between your frontend 
                           |  |  convos) |  |  embeddings)      | |
                           |  +----------+  +-------------------+ |
                           |                                      |
-                          |  +------ Tool Registry ------------+ |
+                          |  +------ Tool Registry -----------+  |
                           |  | Web Search  | Calculator        | |
                           |  | Web Scraper | DateTime          | |
                           |  | Memory/RAG  | System Info       | |
                           |  | Notifier    | (extensible)      | |
-                          |  +--------------------------------- + |
+                          |  +------------------------------- +  |
                           |                                      |
-                          |  +------ Operator Agent ----------+ |
-                          |  | LangChain ReAct agent          | |
-                          |  | Web search + scrape            | |
-                          |  | Semantic conversation search   | |
-                          |  | Named SQLite queries           | |
-                          |  | Allowlisted shell              | |
+                          |  +------ Operator Agent ----------+  |
+                          |  | LangChain ReAct agent          |  |
+                          |  | Web search + scrape            |  |
+                          |  | Semantic conversation search   |  |
+                          |  | Named SQLite queries           |  |
+                          |  | Allowlisted shell              |  |
                           |  +---------------------------------+ |
-                          |                          Port 8000   |
+                          |                          Port 8001   |
                           +--------------------------------------+
 ```
 
@@ -697,9 +697,19 @@ Design notes, research, and theorycrafting live in `docs/2600/`:
 
 ---
 
+## Contributing
+
+By contributing to this project, you agree that your contributions will be licensed under the project's AGPLv3 license, and you grant the maintainer(s) a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to incorporate your contributions into the project and sub-license them under alternative commercial terms.
+
+--
+
 ## License
 
-MIT. Do whatever you want, don't sue me.
+Note for Enterprises: This project is licensed under AGPLv3 to keep it free for the community. If you are a high-revenue carbon-based lifeform, synthetic or otherwise, and require a non-copyleft license (or just want to support the dev), please contact me!
+
+This means if you are gonna make money off of it, you gotta hollar at me first and we can work something out.  I've got 4 dogs and 2 kids and christ they eat a lot...
+
+Otherwise, it is free to use for everyone that is not making a buck from it! If you think of something cool, or have code that matches my style here, please make a PR or an Issue to chat!
 
 ---
 
