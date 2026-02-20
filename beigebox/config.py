@@ -95,3 +95,31 @@ def get_runtime_config() -> dict:
         pass  # Keep last good config on parse error
 
     return _runtime_config
+
+
+def update_runtime_config(key: str, value) -> bool:
+    """
+    Write a single key into the runtime: block of runtime_config.yaml.
+    Thread-safe via file read-modify-write. Returns True on success.
+    """
+    try:
+        if _RUNTIME_CONFIG_PATH.exists():
+            with open(_RUNTIME_CONFIG_PATH) as f:
+                data = yaml.safe_load(f) or {}
+        else:
+            data = {}
+
+        if "runtime" not in data or not isinstance(data["runtime"], dict):
+            data["runtime"] = {}
+
+        data["runtime"][key] = value
+
+        with open(_RUNTIME_CONFIG_PATH, "w") as f:
+            yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+
+        # Bust the mtime cache so next get_runtime_config() picks it up
+        global _runtime_mtime
+        _runtime_mtime = 0.0
+        return True
+    except Exception:
+        return False

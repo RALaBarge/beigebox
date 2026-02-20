@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BeigeBox — tap the line</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&family=Fira+Code:wght@300;400;500&display=swap');
+
+  /* ── Palette (matches TUI) ───────────────────────────────────────────── */
+  :root {
+    --lavender:      #B48EAD;
+    --lavender-dim:  #7D6080;
+    --green:         #A3BE8C;
+    --green-dim:     #5C7043;
+    --cyan:          #88C0D0;
+    --yellow:        #EBCB8B;
+    --red:           #BF616A;
+    --bg:            #1A1A1A;
+    --bg-panel:      #212121;
+    --bg-border:     #2E2E2E;
+    --bg-hover:      #292929;
+    --fg:            #D8DEE9;
+    --fg-dim:        #6C7680;
+    --fg-muted:      #4C5460;
+    --flight-fast:   #a5d6a7;
+    --flight-medium: #fff176;
+    --flight-slow:   #ffcc80;
+    --flight-crit:   #ef9a9a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Fira Code', 'Share Tech Mono', monospace;
+    background: var(--bg);
+    color: var(--fg);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    font-size: 13px;
+  }
+
+  /* ── Header ──────────────────────────────────────────────────────────── */
+  #header {
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--lavender-dim);
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 40px;
+    flex-shrink: 0;
+  }
+  #header .logo {
+    font-family: 'VT323', monospace;
+    font-size: 22px;
+    color: var(--lavender);
+    letter-spacing: 2px;
+  }
+  #header .sub {
+    color: var(--fg-muted);
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
+  #header .status-bar {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+  }
+  .status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--fg-muted);
+    display: inline-block;
+    margin-right: 5px;
+  }
+  .status-dot.ok  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .status-dot.err { background: var(--red);   box-shadow: 0 0 6px var(--red);   }
+  #clock { color: var(--fg-muted); font-size: 11px; }
+
+  /* ── Tabs ────────────────────────────────────────────────────────────── */
+  #tabs {
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--bg-border);
+    display: flex;
+    flex-shrink: 0;
+  }
+  .tab {
+    padding: 8px 20px;
+    cursor: pointer;
+    color: var(--fg-dim);
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    user-select: none;
+  }
+  .tab:hover { color: var(--fg); }
+  .tab.active {
+    color: var(--lavender);
+    border-bottom-color: var(--lavender);
+    font-weight: 500;
+  }
+  .tab .tab-key {
+    color: var(--fg-muted);
+    font-size: 10px;
+    margin-right: 5px;
+  }
+
+  /* ── Main content area ───────────────────────────────────────────────── */
+  #content {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel {
+    display: none;
+    flex: 1;
+    overflow: hidden;
+    flex-direction: column;
+  }
+  .panel.active { display: flex; }
+
+  .scroll-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 16px;
+  }
+  .scroll-area::-webkit-scrollbar { width: 4px; }
+  .scroll-area::-webkit-scrollbar-track { background: var(--bg); }
+  .scroll-area::-webkit-scrollbar-thumb { background: var(--bg-border); border-radius: 2px; }
+
+  /* ── Section headers ─────────────────────────────────────────────────── */
+  .section-header {
+    color: var(--green);
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin: 16px 0 8px;
+    border-bottom: 1px solid var(--bg-border);
+    padding-bottom: 4px;
+  }
+  .section-header:first-child { margin-top: 0; }
+
+  /* ── Grid cards ──────────────────────────────────────────────────────── */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .card {
+    background: var(--bg-panel);
+    border: 1px solid var(--bg-border);
+    padding: 10px 12px;
+    border-radius: 2px;
+  }
+  .card .card-label { color: var(--fg-muted); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
+  .card .card-value { color: var(--cyan); font-size: 18px; font-family: 'VT323', monospace; }
+  .card .card-sub   { color: var(--fg-dim); font-size: 10px; margin-top: 2px; }
+
+  /* ── KV rows ─────────────────────────────────────────────────────────── */
+  .kv-row {
+    display: flex;
+    gap: 8px;
+    padding: 3px 0;
+    border-bottom: 1px solid var(--bg-border);
+    align-items: baseline;
+    flex-wrap: wrap;
+  }
+  .kv-key   { color: var(--cyan);   min-width: 180px; font-size: 12px; }
+  .kv-val   { color: var(--fg);     font-size: 12px; word-break: break-all; }
+  .kv-ok    { color: var(--green);  }
+  .kv-warn  { color: var(--yellow); }
+  .kv-err   { color: var(--red);    }
+  .kv-dim   { color: var(--fg-dim); }
+
+  /* ── Tag badges ──────────────────────────────────────────────────────── */
+  .badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 2px;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+  }
+  .badge-ok   { background: var(--green-dim);   color: var(--green);  }
+  .badge-warn { background: #3a3000;             color: var(--yellow); }
+  .badge-err  { background: #3a1010;             color: var(--red);    }
+  .badge-dim  { background: var(--bg-border);    color: var(--fg-dim); }
+  .badge-lav  { background: #3a2a3a;             color: var(--lavender); }
+
+  /* ── Refresh btn ─────────────────────────────────────────────────────── */
+  .toolbar {
+    padding: 6px 16px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--bg-border);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  button, .btn {
+    background: var(--bg-border);
+    color: var(--fg-dim);
+    border: 1px solid var(--fg-muted);
+    padding: 4px 12px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    border-radius: 2px;
+    transition: all 0.15s;
+  }
+  button:hover, .btn:hover {
+    background: var(--bg-hover);
+    color: var(--fg);
+    border-color: var(--lavender);
+  }
+  button.primary {
+    background: var(--lavender-dim);
+    color: var(--bg);
+    border-color: var(--lavender);
+    font-weight: 500;
+  }
+  button.primary:hover { background: var(--lavender); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  input, select, textarea {
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--bg-border);
+    padding: 6px 10px;
+    font-family: inherit;
+    font-size: 12px;
+    border-radius: 2px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--lavender-dim); }
+  input::placeholder { color: var(--fg-muted); }
+
+  .toolbar-label { color: var(--fg-dim); font-size: 11px; }
+  .toolbar-spacer { flex: 1; }
+  .last-updated { color: var(--fg-muted); font-size: 10px; }
+
+  /* ── Status subsystem table ──────────────────────────────────────────── */
+  .subsystem-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--bg-border);
+  }
+  .subsystem-name { color: var(--fg); min-width: 160px; }
+  .subsystem-detail { color: var(--fg-dim); font-size: 11px; flex: 1; }
+
+  /* ── Chat panel ──────────────────────────────────────────────────────── */
+  #chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  #chat-messages::-webkit-scrollbar { width: 4px; }
+  #chat-messages::-webkit-scrollbar-thumb { background: var(--bg-border); }
+
+  .msg {
+    display: flex;
+    flex-direction: column;
+    max-width: 85%;
+    gap: 3px;
+  }
+  .msg.user   { align-self: flex-end; align-items: flex-end; }
+  .msg.assistant { align-self: flex-start; }
+  .msg .bubble {
+    padding: 8px 12px;
+    border-radius: 2px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .msg.user .bubble {
+    background: var(--lavender-dim);
+    color: var(--bg);
+    border-bottom-right-radius: 0;
+  }
+  .msg.assistant .bubble {
+    background: var(--bg-panel);
+    border: 1px solid var(--bg-border);
+    color: var(--fg);
+    border-bottom-left-radius: 0;
+  }
+  .msg .meta {
+    color: var(--fg-muted);
+    font-size: 10px;
+  }
+  .msg.assistant .meta { color: var(--lavender-dim); }
+
+  #chat-input-area {
+    padding: 10px 16px;
+    background: var(--bg-panel);
+    border-top: 1px solid var(--bg-border);
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    flex-shrink: 0;
+  }
+  #chat-input {
+    flex: 1;
+    resize: none;
+    min-height: 38px;
+    max-height: 120px;
+    line-height: 1.5;
+    padding: 8px 10px;
+  }
+  #model-select { min-width: 180px; height: 38px; }
+
+  .typing-indicator {
+    display: flex; gap: 4px; align-items: center; padding: 8px 12px;
+    background: var(--bg-panel); border: 1px solid var(--bg-border);
+    border-radius: 2px; align-self: flex-start;
+  }
+  .typing-indicator span {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--lavender-dim);
+    animation: blink 1.2s infinite;
+  }
+  .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+  .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink { 0%,80%,100%{opacity:0.2} 40%{opacity:1} }
+
+  .z-hint {
+    color: var(--fg-muted); font-size: 10px; padding: 2px 16px;
+    background: var(--bg-panel); border-top: 1px solid var(--bg-border);
+    flex-shrink: 0;
+  }
+
+  /* ── Flight recorder ─────────────────────────────────────────────────── */
+  .flight-record {
+    background: var(--bg-panel);
+    border: 1px solid var(--bg-border);
+    margin-bottom: 8px;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .flight-header {
+    padding: 6px 12px;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid var(--bg-border);
+  }
+  .flight-header:hover { background: var(--bg-hover); }
+  .flight-id-text { color: var(--lavender); font-size: 12px; }
+  .flight-model-text { color: #ce93d8; font-size: 11px; }
+  .flight-total { font-family: 'VT323', monospace; font-size: 16px; }
+  .flight-total.fast   { color: var(--flight-fast); }
+  .flight-total.medium { color: var(--flight-medium); }
+  .flight-total.slow   { color: var(--flight-slow); }
+  .flight-total.crit   { color: var(--flight-crit); }
+  .flight-events { padding: 8px 12px; display: none; }
+  .flight-record.expanded .flight-events { display: block; }
+  .flight-event {
+    display: flex; gap: 12px; padding: 2px 0;
+    border-bottom: 1px solid var(--bg-border); font-size: 11px;
+  }
+  .flight-event-ms  { color: var(--fg-muted); min-width: 80px; text-align: right; }
+  .flight-event-stage { color: var(--fg); }
+  .flight-event-detail { color: var(--fg-dim); font-size: 10px; }
+  .flight-bar-row {
+    display: flex; gap: 8px; align-items: center;
+    padding: 2px 0; font-size: 10px;
+  }
+  .flight-bar-label { color: var(--fg-muted); min-width: 160px; }
+  .flight-bar-track {
+    flex: 1; height: 6px; background: var(--bg-border); border-radius: 1px; overflow: hidden;
+  }
+  .flight-bar-fill { height: 100%; border-radius: 1px; }
+  .flight-bar-ms { color: var(--fg-dim); min-width: 70px; text-align: right; }
+
+  /* ── Conversations ────────────────────────────────────────────────────── */
+  .conv-row {
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--bg-border);
+    cursor: pointer;
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+  }
+  .conv-row:hover { background: var(--bg-hover); }
+  .conv-id   { color: var(--lavender); font-size: 11px; min-width: 130px; }
+  .conv-preview { color: var(--fg-dim); font-size: 11px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conv-meta { color: var(--fg-muted); font-size: 10px; }
+  .conv-score { color: var(--yellow); font-size: 10px; min-width: 50px; text-align: right; }
+
+  /* ── Operator ────────────────────────────────────────────────────────── */
+  #op-log {
+    flex: 1; overflow-y: auto; padding: 12px 16px; font-size: 12px; line-height: 1.6;
+  }
+  #op-log::-webkit-scrollbar { width: 4px; }
+  #op-log::-webkit-scrollbar-thumb { background: var(--bg-border); }
+  .op-query   { color: var(--cyan);    margin-bottom: 4px; }
+  .op-answer  { color: var(--fg);      white-space: pre-wrap; word-break: break-word; margin-bottom: 12px; }
+  .op-error   { color: var(--red);     margin-bottom: 12px; }
+  .op-pending { color: var(--yellow);  font-style: italic; }
+  .op-sep { border-top: 1px solid var(--bg-border); margin: 8px 0; }
+  #op-input-area {
+    padding: 10px 16px; background: var(--bg-panel);
+    border-top: 1px solid var(--bg-border);
+    display: flex; gap: 8px; flex-shrink: 0;
+  }
+  #op-input { flex: 1; }
+
+  /* ── Spinner ─────────────────────────────────────────────────────────── */
+  .spinner {
+    display: inline-block; width: 10px; height: 10px;
+    border: 2px solid var(--bg-border);
+    border-top-color: var(--lavender);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── π Vi mode toggle ───────────────────────────────────────────────── */
+  #vi-toggle {
+    position: fixed;
+    bottom: 10px;
+    right: 14px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--bg-panel);
+    border: 1px solid var(--bg-border);
+    color: var(--fg-muted);
+    font-size: 13px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9998;
+    transition: all 0.2s;
+    user-select: none;
+  }
+  #vi-toggle:hover { border-color: var(--lavender); color: var(--lavender); }
+  #vi-toggle.active {
+    background: var(--lavender-dim);
+    border-color: var(--lavender);
+    color: var(--bg);
+    box-shadow: 0 0 8px var(--lavender-dim);
+  }
+  #vi-toggle .tooltip {
+    display: none;
+    position: absolute;
+    right: 30px;
+    bottom: 0;
+    background: var(--bg-panel);
+    border: 1px solid var(--bg-border);
+    color: var(--fg-dim);
+    font-size: 10px;
+    padding: 2px 6px;
+    white-space: nowrap;
+    border-radius: 2px;
+    pointer-events: none;
+  }
+  #vi-toggle:hover .tooltip { display: block; }
+
+  /* ── Misc ────────────────────────────────────────────────────────────── */
+  .empty { color: var(--fg-muted); padding: 20px; text-align: center; font-size: 12px; }
+  .error-box {
+    background: #2a1010; border: 1px solid var(--red);
+    color: var(--red); padding: 8px 12px; border-radius: 2px; margin: 8px 0; font-size: 11px;
+  }
+  code {
+    background: var(--bg-border); padding: 1px 5px; border-radius: 2px;
+    font-family: 'Fira Code', monospace; font-size: 11px; color: var(--cyan);
+  }
+  .mono { font-family: 'VT323', monospace; }
+  hr { border: none; border-top: 1px solid var(--bg-border); margin: 8px 0; }
+</style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────────── -->
+<div id="header">
+  <div>
+    <span class="logo">BeigeBox</span>
+    <span class="sub" style="margin-left:12px">tap the line · own the conversation</span>
+  </div>
+  <div class="status-bar">
+    <span><span class="status-dot" id="proxy-dot"></span><span id="proxy-status" style="font-size:11px;color:var(--fg-dim)">connecting…</span></span>
+    <span id="clock"></span>
+  </div>
+</div>
+
+<!-- ── Tabs ────────────────────────────────────────────────────────────── -->
+<div id="tabs">
+  <div class="tab active" data-tab="dashboard" onclick="switchTab('dashboard')"><span class="tab-key">1</span>Dashboard</div>
+  <div class="tab" data-tab="chat"      onclick="switchTab('chat')">     <span class="tab-key">2</span>Chat</div>
+  <div class="tab" data-tab="convos"    onclick="switchTab('convos')">   <span class="tab-key">3</span>Conversations</div>
+  <div class="tab" data-tab="flight"    onclick="switchTab('flight')">   <span class="tab-key">4</span>Flight Recorder</div>
+  <div class="tab" data-tab="operator"  onclick="switchTab('operator')"> <span class="tab-key">5</span>Operator</div>
+  <div class="tab" data-tab="config"    onclick="switchTab('config')">   <span class="tab-key">6</span>Config</div>
+</div>
+
+<!-- ── Content ─────────────────────────────────────────────────────────── -->
+<div id="content">
+
+  <!-- 1. Dashboard -->
+  <div class="panel active" id="panel-dashboard">
+    <div class="toolbar">
+      <button onclick="loadDashboard()">↺ Refresh</button>
+      <span class="toolbar-spacer"></span>
+      <span class="last-updated" id="dash-updated"></span>
+    </div>
+    <div class="scroll-area" id="dash-body">
+      <div class="empty">Loading…</div>
+    </div>
+  </div>
+
+  <!-- 2. Chat -->
+  <div class="panel" id="panel-chat">
+    <div class="toolbar">
+      <span class="toolbar-label">Model:</span>
+      <select id="model-select" onchange="saveModel()"><option value="">default</option></select>
+      <button onclick="clearChat()" style="margin-left:auto">✕ Clear</button>
+    </div>
+    <div id="chat-messages"></div>
+    <div class="z-hint">z-commands: <code>z: search</code> <code>z: code</code> <code>z: complex</code> <code>z: help</code> — prefix your message</div>
+    <div id="chat-input-area">
+      <textarea id="chat-input" placeholder="Send a message… (Enter to send, Shift+Enter for newline)" rows="1"
+        onkeydown="chatKeydown(event)" oninput="autoResize(this)"></textarea>
+      <button class="primary" onclick="sendChat()" id="send-btn">Send</button>
+    </div>
+  </div>
+
+  <!-- 3. Conversations -->
+  <div class="panel" id="panel-convos">
+    <div class="toolbar">
+      <input id="search-input" placeholder="Semantic search…" style="width:300px"
+        onkeydown="if(event.key==='Enter')searchConvos()">
+      <button onclick="searchConvos()">Search</button>
+      <span class="toolbar-spacer"></span>
+      <span class="toolbar-label" id="search-status"></span>
+    </div>
+    <div class="scroll-area" id="convos-body">
+      <div class="empty">Enter a search query above to search conversations semantically.</div>
+    </div>
+  </div>
+
+  <!-- 4. Flight Recorder -->
+  <div class="panel" id="panel-flight">
+    <div class="toolbar">
+      <button onclick="loadFlight()">↺ Refresh</button>
+      <span class="toolbar-label" style="margin-left:8px">Count:</span>
+      <input id="flight-n" type="number" value="20" min="1" max="100" style="width:60px">
+      <span class="toolbar-spacer"></span>
+      <span class="last-updated" id="flight-updated"></span>
+    </div>
+    <div class="scroll-area" id="flight-body">
+      <div class="empty">Loading…</div>
+    </div>
+  </div>
+
+  <!-- 5. Operator -->
+  <div class="panel" id="panel-operator">
+    <div class="toolbar">
+      <span class="toolbar-label">Operator Agent — LangChain ReAct · web search · conversation memory · shell</span>
+      <span class="toolbar-spacer"></span>
+      <button onclick="clearOp()">✕ Clear</button>
+    </div>
+    <div id="op-log"></div>
+    <div id="op-input-area">
+      <input id="op-input" placeholder="Ask the operator anything…"
+        onkeydown="if(event.key==='Enter')runOp()">
+      <button class="primary" onclick="runOp()" id="op-btn">Run</button>
+    </div>
+  </div>
+
+  <!-- 6. Config -->
+  <div class="panel" id="panel-config">
+    <div class="toolbar">
+      <button onclick="loadConfig()">↺ Refresh</button>
+      <span class="toolbar-spacer"></span>
+      <span class="last-updated" id="config-updated"></span>
+    </div>
+    <div class="scroll-area" id="config-body">
+      <div class="empty">Loading…</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Vi mode toggle ───────────────────────────────────────────────────── -->
+<div id="vi-toggle" onclick="toggleViMode()" title="">
+  π
+  <span class="tooltip" id="vi-tooltip">vi mode: off</span>
+</div>
+
+<script>
+// ── State ───────────────────────────────────────────────────────────────────
+const BASE = '';  // same origin
+let chatHistory = [];
+let currentModel = localStorage.getItem('bb_model') || '';
+let viModeActive = false;
+
+// ── Vi mode ─────────────────────────────────────────────────────────────────
+function setViToggleState(active) {
+  viModeActive = active;
+  const btn = document.getElementById('vi-toggle');
+  const tip = document.getElementById('vi-tooltip');
+  btn.classList.toggle('active', active);
+  if (tip) tip.textContent = `vi mode: ${active ? 'on' : 'off'}`;
+}
+
+function injectViMode() {
+  if (document.getElementById('vi-script')) return;
+  const s = document.createElement('script');
+  s.id  = 'vi-script';
+  s.src = '/web/vi.js';
+  document.body.appendChild(s);
+}
+
+function removeViMode() {
+  const s = document.getElementById('vi-script');
+  if (s) s.remove();
+  const ind = document.getElementById('vi-indicator');
+  if (ind) ind.remove();
+}
+
+async function toggleViMode() {
+  try {
+    const d = await api('/api/v1/web-ui/toggle-vi-mode', { method: 'POST' });
+    setViToggleState(d.vi_mode);
+    if (d.vi_mode) injectViMode(); else removeViMode();
+  } catch(e) {
+    console.error('vi mode toggle failed:', e);
+  }
+}
+
+// ── Clock ───────────────────────────────────────────────────────────────────
+function updateClock() {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString();
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ── Tab switching ───────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
+  if (name === 'dashboard') loadDashboard();
+  if (name === 'flight')    loadFlight();
+  if (name === 'config')    loadConfig();
+  if (name === 'chat')      loadModels();
+}
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+  const map = {'1':'dashboard','2':'chat','3':'convos','4':'flight','5':'operator','6':'config'};
+  if (map[e.key]) switchTab(map[e.key]);
+});
+
+// ── API helpers ─────────────────────────────────────────────────────────────
+async function api(path, opts={}) {
+  const r = await fetch(BASE + path, opts);
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  return r.json();
+}
+
+function fmtTs(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleTimeString(); } catch { return iso; }
+}
+
+function badge(ok, yes='enabled', no='disabled') {
+  return ok
+    ? `<span class="badge badge-ok">${yes}</span>`
+    : `<span class="badge badge-dim">${no}</span>`;
+}
+
+function kv(key, val, cls='') {
+  const valCls = cls ? `kv-${cls}` : '';
+  return `<div class="kv-row"><span class="kv-key">${esc(key)}</span><span class="kv-val ${valCls}">${val}</span></div>`;
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function latencyClass(ms) {
+  if (ms < 100)  return 'fast';
+  if (ms < 500)  return 'medium';
+  if (ms < 2000) return 'slow';
+  return 'crit';
+}
+
+// ── Health polling ───────────────────────────────────────────────────────────
+async function pollHealth() {
+  try {
+    const d = await api('/beigebox/health');
+    document.getElementById('proxy-dot').className = 'status-dot ok';
+    document.getElementById('proxy-status').textContent = `v${d.version}`;
+  } catch {
+    document.getElementById('proxy-dot').className = 'status-dot err';
+    document.getElementById('proxy-status').textContent = 'offline';
+  }
+}
+pollHealth();
+setInterval(pollHealth, 10000);
+
+// ── 1. Dashboard ─────────────────────────────────────────────────────────────
+async function loadDashboard() {
+  const el = document.getElementById('dash-body');
+  el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
+  try {
+    const [status, stats, backends, info] = await Promise.allSettled([
+      api('/api/v1/status'),
+      api('/api/v1/stats'),
+      api('/api/v1/backends'),
+      api('/api/v1/info'),
+    ]);
+
+    let html = '';
+
+    // ── Stat cards ──
+    const s = stats.status === 'fulfilled' ? stats.value : {};
+    const convs = s.conversations || {};
+    html += '<div class="card-grid">';
+    html += card('Conversations', convs.total_conversations ?? '—', 'stored in sqlite');
+    html += card('Messages',      convs.total_messages ?? '—',       'across all convos');
+    html += card('Avg Length',    convs.avg_messages_per_conversation != null
+      ? Number(convs.avg_messages_per_conversation).toFixed(1) : '—', 'messages/convo');
+    const emb = s.embeddings || {};
+    html += card('Embeddings',    emb.total_embeddings ?? '—', 'in chromadb');
+    html += '</div>';
+
+    // ── Subsystems ──
+    const st = status.status === 'fulfilled' ? status.value : {};
+    html += '<div class="section-header">Subsystems</div>';
+    if (st.proxy) {
+      html += subsystem('Proxy',              true,                   `backend: ${esc(st.proxy.backend_url || '—')}`);
+      html += subsystem('Storage · SQLite',   st.storage?.sqlite,     st.storage?.stats ? `${st.storage.stats.total_messages ?? 0} messages` : '');
+      html += subsystem('Storage · ChromaDB', st.storage?.vector,     '');
+      html += subsystem('Decision LLM',       st.routing?.decision_llm?.enabled, st.routing?.decision_llm?.model ? `model: ${esc(st.routing.decision_llm.model)}` : 'disabled');
+      html += subsystem('Embedding Classifier', st.routing?.embedding_classifier?.ready, '');
+      html += subsystem('Tools',              st.tools?.enabled,      st.tools?.available?.join(', ') || '');
+    } else {
+      html += '<div class="error-box">Could not load subsystem status.</div>';
+    }
+
+    // ── Backends ──
+    const bk = backends.status === 'fulfilled' ? backends.value : {};
+    html += '<div class="section-header">Backends</div>';
+    if (bk.enabled) {
+      (bk.backends || []).forEach(b => {
+        html += subsystem(
+          `${esc(b.name)} <span class="badge badge-dim">${esc(b.provider)}</span>`,
+          b.healthy,
+          `priority ${b.priority} · ${b.url}`
+        );
+      });
+    } else {
+      const inf = info.status === 'fulfilled' ? info.value : {};
+      html += subsystem('Primary Backend', true, esc(inf.backend?.url || bk.primary_backend || '—'));
+      html += `<div style="color:var(--fg-muted);font-size:11px;padding:4px 0">Multi-backend routing disabled (backends_enabled: false)</div>`;
+    }
+
+    // ── Info ──
+    const i = info.status === 'fulfilled' ? info.value : {};
+    if (i.version) {
+      html += '<div class="section-header">Info</div>';
+      html += kv('version',          esc(i.version));
+      html += kv('default_model',    esc(i.backend?.default_model || '—'));
+      html += kv('model_advertising',esc(i.model_advertising || '—'));
+      html += kv('server',           `${esc(i.server?.host || '0.0.0.0')}:${i.server?.port || 8000}`);
+    }
+
+    document.getElementById('dash-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="error-box">Failed to load dashboard: ${esc(e.message)}</div>`;
+  }
+}
+
+function card(label, value, sub) {
+  return `<div class="card"><div class="card-label">${esc(label)}</div><div class="card-value">${esc(String(value))}</div><div class="card-sub">${esc(sub)}</div></div>`;
+}
+
+function subsystem(name, ok, detail) {
+  const dot = `<span class="status-dot ${ok ? 'ok' : 'err'}" style="display:inline-block;vertical-align:middle;margin-right:6px"></span>`;
+  return `<div class="subsystem-row">${dot}<span class="subsystem-name">${name}</span><span class="subsystem-detail">${esc(detail)}</span></div>`;
+}
+
+// ── 2. Chat ──────────────────────────────────────────────────────────────────
+async function loadModels() {
+  try {
+    const d = await api('/v1/models');
+    const sel = document.getElementById('model-select');
+    const cur = currentModel;
+    sel.innerHTML = '<option value="">— default —</option>';
+    (d.data || d.models || []).forEach(m => {
+      const id = m.id || m.name || m;
+      const opt = document.createElement('option');
+      opt.value = id; opt.textContent = id;
+      if (id === cur) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  } catch {}
+}
+
+function saveModel() {
+  currentModel = document.getElementById('model-select').value;
+  localStorage.setItem('bb_model', currentModel);
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+function chatKeydown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+}
+
+function clearChat() {
+  chatHistory = [];
+  document.getElementById('chat-messages').innerHTML = '';
+}
+
+async function sendChat() {
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+
+  input.value = '';
+  input.style.height = 'auto';
+
+  const model = document.getElementById('model-select').value;
+  appendMsg('user', text, model || 'default');
+  chatHistory.push({ role: 'user', content: text });
+
+  const sendBtn = document.getElementById('send-btn');
+  sendBtn.disabled = true;
+
+  // Typing indicator
+  const typingId = 'typing-' + Date.now();
+  const msgDiv = document.getElementById('chat-messages');
+  msgDiv.insertAdjacentHTML('beforeend',
+    `<div class="typing-indicator" id="${typingId}"><span></span><span></span><span></span></div>`);
+  msgDiv.scrollTop = msgDiv.scrollHeight;
+
+  try {
+    const body = { messages: chatHistory, stream: true };
+    if (model) body.model = model;
+
+    const resp = await fetch(BASE + '/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer beigebox' },
+      body: JSON.stringify(body),
+    });
+
+    document.getElementById(typingId)?.remove();
+
+    if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = '';
+    let assistantDiv = null;
+    let bubble = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      for (const line of chunk.split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6).trim();
+        if (data === '[DONE]') break;
+        try {
+          const j = JSON.parse(data);
+          const delta = j.choices?.[0]?.delta?.content || '';
+          if (delta) {
+            fullText += delta;
+            if (!assistantDiv) {
+              const usedModel = j.model || model || 'assistant';
+              assistantDiv = appendMsg('assistant', '', usedModel);
+              bubble = assistantDiv.querySelector('.bubble');
+            }
+            if (bubble) bubble.textContent = fullText;
+            msgDiv.scrollTop = msgDiv.scrollHeight;
+          }
+        } catch {}
+      }
+    }
+
+    if (fullText) chatHistory.push({ role: 'assistant', content: fullText });
+
+  } catch(e) {
+    document.getElementById(typingId)?.remove();
+    appendMsg('assistant', `Error: ${e.message}`, 'error');
+  }
+
+  sendBtn.disabled = false;
+  input.focus();
+}
+
+function appendMsg(role, text, model) {
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  div.innerHTML = `
+    <div class="meta">${esc(role === 'user' ? 'you' : model)} · ${new Date().toLocaleTimeString()}</div>
+    <div class="bubble">${esc(text)}</div>`;
+  document.getElementById('chat-messages').appendChild(div);
+  document.getElementById('chat-messages').scrollTop = 999999;
+  return div;
+}
+
+// ── 3. Conversations ─────────────────────────────────────────────────────────
+async function searchConvos() {
+  const q = document.getElementById('search-input').value.trim();
+  if (!q) return;
+  const el = document.getElementById('convos-body');
+  const status = document.getElementById('search-status');
+  el.innerHTML = '<div class="empty"><span class="spinner"></span> Searching…</div>';
+  status.textContent = '';
+  try {
+    const d = await api(`/beigebox/search?q=${encodeURIComponent(q)}&n=20`);
+    const results = d.results || [];
+    status.textContent = `${results.length} results`;
+    if (!results.length) {
+      el.innerHTML = '<div class="empty">No results found.</div>';
+      return;
+    }
+    let html = `<div class="section-header">Results for "${esc(q)}"</div>`;
+    results.forEach(r => {
+      const score = r.score != null ? (r.score * 100).toFixed(0) + '%' : '';
+      html += `<div class="conv-row" onclick="loadReplay('${esc(r.conversation_id || '')}')">
+        <span class="conv-id">${esc((r.conversation_id || '').slice(0,16))}</span>
+        <span class="conv-preview">${esc(r.content || '')}</span>
+        <span class="conv-meta">${esc(r.role || '')} · ${fmtTs(r.timestamp)}</span>
+        <span class="conv-score">${esc(score)}</span>
+      </div>`;
+    });
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="error-box">Search failed: ${esc(e.message)}</div>`;
+  }
+}
+
+async function loadReplay(convId) {
+  if (!convId) return;
+  const el = document.getElementById('convos-body');
+  el.insertAdjacentHTML('afterbegin',
+    `<div class="section-header">Replay: ${esc(convId.slice(0,16))}</div>
+     <div id="replay-body"><div class="empty"><span class="spinner"></span> Loading replay…</div></div>`);
+  try {
+    const d = await api(`/api/v1/conversation/${convId}/replay`);
+    if (!d.enabled) {
+      document.getElementById('replay-body').innerHTML =
+        `<div style="color:var(--fg-muted);font-size:11px;padding:8px 0">${esc(d.message || 'Replay disabled.')}</div>`;
+      return;
+    }
+    let html = '';
+    (d.messages || []).forEach(m => {
+      const routeInfo = m.routing ? ` <span class="badge badge-lav">${esc(m.routing.method||'')}</span>` : '';
+      const toolInfo  = m.tools?.length ? ` <span class="badge badge-ok">tools: ${esc(m.tools.join(', '))}</span>` : '';
+      html += `<div class="kv-row">
+        <span class="kv-key">${esc(m.role)}</span>
+        <span class="kv-val">${esc((m.content||'').slice(0,120))}${routeInfo}${toolInfo}</span>
+      </div>`;
+    });
+    document.getElementById('replay-body').innerHTML = html || '<div class="empty">No messages.</div>';
+  } catch(e) {
+    document.getElementById('replay-body').innerHTML =
+      `<div class="error-box">Replay failed: ${esc(e.message)}</div>`;
+  }
+}
+
+// ── 4. Flight Recorder ───────────────────────────────────────────────────────
+async function loadFlight() {
+  const el = document.getElementById('flight-body');
+  const n  = document.getElementById('flight-n').value || 20;
+  el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
+  try {
+    const d = await api(`/api/v1/flight-recorder?n=${n}`);
+    document.getElementById('flight-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
+    if (!d.enabled) {
+      el.innerHTML = `<div class="error-box">${esc(d.message)}</div>
+        <div style="color:var(--fg-muted);font-size:11px;padding:8px">
+          Enable with <code>flight_recorder.enabled: true</code> in config.yaml
+        </div>`;
+      return;
+    }
+    const records = d.records || [];
+    if (!records.length) {
+      el.innerHTML = '<div class="empty">No flight records yet. Send requests through BeigeBox.</div>';
+      return;
+    }
+    let html = `<div style="color:var(--fg-muted);font-size:11px;padding:0 0 8px">${d.count} total records · showing ${records.length}</div>`;
+    records.slice().reverse().forEach(r => {
+      const lc = latencyClass(r.total_ms);
+      html += `<div class="flight-record" id="fr-${esc(r.id)}">
+        <div class="flight-header" onclick="toggleFlight('${esc(r.id)}')">
+          <span class="flight-id-text">◈ ${esc(r.id)}</span>
+          <span class="flight-model-text">${esc(r.model || '')}</span>
+          <span style="flex:1"></span>
+          <span style="color:var(--fg-muted);font-size:10px">${r.events} events</span>
+          <span class="flight-total ${lc}">${r.total_ms.toFixed(0)}ms</span>
+          <span style="color:var(--fg-muted);font-size:11px">▸</span>
+        </div>
+        <div class="flight-events" id="fre-${esc(r.id)}">
+          <div class="empty"><span class="spinner"></span> Click to expand</div>
+        </div>
+      </div>`;
+    });
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="error-box">Failed to load flight recorder: ${esc(e.message)}</div>`;
+  }
+}
+
+async function toggleFlight(id) {
+  const card = document.getElementById('fr-' + id);
+  const body = document.getElementById('fre-' + id);
+  if (!card) return;
+  const expanding = !card.classList.contains('expanded');
+  card.classList.toggle('expanded');
+  if (expanding && body.querySelector('.spinner')) {
+    try {
+      const d = await api('/api/v1/flight-recorder/' + id);
+      let html = '';
+      (d.events || []).forEach(ev => {
+        const det = ev.details ? Object.entries(ev.details).map(([k,v]) => `${k}=${v}`).join(' ') : '';
+        html += `<div class="flight-event">
+          <span class="flight-event-ms">${ev.elapsed_ms.toFixed(1)}ms</span>
+          <span class="flight-event-stage">${esc(ev.stage)}</span>
+          <span class="flight-event-detail">${esc(det)}</span>
+        </div>`;
+      });
+      // Breakdown bars
+      const bk = d.summary?.breakdown || {};
+      if (Object.keys(bk).length) {
+        html += '<hr>';
+        const total = d.summary.total_ms || 1;
+        Object.entries(bk).forEach(([stage, info]) => {
+          const pct = info.pct;
+          const lc  = latencyClass(info.ms);
+          const color = lc === 'fast' ? 'var(--flight-fast)' :
+                        lc === 'medium' ? 'var(--flight-medium)' :
+                        lc === 'slow' ? 'var(--flight-slow)' : 'var(--flight-crit)';
+          html += `<div class="flight-bar-row">
+            <span class="flight-bar-label">${esc(stage)}</span>
+            <div class="flight-bar-track"><div class="flight-bar-fill" style="width:${pct}%;background:${color}"></div></div>
+            <span class="flight-bar-ms">${info.ms.toFixed(0)}ms (${pct}%)</span>
+          </div>`;
+        });
+      }
+      body.innerHTML = html || '<div class="empty">No events.</div>';
+    } catch(e) {
+      body.innerHTML = `<div class="error-box">${esc(e.message)}</div>`;
+    }
+  }
+}
+
+// ── 5. Operator ───────────────────────────────────────────────────────────────
+async function runOp() {
+  const input = document.getElementById('op-input');
+  const query = input.value.trim();
+  if (!query) return;
+  input.value = '';
+
+  const log = document.getElementById('op-log');
+  const btn = document.getElementById('op-btn');
+  btn.disabled = true;
+
+  log.insertAdjacentHTML('beforeend',
+    `<div class="op-query">▶ ${esc(query)}</div>
+     <div class="op-pending" id="op-pending">⟳ operator thinking…</div>`);
+  log.scrollTop = log.scrollHeight;
+
+  try {
+    const d = await api('/api/v1/operator', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+    });
+    document.getElementById('op-pending')?.remove();
+    if (d.success) {
+      log.insertAdjacentHTML('beforeend',
+        `<div class="op-answer">${esc(d.answer)}</div><div class="op-sep"></div>`);
+    } else {
+      log.insertAdjacentHTML('beforeend',
+        `<div class="op-error">✗ ${esc(d.error || 'unknown error')}</div><div class="op-sep"></div>`);
+    }
+  } catch(e) {
+    document.getElementById('op-pending')?.remove();
+    log.insertAdjacentHTML('beforeend',
+      `<div class="op-error">✗ ${esc(e.message)}</div><div class="op-sep"></div>`);
+  }
+
+  btn.disabled = false;
+  log.scrollTop = log.scrollHeight;
+  input.focus();
+}
+
+function clearOp() {
+  document.getElementById('op-log').innerHTML = '';
+}
+
+// ── 6. Config ─────────────────────────────────────────────────────────────────
+async function loadConfig() {
+  const el = document.getElementById('config-body');
+  el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
+  try {
+    const [cfg, tools, status] = await Promise.allSettled([
+      api('/api/v1/config'),
+      api('/api/v1/tools'),
+      api('/api/v1/status'),
+    ]);
+
+    let html = '';
+    const c = cfg.status === 'fulfilled' ? cfg.value : {};
+    const t = tools.status === 'fulfilled' ? tools.value : {};
+    const s = status.status === 'fulfilled' ? status.value : {};
+
+    html += '<div class="section-header">Backend</div>';
+    html += kv('url',           esc(c.backend?.url || '—'));
+    html += kv('default_model', esc(c.backend?.default_model || '—'));
+    html += kv('timeout',       esc(c.backend?.timeout ?? '—'));
+
+    html += '<div class="section-header">Server</div>';
+    html += kv('host', esc(c.server?.host || '0.0.0.0'));
+    html += kv('port', esc(c.server?.port || 8000));
+
+    html += '<div class="section-header">Embedding</div>';
+    html += kv('model', esc(c.embedding?.model || '—'));
+
+    html += '<div class="section-header">Storage</div>';
+    html += kv('log_conversations', badge(c.storage?.log_conversations));
+
+    html += '<div class="section-header">Decision LLM</div>';
+    html += kv('enabled', badge(c.decision_llm?.enabled));
+    if (c.decision_llm?.model) html += kv('model', esc(c.decision_llm.model));
+
+    html += '<div class="section-header">Tools</div>';
+    html += kv('enabled', badge(t.enabled || c.tools?.enabled));
+    (t.tools || []).forEach(name => {
+      html += kv(name, '<span class="badge badge-ok">registered</span>');
+    });
+
+    html += '<div class="section-header">Operator</div>';
+    html += kv('model', esc(s.operator?.model || '—'));
+    html += kv('shell', badge(s.operator?.shell_enabled));
+
+    html += '<div class="section-header">Model Advertising</div>';
+    html += kv('mode', esc(c.model_advertising?.mode || '—'));
+
+    document.getElementById('config-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="error-box">Failed to load config: ${esc(e.message)}</div>`;
+  }
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+loadDashboard();
+loadModels();
+
+// Check vi mode state from runtime config — inject JS only if enabled
+(async function initViMode() {
+  try {
+    const d = await api('/api/v1/config');
+    const enabled = d.web_ui?.vi_mode === true;
+    setViToggleState(enabled);
+    if (enabled) injectViMode();
+  } catch {}
+})();
+</script>
+</body>
+</html>

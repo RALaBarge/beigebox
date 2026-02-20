@@ -20,7 +20,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from beigebox.config import get_config
+from beigebox.config import get_config, get_runtime_config, update_runtime_config
 from beigebox.proxy import Proxy
 from beigebox.storage.sqlite_store import SQLiteStore
 from beigebox.storage.vector_store import VectorStore
@@ -317,6 +317,10 @@ async def api_config():
             "model": decision_agent.model if decision_agent else "",
         },
         "model_advertising": cfg.get("model_advertising", {}),
+        "web_ui": {
+            "vi_mode": get_runtime_config().get("web_ui_vi_mode", False),
+            "palette": get_runtime_config().get("web_ui_palette", "default"),
+        },
     })
 
 
@@ -586,6 +590,27 @@ async def api_operator(request: Request):
             }, status_code=503)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+
+
+# ---------------------------------------------------------------------------
+# Web UI settings
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/web-ui/toggle-vi-mode")
+async def toggle_vi_mode():
+    """Toggle vi mode in runtime_config.yaml. Returns new state."""
+    rt = get_runtime_config()
+    current = rt.get("web_ui_vi_mode", False)
+    new_val = not current
+    ok = update_runtime_config("web_ui_vi_mode", new_val)
+    return JSONResponse({"vi_mode": new_val, "ok": ok})
+
+
+# Serve static web assets (vi.js etc.) — must come before catch-all routes
+from pathlib import Path as _Path
+_web_dir = _Path(__file__).parent / "web"
+if _web_dir.exists():
+    app.mount("/web", StaticFiles(directory=str(_web_dir)), name="web")
 
 
 # ---------------------------------------------------------------------------

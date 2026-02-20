@@ -35,7 +35,7 @@ class BeigeBoxApp(App):
     """BeigeBox hacker TUI."""
     CSS_PATH = str(Path(__file__).parent / "styles" / "main.tcss")
     TITLE = "BeigeBox Console"
-    SUB_TITLE = "tap the line · own the conversation"
+    SUB_TITLE = "Tap the line · Control the carrier"
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("q", "quit", "Disconnect", priority=True),
         Binding("1", "switch_tab('config')",    "Config",    show=True),

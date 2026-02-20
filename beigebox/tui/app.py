@@ -17,6 +17,7 @@ from textual.widgets import Footer, Header, Static, TabbedContent, TabPane
 from textual.reactive import reactive
 from beigebox.tui.screens.tap import TapScreen
 from beigebox.tui.screens.config import ConfigScreen
+from beigebox.tui.screens.flight import FlightScreen
 
 # ---------------------------------------------------------------------------
 # Screen registry — add new screens here to extend the TUI
@@ -25,6 +26,7 @@ from beigebox.tui.screens.config import ConfigScreen
 SCREEN_REGISTRY: list[tuple[str, str, str, type[Screen]]] = [
     ("1", "Config",  "flash",   ConfigScreen),
     ("2", "Tap",     "tap",     TapScreen),
+    ("3", "Flight",  "flight",  FlightScreen),
     # ("3", "Sweep",  "sweep",   SweepScreen),   # future
     # ("4", "Stats",  "ring",    StatsScreen),   # future
     # ("5", "Hooks",  "hooks",   HooksScreen),   # future
@@ -33,16 +35,17 @@ class BeigeBoxApp(App):
     """BeigeBox hacker TUI."""
     CSS_PATH = str(Path(__file__).parent / "styles" / "main.tcss")
     TITLE = "BeigeBox Console"
-    SUB_TITLE = "tap the line · own the conversation"
+    SUB_TITLE = "Tap the line · Control the carrier"
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("q", "quit", "Disconnect", priority=True),
         Binding("1", "switch_tab('flash')",   "Config",  show=True),
+        Binding("3", "switch_tab('flight')", "Flight", show=True),
         Binding("2", "switch_tab('tap')",      "Tap",     show=True),
         Binding("r", "refresh_all",            "Refresh", show=True),
     ]
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with TabbedContent(initial=""):
+        with TabbedContent():
             for _key, label, tab_id, screen_cls in SCREEN_REGISTRY:
                 with TabPane(label, id=tab_id):
                     yield screen_cls()

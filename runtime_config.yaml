@@ -22,5 +22,8 @@ runtime:
   tools_disabled: []         # e.g. ["web_search", "memory"]
   # Extra system prompt injected before every request (blank = none)
   system_prompt_prefix: ""
+  # Web UI settings
+  web_ui_vi_mode: false      # true = enable vi keybindings in chat/operator inputs
+  web_ui_palette: "default"  # "default" | "random" | "dracula" | "gruvbox" | "nord"
   # Log level override for this session
   log_level: ""              # "DEBUG" | "INFO" | "WARNING" | "ERROR" | "" = use config.yaml

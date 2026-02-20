@@ -135,3 +135,13 @@ Tab:hover {
 .wire-model {
     color: $lavender_dim;
 }
+
+/* ── Flight Recorder ─────────────────────────────────────────── */
+.flight-id        { color: #b39ddb; }
+.flight-model     { color: #ce93d8; }
+.flight-stage     { color: #e0e0e0; }
+.flight-separator { color: #4a4a5a; }
+.flight-fast      { color: #a5d6a7; }
+.flight-medium    { color: #fff176; }
+.flight-slow      { color: #ffcc80; }
+.flight-critical  { color: #ef9a9a; }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BeigeBox CLI — Tap the line. Own the conversation.
+BeigeBox CLI — Tap the line. Control the carrier.
 
 Named after the beige box — the phone phreaker device used to tap
 a phone line and intercept both sides of a conversation.
@@ -39,7 +39,7 @@ BANNER = r"""
     ║   ██   ██ ██    ██  ██ ██                        ║
     ║   ██████   ██████  ██   ██                       ║
     ║                                                  ║
-    ║   Tap the line. Own the conversation.   v""" + __version__ + r"""  ║
+    ║   Tap the line. Control the carrier.   v""" + __version__ + r"""  ║
     ║                                                  ║
     ╚══════════════════════════════════════════════════╝
 """
@@ -429,7 +429,7 @@ def _add_command(subparsers, names, help_text, func, setup_fn=None):
 def main():
     parser = argparse.ArgumentParser(
         prog="beigebox",
-        description="BeigeBox — Tap the line. Own the conversation.",
+        description="BeigeBox — Tap the line. Control the carrier.",
         epilog=(
             "Each command has a phreaker name and standard aliases.\n"
             "Example: 'beigebox dial' and 'beigebox start' do the same thing.\n"
