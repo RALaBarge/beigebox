@@ -182,7 +182,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="BeigeBox",
     description="Tap the line. Control the carrier.",
-    version="0.7.0",
+    version="0.8.0",
     lifespan=lifespan,
 )
 
@@ -260,7 +260,7 @@ async def health():
     """Health check."""
     return JSONResponse({
         "status": "ok",
-        "version": "0.7.0",
+        "version": "0.8.0",
         "decision_llm": decision_agent.enabled if decision_agent else False,
     })
 
@@ -274,7 +274,7 @@ async def api_info():
     """System info — what features are available."""
     cfg = get_config()
     return JSONResponse({
-        "version": "0.7.0",
+        "version": "0.8.0",
         "name": "BeigeBox",
         "description": "Transparent Pythonic LLM Proxy",
         "server": {
@@ -400,6 +400,25 @@ async def api_costs(days: int = 30):
     return JSONResponse(stats)
 
 
+@app.get("/api/v1/model-performance")
+async def api_model_performance(days: int = 30):
+    """
+    Per-model latency and throughput stats.
+
+    Query params:
+        days  int  — lookback window (default 30)
+
+    Returns avg/p50/p95 latency, request count, avg tokens, and total cost per model.
+    Note: latency data is only recorded for non-streaming requests via the
+    multi-backend router. Streaming latency tracking is approximate.
+    """
+    if not sqlite_store:
+        return JSONResponse({"error": "Storage not initialized"}, status_code=503)
+    data = sqlite_store.get_model_performance(days=days)
+    data["enabled"] = True
+    return JSONResponse(data)
+
+
 @app.get("/api/v1/backends")
 async def api_backends():
     """Health and status of all configured backends."""
@@ -486,8 +505,114 @@ async def api_conversation_replay(conv_id: str):
 
 
 # ---------------------------------------------------------------------------
-# Semantic Map (v0.6)
+# Conversation Fork (v0.7)
 # ---------------------------------------------------------------------------
+
+@app.post("/api/v1/conversation/{conv_id}/fork")
+async def api_conversation_fork(conv_id: str, request: Request):
+    """
+    Fork a conversation into a new one.
+
+    Body (JSON, all optional):
+        branch_at  int   — 0-based message index to branch at (inclusive).
+                           Omit to copy the full conversation.
+
+    Returns:
+        new_conversation_id  str
+        messages_copied      int
+        source_conversation  str
+    """
+    if not sqlite_store:
+        return JSONResponse({"error": "Storage not initialized"}, status_code=503)
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    branch_at = body.get("branch_at")  # None → full copy
+    if branch_at is not None:
+        try:
+            branch_at = int(branch_at)
+        except (ValueError, TypeError):
+            return JSONResponse({"error": "branch_at must be an integer"}, status_code=400)
+
+    from uuid import uuid4
+    new_conv_id = uuid4().hex
+
+    try:
+        copied = sqlite_store.fork_conversation(
+            source_conv_id=conv_id,
+            new_conv_id=new_conv_id,
+            branch_at=branch_at,
+        )
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+    if copied == 0:
+        return JSONResponse(
+            {"error": f"Conversation '{conv_id}' not found or empty"},
+            status_code=404,
+        )
+
+    return JSONResponse({
+        "new_conversation_id": new_conv_id,
+        "messages_copied": copied,
+        "source_conversation": conv_id,
+        "branch_at": branch_at,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Tap — wire log reader with filters (v0.7)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v1/tap")
+async def api_tap(
+    n: int = 50,
+    role: str | None = None,
+    dir: str | None = None,
+):
+    """
+    Return recent wire log entries with optional filters.
+
+    Query params:
+        n     int    — max entries to return (default 50, max 500)
+        role  str    — filter by role: user|assistant|system|decision|tool
+        dir   str    — filter by direction: inbound|outbound|internal
+    """
+    import json as _json
+    from pathlib import Path as _P
+    cfg = get_config()
+    wire_path = _P(cfg.get("wiretap", {}).get("path", "./data/wire.jsonl"))
+
+    if not wire_path.exists():
+        return JSONResponse({"entries": [], "total": 0, "filtered": 0})
+
+    n = min(max(1, n), 500)
+    entries = []
+    try:
+        with open(wire_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = _json.loads(line)
+                    if role and entry.get("role") != role:
+                        continue
+                    if dir and entry.get("dir") != dir:
+                        continue
+                    entries.append(entry)
+                except _json.JSONDecodeError:
+                    pass
+    except OSError as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+    total = len(entries)
+    entries = entries[-n:]
+    return JSONResponse({"entries": entries, "total": total, "filtered": len(entries)})
+
 
 @app.get("/api/v1/conversation/{conv_id}/semantic-map")
 async def api_semantic_map(conv_id: str):

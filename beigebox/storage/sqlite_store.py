@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS messages (
     timestamp TEXT NOT NULL,
     token_count INTEGER DEFAULT 0,
     cost_usd REAL DEFAULT NULL,
+    latency_ms REAL DEFAULT NULL,
     custom_field_1 TEXT DEFAULT NULL,
     custom_field_2 TEXT DEFAULT NULL,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id)
@@ -45,6 +46,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_role
 # v0.6 migration: add columns to existing databases (safe to re-run)
 MIGRATIONS = [
     "ALTER TABLE messages ADD COLUMN cost_usd REAL DEFAULT NULL",
+    "ALTER TABLE messages ADD COLUMN latency_ms REAL DEFAULT NULL",
     "ALTER TABLE messages ADD COLUMN custom_field_1 TEXT DEFAULT NULL",
     "ALTER TABLE messages ADD COLUMN custom_field_2 TEXT DEFAULT NULL",
 ]
@@ -91,16 +93,16 @@ class SQLiteStore:
                 (conversation_id, created_at),
             )
 
-    def store_message(self, msg: Message, cost_usd: float | None = None):
+    def store_message(self, msg: Message, cost_usd: float | None = None, latency_ms: float | None = None):
         """Store a single message. Creates conversation if needed."""
         self.ensure_conversation(msg.conversation_id, msg.timestamp)
         with self._connect() as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO messages
-                   (id, conversation_id, role, content, model, timestamp, token_count, cost_usd)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (id, conversation_id, role, content, model, timestamp, token_count, cost_usd, latency_ms)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (msg.id, msg.conversation_id, msg.role, msg.content,
-                 msg.model, msg.timestamp, msg.token_count, cost_usd),
+                 msg.model, msg.timestamp, msg.token_count, cost_usd, latency_ms),
             )
         logger.debug("Stored message %s (role=%s, conv=%s)", msg.id, msg.role, msg.conversation_id)
 
@@ -129,6 +131,125 @@ class SQLiteStore:
                 (limit,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def get_model_performance(self, days: int = 30) -> dict:
+        """
+        Return per-model latency and throughput stats for the given period.
+
+        Returns:
+            {
+                "by_model": {
+                    "<model>": {
+                        "requests":       int,
+                        "avg_latency_ms": float,
+                        "p50_latency_ms": float,
+                        "p95_latency_ms": float,
+                        "avg_tokens":     float,
+                        "total_cost_usd": float,
+                    }, ...
+                },
+                "days_queried": int,
+            }
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT model,
+                          COUNT(*) as requests,
+                          AVG(latency_ms) as avg_lat,
+                          AVG(token_count) as avg_tok,
+                          COALESCE(SUM(cost_usd), 0) as total_cost
+                   FROM messages
+                   WHERE role = 'assistant'
+                     AND latency_ms IS NOT NULL
+                     AND timestamp > datetime('now', ?)
+                   GROUP BY model
+                   ORDER BY requests DESC""",
+                (f"-{days} days",),
+            ).fetchall()
+
+            latencies_by_model: dict[str, list[float]] = {}
+            for row in rows:
+                model = row["model"]
+                lat_rows = conn.execute(
+                    """SELECT latency_ms FROM messages
+                       WHERE role = 'assistant'
+                         AND model = ?
+                         AND latency_ms IS NOT NULL
+                         AND timestamp > datetime('now', ?)
+                       ORDER BY latency_ms""",
+                    (model, f"-{days} days"),
+                ).fetchall()
+                latencies_by_model[model] = [r["latency_ms"] for r in lat_rows]
+
+        def _pct(vals: list[float], p: float) -> float:
+            if not vals:
+                return 0.0
+            idx = min(int(len(vals) * p / 100), len(vals) - 1)
+            return round(vals[idx], 1)
+
+        by_model = {}
+        for row in rows:
+            model = row["model"]
+            lats = latencies_by_model.get(model, [])
+            by_model[model] = {
+                "requests":       row["requests"],
+                "avg_latency_ms": round(row["avg_lat"] or 0, 1),
+                "p50_latency_ms": _pct(lats, 50),
+                "p95_latency_ms": _pct(lats, 95),
+                "avg_tokens":     round(row["avg_tok"] or 0, 1),
+                "total_cost_usd": round(row["total_cost"] or 0, 6),
+            }
+
+        return {"by_model": by_model, "days_queried": days}
+
+    def fork_conversation(
+        self,
+        source_conv_id: str,
+        new_conv_id: str,
+        branch_at: int | None = None,
+    ) -> int:
+        """
+        Fork a conversation into a new one.
+
+        Copies messages from source_conv_id into new_conv_id.
+        If branch_at is given, only messages 0..branch_at (inclusive) are copied.
+        Returns the number of messages copied.
+        """
+        messages = self.get_conversation(source_conv_id)
+        if branch_at is not None:
+            messages = messages[: branch_at + 1]
+        if not messages:
+            return 0
+
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        self.ensure_conversation(new_conv_id, now)
+
+        with self._connect() as conn:
+            for msg in messages:
+                from uuid import uuid4
+                conn.execute(
+                    """INSERT INTO messages
+                       (id, conversation_id, role, content, model,
+                        timestamp, token_count, cost_usd, latency_ms)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        uuid4().hex,
+                        new_conv_id,
+                        msg["role"],
+                        msg["content"],
+                        msg.get("model", ""),
+                        msg["timestamp"],
+                        msg.get("token_count", 0),
+                        msg.get("cost_usd"),
+                        msg.get("latency_ms"),
+                    ),
+                )
+        logger.info(
+            "Forked %d messages from %s → %s (branch_at=%s)",
+            len(messages), source_conv_id, new_conv_id, branch_at,
+        )
+        return len(messages)
 
     def export_all_json(self) -> list[dict]:
         """Export all conversations in OpenAI-compatible format."""

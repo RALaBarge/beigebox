@@ -472,6 +472,32 @@
   }
   #vi-toggle:hover .tooltip { display: block; }
 
+  /* ── Cost charts ─────────────────────────────────────────────────────── */
+  .chart-wrap {
+    background: var(--bg-panel);
+    border: 1px solid var(--bg-border);
+    border-radius: 2px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+  .chart-title {
+    color: var(--fg-muted);
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  canvas.bb-chart {
+    display: block;
+    width: 100%;
+    image-rendering: pixelated;
+  }
+  .cost-disabled {
+    color: var(--fg-muted);
+    font-size: 11px;
+    padding: 8px 0 4px;
+  }
+
   /* ── Misc ────────────────────────────────────────────────────────────── */
   .empty { color: var(--fg-muted); padding: 20px; text-align: center; font-size: 12px; }
   .error-box {
@@ -506,8 +532,9 @@
   <div class="tab" data-tab="chat"      onclick="switchTab('chat')">     <span class="tab-key">2</span>Chat</div>
   <div class="tab" data-tab="convos"    onclick="switchTab('convos')">   <span class="tab-key">3</span>Conversations</div>
   <div class="tab" data-tab="flight"    onclick="switchTab('flight')">   <span class="tab-key">4</span>Flight Recorder</div>
-  <div class="tab" data-tab="operator"  onclick="switchTab('operator')"> <span class="tab-key">5</span>Operator</div>
-  <div class="tab" data-tab="config"    onclick="switchTab('config')">   <span class="tab-key">6</span>Config</div>
+  <div class="tab" data-tab="tap"       onclick="switchTab('tap')">      <span class="tab-key">5</span>Tap</div>
+  <div class="tab" data-tab="operator"  onclick="switchTab('operator')"> <span class="tab-key">6</span>Operator</div>
+  <div class="tab" data-tab="config"    onclick="switchTab('config')">   <span class="tab-key">7</span>Config</div>
 </div>
 
 <!-- ── Content ─────────────────────────────────────────────────────────── -->
@@ -569,7 +596,40 @@
     </div>
   </div>
 
-  <!-- 5. Operator -->
+  <!-- 5. Tap -->
+  <div class="panel" id="panel-tap">
+    <div class="toolbar">
+      <button onclick="loadTap()">↺ Refresh</button>
+      <span class="toolbar-label" style="margin-left:8px">Role:</span>
+      <select id="tap-role" onchange="loadTap()" style="width:110px">
+        <option value="">all</option>
+        <option value="user">user</option>
+        <option value="assistant">assistant</option>
+        <option value="system">system</option>
+        <option value="decision">decision</option>
+        <option value="tool">tool</option>
+      </select>
+      <span class="toolbar-label" style="margin-left:8px">Direction:</span>
+      <select id="tap-dir" onchange="loadTap()" style="width:110px">
+        <option value="">all</option>
+        <option value="inbound">inbound</option>
+        <option value="outbound">outbound</option>
+        <option value="internal">internal</option>
+      </select>
+      <span class="toolbar-label" style="margin-left:8px">Lines:</span>
+      <input id="tap-n" type="number" value="50" min="10" max="500" style="width:60px" onchange="loadTap()">
+      <label style="margin-left:8px;color:var(--fg-dim);font-size:11px;cursor:pointer">
+        <input type="checkbox" id="tap-live" onchange="toggleTapLive()"> live
+      </label>
+      <span class="toolbar-spacer"></span>
+      <span class="last-updated" id="tap-updated"></span>
+    </div>
+    <div class="scroll-area" id="tap-body" style="font-size:11px;line-height:1.6">
+      <div class="empty">Loading…</div>
+    </div>
+  </div>
+
+  <!-- 6. Operator -->
   <div class="panel" id="panel-operator">
     <div class="toolbar">
       <span class="toolbar-label">Operator Agent — LangChain ReAct · web search · conversation memory · shell</span>
@@ -727,13 +787,14 @@ function switchTab(name) {
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
   if (name === 'dashboard') loadDashboard();
   if (name === 'flight')    loadFlight();
+  if (name === 'tap')       loadTap();
   if (name === 'config')    loadConfig();
   if (name === 'chat')      loadModels();
 }
 
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
-  const map = {'1':'dashboard','2':'chat','3':'convos','4':'flight','5':'operator','6':'config'};
+  const map = {'1':'dashboard','2':'chat','3':'convos','4':'flight','5':'tap','6':'operator','7':'config'};
   if (map[e.key]) switchTab(map[e.key]);
 });
 
@@ -790,11 +851,13 @@ async function loadDashboard() {
   const el = document.getElementById('dash-body');
   el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
   try {
-    const [status, stats, backends, info] = await Promise.allSettled([
+    const [status, stats, backends, info, costs, perf] = await Promise.allSettled([
       api('/api/v1/status'),
       api('/api/v1/stats'),
       api('/api/v1/backends'),
       api('/api/v1/info'),
+      api('/api/v1/costs?days=30'),
+      api('/api/v1/model-performance?days=30'),
     ]);
 
     let html = '';
@@ -852,11 +915,255 @@ async function loadDashboard() {
       html += kv('server',           `${esc(i.server?.host || '0.0.0.0')}:${i.server?.port || 8000}`);
     }
 
+    // ── Cost tracking ──
+    const c30 = costs.status === 'fulfilled' ? costs.value : null;
+    html += '<div class="section-header">Cost Tracking · 30 days</div>';
+    if (!c30 || !c30.enabled) {
+      html += '<div class="cost-disabled">Cost tracking is disabled. Set <code>cost_tracking.enabled: true</code> in config.yaml.</div>';
+    } else {
+      // Summary cards
+      html += '<div class="card-grid">';
+      html += card('Total Spend', '$' + (c30.total || 0).toFixed(4), '30-day period');
+      html += card('Daily Avg',   '$' + (c30.average_daily || 0).toFixed(4), 'per day');
+      const modelCount = Object.keys(c30.by_model || {}).length;
+      html += card('API Models', modelCount, 'tracked models');
+      html += '</div>';
+      // Charts placeholder — rendered after innerHTML is set
+      html += '<div class="chart-wrap"><div class="chart-title">Spend by Day</div><canvas class="bb-chart" id="chart-day" height="90"></canvas></div>';
+      html += '<div class="chart-wrap"><div class="chart-title">Spend by Model</div><canvas class="bb-chart" id="chart-model" height="' + Math.max(60, modelCount * 28) + '"></canvas></div>';
+    }
+
+    // ── Model Performance ──
+    const perfData = perf.status === 'fulfilled' ? perf.value : null;
+    html += '<div class="section-header">Model Performance · 30 days</div>';
+    if (!perfData || !perfData.enabled || !Object.keys(perfData.by_model || {}).length) {
+      html += '<div class="cost-disabled">No latency data yet — recorded on non-streaming requests via the multi-backend router.</div>';
+    } else {
+      html += '<div class="chart-wrap"><div class="chart-title">Avg Latency by Model (ms)</div><canvas class="bb-chart" id="chart-latency" height="' + Math.max(60, Object.keys(perfData.by_model).length * 28) + '"></canvas></div>';
+      // Stats table
+      html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px">';
+      html += '<tr style="color:var(--fg-muted);border-bottom:1px solid var(--bg-border)">';
+      html += '<th style="text-align:left;padding:3px 8px">Model</th><th style="padding:3px 8px">Reqs</th><th style="padding:3px 8px">Avg ms</th><th style="padding:3px 8px">p50 ms</th><th style="padding:3px 8px">p95 ms</th><th style="padding:3px 8px">Avg tok</th><th style="padding:3px 8px">Cost</th></tr>';
+      Object.entries(perfData.by_model).forEach(([name, m]) => {
+        const p95cls = m.p95_latency_ms > 5000 ? 'color:var(--red)' : m.p95_latency_ms > 2000 ? 'color:var(--yellow)' : 'color:var(--green)';
+        html += `<tr style="border-bottom:1px solid var(--bg-border)">
+          <td style="padding:3px 8px;color:var(--fg)">${esc(name)}</td>
+          <td style="padding:3px 8px;color:var(--cyan);text-align:center">${m.requests}</td>
+          <td style="padding:3px 8px;color:var(--fg-dim);text-align:center">${m.avg_latency_ms}</td>
+          <td style="padding:3px 8px;color:var(--fg-dim);text-align:center">${m.p50_latency_ms}</td>
+          <td style="padding:3px 8px;text-align:center;${p95cls}">${m.p95_latency_ms}</td>
+          <td style="padding:3px 8px;color:var(--fg-muted);text-align:center">${m.avg_tokens}</td>
+          <td style="padding:3px 8px;color:var(--fg-muted);text-align:center">$${m.total_cost_usd.toFixed(4)}</td>
+        </tr>`;
+      });
+      html += '</table></div>';
+    }
+
     document.getElementById('dash-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
     el.innerHTML = html;
+
+    // Render charts after DOM is ready
+    if (c30?.enabled) {
+      renderDayChart(c30.by_day || {});
+      renderModelChart(c30.by_model || {});
+    }
+    if (perfData?.enabled && Object.keys(perfData.by_model || {}).length) {
+      renderLatencyChart(perfData.by_model || {});
+    }
   } catch(e) {
     el.innerHTML = `<div class="error-box">Failed to load dashboard: ${esc(e.message)}</div>`;
   }
+}
+
+// ── Cost chart renderers ──────────────────────────────────────────────────────
+
+function renderDayChart(byDay) {
+  const canvas = document.getElementById('chart-day');
+  if (!canvas) return;
+
+  // Sort last 30 days chronologically, fill gaps with 0
+  const today = new Date();
+  const labels = [];
+  const values = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(today.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    labels.push(key.slice(5));   // MM-DD
+    values.push(byDay[key] || 0);
+  }
+
+  const maxVal = Math.max(...values, 0.000001);
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.offsetWidth || canvas.parentElement.offsetWidth || 600;
+  const H = parseInt(canvas.getAttribute('height')) || 90;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.height = H + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const PAD_L = 52, PAD_R = 8, PAD_T = 8, PAD_B = 22;
+  const chartW = W - PAD_L - PAD_R;
+  const chartH = H - PAD_T - PAD_B;
+  const barW   = Math.max(2, chartW / labels.length - 2);
+  const gap    = chartW / labels.length;
+
+  // Grid lines
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg-border').trim() || '#2E2E2E';
+  ctx.lineWidth = 1;
+  for (let g = 0; g <= 4; g++) {
+    const y = PAD_T + chartH - (g / 4) * chartH;
+    ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(PAD_L + chartW, y); ctx.stroke();
+    if (g > 0) {
+      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--fg-muted').trim() || '#4C5460';
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('$' + ((maxVal * g / 4)).toFixed(4), PAD_L - 4, y + 3);
+    }
+  }
+
+  // Bars
+  const barColor = getComputedStyle(document.documentElement).getPropertyValue('--lavender').trim() || '#B48EAD';
+  values.forEach((v, i) => {
+    const x = PAD_L + i * gap + (gap - barW) / 2;
+    const barH = (v / maxVal) * chartH;
+    const y = PAD_T + chartH - barH;
+    ctx.fillStyle = v > 0 ? barColor : '#2E2E2E';
+    ctx.fillRect(x, y, barW, barH);
+  });
+
+  // X-axis labels — show every 7th
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--fg-muted').trim() || '#4C5460';
+  ctx.font = '9px monospace';
+  ctx.textAlign = 'center';
+  labels.forEach((lbl, i) => {
+    if (i % 7 === 0 || i === labels.length - 1) {
+      const x = PAD_L + i * gap + gap / 2;
+      ctx.fillText(lbl, x, H - 4);
+    }
+  });
+}
+
+function renderModelChart(byModel) {
+  const canvas = document.getElementById('chart-model');
+  if (!canvas) return;
+
+  const entries = Object.entries(byModel)
+    .map(([name, info]) => ({ name, cost: info.cost || 0, msgs: info.messages || 0 }))
+    .sort((a, b) => b.cost - a.cost)
+    .slice(0, 10);
+
+  if (!entries.length) {
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--fg-muted').trim();
+    ctx.font = '11px monospace';
+    ctx.fillText('No cost data recorded yet.', 10, 20);
+    return;
+  }
+
+  const maxVal = Math.max(...entries.map(e => e.cost), 0.000001);
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.offsetWidth || canvas.parentElement.offsetWidth || 600;
+  const ROW_H = 24;
+  const PAD_L = 160, PAD_R = 70, PAD_T = 6, PAD_B = 6;
+  const H = PAD_T + entries.length * ROW_H + PAD_B;
+  canvas.height = H;
+  canvas.style.height = H + 'px';
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.height = H + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const chartW = W - PAD_L - PAD_R;
+  const barColor  = getComputedStyle(document.documentElement).getPropertyValue('--cyan').trim() || '#88C0D0';
+  const labelColor = getComputedStyle(document.documentElement).getPropertyValue('--fg-dim').trim() || '#6C7680';
+  const valColor   = getComputedStyle(document.documentElement).getPropertyValue('--fg').trim() || '#D8DEE9';
+
+  entries.forEach((e, i) => {
+    const y = PAD_T + i * ROW_H;
+    const barH = ROW_H - 6;
+    const barW = (e.cost / maxVal) * chartW;
+
+    // Model name label
+    ctx.fillStyle = labelColor;
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'right';
+    const shortName = e.name.length > 22 ? '…' + e.name.slice(-20) : e.name;
+    ctx.fillText(shortName, PAD_L - 6, y + barH - 4);
+
+    // Bar
+    ctx.fillStyle = barColor;
+    ctx.fillRect(PAD_L, y + 3, Math.max(barW, 1), barH);
+
+    // Cost label
+    ctx.fillStyle = valColor;
+    ctx.textAlign = 'left';
+    ctx.font = '10px monospace';
+    ctx.fillText('$' + e.cost.toFixed(4) + ' · ' + e.msgs + 'msg', PAD_L + Math.max(barW, 1) + 6, y + barH - 4);
+  });
+}
+
+function renderLatencyChart(byModel) {
+  const canvas = document.getElementById('chart-latency');
+  if (!canvas) return;
+
+  const entries = Object.entries(byModel)
+    .map(([name, m]) => ({ name, avg: m.avg_latency_ms, p50: m.p50_latency_ms, p95: m.p95_latency_ms }))
+    .sort((a, b) => b.avg - a.avg)
+    .slice(0, 10);
+
+  if (!entries.length) return;
+
+  const maxVal = Math.max(...entries.map(e => e.p95), 1);
+  const dpr  = window.devicePixelRatio || 1;
+  const W    = canvas.offsetWidth || canvas.parentElement.offsetWidth || 600;
+  const ROW_H = 24;
+  const PAD_L = 160, PAD_R = 80, PAD_T = 6, PAD_B = 6;
+  const H = PAD_T + entries.length * ROW_H + PAD_B;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.height = H + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const chartW = W - PAD_L - PAD_R;
+  const avgColor = getComputedStyle(document.documentElement).getPropertyValue('--cyan').trim()    || '#88C0D0';
+  const p95Color = getComputedStyle(document.documentElement).getPropertyValue('--yellow').trim()  || '#EBCB8B';
+  const labelColor= getComputedStyle(document.documentElement).getPropertyValue('--fg-dim').trim() || '#6C7680';
+  const valColor  = getComputedStyle(document.documentElement).getPropertyValue('--fg').trim()     || '#D8DEE9';
+
+  entries.forEach((e, i) => {
+    const y = PAD_T + i * ROW_H;
+    const barH = ROW_H - 8;
+
+    // Label
+    ctx.fillStyle = labelColor;
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'right';
+    const shortName = e.name.length > 22 ? '…' + e.name.slice(-20) : e.name;
+    ctx.fillText(shortName, PAD_L - 6, y + barH);
+
+    // p95 bar (background, wider)
+    const p95W = (e.p95 / maxVal) * chartW;
+    ctx.fillStyle = p95Color + '55';
+    ctx.fillRect(PAD_L, y + 2, Math.max(p95W, 1), barH);
+
+    // avg bar (foreground)
+    const avgW = (e.avg / maxVal) * chartW;
+    ctx.fillStyle = avgColor;
+    ctx.fillRect(PAD_L, y + 2, Math.max(avgW, 1), barH);
+
+    // Value label
+    ctx.fillStyle = valColor;
+    ctx.textAlign = 'left';
+    ctx.font = '10px monospace';
+    ctx.fillText(`${e.avg}ms avg  p95:${e.p95}ms`, PAD_L + Math.max(p95W, 1) + 6, y + barH);
+  });
 }
 
 function card(label, value, sub) {
@@ -1029,7 +1336,9 @@ async function loadReplay(convId) {
   if (!convId) return;
   const el = document.getElementById('convos-body');
   el.insertAdjacentHTML('afterbegin',
-    `<div class="section-header">Replay: ${esc(convId.slice(0,16))}</div>
+    `<div class="section-header">Replay: ${esc(convId.slice(0,16))}
+       <button onclick="forkConversation('${esc(convId)}')" style="float:right;font-size:10px;padding:2px 8px">⑂ Fork</button>
+     </div>
      <div id="replay-body"><div class="empty"><span class="spinner"></span> Loading replay…</div></div>`);
   try {
     const d = await api(`/api/v1/conversation/${convId}/replay`);
@@ -1039,18 +1348,40 @@ async function loadReplay(convId) {
       return;
     }
     let html = '';
-    (d.messages || []).forEach(m => {
+    (d.messages || []).forEach((m, i) => {
       const routeInfo = m.routing ? ` <span class="badge badge-lav">${esc(m.routing.method||'')}</span>` : '';
       const toolInfo  = m.tools?.length ? ` <span class="badge badge-ok">tools: ${esc(m.tools.join(', '))}</span>` : '';
       html += `<div class="kv-row">
         <span class="kv-key">${esc(m.role)}</span>
         <span class="kv-val">${esc((m.content||'').slice(0,120))}${routeInfo}${toolInfo}</span>
+        <button onclick="forkConversation('${esc(convId)}',${i})" style="font-size:9px;padding:1px 6px;margin-left:8px;flex-shrink:0" title="Fork from this message">⑂</button>
       </div>`;
     });
     document.getElementById('replay-body').innerHTML = html || '<div class="empty">No messages.</div>';
   } catch(e) {
     document.getElementById('replay-body').innerHTML =
       `<div class="error-box">Replay failed: ${esc(e.message)}</div>`;
+  }
+}
+
+async function forkConversation(convId, branchAt) {
+  const body = {};
+  if (branchAt !== undefined) body.branch_at = branchAt;
+  try {
+    const d = await api(`/api/v1/conversation/${convId}/fork`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const label = branchAt !== undefined ? ` at message ${branchAt}` : ' (full copy)';
+    const el = document.getElementById('replay-body') || document.getElementById('convos-body');
+    el.insertAdjacentHTML('afterbegin',
+      `<div class="error-box" style="background:#0a2a0a;border-color:var(--green);color:var(--green)">
+         ⑂ Forked${label} → new conversation <code>${esc(d.new_conversation_id.slice(0,16))}</code>
+         · ${d.messages_copied} messages copied
+       </div>`);
+  } catch(e) {
+    alert('Fork failed: ' + e.message);
   }
 }
 
@@ -1140,7 +1471,89 @@ async function toggleFlight(id) {
   }
 }
 
-// ── 5. Operator ───────────────────────────────────────────────────────────────
+// ── 5. Tap ────────────────────────────────────────────────────────────────────
+
+let _tapLiveTimer = null;
+
+const TAP_ROLE_COLOR = {
+  user:      'var(--cyan)',
+  assistant: 'var(--yellow)',
+  system:    'var(--fg-muted)',
+  decision:  'var(--lavender)',
+  tool:      'var(--green)',
+  error:     'var(--red)',
+};
+const TAP_DIR_ARROW = { inbound: '──▶', outbound: '◀──', internal: '─●─' };
+const TAP_ROLE_ICON = { user:'▶', assistant:'◀', system:'●', decision:'⚖', tool:'⚡', error:'✗' };
+
+function _renderTapEntry(e) {
+  const ts    = e.ts ? new Date(e.ts).toLocaleTimeString() : '?';
+  const role  = e.role || '?';
+  const dir   = e.dir  || '?';
+  const model = e.model || '';
+  const conv  = e.conv  || '';
+  const content = e.content || '';
+  const len   = e.len  || 0;
+
+  const color = TAP_ROLE_COLOR[role] || 'var(--fg)';
+  const arrow = TAP_DIR_ARROW[dir]   || '───';
+  const icon  = TAP_ROLE_ICON[role]  || '?';
+
+  const modelPart = model ? ` <span style="color:var(--lavender)">[${esc(model)}]</span>` : '';
+  const convPart  = conv  ? ` <span style="color:var(--fg-muted)">conv:${esc(conv.slice(0,12))}</span>` : '';
+  const lenPart   = ` <span style="color:var(--fg-muted)">(${len}c)</span>`;
+
+  const preview = content.length > 300 ? content.slice(0, 300) + '…' : content;
+  const contentLines = esc(preview).replace(/\n/g, '<br>    ');
+
+  return `<div style="margin-bottom:6px;border-bottom:1px solid var(--bg-border);padding-bottom:5px">
+    <span style="color:var(--fg-muted)">${esc(ts)}</span>
+    <span style="color:var(--fg-dim)">${esc(arrow)}</span>
+    <span style="color:${color};font-weight:500">${esc(icon)} ${esc(role.toUpperCase())}</span>
+    ${modelPart}${lenPart}${convPart}
+    <div style="margin-top:3px;padding-left:16px;color:var(--fg-dim)">${contentLines}</div>
+  </div>`;
+}
+
+async function loadTap() {
+  const el   = document.getElementById('tap-body');
+  const role = document.getElementById('tap-role').value;
+  const dir  = document.getElementById('tap-dir').value;
+  const n    = parseInt(document.getElementById('tap-n').value) || 50;
+
+  el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
+  try {
+    let url = `/api/v1/tap?n=${n}`;
+    if (role) url += `&role=${encodeURIComponent(role)}`;
+    if (dir)  url += `&dir=${encodeURIComponent(dir)}`;
+    const d = await api(url);
+
+    document.getElementById('tap-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
+
+    if (!d.entries || !d.entries.length) {
+      el.innerHTML = '<div class="empty">No wire entries yet. Send a request through BeigeBox.</div>';
+      return;
+    }
+
+    const html = d.entries.slice().reverse().map(_renderTapEntry).join('');
+    el.innerHTML = `<div style="color:var(--fg-muted);font-size:10px;padding-bottom:8px">${d.total} total · showing ${d.entries.length}${role ? ' · role=' + esc(role) : ''}${dir ? ' · dir=' + esc(dir) : ''}</div>` + html;
+  } catch(e) {
+    el.innerHTML = `<div class="error-box">Tap failed: ${esc(e.message)}</div>`;
+  }
+}
+
+function toggleTapLive() {
+  const live = document.getElementById('tap-live').checked;
+  if (live) {
+    loadTap();
+    _tapLiveTimer = setInterval(loadTap, 2000);
+  } else {
+    clearInterval(_tapLiveTimer);
+    _tapLiveTimer = null;
+  }
+}
+
+// ── 6. Operator ───────────────────────────────────────────────────────────────
 async function runOp() {
   const input = document.getElementById('op-input');
   const query = input.value.trim();
@@ -1185,7 +1598,7 @@ function clearOp() {
   document.getElementById('op-log').innerHTML = '';
 }
 
-// ── 6. Config ─────────────────────────────────────────────────────────────────
+// ── 7. Config ─────────────────────────────────────────────────────────────────
 async function loadConfig() {
   const el = document.getElementById('config-body');
   el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';

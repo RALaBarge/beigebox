@@ -181,7 +181,7 @@ class Proxy:
                 timestamp=message.timestamp,
             ))
 
-    def _log_response(self, conversation_id: str, content: str, model: str, cost_usd: float | None = None):
+    def _log_response(self, conversation_id: str, content: str, model: str, cost_usd: float | None = None, latency_ms: float | None = None):
         """Store the assistant response."""
         if not self.log_enabled or not content.strip():
             return
@@ -193,7 +193,7 @@ class Proxy:
             model=model,
             token_count=tokens,
         )
-        self.sqlite.store_message(message, cost_usd=cost_usd)
+        self.sqlite.store_message(message, cost_usd=cost_usd, latency_ms=latency_ms)
         # Wire tap
         cost_info = f" cost=${cost_usd:.6f}" if cost_usd else ""
         self.wire.log(
@@ -515,6 +515,26 @@ class Proxy:
             if recorder:
                 recorder.log("Pre-Hooks")
 
+        # Check for hook-initiated block (e.g. prompt injection detection)
+        if "_beigebox_block" in body:
+            block = body["_beigebox_block"]
+            self.wire.log(
+                direction="internal",
+                role="system",
+                content=f"request blocked: reason={block.get('reason')} score={block.get('score')} patterns={block.get('patterns')}",
+                model="prompt-injection-guard",
+                conversation_id=conversation_id,
+            )
+            if recorder:
+                recorder.log("Request Blocked", reason=block.get("reason"), score=block.get("score"))
+                recorder.close()
+                if self.flight_store:
+                    self.flight_store.store(recorder)
+            return {
+                "choices": [{"message": {"role": "assistant", "content": block.get("message", "Request blocked.")}}],
+                "model": "beigebox",
+            }
+
         # Check if synthetic (tagged by hook)
         is_synthetic = self._is_synthetic(body)
 
@@ -587,7 +607,8 @@ class Proxy:
             choices = data.get("choices", [])
             if choices:
                 assistant_content = choices[0].get("message", {}).get("content", "")
-                self._log_response(conversation_id, assistant_content, model, cost_usd=cost_usd)
+                response_latency = response.latency_ms if self.backend_router and response.ok else None
+                self._log_response(conversation_id, assistant_content, model, cost_usd=cost_usd, latency_ms=response_latency)
                 if recorder:
                     recorder.log("Response Logged",
                                  tokens=_estimate_tokens(assistant_content),
@@ -633,6 +654,25 @@ class Proxy:
         if self.hook_manager:
             context = self._build_hook_context(body, conversation_id, model, None)
             body = self.hook_manager.run_pre_request(body, context)
+
+        # Check for hook-initiated block (e.g. prompt injection detection)
+        if "_beigebox_block" in body:
+            block = body["_beigebox_block"]
+            self.wire.log(
+                direction="internal",
+                role="system",
+                content=f"stream blocked: reason={block.get('reason')} score={block.get('score')}",
+                model="prompt-injection-guard",
+                conversation_id=conversation_id,
+            )
+            import json as _json
+            chunk = _json.dumps({
+                "choices": [{"delta": {"content": block.get("message", "Request blocked.")}, "index": 0}],
+                "model": "beigebox",
+            })
+            yield f"data: {chunk}\n"
+            yield "data: [DONE]\n"
+            return
 
         # Check if synthetic
         is_synthetic = self._is_synthetic(body)

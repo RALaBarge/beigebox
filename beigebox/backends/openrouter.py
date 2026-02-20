@@ -1,10 +1,13 @@
 """
 OpenRouter backend — API access to hosted models.
 Extracts cost_usd from OpenRouter response headers/body for cost tracking.
+Streaming requests use `include_usage: true` to capture token counts and
+cost from the final SSE chunk before [DONE].
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -14,6 +17,9 @@ import httpx
 from beigebox.backends.base import BaseBackend, BackendResponse
 
 logger = logging.getLogger(__name__)
+
+# Sentinel yielded at the end of forward_stream so proxy.py can capture cost
+_COST_SENTINEL_PREFIX = "__bb_cost__:"
 
 
 class OpenRouterBackend(BaseBackend):
@@ -129,9 +135,21 @@ class OpenRouterBackend(BaseBackend):
             )
 
     async def forward_stream(self, body: dict):
-        """Forward a streaming request to OpenRouter, yielding SSE lines."""
+        """
+        Forward a streaming request to OpenRouter, yielding SSE lines.
+
+        Requests `include_usage: true` so OpenRouter appends a final chunk
+        with token counts and cost before [DONE]. After the stream ends,
+        yields a sentinel line `__bb_cost__:<float>` so the proxy can record
+        the cost without breaking the SSE protocol to the client.
+        """
         if not self.api_key:
             raise RuntimeError("No API key configured for OpenRouter")
+
+        # Ask OpenRouter to include usage/cost in the final chunk
+        stream_body = {**body, "stream_options": {"include_usage": True}}
+
+        cost_usd: float | None = None
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -139,18 +157,39 @@ class OpenRouterBackend(BaseBackend):
                     "POST",
                     f"{self.url}/chat/completions",
                     headers=self._headers(),
-                    json=body,
+                    json=stream_body,
                 ) as resp:
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():
-                        if line:
-                            yield line
+                        if not line:
+                            continue
+
+                        # Parse every data chunk looking for usage in the final one
+                        if line.startswith("data: "):
+                            data_str = line[6:].strip()
+                            if data_str != "[DONE]":
+                                try:
+                                    chunk = json.loads(data_str)
+                                    # OpenRouter puts usage on the last real chunk
+                                    extracted = self._extract_cost(chunk)
+                                    if extracted is not None:
+                                        cost_usd = extracted
+                                except (json.JSONDecodeError, KeyError):
+                                    pass
+
+                        yield line
+
         except httpx.TimeoutException:
             logger.warning("OpenRouter backend '%s' stream timed out", self.name)
             raise
         except Exception as e:
             logger.warning("OpenRouter backend '%s' stream failed: %s", self.name, e)
             raise
+
+        # Yield sentinel so proxy.py can capture cost without touching SSE output
+        if cost_usd is not None:
+            yield f"{_COST_SENTINEL_PREFIX}{cost_usd}"
+            logger.debug("OpenRouter stream cost captured: $%.6f", cost_usd)
 
     async def health_check(self) -> bool:
         """Check OpenRouter is reachable (lightweight models endpoint)."""

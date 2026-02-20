@@ -82,12 +82,11 @@ decision_llm:
 # Extensible pre/post processing pipeline.
 # Drop .py files in the hooks directory, or specify paths explicitly.
 hooks:
-  directory: "./hooks"                 # Auto-load all .py files from this directory
-  # Or specify individual hooks with explicit paths:
-  # hooks:
-  #   - name: "my_hook"
-  #     path: "./hooks/my_hook.py"
-  #     enabled: true
+  - name: prompt_injection
+    path: ./hooks/prompt_injection.py
+    enabled: true
+    mode: flag        # or "block" to hard-stop
+    score_threshold: 2
 
 # --- Logging ---
 logging:

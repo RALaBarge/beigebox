@@ -17,12 +17,28 @@ import os
 
 logger = logging.getLogger(__name__)
 
+_SHELL_BINARY: str | None = None
+
+
+def _get_shell() -> str:
+    """Return the configured shell binary, falling back to /bin/sh."""
+    global _SHELL_BINARY
+    if _SHELL_BINARY is None:
+        try:
+            from beigebox.config import get_config
+            cfg = get_config()
+            _SHELL_BINARY = cfg.get("operator", {}).get("shell_binary", "/bin/sh")
+        except Exception:
+            _SHELL_BINARY = "/bin/sh"
+    return _SHELL_BINARY
+
 
 def _run(cmd: str) -> str:
-    """Run a shell command, return stdout or empty string."""
+    """Run a shell command via the configured shell binary, return stdout or empty string."""
     try:
+        shell = _get_shell()
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=5
+            [shell, "-c", cmd], capture_output=True, text=True, timeout=5
         )
         return result.stdout.strip()
     except Exception:
