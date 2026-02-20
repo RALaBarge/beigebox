@@ -54,7 +54,7 @@ tools:
 # --- Decision LLM ---
 decision_llm:
   enabled: true                          # Enabled by default in Docker — setup pulls the model
-  model: ""                             # Set to a small, fast model for routing
+  model: ""                              # Set to a small, fast model for routing
   backend_url: "http://ollama:11434"
   timeout: 5
   max_tokens: 256
@@ -71,6 +71,68 @@ decision_llm:
     fast:
       model: ""
       description: "Quick responses, simple questions, brainstorming"
+
+# --- Operator ---
+operator:
+  model: ""                              # Defaults to backend.default_model
+  max_iterations: 10
+  shell:
+    enabled: true
+    # All shell commands are routed through /usr/local/bin/bb (restricted busybox).
+    # This allowlist is the first gate; the bb wrapper enforces a blocklist as the second.
+    # Only add applets that are genuinely useful for system observability.
+    shell_binary: "/usr/local/bin/bb"
+    allowed_commands:
+      - ls
+      - cat
+      - grep
+      - ps
+      - df
+      - free
+      - du
+      - uptime
+      - uname
+      - env
+      - printenv
+      - whoami
+      - id
+      - hostname
+      - date
+    blocked_patterns:
+      # Belt-and-suspenders: reject at the config layer even if the applet
+      # somehow passes the bb wrapper check.
+      - "rm"
+      - "chmod"
+      - "chown"
+      - "chroot"
+      - "mv"
+      - "cp"
+      - "> "          # output redirection
+      - ">>"          # append redirection
+      - "sudo"
+      - "su "
+      - "| sh"        # pipe to shell
+      - "| bash"
+      - "| ash"
+      - "$()"         # command substitution
+      - "`"           # backtick substitution
+  data:
+    sqlite_queries:   # named query templates the agent can call by name
+      recent_conversations: >
+        SELECT c.id, c.created_at, COUNT(m.id) as msg_count
+        FROM conversations c JOIN messages m ON m.conversation_id = c.id
+        GROUP BY c.id ORDER BY c.created_at DESC LIMIT 10
+      token_usage_by_model: >
+        SELECT model, SUM(token_count) as tokens, COUNT(*) as messages
+        FROM messages GROUP BY model ORDER BY tokens DESC
+      search_messages: >
+        SELECT role, content, model, timestamp FROM messages
+        WHERE content LIKE ? ORDER BY timestamp DESC LIMIT 20
+      todays_conversations: >
+        SELECT c.id, c.created_at, COUNT(m.id) as msg_count
+        FROM conversations c JOIN messages m ON m.conversation_id = c.id
+        WHERE date(c.created_at) = date('now')
+        GROUP BY c.id ORDER BY c.created_at DESC
 
 # --- Hooks ---
 hooks:

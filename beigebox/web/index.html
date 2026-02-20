@@ -492,7 +492,7 @@
 <div id="header">
   <div>
     <span class="logo">BeigeBox</span>
-    <span class="sub" style="margin-left:12px">tap the line · own the conversation</span>
+    <span class="sub" style="margin-left:12px">tap the line · control the carrier</span>
   </div>
   <div class="status-bar">
     <span><span class="status-dot" id="proxy-dot"></span><span id="proxy-status" style="font-size:11px;color:var(--fg-dim)">connecting…</span></span>
@@ -610,6 +610,75 @@ const BASE = '';  // same origin
 let chatHistory = [];
 let currentModel = localStorage.getItem('bb_model') || '';
 let viModeActive = false;
+
+// ── Palette themes ──────────────────────────────────────────────────────────
+const THEMES = {
+  default: {
+    '--lavender':      '#B48EAD',
+    '--lavender-dim':  '#7D6080',
+    '--green':         '#A3BE8C',
+    '--green-dim':     '#5C7043',
+    '--cyan':          '#88C0D0',
+    '--yellow':        '#EBCB8B',
+    '--red':           '#BF616A',
+  },
+  dracula: {
+    '--lavender':      '#BD93F9',
+    '--lavender-dim':  '#6272A4',
+    '--green':         '#50FA7B',
+    '--green-dim':     '#2A7A40',
+    '--cyan':          '#8BE9FD',
+    '--yellow':        '#F1FA8C',
+    '--red':           '#FF5555',
+  },
+  gruvbox: {
+    '--lavender':      '#D3869B',
+    '--lavender-dim':  '#8F5070',
+    '--green':         '#B8BB26',
+    '--green-dim':     '#636700',
+    '--cyan':          '#8EC07C',
+    '--yellow':        '#FABD2F',
+    '--red':           '#FB4934',
+  },
+  nord: {
+    '--lavender':      '#B48EAD',
+    '--lavender-dim':  '#6B5272',
+    '--green':         '#A3BE8C',
+    '--green-dim':     '#4E6A35',
+    '--cyan':          '#88C0D0',
+    '--yellow':        '#EBCB8B',
+    '--red':           '#BF616A',
+  },
+};
+
+function randomPalette() {
+  // Random hue, saturation 40-60%, lightness 55-75% for accents
+  // Derive dim/muted variants by dropping lightness ~25%
+  const hue = Math.floor(Math.random() * 360);
+  const hue2 = (hue + 137) % 360;  // complementary-ish secondary
+  const hue3 = (hue + 60)  % 360;  // triad for cyan
+  const hue4 = (hue + 180) % 360;  // contrast for red
+
+  const sat  = 40 + Math.floor(Math.random() * 20); // 40–60
+  const lit  = 55 + Math.floor(Math.random() * 20); // 55–75
+  const litD = lit - 25;                             // dim variant
+
+  return {
+    '--lavender':     `hsl(${hue},  ${sat}%, ${lit}%)`,
+    '--lavender-dim': `hsl(${hue},  ${sat}%, ${litD}%)`,
+    '--green':        `hsl(${hue2}, ${sat}%, ${lit}%)`,
+    '--green-dim':    `hsl(${hue2}, ${sat}%, ${litD}%)`,
+    '--cyan':         `hsl(${hue3}, ${sat}%, ${lit}%)`,
+    '--yellow':       `hsl(45,      60%,     ${lit}%)`,
+    '--red':          `hsl(${hue4}, 55%,     ${lit - 5}%)`,
+  };
+}
+
+function applyPalette(name) {
+  const root = document.documentElement;
+  const vars = name === 'random' ? randomPalette() : (THEMES[name] || THEMES.default);
+  Object.entries(vars).forEach(([prop, val]) => root.style.setProperty(prop, val));
+}
 
 // ── Vi mode ─────────────────────────────────────────────────────────────────
 function setViToggleState(active) {
@@ -1164,6 +1233,10 @@ async function loadConfig() {
     html += '<div class="section-header">Model Advertising</div>';
     html += kv('mode', esc(c.model_advertising?.mode || '—'));
 
+    html += '<div class="section-header">Web UI</div>';
+    html += kv('palette', esc(c.web_ui?.palette || 'default'));
+    html += kv('vi_mode', badge(c.web_ui?.vi_mode));
+
     document.getElementById('config-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
     el.innerHTML = html;
   } catch(e) {
@@ -1175,13 +1248,19 @@ async function loadConfig() {
 loadDashboard();
 loadModels();
 
-// Check vi mode state from runtime config — inject JS only if enabled
-(async function initViMode() {
+// Bootstrap vi mode and palette from runtime config in a single fetch
+(async function initWebUi() {
   try {
     const d = await api('/api/v1/config');
-    const enabled = d.web_ui?.vi_mode === true;
-    setViToggleState(enabled);
-    if (enabled) injectViMode();
+
+    // Vi mode
+    const viEnabled = d.web_ui?.vi_mode === true;
+    setViToggleState(viEnabled);
+    if (viEnabled) injectViMode();
+
+    // Palette
+    const palette = d.web_ui?.palette || 'default';
+    if (palette !== 'default') applyPalette(palette);
   } catch {}
 })();
 </script>

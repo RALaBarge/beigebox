@@ -22,7 +22,7 @@ Every command has a phreaker name and a standard alias:
 import argparse
 import sys
 
-__version__ = "0.2.0"
+__version__ = "0.7.0"
 
 BANNER = r"""
     ╔══════════════════════════════════════════════════╗
@@ -331,7 +331,39 @@ def cmd_flash(args):
     else:
         print("  └─ disabled")
 
-###--- Lets get the above renamed to the 'operator standard'
+
+    # Cost summary — reads directly from SQLite via CostTracker.
+    # Falls back silently if DB doesn't exist or cost_tracking is disabled.
+    days = getattr(args, "days", 30)
+    try:
+        from beigebox.costs import CostTracker
+        cost_store = SQLiteStore(cfg["storage"]["sqlite_path"])
+        tracker = CostTracker(cost_store)
+        costs = tracker.get_stats(days=days)
+        total = costs.get("total", 0)
+        by_model = costs.get("by_model", {})
+        print()
+        print(f"  API Costs (last {costs['days_queried']} days)")
+        if total > 0 or by_model:
+            print(f"  ├─ Total:     ${total:.4f}")
+            print(f"  ├─ Daily avg: ${costs['average_daily']:.4f}")
+            model_items = list(by_model.items())
+            for i, (model, info) in enumerate(model_items):
+                prefix = "└─" if i == len(model_items) - 1 else "├─"
+                print(f"  {prefix} {model}: ${info['cost']:.4f}  ({info['messages']} msgs)")
+            by_day = costs.get("by_day", {})
+            if by_day:
+                recent = list(by_day.items())[:5]
+                print()
+                print("  Recent daily spend")
+                for i, (day, cost) in enumerate(recent):
+                    prefix = "└─" if i == len(recent) - 1 else "├─"
+                    print(f"  {prefix} {day}: ${cost:.4f}")
+        else:
+            print("  └─ No API costs recorded (local models are $0.00)")
+    except Exception:
+        pass  # No DB yet, or cost_tracking not enabled in config
+
 
 def cmd_operator(args):
     """
@@ -497,8 +529,11 @@ def main():
                  "Export conversations to JSON", cmd_dump, setup_dump)
 
     # flash / info / config / stats
+    def setup_flash(p):
+        p.add_argument("--days", "-d", type=int, default=30,
+                        help="Days of cost history to show (default: 30)")
     _add_command(sub, ["flash", "info", "config", "stats"],
-                 "Show stats and config at a glance", cmd_flash)
+                 "Show stats and config at a glance", cmd_flash, setup_flash)
 
     # tone / banner
     _add_command(sub, ["tone", "banner"],
