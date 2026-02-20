@@ -413,6 +413,138 @@ async def api_backends():
     })
 
 
+# ---------------------------------------------------------------------------
+# Flight Recorder (v0.6)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v1/flight-recorder")
+async def api_flight_recorder_list(n: int = 10):
+    """List recent flight records."""
+    if not proxy or not proxy.flight_store:
+        return JSONResponse({
+            "enabled": False,
+            "message": "Flight recorder is disabled. Set flight_recorder.enabled: true in config.",
+        })
+    records = proxy.flight_store.recent(n=n)
+    return JSONResponse({
+        "enabled": True,
+        "count": proxy.flight_store.count,
+        "records": [
+            {
+                "id": r.id,
+                "conversation_id": r.conversation_id,
+                "model": r.model,
+                "total_ms": r.total_ms,
+                "events": len(r.events),
+            }
+            for r in records
+        ],
+    })
+
+
+@app.get("/api/v1/flight-recorder/{record_id}")
+async def api_flight_recorder_detail(record_id: str):
+    """Get detailed flight record by ID."""
+    if not proxy or not proxy.flight_store:
+        return JSONResponse({
+            "enabled": False,
+            "message": "Flight recorder is disabled.",
+        })
+    record = proxy.flight_store.get(record_id)
+    if not record:
+        return JSONResponse({"error": "Record not found"}, status_code=404)
+    result = record.to_json()
+    result["text"] = record.render_text()
+    return JSONResponse(result)
+
+
+# ---------------------------------------------------------------------------
+# Conversation Replay (v0.6)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v1/conversation/{conv_id}/replay")
+async def api_conversation_replay(conv_id: str):
+    """Reconstruct a conversation with full routing context."""
+    cfg = get_config()
+    if not cfg.get("conversation_replay", {}).get("enabled", False):
+        return JSONResponse({
+            "enabled": False,
+            "message": "Conversation replay is disabled. Set conversation_replay.enabled: true in config.",
+        })
+    if not sqlite_store:
+        return JSONResponse({"error": "Storage not initialized"}, status_code=503)
+
+    from beigebox.replay import ConversationReplayer
+    wire_path = cfg.get("wiretap", {}).get("path", "./data/wire.jsonl")
+    replayer = ConversationReplayer(sqlite_store, wiretap_path=wire_path)
+    result = replayer.replay(conv_id)
+    return JSONResponse(result)
+
+
+# ---------------------------------------------------------------------------
+# Semantic Map (v0.6)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v1/conversation/{conv_id}/semantic-map")
+async def api_semantic_map(conv_id: str):
+    """Generate a semantic topic map for a conversation."""
+    cfg = get_config()
+    sm_cfg = cfg.get("semantic_map", {})
+    if not sm_cfg.get("enabled", False):
+        return JSONResponse({
+            "enabled": False,
+            "message": "Semantic map is disabled. Set semantic_map.enabled: true in config.",
+        })
+    if not sqlite_store or not vector_store:
+        return JSONResponse({"error": "Storage not initialized"}, status_code=503)
+
+    from beigebox.semantic_map import SemanticMap
+    mapper = SemanticMap(
+        sqlite=sqlite_store,
+        vector=vector_store,
+        similarity_threshold=sm_cfg.get("similarity_threshold", 0.5),
+        max_topics=sm_cfg.get("max_topics", 50),
+    )
+    result = mapper.build(conv_id)
+    return JSONResponse(result)
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator (v0.6)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/orchestrator")
+async def api_orchestrator(request: Request):
+    """
+    Run parallel LLM tasks.
+    Body: {"plan": [{"model": "code", "prompt": "..."}, ...]}
+    """
+    cfg = get_config()
+    orch_cfg = cfg.get("orchestrator", {})
+    if not orch_cfg.get("enabled", False):
+        return JSONResponse({
+            "enabled": False,
+            "message": "Orchestrator is disabled. Set orchestrator.enabled: true in config.",
+        })
+
+    try:
+        body = await request.json()
+        plan = body.get("plan", [])
+        if not plan:
+            return JSONResponse({"error": "plan required (array of tasks)"}, status_code=400)
+
+        from beigebox.orchestrator import ParallelOrchestrator
+        orchestrator = ParallelOrchestrator(
+            max_parallel_tasks=orch_cfg.get("max_parallel_tasks", 5),
+            task_timeout_seconds=orch_cfg.get("task_timeout_seconds", 120),
+            total_timeout_seconds=orch_cfg.get("total_timeout_seconds", 300),
+        )
+        result = await orchestrator.run(plan)
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.post("/api/v1/operator")
 async def api_operator(request: Request):
     """

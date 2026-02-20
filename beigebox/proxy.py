@@ -64,6 +64,16 @@ class Proxy:
         # Wire log — structured tap of everything on the line
         wire_path = self.cfg.get("wiretap", {}).get("path", "./data/wire.jsonl")
         self.wire = WireLog(wire_path)
+        # Flight recorder (v0.6) — in-memory request timelines
+        fr_cfg = self.cfg.get("flight_recorder", {})
+        self._flight_recorder_enabled = fr_cfg.get("enabled", False)
+        self.flight_store = None
+        if self._flight_recorder_enabled:
+            from beigebox.flight_recorder import FlightRecorderStore
+            self.flight_store = FlightRecorderStore(
+                max_records=fr_cfg.get("max_records", 1000),
+                retention_hours=fr_cfg.get("retention_hours", 24),
+            )
         # Session routing cache — sticky model within a conversation
         # {conversation_id: (model_string, timestamp)}
         self._session_cache: dict[str, tuple[str, float]] = {}
@@ -472,11 +482,27 @@ class Proxy:
         model = self._get_model(body)
         conversation_id = self._extract_conversation_id(body)
 
+        # Flight recorder — start timeline
+        recorder = None
+        if self._flight_recorder_enabled:
+            from beigebox.flight_recorder import FlightRecord
+            recorder = FlightRecord(conversation_id=conversation_id, model=model)
+            recorder.log("Request Received", model=model,
+                         tokens=_estimate_tokens(self._get_latest_user_message(body)))
+
         # Z-command parsing
         zcmd, body = self._process_z_command(body)
+        if recorder:
+            recorder.log("Z-Command Parse", active=zcmd.active,
+                         route=zcmd.route or None, tools=zcmd.tools or None)
 
         # Handle z: help — return help text directly without calling LLM
         if zcmd.is_help:
+            if recorder:
+                recorder.log("Z-Help Returned")
+                recorder.close()
+                if self.flight_store:
+                    self.flight_store.store(recorder)
             return {
                 "choices": [{"message": {"role": "assistant", "content": HELP_TEXT}}],
                 "model": "beigebox",
@@ -486,6 +512,8 @@ class Proxy:
         if self.hook_manager:
             context = self._build_hook_context(body, conversation_id, model, None)
             body = self.hook_manager.run_pre_request(body, context)
+            if recorder:
+                recorder.log("Pre-Hooks")
 
         # Check if synthetic (tagged by hook)
         is_synthetic = self._is_synthetic(body)
@@ -495,10 +523,16 @@ class Proxy:
             tool_results = self._run_forced_tools(zcmd, self._get_latest_user_message(body))
             if tool_results:
                 body = self._inject_tool_context(body, tool_results)
+                if recorder:
+                    recorder.log("Forced Tools", tools=zcmd.tools)
 
         # Hybrid routing: session cache → z-command → embedding classifier → decision LLM
         body, decision = await self._hybrid_route(body, zcmd, conversation_id)
         model = body.get("model", model)  # Update model after routing
+        if recorder:
+            recorder.log("Routing Complete", model=model,
+                         method="decision_llm" if decision else "fast_path")
+            recorder.model = model  # Update with final routed model
 
         # Log incoming user messages (skip synthetic)
         if not is_synthetic:
@@ -506,9 +540,21 @@ class Proxy:
 
         # Forward to backend — use router if available, otherwise direct
         cost_usd = None
+        if recorder:
+            recorder.log("Backend Forward Start")
+
         if self.backend_router:
             response = await self.backend_router.forward(body)
+            if recorder:
+                recorder.log("Backend Response", backend=response.backend_name,
+                             latency_ms=round(response.latency_ms, 1),
+                             ok=response.ok)
             if not response.ok:
+                if recorder:
+                    recorder.log("Backend Error", error=response.error)
+                    recorder.close()
+                    if self.flight_store:
+                        self.flight_store.store(recorder)
                 # Return error as a chat response so clients handle it gracefully
                 return {
                     "choices": [{"message": {"role": "assistant",
@@ -533,6 +579,8 @@ class Proxy:
                 )
                 resp.raise_for_status()
                 data = resp.json()
+            if recorder:
+                recorder.log("Backend Response", backend="direct")
 
         # Log assistant response (skip synthetic)
         if not is_synthetic:
@@ -540,11 +588,23 @@ class Proxy:
             if choices:
                 assistant_content = choices[0].get("message", {}).get("content", "")
                 self._log_response(conversation_id, assistant_content, model, cost_usd=cost_usd)
+                if recorder:
+                    recorder.log("Response Logged",
+                                 tokens=_estimate_tokens(assistant_content),
+                                 cost_usd=cost_usd)
 
         # Post-response hooks
         if self.hook_manager and not is_synthetic:
             context = self._build_hook_context(body, conversation_id, model, decision)
             data = self.hook_manager.run_post_response(body, data, context)
+            if recorder:
+                recorder.log("Post-Hooks")
+
+        # Flight recorder — store completed record
+        if recorder:
+            recorder.close()
+            if self.flight_store:
+                self.flight_store.store(recorder)
 
         return data
 
