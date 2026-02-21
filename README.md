@@ -2,7 +2,7 @@
 
 **Tap the line. Control the carrier.**
 
-Transparent middleware proxy for local LLM stacks. Sits between your frontend (Open WebUI, etc.) and your backend (Ollama, etc.) and intercepts every request to add intelligent routing, storage, observability, tooling, and security — without either end knowing it's there.  Lightest weight chat, log, and multi-agent orchestration tools included as well.
+Transparent middleware proxy for local LLM stacks. Sits between your frontend (Open WebUI, etc.) and your backend (Ollama, etc.) and intercepts every request to add intelligent routing, storage, observability, tooling, and security — without either end knowing it's there.  Lightest weight chat, log, and multi-agent orchestration tools included in a GUI interface as well.
 
 ```
 +---------------+         +--------------------------------------+         +---------------+
