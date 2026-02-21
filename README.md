@@ -2,175 +2,131 @@
 
 **Tap the line. Control the carrier.**
 
-A transparent middleware proxy for local LLM stacks. Sits between your frontend (Open WebUI, etc.) and your backend (Ollama, llama.cpp, etc.), intercepting and storing every conversation while providing intelligent routing, extensible tooling, observability, and security.
+Transparent middleware proxy for local LLM stacks. Sits between your frontend (Open WebUI, etc.) and your backend (Ollama, etc.) and intercepts every request to add intelligent routing, storage, observability, tooling, and security — without either end knowing it's there.
 
 ```
 +---------------+         +--------------------------------------+         +---------------+
 |               |  HTTP   |            BEIGEBOX                  |  HTTP   |               |
-|  Open WebUI   | ------->|                                      | ------> |  Ollama /     |
-|  (Frontend)   |<------- |  FastAPI Proxy · Port 8000           |<------- |  llama.cpp    |
-|               |         |                                      |         |  (Backend)    |
-|  Port 3000    |         |  Hybrid Router                       |         +---------------+
-+---------------+         |  ├─ 0. Session Cache  (instant)      |
-                          |  ├─ 1. Z-Commands     (instant)      |         +---------------+
-                          |  ├─ 2. Agentic Scorer (instant)      |         |  OpenRouter   |
-                          |  ├─ 3. Embedding Class (~50ms)       |  HTTP   |  (Fallback)   |
-                          |  └─ 4. Decision LLM   (~500ms)       | ------> |  Priority 2   |
+|  Open WebUI   | ------->|  FastAPI Proxy · Port 8000           | ------> |  Ollama /     |
+|  (Frontend)   |<------- |                                      |<------- |  llama.cpp    |
+|               |         |  Hybrid Router                       |         |  (Backend)    |
+|  Port 3000    |         |  0. Session Cache  (instant)         |         +---------------+
++---------------+         |  1. Z-Commands     (instant)         |
+                          |  2. Agentic Scorer (instant)         |         +---------------+
+                          |  3. Embedding Class (~50ms)          |  HTTP   |  OpenRouter   |
+                          |  4. Decision LLM   (~500ms)          | ------> |  (Fallback)   |
                           |                                      |         +---------------+
-                          |  Multi-Backend Router                |
-                          |  SQLite · ChromaDB                   |
-                          |  Tool Registry · Operator Agent      |
-                          |  Observability · Security            |
+                          |  SQLite · ChromaDB · Tools           |
+                          |  Operator Agent · Observability      |
                           +--------------------------------------+
 ```
 
 ---
 
-## Table of Contents
-
-1. [What It Does](#what-it-does)
-2. [Hybrid Routing](#hybrid-routing)
-3. [Multi-Backend Router](#multi-backend-router)
-4. [Z-Commands](#z-commands)
-5. [Operator Agent](#operator-agent)
-6. [Observability](#observability)
-7. [Security](#security)
-8. [Web UI](#web-ui)
-9. [TUI](#tui)
-10. [Project Structure](#project-structure)
-11. [API Endpoints](#api-endpoints)
-12. [CLI Commands](#cli-commands)
-13. [Configuration](#configuration)
-14. [Setup and Installation](#setup-and-installation)
-15. [Docker Quickstart](#docker-quickstart)
-16. [Testing](#testing)
-17. [Roadmap](#roadmap)
-
----
-
 ## What It Does
 
-BeigeBox is a proxy that makes your local LLM stack smarter without changing anything about how you use it.
+Your frontend thinks it's talking to Ollama. Ollama thinks requests are coming straight from your frontend. BeigeBox is in the middle, transparently:
 
-Your frontend thinks it is talking to Ollama. Ollama thinks it is getting requests from your frontend. BeigeBox sits in the middle, transparently intercepting every message to:
+- **Storing** every conversation in SQLite + ChromaDB (you own the data)
+- **Routing** requests to the right model based on query complexity
+- **Falling back** across backends with priority-based failover
+- **Tracking costs** for API backends including streaming
+- **Augmenting** requests with tool output before they reach the LLM
+- **Summarizing** long conversations automatically to manage context window
+- **Forwarding** all known OpenAI and Ollama endpoints, with a catch-all for anything else
+- **Observing** the full request lifecycle in a structured wire log
+- **Protecting** the pipeline with prompt injection detection
 
-- **Store** every conversation in portable SQLite + semantic ChromaDB (you own the data)
-- **Route** requests to the right model based on query complexity
-- **Fallback** across multiple backends with priority-based failover
-- **Track costs** for API backends, including streaming requests
-- **Augment** requests with tool output before they hit the LLM
-- **Override** any decision with user-level z-commands
-- **Observe** the full lifecycle of every request
-- **Protect** the pipeline with prompt injection detection
-- **Analyze** model performance with latency percentiles
-- **Browse** everything through a web UI or TUI
-
-Everything degrades gracefully. Advanced features are disabled by default and enabled via config flags.
+All advanced features are disabled by default and enabled via config flags.
 
 ---
 
 ## Hybrid Routing
 
-Four-tier system with graceful degradation at every level.
+Four tiers with graceful degradation at every level.
 
-**Tier 0 — Session Cache (instant):** Once a routing decision is made for a conversation, it is cached for the TTL window. Subsequent messages skip the routing pipeline entirely.
+**Tier 0 — Session Cache (instant):** Once a routing decision is made for a conversation it's cached. Subsequent turns skip the pipeline entirely.
 
-**Tier 1 — Z-Commands (instant):** User-level overrides via `z:` prefix. Absolute priority over everything.
+**Tier 1 — Z-Commands (instant):** User-level routing overrides via `z:` prefix. Absolute priority.
 
-**Tier 2 — Agentic Scorer (instant):** Lightweight keyword scorer that flags tool-use intent before the embedding classifier runs.
+**Tier 2 — Agentic Scorer (instant):** Regex scorer that flags tool-use intent before the classifier runs.
 
-**Tier 3 — Embedding Classifier (~50ms):** Pre-computed centroid vectors classify prompts into simple, complex, code, or creative using cosine similarity. Run `beigebox build-centroids` once to generate.
+**Tier 3 — Embedding Classifier (~50ms):** Pre-computed centroid vectors classify prompts into simple, complex, code, or creative via cosine similarity. Run `beigebox build-centroids` once, or trigger it from the Config tab in the web UI.
 
-**Tier 4 — Decision LLM (~500ms):** Small fast model for borderline cases. Outputs structured JSON: route, tools needed, confidence.
+**Tier 4 — Decision LLM (~500ms):** Small fast model for borderline cases the classifier can't confidently resolve.
 
 ```
 Session cache hit?   → Use cached model. Done.
 Z-command found?     → Use it. Done.
 Agentic scorer       → Log if flagged. Continue.
 Centroids loaded?    → Run embedding classifier.
-  Clear result?      → Route accordingly. Cache. Done.
-  Borderline?        → Fall through to decision LLM.
-Decision LLM on?     → Run it. Route and augment. Cache.
+  Clear result?      → Route. Cache. Done.
+  Borderline?        → Fall through to Decision LLM.
+Decision LLM on?     → Run it. Route. Cache.
 Nothing matched?     → Use default model. Still works.
 ```
 
 ---
 
-## Multi-Backend Router
-
-When `backends_enabled: true`, routes across multiple backends with automatic failover. Ollama first (free), OpenRouter second (cost tracked on both streaming and non-streaming), graceful SSE error if all fail. Transparent to clients.
-
-Cost tracking uses OpenRouter's `stream_options: {include_usage: true}` to capture token counts from the final SSE chunk on streaming requests — previously untracked.
-
----
-
 ## Z-Commands
 
-Override any routing decision by prefixing your message with `z:`:
+Prefix any message with `z:` to bypass routing logic:
 
 ```
 z: simple          force fast model
 z: complex         force large model
 z: code            force code model
-z: creative        force creative model
-z: (model)         force exact model by name:tag
+z: (model:tag)     force exact model
 
-z: search          force web search augmentation
+z: search          force web search
 z: memory          search past conversations (RAG)
 z: calc (expr)     evaluate math expression
-z: time            get current date/time
-z: sysinfo         get system resource stats
+z: time            current date/time
+z: sysinfo         system resource stats
 
-z: complex,search  chain multiple directives
-
-z: help            show all z-commands
+z: complex,search  chain directives
+z: help            list everything
 ```
 
 ---
 
 ## Operator Agent
 
-`beigebox operator` launches a LangChain ReAct agent with tools: web_search, web_scrape, conversation_search, database_query, and allowlisted shell. The shell tool respects `operator.shell_binary` in config — in Docker this routes through the busybox `bb` wrapper rather than `/bin/sh`.
-
-When `orchestrator.enabled: true`, the operator also gains `parallel_orchestrator` for divide-and-conquer tasks.
+`beigebox operator` launches a LangChain ReAct agent with web search, web scrape, conversation search, database queries, and an allowlisted shell. In Docker the shell routes through the hardened `bb` busybox wrapper. Also available in the web UI Operator tab.
 
 ```bash
 beigebox operator
-beigebox op "summarise everything we discussed about docker last week"
+beigebox op "what did we discuss about routing last week"
 ```
 
 ---
 
 ## Observability
 
-**Flight Recorder:** Per-request lifecycle timelines in an in-memory ring buffer. Per-stage timing with latency breakdown bars. Available in the web UI (tab 4), TUI (tab 3), and API.
+**Wire Tap** — Structured JSONL log of every message and forwarded request. Filterable by role and direction. Filters persist in localStorage. Live mode polls every 2s. Also queryable via `beigebox tap`.
 
-**Conversation Replay:** Reconstruct any conversation with full routing context — model used, why, tools invoked, backend, cost per message.
+**Flight Recorder** — Per-request lifecycle timelines in a ring buffer. Per-stage timing with latency bars in the web UI.
 
-**Semantic Map:** Topic cluster map for any conversation using ChromaDB embeddings. Pairwise cosine similarity, connected-component clusters.
+**Conversation Replay** — Reconstruct any conversation with full routing context: model, why it was chosen, tools invoked, backend used, cost per message.
 
-**Model Performance Dashboard:** Per-model latency stats (avg, p50, p95) computed from stored `latency_ms` values. Request counts, average tokens, total cost. Rendered as a dual-bar chart (avg + p95 ghost) in the web UI dashboard. Data is recorded on non-streaming requests via the multi-backend router.
+**Semantic Map** — Topic cluster map for any conversation via ChromaDB pairwise cosine similarity.
 
-**Wire Tap:** Full structured JSONL log of every message through the proxy. Filterable by role and direction in both the web UI (tab 5) and `beigebox tap`. Live mode polls every 2 seconds.
+**Model Performance** — Per-model avg / p50 / p95 latency, request counts, total cost. In `beigebox flash` and the web UI dashboard.
 
 ---
 
 ## Security
 
-**Prompt Injection Detection:** Pre-request hook that scans user messages for structural injection patterns — boundary breaking, role override, DAN/jailbreak personas, system prompt extraction, delimiter injection, encoding obfuscation, and prompt chaining. Seven weighted patterns with a configurable score threshold.
+**Prompt Injection Detection** — Pre-request hook scanning for boundary breaking, role overrides, DAN/jailbreak patterns, system prompt extraction, delimiter injection, encoding obfuscation, and prompt chaining.
 
-Two modes:
+Two modes: `flag` (annotate and log, let through) or `block` (return refusal, halt pipeline).
 
-- `flag` — annotates the request with `_bb_injection_flag`, logs to wire, lets it through. Default.
-- `block` — returns a refusal response and halts the pipeline. Visible in flight recorder and wiretap.
-
-Enable in `config.yaml`:
 ```yaml
 hooks:
   - name: prompt_injection
     path: ./hooks/prompt_injection.py
     enabled: true
-    mode: flag          # or "block"
+    mode: flag        # or "block"
     score_threshold: 2
 ```
 
@@ -178,45 +134,23 @@ hooks:
 
 ## Web UI
 
-Single-file, no dependencies, served at `http://localhost:8000`.
+Single-file, no build step, no external JS dependencies. Served at `http://localhost:8000`.
 
 | Tab | Key | Contents |
 |---|---|---|
 | Dashboard | 1 | Stats cards, subsystem health, backends, cost charts, model performance |
-| Chat | 2 | Streaming chat, model selector, z-command hint |
-| Conversations | 3 | Semantic search, replay, conversation forking |
+| Chat | 2 | Streaming chat, model selector, z-command hint, history persists across tab switches |
+| Conversations | 3 | Semantic search grouped by conversation, replay, per-message forking |
 | Flight Recorder | 4 | Request timelines with latency bars |
-| Tap | 5 | Wire log with role/direction filters, live mode |
-| Operator | 6 | LangChain ReAct agent REPL |
-| Config | 7 | Live config and runtime overrides |
+| Tap | 5 | Wire log, role/direction filters (persisted), live mode |
+| Operator | 6 | ReAct agent REPL |
+| Config | 7 | Editable settings, Save & Apply, Build Centroids |
 
-### Conversation Forking
+**Vi mode** — Disabled by default. Zero bytes loaded when off. Toggle via the π button (bottom-left) or `web_ui_vi_mode: true` in `runtime_config.yaml`.
 
-Every message row in the replay view has a `⑂` fork button. Creates a new conversation ID with messages 0–N copied in. The top-level `⑂ Fork` button copies the full thread. Returns the new conversation ID immediately.
+**Palette** — Set `web_ui_palette` in runtime config or the Config tab: `default`, `phosphor`, `cobalt`, `sakura`, `slate`.
 
-### Vi Mode
-
-Disabled by default. Loads zero JavaScript when disabled — not just toggled off, literally absent from the page. Toggle via the π button bottom-right or `web_ui_vi_mode: true` in `runtime_config.yaml`. Persists across reloads.
-
-Bindings: `hjkl`, `w/b`, `0/$`, `G/gg`, `i/I/a/A/o/O`, `dd/yy/p`, `x`, `u` undo, `/n` search.
-
-### Palette Themes
-
-Set `web_ui_palette` in `runtime_config.yaml`: `default`, `dracula`, `gruvbox`, `nord`, or `random`. Random generates a harmonious HSL palette at runtime.
-
----
-
-## TUI
-
-`beigebox jack` launches the terminal UI.
-
-| Tab | Key | Contents |
-|---|---|---|
-| Config | 1 | Live config.yaml + runtime overrides |
-| Tap | 2 | Live wire feed with auto-poll |
-| Flight | 3 | Recent flight records, auto-polls every 2s |
-
-Press `r` to refresh. Press `q` to disconnect.
+**Forking** — Every message in replay view has a `⑂` button. Branches the conversation from that point into a new ID.
 
 ---
 
@@ -224,104 +158,114 @@ Press `r` to refresh. Press `q` to disconnect.
 
 ```
 beigebox/
-├── README.md
-├── config.yaml                    # All runtime configuration
-├── runtime_config.yaml            # Hot-reloaded overrides (no restart needed)
-├── beigebox/
-│   ├── cli.py                     # CLI commands (phreaker names)
-│   ├── main.py                    # FastAPI app, all endpoints
-│   ├── proxy.py                   # Request interception, hybrid routing, block pipeline
-│   ├── config.py                  # Config loader + runtime write support
-│   ├── wiretap.py                 # Structured JSONL wire log
-│   ├── costs.py                   # Cost aggregation queries
-│   ├── flight_recorder.py         # In-memory request timeline ring buffer
-│   ├── replay.py                  # Conversation replay with routing context
-│   ├── semantic_map.py            # Topic clustering via ChromaDB
-│   ├── orchestrator.py            # Parallel LLM task spawner
-│   ├── agents/
-│   │   ├── decision.py            # Decision LLM (Tier 4)
-│   │   ├── embedding_classifier.py # Centroid-based fast classifier (Tier 3)
-│   │   ├── zcommand.py            # Z-command parser
-│   │   ├── agentic_scorer.py      # Keyword intent pre-filter (Tier 2)
-│   │   └── operator.py            # LangChain ReAct agent TUI screen
-│   ├── backends/
-│   │   ├── base.py                # BackendResponse dataclass, BaseBackend ABC
-│   │   ├── ollama.py              # Ollama backend
-│   │   ├── openrouter.py          # OpenRouter backend (streaming cost capture)
-│   │   └── router.py              # Priority-based multi-backend router
-│   ├── storage/
-│   │   ├── sqlite_store.py        # SQLite store (latency_ms, fork, perf queries)
-│   │   ├── vector_store.py        # ChromaDB wrapper
-│   │   └── models.py              # Message / Conversation dataclasses
-│   ├── tools/
-│   │   ├── registry.py
-│   │   ├── web_search.py
-│   │   ├── web_scraper.py
-│   │   ├── calculator.py
-│   │   ├── datetime_tool.py
-│   │   ├── system_info.py         # Respects operator.shell_binary config
-│   │   ├── memory.py
-│   │   └── notifier.py
-│   ├── tui/
-│   │   ├── app.py
-│   │   ├── styles/main.tcss
-│   │   └── screens/
-│   │       ├── base.py
-│   │       ├── config.py
-│   │       ├── tap.py
-│   │       └── flight.py
-│   └── web/
-│       ├── index.html             # Single-file web UI (all tabs, charts, vi mode)
-│       └── vi.js                  # Vi mode (loaded only when enabled)
-├── hooks/
-│   └── prompt_injection.py        # Prompt injection detection hook
-├── scripts/
-│   ├── export_conversations.py
-│   ├── migrate_open_webui.py
-│   └── search_conversations.py
-├── docker/
-│   ├── Dockerfile                 # Busybox + non-root appuser
-│   ├── config.docker.yaml
-│   ├── docker-compose.yaml
-│   └── smoke.sh
-├── 2600/                          # Design docs and session archives
-└── tests/
+  README.md
+  config.yaml                    main configuration
+  runtime_config.yaml            hot-reloaded overrides, no restart needed
+  pyproject.toml
+  requirements.txt
+
+  beigebox/
+    cli.py                       CLI entry point, phreaker command names
+    main.py                      FastAPI app, all endpoints, catch-all passthrough
+    proxy.py                     request interception, hybrid routing, block pipeline
+    config.py                    config loader, runtime hot-reload
+    wiretap.py                   structured JSONL wire log
+    summarizer.py                auto-summarization, context window management
+    costs.py                     cost aggregation queries
+    flight_recorder.py           in-memory request timeline ring buffer
+    replay.py                    conversation replay with routing context
+    semantic_map.py              topic clustering via ChromaDB
+    orchestrator.py              parallel LLM task spawner
+
+    agents/
+      decision.py                Decision LLM — Tier 4
+      embedding_classifier.py    centroid-based classifier — Tier 3
+      agentic_scorer.py          keyword intent pre-filter — Tier 2
+      zcommand.py                z-command parser — Tier 1
+      operator.py                LangChain ReAct agent
+
+    backends/
+      base.py                    BackendResponse dataclass, BaseBackend ABC
+      ollama.py                  Ollama backend
+      openrouter.py              OpenRouter backend, streaming cost capture
+      router.py                  priority-based multi-backend router
+
+    storage/
+      sqlite_store.py            conversations, messages, latency, performance queries
+      vector_store.py            ChromaDB wrapper, grouped semantic search
+      models.py                  Message and Conversation dataclasses
+
+    tools/
+      registry.py
+      web_search.py
+      web_scraper.py
+      calculator.py
+      datetime_tool.py
+      system_info.py             respects operator.shell_binary — bb in Docker
+      memory.py
+      notifier.py
+
+    web/
+      index.html                 single-file web UI, all tabs, no build step
+      vi.js                      vi mode, injected only when enabled
+
+  hooks/
+    prompt_injection.py          prompt injection detection hook
+
+  scripts/
+    export_conversations.py
+    migrate_open_webui.py
+    search_conversations.py
+
+  docker/
+    Dockerfile                   restricted busybox bb wrapper, non-root appuser
+    config.docker.yaml
+    docker-compose.yaml
+    smoke.sh                     full stack validation, 12 test sections
+
+  2600/                          design docs and session archives
+
+  tests/
 ```
 
 ---
 
 ## API Endpoints
 
-### Core
+### OpenAI-compatible (proxied and logged)
+
 | Endpoint | Method | Description |
 |---|---|---|
-| `/v1/chat/completions` | POST | Chat completion (streaming + non-streaming) |
-| `/v1/models` | GET | List models from all backends |
+| `/v1/chat/completions` | POST | Full routing pipeline, streaming + non-streaming |
+| `/v1/models` | GET | Model list from all backends |
+| `/v1/embeddings` | POST | Forwarded and logged |
+| `/v1/completions` | POST | Legacy completions, forwarded |
+| `/v1/audio/transcriptions` | POST | STT — forwarded to configured voice service |
+| `/v1/audio/speech` | POST | TTS — forwarded to configured voice service |
 
-### Proxy
+### Ollama-native (forwarded and logged)
+
+`/api/tags` `/api/chat` `/api/generate` `/api/pull` `/api/embed` `/api/show` `/api/ps` `/api/version` — all forwarded transparently to the backend.
+
+### BeigeBox
+
 | Endpoint | Method | Description |
 |---|---|---|
 | `/beigebox/health` | GET | Health check |
-| `/beigebox/search` | GET | Semantic search — raw message hits (`?q=&n=`) |
-| `/api/v1/search` | GET | Semantic search — grouped by conversation (`?q=&n=`) |
-| `/api/v1/info` | GET | Version and feature info |
-| `/api/v1/config` | GET | Config including web_ui runtime state |
-| `/api/v1/status` | GET | Full subsystem status |
+| `/api/v1/info` | GET | Version and feature flags |
+| `/api/v1/config` | GET / POST | Read config / save runtime settings |
+| `/api/v1/status` | GET | Subsystem status |
 | `/api/v1/stats` | GET | Conversation and token stats |
-| `/api/v1/tools` | GET | Available tools |
-| `/api/v1/backends` | GET | Backend health and priority |
-| `/api/v1/costs` | GET | Cost stats (`?days=30`) |
-| `/api/v1/model-performance` | GET | Latency p50/p95, throughput by model (`?days=30`) |
-| `/api/v1/tap` | GET | Wire log entries with filters (`?n=50&role=user&dir=inbound`) |
-| `/api/v1/flight-recorder` | GET | Recent flight records (`?n=20`) |
-| `/api/v1/flight-recorder/{id}` | GET | Detailed timeline for one record |
-| `/api/v1/conversation/{id}/replay` | GET | Conversation with full routing context |
-| `/api/v1/conversation/{id}/fork` | POST | Fork a conversation (`{"branch_at": N}`) |
-| `/api/v1/conversation/{id}/semantic-map` | GET | Topic cluster map |
-| `/api/v1/orchestrator` | POST | Parallel LLM tasks |
-| `/api/v1/operator` | POST | Run the Operator agent |
-| `/api/v1/web-ui/toggle-vi-mode` | POST | Toggle vi mode, persists to runtime_config |
-| `/` | GET | Web UI |
+| `/api/v1/costs` | GET | Cost breakdown, `?days=30` |
+| `/api/v1/model-performance` | GET | Latency percentiles by model |
+| `/api/v1/tap` | GET | Wire log with filters |
+| `/api/v1/search` | GET | Semantic search grouped by conversation |
+| `/api/v1/flight-recorder` | GET | Request timelines |
+| `/api/v1/conversation/{id}/replay` | GET | Replay with routing context |
+| `/api/v1/conversation/{id}/fork` | POST | Fork conversation at message N |
+| `/api/v1/build-centroids` | POST | Rebuild embedding classifier centroids |
+| `/api/v1/operator` | POST | Run Operator agent |
+| `/{path:path}` | ANY | Catch-all — forwards unknown paths to backend |
 
 ---
 
@@ -331,108 +275,60 @@ beigebox/
 PHREAKER        STANDARD         WHAT IT DOES
 --------        --------         ----------------------------------
 dial            start, up        Start the proxy server
-jack            tui, ui          Launch the TUI
 tap             log, tail        Live wiretap
 ring            status, ping     Ping a running instance
 sweep           search, find     Semantic search over conversations
 dump            export           Export conversations to JSON
-flash           info, config     Show stats, config, and cost summary
+flash           info, stats      Stats, config, costs, model performance
 tone            banner           Print the banner
 build-centroids centroids        Generate embedding classifier centroids
 operator        op               Launch the Operator agent
-setup           init             Interactive first-time setup
+setup           install, pull    Pull required Ollama models
 ```
 
 ---
 
 ## Configuration
 
-`config.yaml` is the main config. `runtime_config.yaml` is hot-reloaded on every request with no restart needed.
-
-### runtime_config.yaml keys
-
-```yaml
-runtime:
-  default_model: ""
-  border_threshold: null
-  agentic_threshold: null
-  force_route: ""
-  tools_disabled: []
-  system_prompt_prefix: ""
-  log_level: ""
-  web_ui_vi_mode: false
-  web_ui_palette: "default"   # default | dracula | gruvbox | nord | random
-```
+`config.yaml` is the main config. `runtime_config.yaml` is hot-reloaded on every request — no restart needed. Both are editable from the web UI Config tab.
 
 ### Feature flags (all disabled by default)
 
 ```yaml
 backends_enabled: false
-backends:
-  - name: local
-    url: http://localhost:11434
-    provider: ollama
-    priority: 1
-    timeout: 120
-  - name: openrouter
-    url: https://openrouter.ai/api/v1
-    provider: openrouter
-    api_key: "${OPENROUTER_API_KEY}"
-    priority: 2
-    timeout: 60
 
 cost_tracking:
   enabled: false
 
-orchestrator:
+auto_summarization:
   enabled: false
-  max_parallel_tasks: 5
-  shell_binary: /bin/sh       # Docker: /usr/local/bin/bb
+  token_budget: 3000
+  summary_model: "llama3.2:3b"
+  keep_last: 4
 
 flight_recorder:
   enabled: false
-  max_records: 1000
-  retention_hours: 24
 
 conversation_replay:
   enabled: false
 
 semantic_map:
   enabled: false
-  similarity_threshold: 0.5
-  max_topics: 50
+
+orchestrator:
+  enabled: false
+
+voice:
+  enabled: false
+  stt_url: ""
+  tts_url: ""
 
 hooks:
   - name: prompt_injection
-    path: ./hooks/prompt_injection.py
     enabled: false
-    mode: flag          # flag | block
+    mode: flag        # flag | block
     score_threshold: 2
 ```
-
----
-
-## Setup and Installation
-
-```bash
-git clone https://github.com/RALaBarge/beigebox.git
-cd beigebox
-pip install -e .
-```
-
-Pull required models:
-```bash
-ollama pull nomic-embed-text
-ollama pull <your-preferred-model>
-```
-
-Edit `config.yaml` to set `backend.url` and `backend.default_model`, then:
-
-```bash
-beigebox dial
-```
-
-Web UI at `http://localhost:8000`. Point Open WebUI at `http://localhost:8000/v1` with any non-empty API key.
 
 ---
 
@@ -443,6 +339,12 @@ cd docker
 docker compose up -d
 ```
 
+Pulls `llama3.2:3b` and `nomic-embed-text` on first start. Web UI at `http://localhost:8000`. Point Open WebUI at `http://localhost:8000/v1` with any non-empty API key.
+
+```bash
+./smoke.sh    # validate the full stack
+```
+
 ---
 
 ## Testing
@@ -450,116 +352,57 @@ docker compose up -d
 ```bash
 pytest tests/ -v
 
-# Feature-specific
-pytest tests/test_backends.py tests/test_costs.py tests/test_flight_recorder.py \
-       tests/test_replay.py tests/test_semantic_map.py tests/test_orchestrator.py -v
-
-# No external dependencies (runs anywhere)
-pytest tests/test_flight_recorder.py tests/test_costs.py tests/test_replay.py \
-       tests/test_web_ui.py -v
+# Core suite, no external dependencies
+pytest tests/test_storage.py tests/test_proxy.py tests/test_hooks.py \
+       tests/test_costs.py tests/test_zcommand.py tests/test_v08.py -v
 ```
 
 ---
 
 ## Roadmap
 
-### Done — v0.8.0
+### Done — v0.9.0
 
-**Foundation**
-- [x] FastAPI proxy with OpenAI-compatible endpoints
-- [x] Transparent streaming forwarding
-- [x] SQLite + ChromaDB dual storage
-- [x] Token tracking
-- [x] Wiretap (structured JSONL log + CLI viewer)
-- [x] Runtime config hot-reload
-- [x] Hooks plugin system
-- [x] Synthetic request filtering
-- [x] Docker quickstart with health checks
-- [x] Conversation export and Open WebUI migration
-
-**Routing**
-- [x] Four-tier hybrid routing (session cache → z-commands → embedding → decision LLM)
-- [x] Session-aware routing with TTL eviction
-- [x] Agentic intent scorer
-- [x] Multi-class embedding classifier (simple / complex / code / creative)
-- [x] Decision LLM routing
-- [x] Z-command user overrides with chaining
-- [x] Web search and RAG augmentation
-
-**Backends**
-- [x] Multi-backend router (priority-based, Ollama → OpenRouter fallback)
-- [x] Cost tracking — non-streaming
-- [x] Cost tracking — streaming (OpenRouter `include_usage` sentinel)
-- [x] Model performance dashboard (avg / p50 / p95 latency stored per response)
-- [x] Streaming latency tracking (wall-clock duration stored for all streaming responses)
-
-**Operator**
+- [x] OpenAI-compatible proxy, transparent streaming, SQLite + ChromaDB storage
+- [x] Four-tier hybrid routing — session cache, z-commands, embedding classifier, decision LLM
+- [x] Multi-backend router, Ollama → OpenRouter failover
+- [x] Cost tracking, streaming and non-streaming
+- [x] Streaming latency tracking, model performance dashboard
+- [x] Auto-summarization for context window management
+- [x] All known OpenAI and Ollama endpoints proxied and logged
+- [x] Catch-all passthrough for any unknown endpoint
 - [x] LangChain ReAct operator agent
 - [x] Parallel orchestrator
-- [x] Busybox shell hardening (Docker + `shell_binary` config key honoured in `system_info.py`)
+- [x] Flight recorder, conversation replay, semantic map
+- [x] Wire tap with persistent filters and live mode
+- [x] Prompt injection detection, flag and block modes
+- [x] Single-file web UI — 7 tabs, editable config, persistent chat history and tap filters
+- [x] Vi mode (zero bytes when disabled), palette themes, conversation forking
+- [x] Busybox bb shell hardening in Docker
+- [x] 68 tests, smoke test covering all endpoints and restart resilience
 
-**Observability**
-- [x] Flight recorder (request lifecycle timelines)
-- [x] Conversation replay (full routing context)
-- [x] Semantic map (topic clustering)
-- [x] Wire tap with role / direction filters (web UI + CLI)
+### v1.0 and beyond
 
-**Security**
-- [x] Prompt injection detection hook (flag + block modes, 7 pattern families)
-- [x] `_beigebox_block` pipeline short-circuit (streaming + non-streaming)
-
-**Web UI**
-- [x] Single-file, no dependencies
-- [x] Dashboard with stat cards, subsystem health, cost charts, latency chart
-- [x] Chat with streaming and model selector
-- [x] Conversations with semantic search, replay, and per-message fork buttons
-- [x] Flight Recorder with expandable latency bars
-- [x] Tap tab with live mode and role / direction filters
-- [x] Operator REPL
-- [x] Config view with live runtime state
-- [x] Vi mode (dynamic injection, zero bytes when disabled)
-- [x] Palette themes (default, dracula, gruvbox, nord, random)
-
-**TUI**
-- [x] Lavender palette, three tabs (Config, Tap, Flight)
-- [x] Flight recorder screen with auto-poll
-
----
-
-### Next — v0.9.0
-
-This release is reserved for user testing and stabilisation. All planned features for v0.9 have shipped in v0.8; the version bump reflects a testing milestone, not new code.
-
-**Tap filter persistence** — The web UI tap filters reset on page reload. Saving the last used role/direction/n to `localStorage` would make it more useful as a monitoring tool. Intentionally deferred — browser storage is unavailable in some deployment contexts.
-
-**Auto-summarization** — When a conversation exceeds a configurable token budget, summarise older messages and replace them with the summary to free context window. Needs a summary model config key and a trigger threshold.
-
----
-
-### Future — v1.0 and beyond
-
-- [ ] Voice pipeline (Whisper STT → LLM → TTS loop)
-- [ ] Conversation export to fine-tuning format (JSONL, Alpaca, ShareGPT)
+- [ ] Voice — Whisper STT, push-to-talk, Kokoro TTS, lazy-loaded JS, disabled by default
+- [ ] Conversation export to fine-tuning formats (JSONL, Alpaca, ShareGPT)
 - [ ] Multi-model voting / ensemble responses
-- [ ] Plugin system for custom tools (beyond the hooks system)
-- [ ] Agent framework with sandboxed execution
 - [ ] Web UI mobile layout
 
 ---
 
 ## Contributing
 
-By contributing to this project, you agree that your contributions will be licensed under the project's AGPLv3 license, and you grant the maintainer(s) a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to incorporate your contributions into the project and sub-license them under alternative commercial terms.
+By contributing you agree your work will be licensed under AGPLv3, and you grant the maintainer(s) a perpetual license to sub-license under alternative commercial terms.
 
 ---
 
 ## License
 
-Note for Enterprises: This project is licensed under AGPLv3 to keep it free for the community. If you are a high-revenue carbon-based lifeform, synthetic or otherwise, and require a non-copyleft license, please contact me.
+AGPLv3. Enterprise use without copyleft — reach out.
 
-If you are gonna make money off of it, you gotta hollar at me first. I have got 4 dogs and 2 kids and they eat a lot.
+If you're making money off it, holler first. Four dogs, two kids, they eat a lot.
 
-Otherwise, free to use for everyone not making a buck from it. If you think of something cool or have code that matches the style, please make a PR or an Issue.
+Otherwise free for everyone not making a buck from it. PRs and issues welcome if you've got something that fits the style.
 
 ---
 

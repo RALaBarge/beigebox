@@ -557,6 +557,13 @@ class Proxy:
                          method="decision_llm" if decision else "fast_path")
             recorder.model = model  # Update with final routed model
 
+        # Auto-summarize if conversation exceeds token budget
+        try:
+            from beigebox.summarizer import maybe_summarize
+            body["messages"] = await maybe_summarize(body.get("messages", []), self.cfg)
+        except Exception as _e:
+            logger.debug("auto_summarizer skipped: %s", _e)
+
         # Log incoming user messages (skip synthetic)
         if not is_synthetic:
             self._log_messages(conversation_id, body.get("messages", []), model)
@@ -689,6 +696,13 @@ class Proxy:
         # Hybrid routing
         body, decision = await self._hybrid_route(body, zcmd, conversation_id)
         model = body.get("model", model)
+
+        # Auto-summarize if conversation exceeds token budget
+        try:
+            from beigebox.summarizer import maybe_summarize
+            body["messages"] = await maybe_summarize(body.get("messages", []), self.cfg)
+        except Exception as _e:
+            logger.debug("auto_summarizer skipped: %s", _e)
 
         # Log incoming user messages (skip synthetic)
         if not is_synthetic:

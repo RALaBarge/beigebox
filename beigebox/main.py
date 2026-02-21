@@ -787,7 +787,26 @@ async def api_operator(request: Request):
 # Web UI settings
 # ---------------------------------------------------------------------------
 
-@app.post("/api/v1/web-ui/toggle-vi-mode")
+@app.post("/api/v1/build-centroids")
+async def api_build_centroids():
+    """
+    Rebuild embedding classifier centroids from seed prompts.
+    Equivalent to `beigebox build-centroids` CLI command.
+    Runs synchronously — may take 10-30s depending on embedding model speed.
+    """
+    if not embedding_classifier:
+        return JSONResponse({"success": False, "error": "Embedding classifier not initialized"}, status_code=503)
+    try:
+        success = embedding_classifier.build_centroids()
+        if success:
+            return JSONResponse({"success": True, "message": "Centroids built successfully"})
+        else:
+            return JSONResponse({"success": False, "error": "build_centroids() returned False — check Ollama is running"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+
 async def toggle_vi_mode():
     """Toggle vi mode in runtime_config.yaml. Returns new state."""
     rt = get_runtime_config()
@@ -818,6 +837,178 @@ async def root():
 async def ui():
     """Alias for root."""
     return FileResponse("beigebox/web/index.html", media_type="text/html")
+
+
+# ---------------------------------------------------------------------------
+# Known OpenAI-compatible endpoints — explicit routes for observability.
+# These all forward to the backend but are logged to wiretap.
+# Catch-all below handles anything not listed here.
+# ---------------------------------------------------------------------------
+
+async def _wire_and_forward(request: Request, route_label: str) -> StreamingResponse:
+    """
+    Generic forward: log to wiretap, stream response from backend verbatim.
+    Used for all known-but-not-specially-handled OpenAI/Ollama endpoints.
+    """
+    cfg = get_config()
+    backend_url = cfg["backend"]["url"].rstrip("/")
+    path = request.url.path
+    query = request.url.query
+    target = f"{backend_url}{path}"
+    if query:
+        target += f"?{query}"
+
+    body = await request.body()
+    headers = {
+        k: v for k, v in request.headers.items()
+        if k.lower() not in ("host", "content-length")
+    }
+
+    # Wire log entry via proxy.wire (WireLog)
+    if proxy and proxy.wire:
+        try:
+            body_preview = body[:400].decode("utf-8", errors="replace") if body else ""
+        except Exception:
+            body_preview = ""
+        proxy.wire.log(
+            direction="internal",
+            role="proxy",
+            content=f"[{request.method}] {route_label} → {target}\n{body_preview}",
+            model="",
+            conversation_id="",
+        )
+
+    async def _stream():
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream(
+                request.method,
+                target,
+                headers=headers,
+                content=body,
+            ) as resp:
+                async for chunk in resp.aiter_bytes():
+                    yield chunk
+
+    return StreamingResponse(_stream(), media_type="application/octet-stream")
+
+
+# OpenAI Audio — STT / TTS (forwarded to configured voice services or backend)
+@app.post("/v1/audio/transcriptions")
+async def audio_transcriptions(request: Request):
+    """STT — forward to configured STT service or backend."""
+    return await _wire_and_forward(request, "audio/transcriptions")
+
+@app.post("/v1/audio/speech")
+async def audio_speech(request: Request):
+    """TTS — forward to configured TTS service or backend."""
+    return await _wire_and_forward(request, "audio/speech")
+
+@app.post("/v1/audio/translations")
+async def audio_translations(request: Request):
+    """Audio translation — forward to backend."""
+    return await _wire_and_forward(request, "audio/translations")
+
+# OpenAI Embeddings
+@app.post("/v1/embeddings")
+async def embeddings(request: Request):
+    """Embeddings — forward to backend, logged."""
+    return await _wire_and_forward(request, "embeddings")
+
+# OpenAI legacy completions (non-chat)
+@app.post("/v1/completions")
+async def completions(request: Request):
+    """Legacy completions — forward to backend."""
+    return await _wire_and_forward(request, "completions")
+
+# OpenAI Files / Fine-tuning / Assistants (future-proofing)
+@app.api_route("/v1/files/{path:path}", methods=["GET","POST","DELETE"])
+async def files_passthrough(path: str, request: Request):
+    return await _wire_and_forward(request, f"files/{path}")
+
+@app.api_route("/v1/fine_tuning/{path:path}", methods=["GET","POST","DELETE"])
+async def fine_tuning_passthrough(path: str, request: Request):
+    return await _wire_and_forward(request, f"fine_tuning/{path}")
+
+@app.api_route("/v1/assistants/{path:path}", methods=["GET","POST","DELETE","PUT"])
+async def assistants_passthrough(path: str, request: Request):
+    return await _wire_and_forward(request, f"assistants/{path}")
+
+# Ollama-native endpoints (used by some frontends that speak Ollama directly)
+@app.api_route("/api/tags", methods=["GET"])
+async def ollama_tags(request: Request):
+    """Ollama model list — forward and log."""
+    return await _wire_and_forward(request, "ollama/tags")
+
+@app.api_route("/api/chat", methods=["POST"])
+async def ollama_chat(request: Request):
+    """Ollama native chat — forward and log."""
+    return await _wire_and_forward(request, "ollama/chat")
+
+@app.api_route("/api/generate", methods=["POST"])
+async def ollama_generate(request: Request):
+    """Ollama native generate — forward and log."""
+    return await _wire_and_forward(request, "ollama/generate")
+
+@app.api_route("/api/pull", methods=["POST"])
+async def ollama_pull(request: Request):
+    """Ollama model pull — forward and log."""
+    return await _wire_and_forward(request, "ollama/pull")
+
+@app.api_route("/api/push", methods=["POST"])
+async def ollama_push(request: Request):
+    return await _wire_and_forward(request, "ollama/push")
+
+@app.api_route("/api/delete", methods=["DELETE","POST"])
+async def ollama_delete(request: Request):
+    return await _wire_and_forward(request, "ollama/delete")
+
+@app.api_route("/api/copy", methods=["POST"])
+async def ollama_copy(request: Request):
+    return await _wire_and_forward(request, "ollama/copy")
+
+@app.api_route("/api/show", methods=["POST"])
+async def ollama_show(request: Request):
+    return await _wire_and_forward(request, "ollama/show")
+
+@app.api_route("/api/embed", methods=["POST"])
+async def ollama_embed(request: Request):
+    """Ollama embed — forward and log."""
+    return await _wire_and_forward(request, "ollama/embed")
+
+@app.api_route("/api/embeddings", methods=["POST"])
+async def ollama_embeddings(request: Request):
+    return await _wire_and_forward(request, "ollama/embeddings")
+
+@app.api_route("/api/ps", methods=["GET"])
+async def ollama_ps(request: Request):
+    return await _wire_and_forward(request, "ollama/ps")
+
+@app.api_route("/api/version", methods=["GET"])
+async def ollama_version(request: Request):
+    return await _wire_and_forward(request, "ollama/version")
+
+# ---------------------------------------------------------------------------
+# Catch-all — anything not explicitly handled above is forwarded transparently.
+# Logged to wiretap as "passthrough/unknown" for observability.
+# MUST be the last route registered.
+# ---------------------------------------------------------------------------
+
+@app.api_route(
+    "/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+)
+async def catch_all(path: str, request: Request):
+    """
+    Transparent passthrough for any endpoint not explicitly handled.
+    Keeps BeigeBox invisible to frontends and backends that use endpoints
+    we haven't specifically implemented. All traffic is logged to wiretap.
+    """
+    # Don't forward requests to our own beigebox/* or api/v1/* endpoints —
+    # those are handled above; if we're here it means they 404'd internally.
+    if path.startswith("beigebox/") or path.startswith("api/v1/"):
+        return JSONResponse({"error": "not found", "path": path}, status_code=404)
+
+    return await _wire_and_forward(request, f"passthrough/{path}")
 
 
 # ---------------------------------------------------------------------------

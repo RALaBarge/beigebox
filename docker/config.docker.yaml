@@ -146,3 +146,20 @@ logging:
 # --- Wiretap ---
 wiretap:
   path: "./data/wire.jsonl"
+
+# --- Auto-summarization ---
+auto_summarization:
+  enabled: false               # Enable to compress long conversations automatically
+  token_budget: 3000           # Trigger when estimated tokens exceed this
+  summary_model: "llama3.2:3b" # Model to use for summarization (defaults to backend.default_model)
+  keep_last: 4                 # Always keep the N most recent messages intact
+  summary_prefix: "Summary of earlier conversation: "
+
+# --- Voice (Push-to-talk) ---
+voice:
+  enabled: false               # Enable voice input/output
+  stt_url: ""                  # STT service URL (OpenAI-compatible /v1/audio/transcriptions)
+  tts_url: ""                  # TTS service URL (OpenAI-compatible /v1/audio/speech)
+  tts_voice: "af_heart"        # TTS voice name (Kokoro default)
+  tts_model: "kokoro"
+  hotkey: "alt+v"              # Push-to-talk hotkey (browser-scoped)

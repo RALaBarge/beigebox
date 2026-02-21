@@ -1541,6 +1541,13 @@ async function loadTap() {
   const dir  = document.getElementById('tap-dir').value;
   const n    = parseInt(document.getElementById('tap-n').value) || 50;
 
+  // Persist filters
+  try {
+    localStorage.setItem('bb_tap_role', role);
+    localStorage.setItem('bb_tap_dir', dir);
+    localStorage.setItem('bb_tap_n', String(n));
+  } catch {}
+
   el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
   try {
     let url = `/api/v1/tap?n=${n}`;
@@ -1684,6 +1691,7 @@ async function loadConfig() {
 
     html += `<div style="margin-top:16px;display:flex;gap:8px;align-items:center">
       <button class="primary" onclick="saveConfig()">💾 Save &amp; Apply</button>
+      <button onclick="buildCentroids()" id="centroids-btn" style="margin-left:8px">⚙ Build Centroids</button>
       <span id="cfg-save-status" style="font-size:11px;color:var(--fg-dim)"></span>
     </div>`;
 
@@ -1742,9 +1750,34 @@ async function saveConfig() {
 }
 
 
-// ── Init ─────────────────────────────────────────────────────────────────────
+async function buildCentroids() {
+  const btn = document.getElementById('centroids-btn');
+  const status = document.getElementById('cfg-save-status');
+  if (btn) btn.disabled = true;
+  if (status) status.textContent = '⚙ Building centroids… (may take 10-30s)';
+  try {
+    const d = await api('/api/v1/build-centroids', { method: 'POST' });
+    if (status) status.textContent = d.success ? '✓ Centroids built' : `✗ ${d.error}`;
+  } catch(e) {
+    if (status) status.textContent = `✗ ${esc(e.message)}`;
+  } finally {
+    if (btn) btn.disabled = false;
+    setTimeout(() => { if (status) status.textContent = ''; }, 5000);
+  }
+}
+
 loadDashboard();
 loadModels();
+
+// Restore tap filters from localStorage
+try {
+  const savedRole = localStorage.getItem('bb_tap_role');
+  const savedDir  = localStorage.getItem('bb_tap_dir');
+  const savedN    = localStorage.getItem('bb_tap_n');
+  if (savedRole !== null) document.getElementById('tap-role').value = savedRole;
+  if (savedDir  !== null) document.getElementById('tap-dir').value  = savedDir;
+  if (savedN    !== null) document.getElementById('tap-n').value    = savedN;
+} catch {}
 
 // Restore chat history from localStorage
 restoreChatHistory();
