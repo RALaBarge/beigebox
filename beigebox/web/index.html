@@ -498,6 +498,219 @@
     padding: 8px 0 4px;
   }
 
+  /* ── Voice / Push-to-talk ────────────────────────────────────────────── */
+  #mic-btn {
+    display: none; /* hidden until voice_enabled confirmed from server */
+    background: var(--bg-panel);
+    border: 1px solid var(--bg-border);
+    color: var(--fg-muted);
+    padding: 0 12px;
+    border-radius: 2px;
+    font-size: 16px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.15s;
+    height: 100%;
+    align-self: stretch;
+  }
+  #mic-btn:hover { border-color: var(--lavender); color: var(--lavender); }
+  #mic-btn.recording {
+    border-color: var(--red);
+    color: var(--red);
+    background: #2a1010;
+    animation: mic-pulse 1s infinite;
+  }
+  @keyframes mic-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(191, 97, 106, 0.4); }
+    50%       { box-shadow: 0 0 0 5px rgba(191, 97, 106, 0); }
+  }
+
+  /* ── Multi-pane chat ─────────────────────────────────────────────────── */
+  #chat-pane-container {
+    flex: 1;
+    display: flex;
+    gap: 4px;
+    overflow: hidden;
+    min-height: 0;
+  }
+  .chat-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--bg-border);
+    border-radius: 2px;
+    overflow: hidden;
+    min-width: 0;
+  }
+  .chat-pane-header {
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--bg-border);
+    padding: 4px 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    font-size: 11px;
+  }
+  .chat-pane-header select {
+    font-size: 11px;
+    height: 22px;
+    padding: 1px 4px;
+    flex: 1;
+    min-width: 0;
+  }
+  .chat-pane-header .pane-label {
+    color: var(--lavender);
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+  }
+  .chat-pane-header button {
+    padding: 1px 6px;
+    font-size: 10px;
+    height: 20px;
+    line-height: 1;
+  }
+  .chat-pane-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+  .chat-pane-messages::-webkit-scrollbar { width: 4px; }
+  .chat-pane-messages::-webkit-scrollbar-thumb { background: var(--bg-border); }
+
+  /* ── Chat page nav ───────────────────────────────────────────────────── */
+  #chat-page-nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 8px;
+    flex-shrink: 0;
+  }
+  #chat-page-nav button {
+    padding: 2px 10px;
+    font-size: 12px;
+  }
+  #chat-page-indicator {
+    color: var(--fg-muted);
+    font-size: 11px;
+    min-width: 60px;
+    text-align: center;
+  }
+
+  /* ── Harness tab ─────────────────────────────────────────────────────── */
+  #panel-harness {
+    flex-direction: column;
+  }
+  #harness-grid {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px;
+    overflow: hidden;
+    align-content: flex-start;
+  }
+  .harness-pane {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 280px;
+    max-width: calc(50% - 2px);
+    min-height: 200px;
+    max-height: 50%;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--bg-border);
+    border-radius: 2px;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+  .harness-pane-header {
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--bg-border);
+    padding: 4px 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    font-size: 11px;
+  }
+  .harness-pane-header .target-label {
+    color: var(--cyan);
+    font-size: 11px;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .harness-status {
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 2px;
+  }
+  .harness-status.pending { color: var(--yellow); }
+  .harness-status.done    { color: var(--green); }
+  .harness-status.error   { color: var(--red); }
+  .harness-pane-output {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--fg);
+  }
+  .harness-pane-output::-webkit-scrollbar { width: 4px; }
+  .harness-pane-output::-webkit-scrollbar-thumb { background: var(--bg-border); }
+  .harness-pane-output.thinking { color: var(--yellow); font-style: italic; }
+
+  #harness-target-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--bg-border);
+    flex-shrink: 0;
+    align-items: center;
+  }
+  .harness-target-chip {
+    background: var(--bg-border);
+    border: 1px solid var(--bg-border);
+    border-radius: 2px;
+    padding: 2px 8px;
+    font-size: 11px;
+    color: var(--fg);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: default;
+  }
+  .harness-target-chip .remove-chip {
+    color: var(--fg-muted);
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+  }
+  .harness-target-chip .remove-chip:hover { color: var(--red); }
+
+  #harness-page-nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    background: var(--bg-panel);
+    border-top: 1px solid var(--bg-border);
+    flex-shrink: 0;
+  }
+  #harness-page-indicator {
+    color: var(--fg-muted);
+    font-size: 11px;
+    min-width: 80px;
+    text-align: center;
+  }
+
   /* ── Misc ────────────────────────────────────────────────────────────── */
   .empty { color: var(--fg-muted); padding: 20px; text-align: center; font-size: 12px; }
   .error-box {
@@ -534,7 +747,8 @@
   <div class="tab" data-tab="flight"    onclick="switchTab('flight')">   <span class="tab-key">4</span>Flight Recorder</div>
   <div class="tab" data-tab="tap"       onclick="switchTab('tap')">      <span class="tab-key">5</span>Tap</div>
   <div class="tab" data-tab="operator"  onclick="switchTab('operator')"> <span class="tab-key">6</span>Operator</div>
-  <div class="tab" data-tab="config"    onclick="switchTab('config')">   <span class="tab-key">7</span>Config</div>
+  <div class="tab" data-tab="harness"   onclick="switchTab('harness')">  <span class="tab-key">7</span>Harness</div>
+  <div class="tab" data-tab="config"    onclick="switchTab('config')">   <span class="tab-key">8</span>Config</div>
 </div>
 
 <!-- ── Content ─────────────────────────────────────────────────────────── -->
@@ -553,17 +767,29 @@
   </div>
 
   <!-- 2. Chat -->
+  <!-- 2. Chat (multi-pane) -->
   <div class="panel" id="panel-chat">
     <div class="toolbar">
-      <span class="toolbar-label">Model:</span>
-      <select id="model-select" onchange="saveModel()"><option value="">default</option></select>
-      <button onclick="clearChat()" style="margin-left:auto">✕ Clear</button>
+      <span class="toolbar-label">Panes:</span>
+      <button onclick="addChatPane()" title="Add output pane (+)">＋</button>
+      <button onclick="removeChatPane()" title="Remove last pane">－</button>
+      <span style="color:var(--fg-muted);font-size:10px;margin-left:4px">max 4/page · [ ] to page</span>
+      <span class="toolbar-spacer"></span>
+      <div id="chat-page-nav">
+        <button onclick="chatPagePrev()" id="chat-prev-btn" title="Previous page [">◀</button>
+        <span id="chat-page-indicator">p1/1</span>
+        <button onclick="chatPageNext()" id="chat-next-btn" title="Next page ]">▶</button>
+      </div>
+      <button onclick="clearAllPanes()" style="margin-left:8px">✕ Clear all</button>
     </div>
-    <div id="chat-messages"></div>
-    <div class="z-hint">z-commands: <code>z: search</code> <code>z: code</code> <code>z: complex</code> <code>z: help</code> — prefix your message</div>
+    <div id="chat-pane-container">
+      <!-- panes injected by JS -->
+    </div>
+    <div class="z-hint">z-commands: <code>z: search</code> <code>z: code</code> <code>z: complex</code> <code>z: help</code> — or target <code>@op</code> to route to Operator</div>
     <div id="chat-input-area">
-      <textarea id="chat-input" placeholder="Send a message… (Enter to send, Shift+Enter for newline)" rows="1"
+      <textarea id="chat-input" placeholder="Send a message… (Enter=send, Shift+Enter=newline, @op prefix=operator)" rows="1"
         onkeydown="chatKeydown(event)" oninput="autoResize(this)"></textarea>
+      <button id="mic-btn" title="Push to talk (click to toggle, hold to record)">🎙</button>
       <button class="primary" onclick="sendChat()" id="send-btn">Send</button>
     </div>
   </div>
@@ -630,9 +856,15 @@
   </div>
 
   <!-- 6. Operator -->
+  <!-- 6. Operator -->
   <div class="panel" id="panel-operator">
     <div class="toolbar">
-      <span class="toolbar-label">Operator Agent — LangChain ReAct · web search · conversation memory · shell</span>
+      <span class="toolbar-label">Agent:</span>
+      <select id="op-target" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
+        <option value="operator">operator (default)</option>
+      </select>
+      <span class="toolbar-spacer"></span>
+      <span style="color:var(--fg-muted);font-size:10px">LangChain ReAct · tool registry</span>
       <span class="toolbar-spacer"></span>
       <button onclick="clearOp()">✕ Clear</button>
     </div>
@@ -644,7 +876,91 @@
     </div>
   </div>
 
-  <!-- 6. Config -->
+  <!-- 7. Harness — parallel agent runner -->
+  <div class="panel" id="panel-harness">
+    <!-- Mode toggle + toolbar -->
+    <div class="toolbar">
+      <span class="toolbar-label">Mode:</span>
+      <div style="display:flex;gap:0;border:1px solid var(--bg-border);border-radius:2px;overflow:hidden;flex-shrink:0">
+        <button id="harness-mode-manual" onclick="setHarnessMode('manual')"
+          style="border-radius:0;border:none;padding:2px 10px;font-size:11px;background:var(--lavender);color:#000">Manual</button>
+        <button id="harness-mode-orchestrated" onclick="setHarnessMode('orchestrated')"
+          style="border-radius:0;border:none;padding:2px 10px;font-size:11px;background:var(--bg-input);color:var(--fg-dim)">Orchestrated</button>
+      </div>
+      <span class="toolbar-spacer"></span>
+      <span id="harness-manual-controls" style="display:flex;gap:6px;align-items:center">
+        <span class="toolbar-label">Add target:</span>
+        <select id="harness-add-select" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
+          <option value="">— pick agent/model —</option>
+          <option value="operator">operator</option>
+        </select>
+        <button onclick="harnessAddTarget()">＋ Add</button>
+        <span style="width:1px;background:var(--bg-border);height:18px;display:inline-block;margin:0 2px"></span>
+        <div id="harness-page-nav" style="border:none;padding:0">
+          <button onclick="harnessPagePrev()" id="harness-prev-btn" title="Previous page">◀</button>
+          <span id="harness-page-indicator">p1/1</span>
+          <button onclick="harnessPageNext()" id="harness-next-btn" title="Next page">▶</button>
+        </div>
+        <button onclick="harnessRun()" class="primary" id="harness-run-btn">▶ Run All</button>
+        <button onclick="harnessClear()">✕ Clear</button>
+      </span>
+      <span id="harness-orch-controls" style="display:none;gap:6px;align-items:center">
+        <span class="toolbar-label" style="color:var(--cyan)">Master model:</span>
+        <select id="harness-orch-model" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
+          <option value="">— use operator default —</option>
+        </select>
+        <span class="toolbar-label" style="color:var(--fg-muted)">max rounds:</span>
+        <input id="harness-orch-rounds" type="number" value="8" min="1" max="20"
+          style="width:44px;height:26px;font-size:12px;padding:2px 4px;background:var(--bg-input);border:1px solid var(--bg-border);color:var(--fg);border-radius:2px">
+        <button onclick="harnessOrchRun()" class="primary" id="harness-orch-run-btn">▶ Run</button>
+        <button onclick="harnessOrchClear()">✕ Clear</button>
+      </span>
+    </div>
+
+    <!-- Manual: target chips -->
+    <div id="harness-target-list">
+      <span style="color:var(--fg-muted);font-size:11px">No targets. Add models or agents above.</span>
+    </div>
+
+    <!-- Orchestrated: available target pool -->
+    <div id="harness-orch-target-area" style="display:none;padding:4px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border);flex-wrap:wrap;align-items:center;gap:6px">
+      <span style="color:var(--fg-muted);font-size:11px;flex-shrink:0">Available to master:</span>
+      <div id="harness-orch-target-chips" style="display:flex;gap:4px;flex-wrap:wrap;flex:1"></div>
+      <select id="harness-orch-add-select" style="height:22px;font-size:11px;padding:1px 4px;min-width:140px">
+        <option value="">＋ add target</option>
+        <option value="operator">operator</option>
+      </select>
+      <button onclick="harnessOrchAddTarget()" style="padding:2px 8px;font-size:11px">＋</button>
+    </div>
+
+    <!-- Prompt input (shared) -->
+    <div style="padding:6px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border);display:flex;gap:8px;flex-shrink:0">
+      <textarea id="harness-prompt" rows="2"
+        style="flex:1;resize:none;font-size:12px;padding:4px 8px"
+        onkeydown="if(event.ctrlKey&&event.key==='Enter'){harnessMode==='manual'?harnessRun():harnessOrchRun()}"
+        placeholder="Enter goal or prompt… (Ctrl+Enter to run)"></textarea>
+    </div>
+
+    <!-- Orchestrated layout: master pane + worker grid -->
+    <div id="harness-orch-layout" style="display:none;flex:1;overflow:hidden;flex-direction:column;min-height:0">
+      <div id="harness-master-pane" style="flex-shrink:0;max-height:45%;overflow-y:auto;border-bottom:2px solid var(--cyan);padding:10px 14px;background:var(--bg-deep)">
+        <div style="font-size:10px;color:var(--cyan);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">◈ Orchestrator</div>
+        <div id="harness-master-body" style="font-size:12px;line-height:1.6;color:var(--fg)">
+          <span style="color:var(--fg-muted)">Waiting for goal…</span>
+        </div>
+      </div>
+      <div id="harness-orch-grid" style="flex:1;overflow-y:auto;padding:8px;display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start">
+        <div class="empty">Worker results will appear here.</div>
+      </div>
+    </div>
+
+    <!-- Manual: 2×2 pane grid -->
+    <div id="harness-grid">
+      <div class="empty">Add targets and enter a prompt to begin.</div>
+    </div>
+  </div>
+
+    <!-- 8. Config -->
   <div class="panel" id="panel-config">
     <div class="toolbar">
       <button onclick="loadConfig()">↺ Refresh</button>
@@ -800,21 +1116,58 @@ function switchTab(name) {
   if (name === 'flight')    loadFlight();
   if (name === 'tap')       loadTap();
   if (name === 'config')    loadConfig();
-  if (name === 'chat')      loadModels();
+  if (name === 'chat')      { initChatPanes(); loadModels(); }
+  if (name === 'operator')  { loadOpTargets(); }
+  if (name === 'harness')   { loadHarnessTargetOptions(); setHarnessMode(harnessMode); }
 }
 
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
-  const map = {'1':'dashboard','2':'chat','3':'convos','4':'flight','5':'tap','6':'operator','7':'config'};
+  const map = {'1':'dashboard','2':'chat','3':'convos','4':'flight','5':'tap','6':'operator','7':'harness','8':'config'};
   if (map[e.key]) switchTab(map[e.key]);
+  // [ ] to page chat panes
+  if (e.key === '[') chatPagePrev();
+  if (e.key === ']') chatPageNext();
+  // { } to page harness
+  if (e.key === '{') harnessPagePrev();
+  if (e.key === '}') harnessPageNext();
 });
 
 // ── API helpers ─────────────────────────────────────────────────────────────
 async function api(path, opts={}) {
   const r = await fetch(BASE + path, opts);
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  if (!r.ok) {
+    let body = {};
+    try { body = await r.json(); } catch {}
+    const err = new Error(body.detail || body.error || body.message || `${r.status} ${r.statusText}`);
+    err.status = r.status;
+    err.body = body;
+    throw err;
+  }
   return r.json();
 }
+
+// Friendly "feature not enabled" message box
+function featureDisabledMsg(featureName, configKey, extraHint) {
+  return `<div style="background:var(--bg-panel);border:1px solid var(--bg-border);border-left:3px solid var(--yellow);
+    padding:12px 16px;border-radius:2px;margin:8px 0">
+    <div style="color:var(--yellow);font-size:12px;margin-bottom:6px">⚠ ${esc(featureName)} is disabled</div>
+    <div style="color:var(--fg-dim);font-size:11px;line-height:1.7">
+      Enable it in the <a href="#" onclick="switchTab('config');return false" style="color:var(--cyan)">Config tab (8)</a>
+      by toggling <code>${esc(configKey)}</code> and clicking Save &amp; Apply.
+      ${extraHint ? `<br>${extraHint}` : ''}
+    </div>
+  </div>`;
+}
+
+// Generic API error box — distinguishes 404/disabled from real errors
+function apiErrorMsg(e, featureName, configKey, extraHint) {
+  if (e.status === 404 || (e.body && e.body.enabled === false)) {
+    return featureDisabledMsg(featureName, configKey, extraHint);
+  }
+  return `<div class="error-box">${esc(featureName)}: ${esc(e.message)}</div>`;
+}
+
 
 function fmtTs(iso) {
   if (!iso) return '';
@@ -930,7 +1283,8 @@ async function loadDashboard() {
     const c30 = costs.status === 'fulfilled' ? costs.value : null;
     html += '<div class="section-header">Cost Tracking · 30 days</div>';
     if (!c30 || !c30.enabled) {
-      html += '<div class="cost-disabled">Cost tracking is disabled. Set <code>cost_tracking.enabled: true</code> in config.yaml.</div>';
+      html += featureDisabledMsg('Cost Tracking', 'cost_tracking_enabled',
+        'Tracks spend on OpenRouter API calls. Free for local Ollama models.');
     } else {
       // Summary cards
       html += '<div class="card-grid">';
@@ -1187,25 +1541,207 @@ function subsystem(name, ok, detail) {
 }
 
 // ── 2. Chat ──────────────────────────────────────────────────────────────────
-async function loadModels() {
+// ── 2. Chat (multi-pane) ─────────────────────────────────────────────────────
+
+// Pane state
+const PANES_PER_PAGE = 4;
+let chatPanes = [];      // [{id, target, history}]
+let chatPageIdx = 0;     // 0-based page index
+let chatPaneIdSeq = 0;
+
+// Each pane has independent history. Shared user-input goes to ALL visible panes by default.
+// Target can be: model id (string) or "@op" for operator.
+
+function initChatPanes() {
+  if (chatPanes.length === 0) {
+    addChatPane();
+  } else {
+    renderChatPanes();
+  }
+  loadModelsForPanes();
+}
+
+function addChatPane() {
+  if (chatPanes.length >= 20) return; // soft cap
+  const id = ++chatPaneIdSeq;
+  chatPanes.push({ id, target: currentModel || '', history: [] });
+  // If the new pane would be on a new page, navigate there
+  const newPage = Math.floor((chatPanes.length - 1) / PANES_PER_PAGE);
+  chatPageIdx = newPage;
+  renderChatPanes();
+  loadModelsForPanes();
+}
+
+function removeChatPane() {
+  if (chatPanes.length <= 1) return;
+  chatPanes.pop();
+  // Clamp page
+  const maxPage = Math.max(0, Math.floor((chatPanes.length - 1) / PANES_PER_PAGE));
+  if (chatPageIdx > maxPage) chatPageIdx = maxPage;
+  renderChatPanes();
+}
+
+function clearAllPanes() {
+  chatPanes.forEach(p => { p.history = []; });
+  renderChatPanes();
+}
+
+function chatPagePrev() {
+  if (chatPageIdx > 0) { chatPageIdx--; renderChatPanes(); }
+}
+function chatPageNext() {
+  const maxPage = Math.max(0, Math.floor((chatPanes.length - 1) / PANES_PER_PAGE));
+  if (chatPageIdx < maxPage) { chatPageIdx++; renderChatPanes(); }
+}
+
+function renderChatPanes() {
+  const container = document.getElementById('chat-pane-container');
+  container.innerHTML = '';
+  const start = chatPageIdx * PANES_PER_PAGE;
+  const visible = chatPanes.slice(start, start + PANES_PER_PAGE);
+
+  visible.forEach(pane => {
+    const div = document.createElement('div');
+    div.className = 'chat-pane';
+    div.id = `chat-pane-${pane.id}`;
+
+    // Pane header with target selector
+    div.innerHTML = `
+      <div class="chat-pane-header">
+        <span class="pane-label">#${pane.id}</span>
+        <select class="pane-target-sel" data-pane="${pane.id}" onchange="setPaneTarget(${pane.id}, this.value)">
+          <option value="">default model</option>
+          <option value="@op" ${pane.target==='@op'?'selected':''}>@operator</option>
+        </select>
+        <button onclick="clearPane(${pane.id})" title="Clear this pane">✕</button>
+      </div>
+      <div class="chat-pane-messages" id="pane-msgs-${pane.id}"></div>`;
+
+    container.appendChild(div);
+
+    // Re-render history
+    const msgArea = div.querySelector(`#pane-msgs-${pane.id}`);
+    pane.history.forEach(m => appendMsgToPane(pane.id, m.role, m.content, m.model || '', msgArea));
+  });
+
+  // Populate model selectors
+  loadModelsForPanes();
+  updateChatPageNav();
+}
+
+function updateChatPageNav() {
+  const totalPages = Math.max(1, Math.ceil(chatPanes.length / PANES_PER_PAGE));
+  document.getElementById('chat-page-indicator').textContent = `p${chatPageIdx+1}/${totalPages}`;
+  document.getElementById('chat-prev-btn').disabled = chatPageIdx === 0;
+  document.getElementById('chat-next-btn').disabled = chatPageIdx >= totalPages - 1;
+}
+
+async function loadModelsForPanes() {
+  let models = [];
   try {
     const d = await api('/v1/models');
-    const sel = document.getElementById('model-select');
-    const cur = currentModel;
-    sel.innerHTML = '<option value="">— default —</option>';
-    (d.data || d.models || []).forEach(m => {
-      const id = m.id || m.name || m;
+    models = (d.data || d.models || []).map(m => m.id || m.name || m);
+  } catch {}
+
+  document.querySelectorAll('.pane-target-sel').forEach(sel => {
+    const paneId = parseInt(sel.dataset.pane);
+    const pane = chatPanes.find(p => p.id === paneId);
+    // Keep existing op option, add models
+    const curVal = pane ? pane.target : '';
+    sel.innerHTML = `<option value="">default model</option><option value="@op" ${curVal==='@op'?'selected':''}>@operator</option>`;
+    models.forEach(id => {
+      const opt = document.createElement('option');
+      opt.value = id; opt.textContent = id;
+      if (id === curVal) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  });
+
+  // Also populate operator target dropdown
+  const opSel = document.getElementById('op-target');
+  if (opSel) {
+    const curOp = opSel.value;
+    const baseOpts = opSel.innerHTML.split('<option').filter(o => o.includes('operator')).map(o => '<option' + o).join('');
+    opSel.innerHTML = `<option value="operator">operator (default)</option>`;
+    models.forEach(id => {
+      const opt = document.createElement('option');
+      opt.value = 'model:' + id; opt.textContent = 'model: ' + id;
+      if ('model:' + id === curOp) opt.selected = true;
+      opSel.appendChild(opt);
+    });
+  }
+
+  // Also populate harness add-select
+  const hSel = document.getElementById('harness-add-select');
+  if (hSel) {
+    hSel.innerHTML = `<option value="">— pick agent/model —</option><option value="operator">operator</option>`;
+    models.forEach(id => {
+      const opt = document.createElement('option');
+      opt.value = 'model:' + id; opt.textContent = id;
+      hSel.appendChild(opt);
+    });
+  }
+
+  // Also populate harness orch add-select and master model select
+  const orchAddSel = document.getElementById('harness-orch-add-select');
+  if (orchAddSel) {
+    orchAddSel.innerHTML = `<option value="">＋ add target</option><option value="operator">operator</option>`;
+    models.forEach(id => {
+      const opt = document.createElement('option');
+      opt.value = 'model:' + id; opt.textContent = id;
+      orchAddSel.appendChild(opt);
+    });
+  }
+  const orchModelSel = document.getElementById('harness-orch-model');
+  if (orchModelSel) {
+    const cur = orchModelSel.value;
+    orchModelSel.innerHTML = `<option value="">— use operator default —</option>`;
+    models.forEach(id => {
       const opt = document.createElement('option');
       opt.value = id; opt.textContent = id;
       if (id === cur) opt.selected = true;
-      sel.appendChild(opt);
+      orchModelSel.appendChild(opt);
     });
-  } catch {}
+  }
 }
 
-function saveModel() {
-  currentModel = document.getElementById('model-select').value;
-  localStorage.setItem('bb_model', currentModel);
+function setPaneTarget(paneId, val) {
+  const pane = chatPanes.find(p => p.id === paneId);
+  if (pane) pane.target = val;
+}
+
+function clearPane(paneId) {
+  // Remove the pane entirely (keep at least 1)
+  if (chatPanes.length <= 1) {
+    // Just clear history if it's the last pane
+    const pane = chatPanes.find(p => p.id === paneId);
+    if (pane) pane.history = [];
+    const area = document.getElementById(`pane-msgs-${paneId}`);
+    if (area) area.innerHTML = '';
+    return;
+  }
+  chatPanes = chatPanes.filter(p => p.id !== paneId);
+  // Clamp page index
+  const maxPage = Math.max(0, Math.floor((chatPanes.length - 1) / PANES_PER_PAGE));
+  if (chatPageIdx > maxPage) chatPageIdx = maxPage;
+  renderChatPanes();
+}
+
+function appendMsgToPane(paneId, role, text, model, container) {
+  const area = container || document.getElementById(`pane-msgs-${paneId}`);
+  if (!area) return null;
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  div.innerHTML = `
+    <div class="meta">${esc(role === 'user' ? 'you' : (model || role))} · ${new Date().toLocaleTimeString()}</div>
+    <div class="bubble">${esc(text)}</div>`;
+  area.appendChild(div);
+  area.scrollTop = area.scrollHeight;
+  return div;
+}
+
+async function loadModels() {
+  await loadModelsForPanes();
 }
 
 function autoResize(el) {
@@ -1217,103 +1753,217 @@ function chatKeydown(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
 }
 
-function clearChat() {
-  chatHistory = [];
-  localStorage.removeItem('bb_chat_history');
-  document.getElementById('chat-messages').innerHTML = '';
-}
-
 async function sendChat() {
   const input = document.getElementById('chat-input');
   const text = input.value.trim();
   if (!text) return;
-
   input.value = '';
   input.style.height = 'auto';
-
-  const model = document.getElementById('model-select').value;
-  appendMsg('user', text, model || 'default');
-  chatHistory.push({ role: 'user', content: text });
-  saveChatHistory();
 
   const sendBtn = document.getElementById('send-btn');
   sendBtn.disabled = true;
 
-  // Typing indicator
-  const typingId = 'typing-' + Date.now();
-  const msgDiv = document.getElementById('chat-messages');
-  msgDiv.insertAdjacentHTML('beforeend',
-    `<div class="typing-indicator" id="${typingId}"><span></span><span></span><span></span></div>`);
-  msgDiv.scrollTop = msgDiv.scrollHeight;
+  // Check for @op prefix — route to operator pane(s) only
+  const isOpCommand = text.startsWith('@op ') || text === '@op';
+  const cleanText = isOpCommand ? text.replace(/^@op\s*/, '').trim() : text;
 
-  try {
-    const body = { messages: chatHistory, stream: true };
-    if (model) body.model = model;
+  // Determine which visible panes to send to
+  const start = chatPageIdx * PANES_PER_PAGE;
+  const visible = chatPanes.slice(start, start + PANES_PER_PAGE);
 
-    const resp = await fetch(BASE + '/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer beigebox' },
-      body: JSON.stringify(body),
-    });
+  // If @op prefix: only op-targeted panes (or all if none targeted)
+  const targetPanes = isOpCommand
+    ? (visible.filter(p => p.target === '@op').length > 0
+        ? visible.filter(p => p.target === '@op')
+        : visible)
+    : visible;
 
-    document.getElementById(typingId)?.remove();
-
-    if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
-
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let fullText = '';
-    let assistantDiv = null;
-    let bubble = null;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value);
-      for (const line of chunk.split('\n')) {
-        if (!line.startsWith('data: ')) continue;
-        const data = line.slice(6).trim();
-        if (data === '[DONE]') break;
-        try {
-          const j = JSON.parse(data);
-          const delta = j.choices?.[0]?.delta?.content || '';
-          if (delta) {
-            fullText += delta;
-            if (!assistantDiv) {
-              const usedModel = j.model || model || 'assistant';
-              assistantDiv = appendMsg('assistant', '', usedModel);
-              bubble = assistantDiv.querySelector('.bubble');
-            }
-            if (bubble) bubble.textContent = fullText;
-            msgDiv.scrollTop = msgDiv.scrollHeight;
-          }
-        } catch {}
-      }
-    }
-
-    if (fullText) {
-      chatHistory.push({ role: 'assistant', content: fullText });
-      saveChatHistory();
-    }
-
-  } catch(e) {
-    document.getElementById(typingId)?.remove();
-    appendMsg('assistant', `Error: ${e.message}`, 'error');
-  }
+  // Fan out to all target panes in parallel
+  await Promise.all(targetPanes.map(pane => sendToPane(pane, cleanText, isOpCommand)));
 
   sendBtn.disabled = false;
   input.focus();
 }
 
+async function sendToPane(pane, text, forceOp) {
+  const isOp = forceOp || pane.target === '@op';
+  const area = document.getElementById(`pane-msgs-${pane.id}`);
+  if (!area) return;
+
+  // Add user message
+  pane.history.push({ role: 'user', content: text });
+  appendMsgToPane(pane.id, 'user', text, '', area);
+
+  // Typing indicator
+  const typingId = `typing-${pane.id}-${Date.now()}`;
+  area.insertAdjacentHTML('beforeend',
+    `<div class="typing-indicator" id="${typingId}"><span></span><span></span><span></span></div>`);
+  area.scrollTop = area.scrollHeight;
+
+  try {
+    if (isOp) {
+      // Route to operator
+      const d = await api('/api/v1/operator', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: text }),
+      });
+      document.getElementById(typingId)?.remove();
+      const answer = d.success ? d.answer : `Error: ${d.error}`;
+      pane.history.push({ role: 'assistant', content: answer, model: 'operator' });
+      appendMsgToPane(pane.id, 'assistant', answer, 'operator', area);
+    } else {
+      // Stream to model
+      const model = pane.target || '';
+      const body = { messages: pane.history.filter(m => m.role !== 'assistant' || m.content), stream: true };
+      if (model) body.model = model;
+
+      const resp = await fetch(BASE + '/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer beigebox' },
+        body: JSON.stringify(body),
+      });
+      document.getElementById(typingId)?.remove();
+      if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+      let assistantDiv = null;
+      let bubble = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value);
+        for (const line of chunk.split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') break;
+          try {
+            const j = JSON.parse(data);
+            const delta = j.choices?.[0]?.delta?.content || '';
+            if (delta) {
+              fullText += delta;
+              if (!assistantDiv) {
+                const usedModel = j.model || model || 'assistant';
+                assistantDiv = appendMsgToPane(pane.id, 'assistant', '', usedModel, area);
+                bubble = assistantDiv?.querySelector('.bubble');
+              }
+              if (bubble) bubble.textContent = fullText;
+              area.scrollTop = area.scrollHeight;
+            }
+          } catch {}
+        }
+      }
+      if (fullText) {
+        pane.history.push({ role: 'assistant', content: fullText, model: model || 'assistant' });
+      }
+    }
+  } catch(e) {
+    document.getElementById(typingId)?.remove();
+    appendMsgToPane(pane.id, 'assistant', `Error: ${e.message}`, 'error', area);
+  }
+}
+
+// ── Voice / Push-to-talk ─────────────────────────────────────────────────────
+let _mediaRecorder = null;
+let _audioChunks = [];
+let _isRecording = false;
+let _voiceEnabled = false;
+let _voiceHotkey = '';
+
+function enableVoiceUI(hotkey) {
+  _voiceEnabled = true;
+  _voiceHotkey = hotkey || '';
+  const btn = document.getElementById('mic-btn');
+  if (btn) btn.style.display = 'flex';
+  if (_voiceHotkey) {
+    document.addEventListener('keydown', e => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === _voiceHotkey) {
+        e.preventDefault();
+        if (_isRecording) stopRecording(); else startRecording();
+      }
+    });
+  }
+}
+
+async function startRecording() {
+  if (_isRecording) return;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus' : 'audio/mp4';
+    _mediaRecorder = new MediaRecorder(stream, { mimeType });
+    _audioChunks = [];
+    _mediaRecorder.ondataavailable = e => { if (e.data.size > 0) _audioChunks.push(e.data); };
+    _mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      await _transcribeAudio();
+    };
+    _mediaRecorder.start();
+    _isRecording = true;
+    const btn = document.getElementById('mic-btn');
+    if (btn) { btn.classList.add('recording'); btn.title = 'Recording… click to stop'; }
+  } catch(err) {
+    console.error('Mic error:', err);
+  }
+}
+
+function stopRecording() {
+  if (!_isRecording || !_mediaRecorder) return;
+  _mediaRecorder.stop();
+  _isRecording = false;
+  const btn = document.getElementById('mic-btn');
+  if (btn) { btn.classList.remove('recording'); btn.title = 'Push to talk (click to toggle, hold to record)'; }
+}
+
+async function _transcribeAudio() {
+  if (!_audioChunks.length) return;
+  const mimeType = _audioChunks[0].type || 'audio/webm';
+  const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+  const blob = new Blob(_audioChunks, { type: mimeType });
+  const form = new FormData();
+  form.append('file', blob, `recording.${ext}`);
+  form.append('model', 'whisper-1');
+  try {
+    const resp = await fetch(BASE + '/v1/audio/transcriptions', { method: 'POST', body: form });
+    if (!resp.ok) throw new Error(`STT ${resp.status}`);
+    const data = await resp.json();
+    const text = (data.text || '').trim();
+    if (text) {
+      const input = document.getElementById('chat-input');
+      if (input) {
+        input.value = text;
+        autoResize(input);
+        sendChat();
+      }
+    }
+  } catch(e) {
+    console.error('Transcription error:', e);
+  }
+}
+
+// Wire mic button events
+(function() {
+  const btn = document.getElementById('mic-btn');
+  if (!btn) return;
+  btn.addEventListener('click', () => { if (_isRecording) stopRecording(); else startRecording(); });
+  btn.addEventListener('mousedown', () => { if (!_isRecording) startRecording(); });
+  btn.addEventListener('mouseup', () => { if (_isRecording) stopRecording(); });
+  btn.addEventListener('mouseleave', () => { if (_isRecording) stopRecording(); });
+  btn.addEventListener('touchstart', e => { e.preventDefault(); startRecording(); }, { passive: false });
+  btn.addEventListener('touchend', e => { e.preventDefault(); stopRecording(); }, { passive: false });
+})();
+// ── End Voice ─────────────────────────────────────────────────────────────────
+
+// Legacy compatibility for any code that calls appendMsg
 function appendMsg(role, text, model) {
-  const div = document.createElement('div');
-  div.className = `msg ${role}`;
-  div.innerHTML = `
-    <div class="meta">${esc(role === 'user' ? 'you' : model)} · ${new Date().toLocaleTimeString()}</div>
-    <div class="bubble">${esc(text)}</div>`;
-  document.getElementById('chat-messages').appendChild(div);
-  document.getElementById('chat-messages').scrollTop = 999999;
-  return div;
+  if (chatPanes.length === 0) return null;
+  const start = chatPageIdx * PANES_PER_PAGE;
+  const pane = chatPanes[start] || chatPanes[0];
+  return appendMsgToPane(pane.id, role, text, model);
 }
 
 // ── 3. Conversations ─────────────────────────────────────────────────────────
@@ -1348,7 +1998,8 @@ async function searchConvos() {
     });
     el.innerHTML = html;
   } catch(e) {
-    el.innerHTML = `<div class="error-box">Search failed: ${esc(e.message)}</div>`;
+    el.innerHTML = apiErrorMsg(e, 'Semantic Search', 'log_conversations',
+      'Requires ChromaDB and embeddings to be running. Check that <code>nomic-embed-text</code> is pulled in Ollama.');
   }
 }
 
@@ -1380,7 +2031,8 @@ async function loadReplay(convId) {
     document.getElementById('replay-body').innerHTML = html || '<div class="empty">No messages.</div>';
   } catch(e) {
     document.getElementById('replay-body').innerHTML =
-      `<div class="error-box">Replay failed: ${esc(e.message)}</div>`;
+      apiErrorMsg(e, 'Conversation Replay', 'conversation_replay_enabled',
+        'Reconstructs conversations with full routing context and tool calls.');
   }
 }
 
@@ -1414,10 +2066,8 @@ async function loadFlight() {
     const d = await api(`/api/v1/flight-recorder?n=${n}`);
     document.getElementById('flight-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
     if (!d.enabled) {
-      el.innerHTML = `<div class="error-box">${esc(d.message)}</div>
-        <div style="color:var(--fg-muted);font-size:11px;padding:8px">
-          Enable with <code>flight_recorder.enabled: true</code> in config.yaml
-        </div>`;
+      el.innerHTML = featureDisabledMsg('Flight Recorder', 'flight_recorder_enabled',
+        'Records the full timing lifecycle of each request — latency per stage, routing decisions, model selection.');
       return;
     }
     const records = d.records || [];
@@ -1444,7 +2094,8 @@ async function loadFlight() {
     });
     el.innerHTML = html;
   } catch(e) {
-    el.innerHTML = `<div class="error-box">Failed to load flight recorder: ${esc(e.message)}</div>`;
+    el.innerHTML = apiErrorMsg(e, 'Flight Recorder', 'flight_recorder_enabled',
+      'Records the full timing lifecycle of each request.');
   }
 }
 
@@ -1486,7 +2137,7 @@ async function toggleFlight(id) {
       }
       body.innerHTML = html || '<div class="empty">No events.</div>';
     } catch(e) {
-      body.innerHTML = `<div class="error-box">${esc(e.message)}</div>`;
+      body.innerHTML = apiErrorMsg(e, 'Flight Record Detail', 'flight_recorder_enabled', '');
     }
   }
 }
@@ -1565,7 +2216,8 @@ async function loadTap() {
     const html = d.entries.slice().reverse().map(_renderTapEntry).join('');
     el.innerHTML = `<div style="color:var(--fg-muted);font-size:10px;padding-bottom:8px">${d.total} total · showing ${d.entries.length}${role ? ' · role=' + esc(role) : ''}${dir ? ' · dir=' + esc(dir) : ''}</div>` + html;
   } catch(e) {
-    el.innerHTML = `<div class="error-box">Tap failed: ${esc(e.message)}</div>`;
+    el.innerHTML = apiErrorMsg(e, 'Tap', 'log_conversations',
+      'The tap streams all messages on the wire. Make sure <code>log_conversations</code> is enabled.');
   }
 }
 
@@ -1581,6 +2233,12 @@ function toggleTapLive() {
 }
 
 // ── 6. Operator ───────────────────────────────────────────────────────────────
+function loadOpTargets() {
+  // Models are loaded by loadModelsForPanes when chat tab inits,
+  // but if operator tab visited first, load them now.
+  loadModelsForPanes();
+}
+
 async function runOp() {
   const input = document.getElementById('op-input');
   const query = input.value.trim();
@@ -1591,24 +2249,43 @@ async function runOp() {
   const btn = document.getElementById('op-btn');
   btn.disabled = true;
 
+  const targetSel = document.getElementById('op-target');
+  const target = targetSel ? targetSel.value : 'operator';
+  const isModel = target.startsWith('model:');
+  const targetLabel = isModel ? target.slice(6) : 'operator';
+
   log.insertAdjacentHTML('beforeend',
-    `<div class="op-query">▶ ${esc(query)}</div>
-     <div class="op-pending" id="op-pending">⟳ operator thinking…</div>`);
+    `<div class="op-query">▶ [${esc(targetLabel)}] ${esc(query)}</div>
+     <div class="op-pending" id="op-pending">⟳ thinking…</div>`);
   log.scrollTop = log.scrollHeight;
 
   try {
-    const d = await api('/api/v1/operator', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query }),
-    });
-    document.getElementById('op-pending')?.remove();
-    if (d.success) {
+    if (isModel) {
+      // Route to chat completions with the selected model (non-streaming for simplicity here)
+      const modelId = target.slice(6);
+      const d = await api('/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer beigebox' },
+        body: JSON.stringify({ model: modelId, messages: [{ role: 'user', content: query }], stream: false }),
+      });
+      document.getElementById('op-pending')?.remove();
+      const answer = d.choices?.[0]?.message?.content || JSON.stringify(d);
       log.insertAdjacentHTML('beforeend',
-        `<div class="op-answer">${esc(d.answer)}</div><div class="op-sep"></div>`);
+        `<div class="op-answer">${esc(answer)}</div><div class="op-sep"></div>`);
     } else {
-      log.insertAdjacentHTML('beforeend',
-        `<div class="op-error">✗ ${esc(d.error || 'unknown error')}</div><div class="op-sep"></div>`);
+      const d = await api('/api/v1/operator', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query }),
+      });
+      document.getElementById('op-pending')?.remove();
+      if (d.success) {
+        log.insertAdjacentHTML('beforeend',
+          `<div class="op-answer">${esc(d.answer)}</div><div class="op-sep"></div>`);
+      } else {
+        log.insertAdjacentHTML('beforeend',
+          `<div class="op-error">✗ ${esc(d.error || 'unknown error')}</div><div class="op-sep"></div>`);
+      }
     }
   } catch(e) {
     document.getElementById('op-pending')?.remove();
@@ -1625,7 +2302,455 @@ function clearOp() {
   document.getElementById('op-log').innerHTML = '';
 }
 
-// ── 7. Config ─────────────────────────────────────────────────────────────────
+// ── 7. Harness — parallel agent runner ────────────────────────────────────────
+const HARNESS_PER_PAGE = 4;
+let harnessTargets = [];   // [{key, label}]  key = "operator" | "model:llama3.2:3b"
+let harnessPageIdx = 0;
+let harnessRunResults = {}; // key -> {text, status}
+
+function loadHarnessTargetOptions() {
+  loadModelsForPanes(); // reuses same function to populate harness-add-select
+}
+
+function harnessAddTarget() {
+  const sel = document.getElementById('harness-add-select');
+  const val = sel.value;
+  if (!val) return;
+  const label = val === 'operator' ? 'operator' : val.startsWith('model:') ? val.slice(6) : val;
+  // Avoid duplicates
+  if (harnessTargets.find(t => t.key === val)) return;
+  harnessTargets.push({ key: val, label });
+  sel.value = '';
+  renderHarnessTargetChips();
+  renderHarnessGrid();
+}
+
+function harnessRemoveTarget(key) {
+  harnessTargets = harnessTargets.filter(t => t.key !== key);
+  delete harnessRunResults[key];
+  // Clamp page
+  const maxPage = Math.max(0, Math.ceil(harnessTargets.length / HARNESS_PER_PAGE) - 1);
+  if (harnessPageIdx > maxPage) harnessPageIdx = maxPage;
+  renderHarnessTargetChips();
+  renderHarnessGrid();
+}
+
+function renderHarnessTargetChips() {
+  const el = document.getElementById('harness-target-list');
+  if (harnessTargets.length === 0) {
+    el.innerHTML = '<span style="color:var(--fg-muted);font-size:11px">No targets. Add models or agents above.</span>';
+    return;
+  }
+  el.innerHTML = harnessTargets.map(t => `
+    <div class="harness-target-chip">
+      <span>${esc(t.label)}</span>
+      <span class="remove-chip" onclick="harnessRemoveTarget('${t.key.replace(/'/g,"\\'")}')">✕</span>
+    </div>`).join('');
+}
+
+function renderHarnessGrid() {
+  const grid = document.getElementById('harness-grid');
+  if (harnessTargets.length === 0) {
+    grid.innerHTML = '<div class="empty">Add targets and enter a prompt to begin.</div>';
+    updateHarnessPageNav();
+    return;
+  }
+  const start = harnessPageIdx * HARNESS_PER_PAGE;
+  const visible = harnessTargets.slice(start, start + HARNESS_PER_PAGE);
+  grid.innerHTML = '';
+  visible.forEach(t => {
+    const res = harnessRunResults[t.key];
+    const status = res ? res.status : '';
+    const text = res ? res.text : '';
+    const statusHtml = status ? `<span class="harness-status ${status}">${status === 'pending' ? '⟳ running…' : status}</span>` : '';
+    const pane = document.createElement('div');
+    pane.className = 'harness-pane';
+    pane.id = `harness-pane-${t.key.replace(/[^a-z0-9]/gi,'_')}`;
+    pane.innerHTML = `
+      <div class="harness-pane-header">
+        <span class="target-label">${esc(t.label)}</span>
+        ${statusHtml}
+      </div>
+      <div class="harness-pane-output${status==='pending'?' thinking':''}">${esc(text) || '<span style="color:var(--fg-muted)">waiting…</span>'}</div>`;
+    grid.appendChild(pane);
+  });
+  updateHarnessPageNav();
+}
+
+function updateHarnessPageNav() {
+  const total = Math.max(1, Math.ceil(harnessTargets.length / HARNESS_PER_PAGE));
+  document.getElementById('harness-page-indicator').textContent = `p${harnessPageIdx+1}/${total}`;
+  document.getElementById('harness-prev-btn').disabled = harnessPageIdx === 0;
+  document.getElementById('harness-next-btn').disabled = harnessPageIdx >= total - 1;
+}
+
+function harnessPagePrev() {
+  if (harnessPageIdx > 0) { harnessPageIdx--; renderHarnessGrid(); }
+}
+function harnessPageNext() {
+  const maxPage = Math.max(0, Math.ceil(harnessTargets.length / HARNESS_PER_PAGE) - 1);
+  if (harnessPageIdx < maxPage) { harnessPageIdx++; renderHarnessGrid(); }
+}
+
+async function harnessRun() {
+  const prompt = document.getElementById('harness-prompt').value.trim();
+  if (!prompt) return;
+  if (harnessTargets.length === 0) return;
+
+  const btn = document.getElementById('harness-run-btn');
+  btn.disabled = true;
+
+  // Mark all as pending
+  harnessTargets.forEach(t => { harnessRunResults[t.key] = { text: '', status: 'pending' }; });
+  renderHarnessGrid();
+
+  // Fire all in parallel — each updates its own pane as it completes
+  await Promise.all(harnessTargets.map(t => harnessRunTarget(t, prompt)));
+
+  btn.disabled = false;
+}
+
+async function harnessRunTarget(target, prompt) {
+  const paneId = `harness-pane-${target.key.replace(/[^a-z0-9]/gi,'_')}`;
+
+  const updatePane = (text, status) => {
+    harnessRunResults[target.key] = { text, status };
+    // Only update DOM if pane is currently visible
+    const pane = document.getElementById(paneId);
+    if (pane) {
+      const out = pane.querySelector('.harness-pane-output');
+      const hdr = pane.querySelector('.harness-pane-header');
+      if (out) {
+        out.className = `harness-pane-output${status === 'pending' ? ' thinking' : ''}`;
+        out.textContent = text || (status === 'pending' ? 'running…' : '');
+      }
+      if (hdr) {
+        const existing = hdr.querySelector('.harness-status');
+        if (existing) existing.remove();
+        if (status) {
+          const sp = document.createElement('span');
+          sp.className = `harness-status ${status}`;
+          sp.textContent = status === 'pending' ? '⟳ running…' : status;
+          hdr.appendChild(sp);
+        }
+      }
+    }
+  };
+
+  try {
+    if (target.key === 'operator') {
+      updatePane('', 'pending');
+      const d = await api('/api/v1/operator', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: prompt }),
+      });
+      const answer = d.success ? d.answer : `Error: ${d.error}`;
+      updatePane(answer, d.success ? 'done' : 'error');
+    } else if (target.key.startsWith('model:')) {
+      const modelId = target.key.slice(6);
+      updatePane('', 'pending');
+      // Stream the response, updating pane incrementally
+      const resp = await fetch(BASE + '/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer beigebox' },
+        body: JSON.stringify({
+          model: modelId,
+          messages: [{ role: 'user', content: prompt }],
+          stream: true,
+        }),
+      });
+      if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value);
+        for (const line of chunk.split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') break;
+          try {
+            const j = JSON.parse(data);
+            const delta = j.choices?.[0]?.delta?.content || '';
+            if (delta) {
+              fullText += delta;
+              updatePane(fullText, 'pending');
+            }
+          } catch {}
+        }
+      }
+      updatePane(fullText, 'done');
+    }
+  } catch(e) {
+    updatePane(`Error: ${e.message}`, 'error');
+  }
+}
+
+function harnessClear() {
+  harnessRunResults = {};
+  renderHarnessGrid();
+}
+
+// ── Harness mode switching ────────────────────────────────────────────────────
+let harnessMode = 'manual'; // 'manual' | 'orchestrated'
+let harnessOrchTargets = []; // targets the master can use: [{key, label}]
+
+function setHarnessMode(mode) {
+  harnessMode = mode;
+  const isOrch = mode === 'orchestrated';
+
+  // Mode button styles
+  const manBtn = document.getElementById('harness-mode-manual');
+  const orchBtn = document.getElementById('harness-mode-orchestrated');
+  if (manBtn) { manBtn.style.background = isOrch ? 'var(--bg-input)' : 'var(--lavender)'; manBtn.style.color = isOrch ? 'var(--fg-dim)' : '#000'; }
+  if (orchBtn) { orchBtn.style.background = isOrch ? 'var(--cyan)' : 'var(--bg-input)'; orchBtn.style.color = isOrch ? '#000' : 'var(--fg-dim)'; }
+
+  // Show/hide control bars
+  const manControls = document.getElementById('harness-manual-controls');
+  const orchControls = document.getElementById('harness-orch-controls');
+  if (manControls) manControls.style.display = isOrch ? 'none' : 'flex';
+  if (orchControls) orchControls.style.display = isOrch ? 'flex' : 'none';
+
+  // Show/hide target areas
+  const manTargets = document.getElementById('harness-target-list');
+  const orchTargetArea = document.getElementById('harness-orch-target-area');
+  if (manTargets) manTargets.style.display = isOrch ? 'none' : '';
+  if (orchTargetArea) { orchTargetArea.style.display = isOrch ? 'flex' : 'none'; }
+
+  // Show/hide grids
+  const manGrid = document.getElementById('harness-grid');
+  const orchLayout = document.getElementById('harness-orch-layout');
+  if (manGrid) manGrid.style.display = isOrch ? 'none' : '';
+  if (orchLayout) orchLayout.style.display = isOrch ? 'flex' : 'none';
+
+  // Update prompt placeholder
+  const ta = document.getElementById('harness-prompt');
+  if (ta) ta.placeholder = isOrch
+    ? 'Describe the goal… the orchestrator will plan, delegate, and iterate. (Ctrl+Enter to run)'
+    : 'Prompt to send to all targets… (Ctrl+Enter to run)';
+
+  // Populate orch target chips if switching to orchestrated
+  if (isOrch && harnessOrchTargets.length === 0) {
+    // Default: add operator + any existing manual targets
+    ['operator', ...harnessTargets.map(t => t.key)].forEach(key => {
+      if (!harnessOrchTargets.find(t => t.key === key)) {
+        const label = key === 'operator' ? 'operator' : key.startsWith('model:') ? key.slice(6) : key;
+        harnessOrchTargets.push({ key, label });
+      }
+    });
+    renderOrchTargetChips();
+  }
+}
+
+// ── Orchestrated target pool ──────────────────────────────────────────────────
+
+function harnessOrchAddTarget() {
+  const sel = document.getElementById('harness-orch-add-select');
+  const val = sel.value;
+  if (!val) return;
+  if (harnessOrchTargets.find(t => t.key === val)) { sel.value = ''; return; }
+  const label = val === 'operator' ? 'operator' : val.startsWith('model:') ? val.slice(6) : val;
+  harnessOrchTargets.push({ key: val, label });
+  sel.value = '';
+  renderOrchTargetChips();
+}
+
+function harnessOrchRemoveTarget(key) {
+  harnessOrchTargets = harnessOrchTargets.filter(t => t.key !== key);
+  renderOrchTargetChips();
+}
+
+function renderOrchTargetChips() {
+  const el = document.getElementById('harness-orch-target-chips');
+  if (!el) return;
+  el.innerHTML = harnessOrchTargets.map(t =>
+    `<div class="harness-target-chip" style="font-size:11px;padding:1px 6px">
+      <span>${esc(t.label)}</span>
+      <span class="remove-chip" onclick="harnessOrchRemoveTarget('${t.key.replace(/'/g,"\\'")}')">✕</span>
+    </div>`
+  ).join('') || '<span style="color:var(--fg-muted);font-size:11px">No targets set — master will use all available models.</span>';
+}
+
+// ── Orchestrated run ──────────────────────────────────────────────────────────
+
+let _orchAbort = null; // AbortController for cancelling a run
+
+function harnessOrchClear() {
+  if (_orchAbort) { _orchAbort.abort(); _orchAbort = null; }
+  const master = document.getElementById('harness-master-body');
+  if (master) master.innerHTML = '<span style="color:var(--fg-muted)">Waiting for goal…</span>';
+  const grid = document.getElementById('harness-orch-grid');
+  if (grid) grid.innerHTML = '<div class="empty">Worker results will appear here.</div>';
+  const btn = document.getElementById('harness-orch-run-btn');
+  if (btn) { btn.disabled = false; btn.textContent = '▶ Run'; }
+}
+
+async function harnessOrchRun() {
+  const goal = document.getElementById('harness-prompt').value.trim();
+  if (!goal) return;
+
+  const btn = document.getElementById('harness-orch-run-btn');
+  const masterBody = document.getElementById('harness-master-body');
+  const orchGrid = document.getElementById('harness-orch-grid');
+
+  btn.disabled = true;
+  btn.textContent = '⟳ Running…';
+  masterBody.innerHTML = `<div style="color:var(--cyan);font-size:11px">Goal: ${esc(goal)}</div><div class="empty" style="margin-top:8px"><span class="spinner"></span> Planning…</div>`;
+  orchGrid.innerHTML = '';
+
+  _orchAbort = new AbortController();
+
+  const targets = harnessOrchTargets.length > 0
+    ? harnessOrchTargets.map(t => t.key)
+    : ['operator'];
+  const modelOverride = document.getElementById('harness-orch-model')?.value || null;
+  const maxRounds = parseInt(document.getElementById('harness-orch-rounds')?.value || '8');
+
+  // Track worker panes by target+round key
+  const workerPanes = {}; // "round-target" -> dom element
+
+  function getOrCreateWorkerPane(round, target, prompt, rationale) {
+    const paneKey = `r${round}-${target.replace(/[^a-z0-9]/gi,'_')}`;
+    if (workerPanes[paneKey]) return workerPanes[paneKey];
+    const el = document.createElement('div');
+    el.className = 'harness-pane';
+    el.id = `orch-pane-${paneKey}`;
+    el.style.minWidth = '240px';
+    el.style.flex = '1 1 240px';
+    el.innerHTML = `
+      <div class="harness-pane-header">
+        <span class="target-label">${esc(target)}</span>
+        <span style="font-size:9px;color:var(--fg-muted)">round ${round}</span>
+        <span class="harness-status pending" id="orch-status-${paneKey}">⟳ running…</span>
+      </div>
+      <div style="font-size:10px;color:var(--fg-muted);padding:2px 0 6px;border-bottom:1px solid var(--bg-border);margin-bottom:4px">${esc(prompt.slice(0,120))}${prompt.length>120?'…':''}</div>
+      <div class="harness-pane-output thinking" id="orch-output-${paneKey}">waiting…</div>`;
+    orchGrid.appendChild(el);
+    workerPanes[paneKey] = el;
+    return el;
+  }
+
+  function updateWorkerPane(round, target, content, status) {
+    const paneKey = `r${round}-${target.replace(/[^a-z0-9]/gi,'_')}`;
+    const outputEl = document.getElementById(`orch-output-${paneKey}`);
+    const statusEl = document.getElementById(`orch-status-${paneKey}`);
+    if (outputEl) {
+      outputEl.className = `harness-pane-output${status === 'pending' ? ' thinking' : ''}`;
+      outputEl.textContent = content;
+    }
+    if (statusEl) {
+      statusEl.className = `harness-status ${status}`;
+      statusEl.textContent = status === 'pending' ? '⟳ running…' : status;
+    }
+  }
+
+  // Master pane rendering helpers
+  let masterLog = [`<div style="color:var(--cyan);font-size:11px;margin-bottom:8px">Goal: ${esc(goal)}</div>`];
+  function appendMaster(html) {
+    masterLog.push(html);
+    masterBody.innerHTML = masterLog.join('');
+    masterBody.scrollTop = masterBody.scrollHeight;
+  }
+
+  try {
+    const resp = await fetch(BASE + '/api/v1/harness/orchestrate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: goal, targets, model: modelOverride, max_rounds: maxRounds }),
+      signal: _orchAbort.signal,
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      appendMaster(`<div class="error-box">Error: ${esc(err.error || resp.statusText)}</div>`);
+      btn.disabled = false; btn.textContent = '▶ Run';
+      return;
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop(); // keep incomplete line
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6).trim();
+        if (raw === '[DONE]') break;
+
+        let ev;
+        try { ev = JSON.parse(raw); } catch { continue; }
+
+        switch (ev.type) {
+          case 'start':
+            appendMaster(`<div style="color:var(--fg-muted);font-size:11px">Model: ${esc(ev.model)} · Targets: ${ev.targets.map(esc).join(', ')}</div>`);
+            break;
+
+          case 'plan': {
+            const taskList = (ev.tasks || []).map(t =>
+              `<div style="padding:2px 0 2px 8px;border-left:2px solid var(--lavender)">
+                <span style="color:var(--lavender)">${esc(t.target)}</span>
+                <span style="color:var(--fg-muted);font-size:10px;margin-left:6px">${esc(t.rationale||'')}</span><br>
+                <span style="font-size:11px">${esc(t.prompt.slice(0,150))}${t.prompt.length>150?'…':''}</span>
+              </div>`).join('');
+            appendMaster(`
+              <div style="margin-top:8px;border-top:1px solid var(--bg-border);padding-top:8px">
+                <span style="color:var(--yellow);font-size:10px">ROUND ${ev.round} — PLAN</span>
+                <div style="font-size:11px;color:var(--fg-dim);margin:4px 0">${esc(ev.reasoning||'')}</div>
+                ${taskList}
+              </div>`);
+            // Pre-create worker panes
+            (ev.tasks || []).forEach(t => getOrCreateWorkerPane(ev.round, t.target, t.prompt, t.rationale||''));
+            break;
+          }
+
+          case 'result': {
+            const statusClass = ev.status === 'done' ? 'done' : ev.status === 'error' ? 'error' : 'pending';
+            updateWorkerPane(ev.round, ev.target, ev.content, statusClass);
+            break;
+          }
+
+          case 'evaluate':
+            appendMaster(`
+              <div style="margin-top:6px;padding:4px 8px;background:var(--bg-deep);border-left:2px solid ${ev.action==='finish'?'var(--green)':'var(--yellow)'}">
+                <span style="font-size:10px;color:${ev.action==='finish'?'var(--green)':'var(--yellow)'}">${ev.action === 'finish' ? '✓ SUFFICIENT' : '↻ NEEDS MORE'}</span>
+                <div style="font-size:11px;color:var(--fg-dim);margin-top:2px">${esc(ev.assessment||'')}</div>
+              </div>`);
+            break;
+
+          case 'finish':
+            appendMaster(`
+              <div style="margin-top:12px;border-top:2px solid var(--green);padding-top:10px">
+                <span style="color:var(--green);font-size:11px">✓ DONE${ev.capped?' (round cap)':''} · ${ev.rounds} round${ev.rounds!==1?'s':''}</span>
+                <div style="margin-top:8px;font-size:12px;line-height:1.6;white-space:pre-wrap">${esc(ev.answer||'')}</div>
+              </div>`);
+            btn.disabled = false; btn.textContent = '▶ Run';
+            break;
+
+          case 'error':
+            appendMaster(`<div class="error-box" style="margin-top:8px">${esc(ev.message||'Unknown error')}</div>`);
+            btn.disabled = false; btn.textContent = '▶ Run';
+            break;
+        }
+      }
+    }
+  } catch(e) {
+    if (e.name !== 'AbortError') {
+      appendMaster(`<div class="error-box">${esc(e.message)}</div>`);
+    }
+    btn.disabled = false; btn.textContent = '▶ Run';
+  }
+}
+
+// ── 8. Config ─────────────────────────────────────────────────────────────────
 function cfgInput(id, label, value, type='text') {
   return `<div class="kv-row" style="gap:12px;align-items:center">
     <span class="kv-key" style="min-width:160px">${esc(label)}</span>
@@ -1655,54 +2780,171 @@ async function loadConfig() {
   const el = document.getElementById('config-body');
   el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
   try {
-    const [cfg, tools, status] = await Promise.allSettled([
+    const [cfg, tools] = await Promise.allSettled([
       api('/api/v1/config'),
       api('/api/v1/tools'),
-      api('/api/v1/status'),
     ]);
 
     const c = cfg.status === 'fulfilled' ? cfg.value : {};
     const t = tools.status === 'fulfilled' ? tools.value : {};
-    const s = status.status === 'fulfilled' ? status.value : {};
 
     let html = '';
 
-    // ── Read-only system info ──
-    html += '<div class="section-header">System (read-only)</div>';
-    html += kv('backend url',   esc(c.backend?.url || '—'));
-    html += kv('server',        `${esc(c.server?.host || '0.0.0.0')}:${c.server?.port || 8000}`);
-    html += kv('embedding',     esc(c.embedding?.model || '—'));
-    html += kv('operator model',esc(s.operator?.model || c.backend?.default_model || '—'));
-    html += kv('operator shell',badge(s.operator?.shell_enabled));
-    html += kv('model advertising', esc(c.model_advertising?.mode || '—'));
-    const toolList = (t.tools || []);
-    if (toolList.length) html += kv('tools registered', toolList.map(n=>`<span class="badge badge-ok">${esc(n)}</span>`).join(' '));
-
-    // ── Editable settings ──
-    html += '<div class="section-header" style="margin-top:16px">Settings (editable)</div>';
-    html += cfgInput('default_model',       'Default model',         c.backend?.default_model || '');
-    html += cfgToggle('decision_llm_enabled','Decision LLM',          c.decision_llm?.enabled ?? false);
-    if (c.decision_llm?.model) html += kv('decision model', esc(c.decision_llm.model));
-    html += cfgToggle('tools_enabled',       'Tools',                 t.enabled ?? c.tools?.enabled ?? false);
-    html += cfgToggle('log_conversations',   'Log conversations',      c.storage?.log_conversations ?? true);
-    html += cfgSelect('web_ui_palette',      'Palette theme',          c.web_ui?.palette || 'default',
-                      ['default','phosphor','cobalt','sakura','slate']);
-    html += cfgToggle('web_ui_vi_mode',      'Vi mode',               c.web_ui?.vi_mode ?? false);
-
-    html += `<div style="margin-top:16px;display:flex;gap:8px;align-items:center">
+    // ── Save bar (top) ───────────────────────────────────────────────────
+    html += `<div style="position:sticky;top:0;z-index:10;background:var(--bg-panel);padding:8px 0 10px;border-bottom:1px solid var(--bg-border);margin-bottom:12px;display:flex;gap:8px;align-items:center">
       <button class="primary" onclick="saveConfig()">💾 Save &amp; Apply</button>
-      <button onclick="buildCentroids()" id="centroids-btn" style="margin-left:8px">⚙ Build Centroids</button>
       <span id="cfg-save-status" style="font-size:11px;color:var(--fg-dim)"></span>
     </div>`;
+
+    // ── Backend ──────────────────────────────────────────────────────────
+    html += '<div class="section-header">Backend</div>';
+    html += kv('backend url', esc(c.backend?.url || '—'));
+    html += kv('embedding model', esc(c.embedding?.model || '—'));
+    html += kv('embedding url', esc(c.embedding?.backend_url || '—'));
+    html += cfgInput('default_model', 'Default model', c.backend?.default_model || '');
+    html += kv('timeout', `${c.backend?.timeout || 120}s`);
+
+    // ── Server ───────────────────────────────────────────────────────────
+    html += '<div class="section-header" style="margin-top:14px">Server</div>';
+    html += kv('host', esc(c.server?.host || '0.0.0.0'));
+    html += kv('port', String(c.server?.port || 8000));
+
+    // ── Storage ──────────────────────────────────────────────────────────
+    html += '<div class="section-header" style="margin-top:14px">Storage</div>';
+    html += kv('sqlite path', esc(c.storage?.sqlite_path || '—'));
+    html += kv('chroma path', esc(c.storage?.chroma_path || '—'));
+    html += cfgToggle('log_conversations', 'Log conversations', c.storage?.log_conversations ?? true);
+
+    // ── Decision LLM ─────────────────────────────────────────────────────
+    html += '<div class="section-header" style="margin-top:14px">Decision LLM</div>';
+    html += cfgToggle('decision_llm_enabled', 'Enabled', c.decision_llm?.enabled ?? false);
+    html += kv('model', esc(c.decision_llm?.model || '—'));
+    html += kv('timeout', `${c.decision_llm?.timeout || 5}s`);
+    html += kv('max tokens', String(c.decision_llm?.max_tokens || 256));
+
+    // ── Operator ─────────────────────────────────────────────────────────
+    html += '<div class="section-header" style="margin-top:14px">Operator</div>';
+    html += kv('model', esc(c.operator?.model || '—'));
+    html += kv('max iterations', String(c.operator?.max_iterations || 10));
+    html += kv('shell', badge(c.operator?.shell_enabled));
+
+    // ── Tools ────────────────────────────────────────────────────────────
+    html += '<div class="section-header" style="margin-top:14px">Tools</div>';
+    html += cfgToggle('tools_enabled', 'Tools master switch', c.tools?.enabled ?? false);
+    const toolList = (t.tools || []);
+    if (toolList.length) html += kv('registered', toolList.map(n=>`<span class="badge badge-ok">${esc(n)}</span>`).join(' '));
+    // Individual tool toggles (informational — toggling requires config.yaml edit for now)
+    if (c.tools?.web_search)  html += kv('web_search',  badge(c.tools.web_search.enabled));
+    if (c.tools?.web_scraper) html += kv('web_scraper', badge(c.tools.web_scraper.enabled));
+    if (c.tools?.calculator)  html += kv('calculator',  badge(c.tools.calculator?.enabled));
+    if (c.tools?.datetime)    html += kv('datetime',    badge(c.tools.datetime?.enabled));
+    if (c.tools?.system_info) html += kv('system_info', badge(c.tools.system_info?.enabled));
+    if (c.tools?.memory)      html += kv('memory',      badge(c.tools.memory?.enabled));
+
+    // ── Feature Flags ────────────────────────────────────────────────────
+    html += '<div class="section-header" style="margin-top:14px">Feature Flags</div>';
+
+    // Cost tracking
+    html += cfgToggle('cost_tracking_enabled', 'Cost tracking', c.cost_tracking?.enabled ?? false);
+    html += `<div id="sub-cost_tracking_enabled" style="display:${c.cost_tracking?.enabled ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
+    html += cfgToggle('cost_track_openrouter', 'Track OpenRouter', c.cost_tracking?.track_openrouter ?? true);
+    html += cfgToggle('cost_track_local',      'Track local (Ollama)', c.cost_tracking?.track_local ?? false);
+    html += '</div>';
+
+    // Orchestrator
+    html += cfgToggle('orchestrator_enabled', 'Orchestrator', c.orchestrator?.enabled ?? false);
+    html += `<div id="sub-orchestrator_enabled" style="display:${c.orchestrator?.enabled ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
+    html += cfgInput('orchestrator_max_parallel', 'Max parallel tasks', c.orchestrator?.max_parallel_tasks ?? 5, 'number');
+    html += cfgInput('orchestrator_task_timeout', 'Task timeout (s)',   c.orchestrator?.task_timeout_seconds ?? 120, 'number');
+    html += cfgInput('orchestrator_total_timeout','Total timeout (s)',  c.orchestrator?.total_timeout_seconds ?? 300, 'number');
+    html += '</div>';
+
+    // Flight recorder
+    html += cfgToggle('flight_recorder_enabled', 'Flight recorder', c.flight_recorder?.enabled ?? false);
+    html += `<div id="sub-flight_recorder_enabled" style="display:${c.flight_recorder?.enabled ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
+    html += cfgInput('flight_retention_hours', 'Retention (hours)', c.flight_recorder?.retention_hours ?? 24, 'number');
+    html += cfgInput('flight_max_records',     'Max records',       c.flight_recorder?.max_records ?? 1000, 'number');
+    html += '</div>';
+
+    // Conversation replay (no sub-options)
+    html += cfgToggle('conversation_replay_enabled', 'Conversation replay', c.conversation_replay?.enabled ?? false);
+
+    // Semantic map
+    html += cfgToggle('semantic_map_enabled', 'Semantic map', c.semantic_map?.enabled ?? false);
+    html += `<div id="sub-semantic_map_enabled" style="display:${c.semantic_map?.enabled ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
+    html += cfgInput('semantic_similarity_threshold', 'Similarity threshold (0-1)', c.semantic_map?.similarity_threshold ?? 0.5, 'number');
+    html += cfgInput('semantic_max_topics',           'Max topics',                c.semantic_map?.max_topics ?? 50, 'number');
+    html += '</div>';
+
+    // Auto-summarization
+    html += cfgToggle('auto_summarization_enabled', 'Auto-summarization', c.auto_summarization?.enabled ?? false);
+    html += `<div id="sub-auto_summarization_enabled" style="display:${c.auto_summarization?.enabled ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
+    html += cfgInput('auto_token_budget',    'Token budget (trigger)',  c.auto_summarization?.token_budget ?? 3000, 'number');
+    html += cfgInput('auto_summary_model',   'Summary model',           c.auto_summarization?.summary_model ?? '');
+    html += cfgInput('auto_keep_last',       'Keep last N messages',    c.auto_summarization?.keep_last ?? 4, 'number');
+    html += '</div>';
+
+    // ── Routing ──────────────────────────────────────────────────────────
+    html += '<div class="section-header" style="margin-top:14px">Routing (session overrides)</div>';
+    html += cfgSelect('force_route', 'Force route', c.routing?.force_route || '',
+                      ['', 'simple', 'complex', 'code', 'large', 'fast']);
+    html += kv('session TTL', `${c.routing?.session_ttl_seconds || 1800}s`);
+
+    // ── Backends ─────────────────────────────────────────────────────────
+    html += '<div class="section-header" style="margin-top:14px">Multi-Backend</div>';
+    html += kv('enabled', badge(c.backends_enabled));
+    (c.backends || []).forEach((b, i) => {
+      html += kv(`backend ${i+1}`, `<span class="badge badge-lav">${esc(b.name||'?')}</span> ${esc(b.url||'')} <span class="badge">${esc(b.provider||'')}</span>`);
+    });
+
+    // ── Model Advertising ─────────────────────────────────────────────────
+    html += '<div class="section-header" style="margin-top:14px">Model Advertising</div>';
+    html += kv('mode', esc(c.model_advertising?.mode || '—'));
+    html += kv('prefix', esc(c.model_advertising?.prefix || '—'));
+
+    // ── Logging ──────────────────────────────────────────────────────────
+    html += '<div class="section-header" style="margin-top:14px">Logging</div>';
+    html += cfgSelect('log_level', 'Log level', c.logging?.level || 'INFO',
+                      ['DEBUG', 'INFO', 'WARNING', 'ERROR']);
+    html += kv('log file', esc(c.logging?.file || '—'));
+    html += kv('wiretap', esc(c.wiretap?.path || '—'));
+
+    // ── Web UI ────────────────────────────────────────────────────────────
+    html += '<div class="section-header" style="margin-top:14px">Web UI</div>';
+    html += cfgSelect('web_ui_palette', 'Palette theme', c.web_ui?.palette || 'default',
+                      ['default','phosphor','cobalt','sakura','slate']);
+    html += cfgToggle('web_ui_vi_mode', 'Vi mode', c.web_ui?.vi_mode ?? false);
+    html += cfgToggle('voice_enabled',  'Voice / PTT (requires STT service)', c.web_ui?.voice_enabled ?? false);
+    html += cfgInput('voice_hotkey',    'Voice hotkey', c.web_ui?.voice_hotkey || '');
+
+    // ── Session ───────────────────────────────────────────────────────────
+    html += '<div class="section-header" style="margin-top:14px">Session Overrides</div>';
+    html += cfgInput('system_prompt_prefix', 'System prompt prefix', c.runtime?.system_prompt_prefix || '');
 
     document.getElementById('config-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
     el.innerHTML = html;
 
-    // Wire up toggle labels
-    ['decision_llm_enabled','tools_enabled','log_conversations','web_ui_vi_mode'].forEach(id => {
+    // Wire toggle labels + expand/collapse sub-options
+    const toggleIds = [
+      'log_conversations','decision_llm_enabled','tools_enabled',
+      'cost_tracking_enabled','cost_track_openrouter','cost_track_local',
+      'orchestrator_enabled','flight_recorder_enabled',
+      'conversation_replay_enabled','semantic_map_enabled','auto_summarization_enabled',
+      'web_ui_vi_mode','voice_enabled',
+    ];
+    toggleIds.forEach(id => {
       const cb = document.getElementById(`cfg-${id}`);
       const lbl = document.getElementById(`cfg-${id}-lbl`);
       if (cb && lbl) cb.addEventListener('change', () => { lbl.textContent = cb.checked ? 'enabled' : 'disabled'; });
+    });
+    // Expand sub-options when parent feature flag is toggled
+    ['cost_tracking_enabled','orchestrator_enabled','flight_recorder_enabled',
+     'semantic_map_enabled','auto_summarization_enabled'].forEach(id => {
+      const cb = document.getElementById(`cfg-${id}`);
+      const sub = document.getElementById(`sub-${id}`);
+      if (cb && sub) {
+        cb.addEventListener('change', () => { sub.style.display = cb.checked ? 'block' : 'none'; });
+      }
     });
 
   } catch(e) {
@@ -1714,19 +2956,31 @@ async function saveConfig() {
   const status = document.getElementById('cfg-save-status');
   if (status) status.textContent = 'saving…';
 
+  // Collect all editable fields
+  const getChecked = id => { const el = document.getElementById(`cfg-${id}`); return el ? el.checked : null; };
+  const getVal = id => { const el = document.getElementById(`cfg-${id}`); return el ? (el.value ?? null) : null; };
+
   const payload = {};
-  const fields = {
-    'default_model':        () => document.getElementById('cfg-default_model')?.value ?? null,
-    'decision_llm_enabled': () => document.getElementById('cfg-decision_llm_enabled')?.checked ?? null,
-    'tools_enabled':        () => document.getElementById('cfg-tools_enabled')?.checked ?? null,
-    'log_conversations':    () => document.getElementById('cfg-log_conversations')?.checked ?? null,
-    'web_ui_palette':       () => document.getElementById('cfg-web_ui_palette')?.value ?? null,
-    'web_ui_vi_mode':       () => document.getElementById('cfg-web_ui_vi_mode')?.checked ?? null,
-  };
-  for (const [key, fn] of Object.entries(fields)) {
-    const val = fn();
-    if (val !== null) payload[key] = val;
-  }
+  const bools = [
+    'log_conversations','decision_llm_enabled','tools_enabled',
+    'cost_tracking_enabled','cost_track_openrouter','cost_track_local',
+    'orchestrator_enabled','flight_recorder_enabled',
+    'conversation_replay_enabled','semantic_map_enabled','auto_summarization_enabled',
+    'web_ui_vi_mode','voice_enabled',
+  ];
+  const strings = [
+    'default_model','force_route','log_level','web_ui_palette',
+    'voice_hotkey','system_prompt_prefix','auto_summary_model',
+  ];
+  const numbers = [
+    'orchestrator_max_parallel','orchestrator_task_timeout','orchestrator_total_timeout',
+    'flight_retention_hours','flight_max_records',
+    'semantic_similarity_threshold','semantic_max_topics',
+    'auto_token_budget','auto_keep_last',
+  ];
+  bools.forEach(k => { const v = getChecked(k); if (v !== null) payload[k] = v; });
+  strings.forEach(k => { const v = getVal(k); if (v !== null) payload[k] = v; });
+  numbers.forEach(k => { const el = document.getElementById(`cfg-${k}`); if (el && el.value !== '') payload[k] = parseFloat(el.value); });
 
   try {
     const d = await api('/api/v1/config', {
@@ -1735,17 +2989,25 @@ async function saveConfig() {
       body: JSON.stringify(payload),
     });
 
-    // Apply palette and vi mode immediately without page reload
+    // Apply immediately in the UI where possible
     if ('web_ui_palette' in payload) applyPalette(payload.web_ui_palette);
     if ('web_ui_vi_mode' in payload) {
       setViToggleState(payload.web_ui_vi_mode);
       if (payload.web_ui_vi_mode) injectViMode(); else removeViMode?.();
     }
+    if ('voice_enabled' in payload) {
+      if (payload.voice_enabled) enableVoiceUI(payload.voice_hotkey || '');
+      else { const btn = document.getElementById('mic-btn'); if (btn) btn.style.display = 'none'; }
+    }
 
-    if (status) status.textContent = `✓ saved ${d.saved?.join(', ') || ''}`;
+    if (status) status.textContent = `✓ saved (${d.saved?.length || 0} keys)`;
     setTimeout(() => { if (status) status.textContent = ''; }, 3000);
   } catch(e) {
-    if (status) status.textContent = `✗ ${esc(e.message)}`;
+    if (e.status === 404) {
+      if (status) status.textContent = '✗ Config save endpoint not found — rebuild the container with the latest main.py';
+    } else {
+      if (status) status.textContent = `✗ ${esc(e.message)}`;
+    }
   }
 }
 
@@ -1772,6 +3034,7 @@ loadModels();
 // Restore tap filters from localStorage
 try {
   const savedRole = localStorage.getItem('bb_tap_role');
+
   const savedDir  = localStorage.getItem('bb_tap_dir');
   const savedN    = localStorage.getItem('bb_tap_n');
   if (savedRole !== null) document.getElementById('tap-role').value = savedRole;
@@ -1779,13 +3042,8 @@ try {
   if (savedN    !== null) document.getElementById('tap-n').value    = savedN;
 } catch {}
 
-// Restore chat history from localStorage
-restoreChatHistory();
-if (chatHistory.length > 0) {
-  const msgDiv = document.getElementById('chat-messages');
-  chatHistory.forEach(m => appendMsg(m.role, m.content, m.role === 'assistant' ? 'restored' : ''));
-  setTimeout(() => { msgDiv.scrollTop = msgDiv.scrollHeight; }, 50);
-}
+// Initialize multi-pane chat (creates first pane, no history restore needed — per-pane history is in memory only)
+initChatPanes();
 
 // Bootstrap vi mode and palette from runtime config in a single fetch
 (async function initWebUi() {
@@ -1800,6 +3058,11 @@ if (chatHistory.length > 0) {
     // Palette
     const palette = d.web_ui?.palette || 'default';
     if (palette !== 'default') applyPalette(palette);
+
+    // Voice
+    if (d.web_ui?.voice_enabled) {
+      enableVoiceUI(d.web_ui?.voice_hotkey || '');
+    }
   } catch {}
 })();
 </script>

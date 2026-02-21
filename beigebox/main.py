@@ -120,7 +120,7 @@ async def lifespan(app: FastAPI):
 
     # Embedding classifier (fast path for routing)
     embedding_classifier = get_embedding_classifier()
-    ec_status = "ready" if embedding_classifier.ready else "no centroids (run beigebox build-centroids)"
+    ec_status = "ready" if embedding_classifier.ready else "no centroids — will auto-build at startup"
 
     # Multi-backend router (v0.6)
     backend_router = None
@@ -170,6 +170,23 @@ async def lifespan(app: FastAPI):
     await _preload_embedding_model(cfg)
     if decision_agent:
         await decision_agent.preload()
+
+    # Auto-build centroids if they don't exist yet
+    if not embedding_classifier.ready:
+        import asyncio as _asyncio
+
+        async def _auto_build_centroids():
+            logger.info("Embedding centroids not found — auto-building in background…")
+            try:
+                success = embedding_classifier.build_centroids()
+                if success:
+                    logger.info("Embedding centroids auto-built successfully")
+                else:
+                    logger.warning("Auto-build centroids returned False — check Ollama is running with nomic-embed-text")
+            except Exception as _e:
+                logger.warning("Auto-build centroids failed: %s", _e)
+
+        _asyncio.create_task(_auto_build_centroids())
 
     yield
 
@@ -312,26 +329,139 @@ async def api_info():
 
 @app.get("/api/v1/config")
 async def api_config():
-    """Current configuration (safe to expose)."""
+    """
+    Full configuration — all config.yaml settings plus runtime overrides.
+    Runtime keys (from runtime_config.yaml) take precedence where they exist.
+    Safe to expose: no secrets, API keys are redacted.
+    """
     cfg = get_config()
+    rt = get_runtime_config()
+
+    def _redact(v):
+        """Redact anything that looks like an API key or password."""
+        if isinstance(v, str) and len(v) > 8 and any(k in v.lower() for k in ("key", "secret", "token", "password")):
+            return "***redacted***"
+        return v
+
+    # Merge runtime overrides onto config values
     return JSONResponse({
-        "backend": cfg.get("backend", {}),
-        "server": cfg.get("server", {}),
-        "embedding": {"model": cfg.get("embedding", {}).get("model", "")},
+        # ── Backend ──────────────────────────────────────────────────
+        "backend": {
+            "url":           cfg.get("backend", {}).get("url", ""),
+            "default_model": rt.get("default_model") or cfg.get("backend", {}).get("default_model", ""),
+            "timeout":       cfg.get("backend", {}).get("timeout", 120),
+        },
+        # ── Server ───────────────────────────────────────────────────
+        "server": {
+            "host": cfg.get("server", {}).get("host", "0.0.0.0"),
+            "port": cfg.get("server", {}).get("port", 8000),
+        },
+        # ── Embedding ────────────────────────────────────────────────
+        "embedding": {
+            "model":       cfg.get("embedding", {}).get("model", ""),
+            "backend_url": cfg.get("embedding", {}).get("backend_url", ""),
+        },
+        # ── Storage ──────────────────────────────────────────────────
         "storage": {
-            "log_conversations": cfg.get("storage", {}).get("log_conversations", True),
+            "sqlite_path":        cfg.get("storage", {}).get("sqlite_path", ""),
+            "chroma_path":        cfg.get("storage", {}).get("chroma_path", ""),
+            "log_conversations":  rt.get("log_conversations", cfg.get("storage", {}).get("log_conversations", True)),
         },
+        # ── Tools ────────────────────────────────────────────────────
         "tools": {
-            "enabled": cfg.get("tools", {}).get("enabled", False),
+            "enabled":      rt.get("tools_enabled", cfg.get("tools", {}).get("enabled", False)),
+            "web_search":   cfg.get("tools", {}).get("web_search", {}),
+            "web_scraper":  cfg.get("tools", {}).get("web_scraper", {}),
+            "calculator":   cfg.get("tools", {}).get("calculator", {}),
+            "datetime":     cfg.get("tools", {}).get("datetime", {}),
+            "system_info":  cfg.get("tools", {}).get("system_info", {}),
+            "memory":       cfg.get("tools", {}).get("memory", {}),
         },
+        # ── Decision LLM ─────────────────────────────────────────────
         "decision_llm": {
-            "enabled": decision_agent.enabled if decision_agent else False,
-            "model": decision_agent.model if decision_agent else "",
+            "enabled":     rt.get("decision_llm_enabled", decision_agent.enabled if decision_agent else False),
+            "model":       decision_agent.model if decision_agent else cfg.get("decision_llm", {}).get("model", ""),
+            "timeout":     cfg.get("decision_llm", {}).get("timeout", 5),
+            "max_tokens":  cfg.get("decision_llm", {}).get("max_tokens", 256),
         },
+        # ── Operator ─────────────────────────────────────────────────
+        "operator": {
+            "model":          cfg.get("operator", {}).get("model", ""),
+            "max_iterations": cfg.get("operator", {}).get("max_iterations", 10),
+            "shell_enabled":  cfg.get("operator", {}).get("shell", {}).get("enabled", False),
+        },
+        # ── Model advertising ─────────────────────────────────────────
         "model_advertising": cfg.get("model_advertising", {}),
+        # ── Multi-backend ─────────────────────────────────────────────
+        "backends_enabled": cfg.get("backends_enabled", False),
+        "backends": [
+            {k: ("***redacted***" if "key" in k.lower() else v)
+             for k, v in b.items()}
+            for b in cfg.get("backends", [])
+        ],
+        # ── Feature flags ─────────────────────────────────────────────
+        "cost_tracking": {
+            **cfg.get("cost_tracking", {}),
+            "enabled": rt.get("cost_tracking_enabled", cfg.get("cost_tracking", {}).get("enabled", False)),
+            "track_openrouter": rt.get("cost_track_openrouter", cfg.get("cost_tracking", {}).get("track_openrouter", True)),
+            "track_local": rt.get("cost_track_local", cfg.get("cost_tracking", {}).get("track_local", False)),
+        },
+        "orchestrator": {
+            **cfg.get("orchestrator", {}),
+            "enabled": rt.get("orchestrator_enabled", cfg.get("orchestrator", {}).get("enabled", False)),
+            "max_parallel_tasks": rt.get("orchestrator_max_parallel", cfg.get("orchestrator", {}).get("max_parallel_tasks", 5)),
+            "task_timeout_seconds": rt.get("orchestrator_task_timeout", cfg.get("orchestrator", {}).get("task_timeout_seconds", 120)),
+            "total_timeout_seconds": rt.get("orchestrator_total_timeout", cfg.get("orchestrator", {}).get("total_timeout_seconds", 300)),
+        },
+        "flight_recorder": {
+            **cfg.get("flight_recorder", {}),
+            "enabled": rt.get("flight_recorder_enabled", cfg.get("flight_recorder", {}).get("enabled", False)),
+            "retention_hours": rt.get("flight_retention_hours", cfg.get("flight_recorder", {}).get("retention_hours", 24)),
+            "max_records": rt.get("flight_max_records", cfg.get("flight_recorder", {}).get("max_records", 1000)),
+        },
+        "conversation_replay": {
+            "enabled": rt.get("conversation_replay_enabled", cfg.get("conversation_replay", {}).get("enabled", False)),
+        },
+        "semantic_map": {
+            **cfg.get("semantic_map", {}),
+            "enabled": rt.get("semantic_map_enabled", cfg.get("semantic_map", {}).get("enabled", False)),
+            "similarity_threshold": rt.get("semantic_similarity_threshold", cfg.get("semantic_map", {}).get("similarity_threshold", 0.5)),
+            "max_topics": rt.get("semantic_max_topics", cfg.get("semantic_map", {}).get("max_topics", 50)),
+        },
+        "auto_summarization": {
+            **cfg.get("auto_summarization", {}),
+            "enabled": rt.get("auto_summarization_enabled", cfg.get("auto_summarization", {}).get("enabled", False)),
+            "token_budget": rt.get("auto_token_budget", cfg.get("auto_summarization", {}).get("token_budget", 3000)),
+            "summary_model": rt.get("auto_summary_model", cfg.get("auto_summarization", {}).get("summary_model", "")),
+            "keep_last": rt.get("auto_keep_last", cfg.get("auto_summarization", {}).get("keep_last", 4)),
+        },
+        # ── Routing ───────────────────────────────────────────────────
+        "routing": {
+            "session_ttl_seconds": cfg.get("routing", {}).get("session_ttl_seconds", 1800),
+            "force_route":         rt.get("force_route", ""),
+            "border_threshold":    rt.get("border_threshold"),
+            "agentic_threshold":   rt.get("agentic_threshold"),
+        },
+        # ── Logging ───────────────────────────────────────────────────
+        "logging": {
+            "level": rt.get("log_level") or cfg.get("logging", {}).get("level", "INFO"),
+            "file":  cfg.get("logging", {}).get("file", ""),
+        },
+        # ── Wiretap ───────────────────────────────────────────────────
+        "wiretap": cfg.get("wiretap", {}),
+        # ── Hooks ─────────────────────────────────────────────────────
+        "hooks": cfg.get("hooks", []),
+        # ── Web UI (runtime only) ─────────────────────────────────────
         "web_ui": {
-            "vi_mode": get_runtime_config().get("web_ui_vi_mode", False),
-            "palette": get_runtime_config().get("web_ui_palette", "default"),
+            "vi_mode":      rt.get("web_ui_vi_mode", False),
+            "palette":      rt.get("web_ui_palette", "default"),
+            "voice_enabled": rt.get("voice_enabled", False),
+            "voice_hotkey":  rt.get("voice_hotkey", ""),
+        },
+        # ── Runtime session overrides ─────────────────────────────────
+        "runtime": {
+            "system_prompt_prefix": rt.get("system_prompt_prefix", ""),
+            "tools_disabled":       rt.get("tools_disabled", []),
         },
     })
 
@@ -340,9 +470,20 @@ async def api_config():
 async def api_config_save(request: Request):
     """
     Save runtime-adjustable settings to runtime_config.yaml.
-    Accepts a flat or nested dict of keys to update.
-    Supported keys: web_ui_vi_mode, web_ui_palette, decision_llm_enabled,
-    tools_enabled, log_conversations, default_model.
+    All keys are hot-reloaded — no restart required.
+
+    Accepted keys:
+        # Web UI
+        web_ui_vi_mode, web_ui_palette, voice_enabled, voice_hotkey
+        # Routing
+        default_model, force_route, border_threshold, agentic_threshold
+        # Features
+        decision_llm_enabled, tools_enabled, log_conversations, log_level
+        # Session
+        system_prompt_prefix, tools_disabled
+        # Feature flags (bool)
+        cost_tracking_enabled, orchestrator_enabled, flight_recorder_enabled,
+        conversation_replay_enabled, semantic_map_enabled, auto_summarization_enabled
     """
     try:
         body = await request.json()
@@ -352,14 +493,45 @@ async def api_config_save(request: Request):
     updated = []
     errors = []
 
-    # Map of accepted keys → runtime_config key
+    # All runtime-adjustable keys
     allowed = {
-        "web_ui_vi_mode":      "web_ui_vi_mode",
-        "web_ui_palette":      "web_ui_palette",
-        "decision_llm_enabled": "decision_llm_enabled",
-        "tools_enabled":       "tools_enabled",
-        "log_conversations":   "log_conversations",
-        "default_model":       "default_model",
+        # Web UI
+        "web_ui_vi_mode":               "web_ui_vi_mode",
+        "web_ui_palette":               "web_ui_palette",
+        "voice_enabled":                "voice_enabled",
+        "voice_hotkey":                 "voice_hotkey",
+        # Routing
+        "default_model":                "default_model",
+        "force_route":                  "force_route",
+        "border_threshold":             "border_threshold",
+        "agentic_threshold":            "agentic_threshold",
+        # Features
+        "decision_llm_enabled":         "decision_llm_enabled",
+        "tools_enabled":                "tools_enabled",
+        "log_conversations":            "log_conversations",
+        "log_level":                    "log_level",
+        # Session
+        "system_prompt_prefix":         "system_prompt_prefix",
+        "tools_disabled":               "tools_disabled",
+        # Feature flag sub-options
+        "cost_tracking_enabled":        "cost_tracking_enabled",
+        "cost_track_openrouter":        "cost_track_openrouter",
+        "cost_track_local":             "cost_track_local",
+        "orchestrator_enabled":         "orchestrator_enabled",
+        "orchestrator_max_parallel":    "orchestrator_max_parallel",
+        "orchestrator_task_timeout":    "orchestrator_task_timeout",
+        "orchestrator_total_timeout":   "orchestrator_total_timeout",
+        "flight_recorder_enabled":      "flight_recorder_enabled",
+        "flight_retention_hours":       "flight_retention_hours",
+        "flight_max_records":           "flight_max_records",
+        "conversation_replay_enabled":  "conversation_replay_enabled",
+        "semantic_map_enabled":         "semantic_map_enabled",
+        "semantic_similarity_threshold": "semantic_similarity_threshold",
+        "semantic_max_topics":          "semantic_max_topics",
+        "auto_summarization_enabled":   "auto_summarization_enabled",
+        "auto_token_budget":            "auto_token_budget",
+        "auto_summary_model":           "auto_summary_model",
+        "auto_keep_last":               "auto_keep_last",
     }
 
     for key, rt_key in allowed.items():
@@ -370,18 +542,15 @@ async def api_config_save(request: Request):
             else:
                 errors.append(key)
 
-    # Apply changes that can take effect without restart
+    # Apply live changes that don't need restart
     rt = get_runtime_config()
 
-    # decision_llm toggle — flip the live agent if it exists
     if "decision_llm_enabled" in updated and decision_agent:
         decision_agent.enabled = rt.get("decision_llm_enabled", decision_agent.enabled)
 
-    # default_model — update proxy live
     if "default_model" in updated and proxy:
         proxy.default_model = rt.get("default_model", proxy.default_model)
 
-    # log_conversations — update proxy live
     if "log_conversations" in updated and proxy:
         proxy.log_enabled = rt.get("log_conversations", proxy.log_enabled)
 
@@ -391,7 +560,6 @@ async def api_config_save(request: Request):
 
 
 
-async def api_tools():
     """List available tools."""
     if not tool_registry:
         return JSONResponse({"tools": []})
@@ -738,6 +906,69 @@ async def api_orchestrator(request: Request):
         return JSONResponse(result)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/v1/harness/orchestrate")
+async def api_harness_orchestrate(request: Request):
+    """
+    Harness master orchestrator — goal-directed multi-agent coordinator.
+
+    Body:
+        query    str           — the goal/task to accomplish
+        targets  list[str]     — available targets e.g. ["operator","model:llama3.2:3b"]
+        model    str (opt)     — override the orchestrator's own model
+        max_rounds int (opt)   — override max iteration rounds (default 8)
+
+    Returns: text/event-stream of JSON events:
+        {type:"start",    goal, model, targets}
+        {type:"plan",     round, reasoning, tasks:[{target,prompt,rationale}]}
+        {type:"dispatch", round, task_count}
+        {type:"result",   round, target, prompt, content, latency_ms, status}
+        {type:"evaluate", round, assessment, action}
+        {type:"finish",   answer, rounds, capped?}
+        {type:"error",    message}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    goal = body.get("query", "").strip()
+    if not goal:
+        return JSONResponse({"error": "query required"}, status_code=400)
+
+    targets = body.get("targets", ["operator"])
+    model_override = body.get("model") or None
+    max_rounds = int(body.get("max_rounds", 8))
+    task_stagger = float(body.get("task_stagger_seconds", 0.4))
+
+    from beigebox.agents.harness_orchestrator import HarnessOrchestrator
+    import json as _json
+
+    orch = HarnessOrchestrator(
+        available_targets=targets,
+        model=model_override,
+        max_rounds=max_rounds,
+        task_stagger_seconds=task_stagger,
+    )
+
+    async def _event_stream():
+        try:
+            async for event in orch.run(goal):
+                yield f"data: {_json.dumps(event)}\n\n"
+        except Exception as e:
+            yield f"data: {_json.dumps({'type':'error','message':str(e)})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/api/v1/operator")
