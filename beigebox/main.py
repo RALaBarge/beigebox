@@ -723,10 +723,12 @@ async def api_flight_recorder_detail(record_id: str):
 async def api_conversation_replay(conv_id: str):
     """Reconstruct a conversation with full routing context."""
     cfg = get_config()
-    if not cfg.get("conversation_replay", {}).get("enabled", False):
+    rt = get_runtime_config()
+    replay_enabled = rt.get("conversation_replay_enabled", cfg.get("conversation_replay", {}).get("enabled", False))
+    if not replay_enabled:
         return JSONResponse({
             "enabled": False,
-            "message": "Conversation replay is disabled. Set conversation_replay.enabled: true in config.",
+            "message": "Conversation replay is disabled. Enable it in Config tab or set conversation_replay.enabled: true in config.yaml.",
         })
     if not sqlite_store:
         return JSONResponse({"error": "Storage not initialized"}, status_code=503)
@@ -852,21 +854,24 @@ async def api_tap(
 async def api_semantic_map(conv_id: str):
     """Generate a semantic topic map for a conversation."""
     cfg = get_config()
-    sm_cfg = cfg.get("semantic_map", {})
-    if not sm_cfg.get("enabled", False):
+    rt = get_runtime_config()
+    sm_enabled = rt.get("semantic_map_enabled", cfg.get("semantic_map", {}).get("enabled", False))
+    if not sm_enabled:
         return JSONResponse({
             "enabled": False,
-            "message": "Semantic map is disabled. Set semantic_map.enabled: true in config.",
+            "message": "Semantic map is disabled. Enable it in Config tab or set semantic_map.enabled: true in config.yaml.",
         })
     if not sqlite_store or not vector_store:
         return JSONResponse({"error": "Storage not initialized"}, status_code=503)
 
     from beigebox.semantic_map import SemanticMap
+    similarity_threshold = rt.get("semantic_similarity_threshold", cfg.get("semantic_map", {}).get("similarity_threshold", 0.5))
+    max_topics = rt.get("semantic_max_topics", cfg.get("semantic_map", {}).get("max_topics", 50))
     mapper = SemanticMap(
         sqlite=sqlite_store,
         vector=vector_store,
-        similarity_threshold=sm_cfg.get("similarity_threshold", 0.5),
-        max_topics=sm_cfg.get("max_topics", 50),
+        similarity_threshold=similarity_threshold,
+        max_topics=max_topics,
     )
     result = mapper.build(conv_id)
     return JSONResponse(result)
@@ -1012,6 +1017,57 @@ async def api_operator(request: Request):
             }, status_code=503)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+
+
+# ---------------------------------------------------------------------------
+# Ensemble Voting (v1.0+)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/ensemble")
+async def api_ensemble(request: Request):
+    """
+    Vote on responses from multiple models using an LLM judge.
+
+    Request body:
+    {
+      "prompt": "What is X?",
+      "models": ["llama3.2:3b", "mistral:7b"],
+      "judge_model": "llama3.2:3b"  (optional; defaults to operator model)
+    }
+
+    Returns: SSE stream of JSON events
+    {type:"dispatch", model_count:2}
+    {type:"result", model:"...", response:"...", latency_ms:123}
+    ...
+    {type:"evaluate", winner:"...", reasoning:"...", all_responses:[...]}
+    {type:"finish", winner:"...", best_response:"...", verdict:"..."}
+    """
+    try:
+        body = await request.json()
+    except:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    prompt = body.get("prompt", "").strip()
+    models = body.get("models", [])
+    judge_model = body.get("judge_model")
+
+    if not prompt:
+        return JSONResponse({"error": "prompt is required"}, status_code=400)
+    if not models:
+        return JSONResponse({"error": "models list is required"}, status_code=400)
+
+    from beigebox.agents.ensemble_voter import EnsembleVoter
+
+    voter = EnsembleVoter(models=models, judge_model=judge_model)
+
+    async def event_generator():
+        try:
+            async for event in voter.vote(prompt):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 # ---------------------------------------------------------------------------
