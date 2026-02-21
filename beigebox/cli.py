@@ -84,12 +84,6 @@ def cmd_tap(args):
         raw=args.raw,
     )
 
-def cmd_jack(args):
-    """Launch the BeigeBox TUI console."""
-    from beigebox.tui.app import BeigeBoxApp
-    app = BeigeBoxApp()
-    app.run()
-
 def cmd_setup(args):
     """Pull required models into Ollama."""
     import httpx
@@ -575,9 +569,6 @@ def main():
     # build-centroids
     _add_command(sub, ["build-centroids", "centroids"],
                  "Build embedding classifier centroids from seed prompts", cmd_build_centroids)
-
-    # jack / console / tui
-    _add_command(sub, ["jack", "console", "tui"], "Launch the interactive TUI console", cmd_jack)
 
     # operator / op
     def setup_operator(p):

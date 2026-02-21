@@ -5,7 +5,7 @@
 # --- Backend (where requests get forwarded) ---
 backend:
   url: "http://ollama:11434"            # Docker service name
-  default_model: ""                     # Set to a model you have pulled
+  default_model: "llama3.2:3b"         # Main chat model — pulled by ollama-init
   timeout: 120
 
 # --- Middleware Server ---
@@ -54,27 +54,27 @@ tools:
 # --- Decision LLM ---
 decision_llm:
   enabled: true                          # Enabled by default in Docker — setup pulls the model
-  model: ""                              # Set to a small, fast model for routing
+  model: "llama3.2:3b"                   # Fast routing decisions
   backend_url: "http://ollama:11434"
   timeout: 5
   max_tokens: 256
   routes:
     default:
-      model: ""
+      model: "llama3.2:3b"
       description: "General purpose conversation and Q&A"
     code:
-      model: ""
+      model: "llama3.2:3b"
       description: "Code generation, debugging, technical programming tasks"
     large:
-      model: ""
+      model: "llama3.2:3b"
       description: "Complex reasoning, analysis, long-form writing"
     fast:
-      model: ""
+      model: "llama3.2:3b"
       description: "Quick responses, simple questions, brainstorming"
 
 # --- Operator ---
 operator:
-  model: ""                              # Defaults to backend.default_model
+  model: "llama3.2:3b"                   # Defaults to backend.default_model
   max_iterations: 10
   shell:
     enabled: true

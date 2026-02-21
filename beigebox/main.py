@@ -182,7 +182,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="BeigeBox",
     description="Tap the line. Control the carrier.",
-    version="0.9.0",
+    version="0.8.0",
     lifespan=lifespan,
 )
 
@@ -272,7 +272,7 @@ async def health():
     """Health check."""
     return JSONResponse({
         "status": "ok",
-        "version": "0.9.0",
+        "version": "0.8.0",
         "decision_llm": decision_agent.enabled if decision_agent else False,
     })
 
@@ -286,7 +286,7 @@ async def api_info():
     """System info — what features are available."""
     cfg = get_config()
     return JSONResponse({
-        "version": "0.9.0",
+        "version": "0.8.0",
         "name": "BeigeBox",
         "description": "Transparent Pythonic LLM Proxy",
         "server": {
@@ -336,7 +336,61 @@ async def api_config():
     })
 
 
-@app.get("/api/v1/tools")
+@app.post("/api/v1/config")
+async def api_config_save(request: Request):
+    """
+    Save runtime-adjustable settings to runtime_config.yaml.
+    Accepts a flat or nested dict of keys to update.
+    Supported keys: web_ui_vi_mode, web_ui_palette, decision_llm_enabled,
+    tools_enabled, log_conversations, default_model.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    updated = []
+    errors = []
+
+    # Map of accepted keys → runtime_config key
+    allowed = {
+        "web_ui_vi_mode":      "web_ui_vi_mode",
+        "web_ui_palette":      "web_ui_palette",
+        "decision_llm_enabled": "decision_llm_enabled",
+        "tools_enabled":       "tools_enabled",
+        "log_conversations":   "log_conversations",
+        "default_model":       "default_model",
+    }
+
+    for key, rt_key in allowed.items():
+        if key in body:
+            ok = update_runtime_config(rt_key, body[key])
+            if ok:
+                updated.append(key)
+            else:
+                errors.append(key)
+
+    # Apply changes that can take effect without restart
+    rt = get_runtime_config()
+
+    # decision_llm toggle — flip the live agent if it exists
+    if "decision_llm_enabled" in updated and decision_agent:
+        decision_agent.enabled = rt.get("decision_llm_enabled", decision_agent.enabled)
+
+    # default_model — update proxy live
+    if "default_model" in updated and proxy:
+        proxy.default_model = rt.get("default_model", proxy.default_model)
+
+    # log_conversations — update proxy live
+    if "log_conversations" in updated and proxy:
+        proxy.log_enabled = rt.get("log_conversations", proxy.log_enabled)
+
+    if errors:
+        return JSONResponse({"saved": updated, "errors": errors}, status_code=207)
+    return JSONResponse({"saved": updated, "ok": True})
+
+
+
 async def api_tools():
     """List available tools."""
     if not tool_registry:

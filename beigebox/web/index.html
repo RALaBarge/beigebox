@@ -433,7 +433,7 @@
   #vi-toggle {
     position: fixed;
     bottom: 10px;
-    right: 14px;
+    left: 14px;
     width: 24px;
     height: 24px;
     border-radius: 50%;
@@ -459,7 +459,7 @@
   #vi-toggle .tooltip {
     display: none;
     position: absolute;
-    right: 30px;
+    left: 30px;
     bottom: 0;
     background: var(--bg-panel);
     border: 1px solid var(--bg-border);
@@ -670,6 +670,17 @@ const BASE = '';  // same origin
 let chatHistory = [];
 let currentModel = localStorage.getItem('bb_model') || '';
 let viModeActive = false;
+
+// Persist and restore chat history across tab switches
+function saveChatHistory() {
+  try { localStorage.setItem('bb_chat_history', JSON.stringify(chatHistory)); } catch {}
+}
+function restoreChatHistory() {
+  try {
+    const saved = localStorage.getItem('bb_chat_history');
+    if (saved) chatHistory = JSON.parse(saved);
+  } catch {}
+}
 
 // ── Palette themes ──────────────────────────────────────────────────────────
 const THEMES = {
@@ -885,7 +896,7 @@ async function loadDashboard() {
       html += subsystem('Embedding Classifier', st.routing?.embedding_classifier?.ready, '');
       html += subsystem('Tools',              st.tools?.enabled,      st.tools?.available?.join(', ') || '');
     } else {
-      html += '<div class="error-box">Could not load subsystem status.</div>';
+      html += '<div class="error-box" style="background:transparent;border-color:var(--fg-muted);color:var(--fg-muted)">No subsystems loaded — proxy may still be starting up.</div>';
     }
 
     // ── Backends ──
@@ -1208,6 +1219,7 @@ function chatKeydown(e) {
 
 function clearChat() {
   chatHistory = [];
+  localStorage.removeItem('bb_chat_history');
   document.getElementById('chat-messages').innerHTML = '';
 }
 
@@ -1222,6 +1234,7 @@ async function sendChat() {
   const model = document.getElementById('model-select').value;
   appendMsg('user', text, model || 'default');
   chatHistory.push({ role: 'user', content: text });
+  saveChatHistory();
 
   const sendBtn = document.getElementById('send-btn');
   sendBtn.disabled = true;
@@ -1278,7 +1291,10 @@ async function sendChat() {
       }
     }
 
-    if (fullText) chatHistory.push({ role: 'assistant', content: fullText });
+    if (fullText) {
+      chatHistory.push({ role: 'assistant', content: fullText });
+      saveChatHistory();
+    }
 
   } catch(e) {
     document.getElementById(typingId)?.remove();
@@ -1603,6 +1619,31 @@ function clearOp() {
 }
 
 // ── 7. Config ─────────────────────────────────────────────────────────────────
+function cfgInput(id, label, value, type='text') {
+  return `<div class="kv-row" style="gap:12px;align-items:center">
+    <span class="kv-key" style="min-width:160px">${esc(label)}</span>
+    <input id="cfg-${id}" type="${type}" value="${esc(String(value ?? ''))}"
+      style="flex:1;min-width:0;max-width:360px;height:26px;padding:2px 6px;font-size:12px">
+  </div>`;
+}
+function cfgToggle(id, label, checked) {
+  return `<div class="kv-row" style="gap:12px;align-items:center">
+    <span class="kv-key" style="min-width:160px">${esc(label)}</span>
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+      <input id="cfg-${id}" type="checkbox" ${checked ? 'checked' : ''}
+        style="width:14px;height:14px;cursor:pointer">
+      <span id="cfg-${id}-lbl" style="font-size:11px;color:var(--fg-dim)">${checked ? 'enabled' : 'disabled'}</span>
+    </label>
+  </div>`;
+}
+function cfgSelect(id, label, value, options) {
+  const opts = options.map(o => `<option value="${esc(o)}" ${o===value?'selected':''}>${esc(o)}</option>`).join('');
+  return `<div class="kv-row" style="gap:12px;align-items:center">
+    <span class="kv-key" style="min-width:160px">${esc(label)}</span>
+    <select id="cfg-${id}" style="height:26px;padding:2px 6px;font-size:12px;min-width:160px">${opts}</select>
+  </div>`;
+}
+
 async function loadConfig() {
   const el = document.getElementById('config-body');
   el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
@@ -1613,57 +1654,105 @@ async function loadConfig() {
       api('/api/v1/status'),
     ]);
 
-    let html = '';
     const c = cfg.status === 'fulfilled' ? cfg.value : {};
     const t = tools.status === 'fulfilled' ? tools.value : {};
     const s = status.status === 'fulfilled' ? status.value : {};
 
-    html += '<div class="section-header">Backend</div>';
-    html += kv('url',           esc(c.backend?.url || '—'));
-    html += kv('default_model', esc(c.backend?.default_model || '—'));
-    html += kv('timeout',       esc(c.backend?.timeout ?? '—'));
+    let html = '';
 
-    html += '<div class="section-header">Server</div>';
-    html += kv('host', esc(c.server?.host || '0.0.0.0'));
-    html += kv('port', esc(c.server?.port || 8000));
+    // ── Read-only system info ──
+    html += '<div class="section-header">System (read-only)</div>';
+    html += kv('backend url',   esc(c.backend?.url || '—'));
+    html += kv('server',        `${esc(c.server?.host || '0.0.0.0')}:${c.server?.port || 8000}`);
+    html += kv('embedding',     esc(c.embedding?.model || '—'));
+    html += kv('operator model',esc(s.operator?.model || c.backend?.default_model || '—'));
+    html += kv('operator shell',badge(s.operator?.shell_enabled));
+    html += kv('model advertising', esc(c.model_advertising?.mode || '—'));
+    const toolList = (t.tools || []);
+    if (toolList.length) html += kv('tools registered', toolList.map(n=>`<span class="badge badge-ok">${esc(n)}</span>`).join(' '));
 
-    html += '<div class="section-header">Embedding</div>';
-    html += kv('model', esc(c.embedding?.model || '—'));
+    // ── Editable settings ──
+    html += '<div class="section-header" style="margin-top:16px">Settings (editable)</div>';
+    html += cfgInput('default_model',       'Default model',         c.backend?.default_model || '');
+    html += cfgToggle('decision_llm_enabled','Decision LLM',          c.decision_llm?.enabled ?? false);
+    if (c.decision_llm?.model) html += kv('decision model', esc(c.decision_llm.model));
+    html += cfgToggle('tools_enabled',       'Tools',                 t.enabled ?? c.tools?.enabled ?? false);
+    html += cfgToggle('log_conversations',   'Log conversations',      c.storage?.log_conversations ?? true);
+    html += cfgSelect('web_ui_palette',      'Palette theme',          c.web_ui?.palette || 'default',
+                      ['default','phosphor','cobalt','sakura','slate']);
+    html += cfgToggle('web_ui_vi_mode',      'Vi mode',               c.web_ui?.vi_mode ?? false);
 
-    html += '<div class="section-header">Storage</div>';
-    html += kv('log_conversations', badge(c.storage?.log_conversations));
-
-    html += '<div class="section-header">Decision LLM</div>';
-    html += kv('enabled', badge(c.decision_llm?.enabled));
-    if (c.decision_llm?.model) html += kv('model', esc(c.decision_llm.model));
-
-    html += '<div class="section-header">Tools</div>';
-    html += kv('enabled', badge(t.enabled || c.tools?.enabled));
-    (t.tools || []).forEach(name => {
-      html += kv(name, '<span class="badge badge-ok">registered</span>');
-    });
-
-    html += '<div class="section-header">Operator</div>';
-    html += kv('model', esc(s.operator?.model || '—'));
-    html += kv('shell', badge(s.operator?.shell_enabled));
-
-    html += '<div class="section-header">Model Advertising</div>';
-    html += kv('mode', esc(c.model_advertising?.mode || '—'));
-
-    html += '<div class="section-header">Web UI</div>';
-    html += kv('palette', esc(c.web_ui?.palette || 'default'));
-    html += kv('vi_mode', badge(c.web_ui?.vi_mode));
+    html += `<div style="margin-top:16px;display:flex;gap:8px;align-items:center">
+      <button class="primary" onclick="saveConfig()">💾 Save &amp; Apply</button>
+      <span id="cfg-save-status" style="font-size:11px;color:var(--fg-dim)"></span>
+    </div>`;
 
     document.getElementById('config-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
     el.innerHTML = html;
+
+    // Wire up toggle labels
+    ['decision_llm_enabled','tools_enabled','log_conversations','web_ui_vi_mode'].forEach(id => {
+      const cb = document.getElementById(`cfg-${id}`);
+      const lbl = document.getElementById(`cfg-${id}-lbl`);
+      if (cb && lbl) cb.addEventListener('change', () => { lbl.textContent = cb.checked ? 'enabled' : 'disabled'; });
+    });
+
   } catch(e) {
     el.innerHTML = `<div class="error-box">Failed to load config: ${esc(e.message)}</div>`;
   }
 }
 
+async function saveConfig() {
+  const status = document.getElementById('cfg-save-status');
+  if (status) status.textContent = 'saving…';
+
+  const payload = {};
+  const fields = {
+    'default_model':        () => document.getElementById('cfg-default_model')?.value ?? null,
+    'decision_llm_enabled': () => document.getElementById('cfg-decision_llm_enabled')?.checked ?? null,
+    'tools_enabled':        () => document.getElementById('cfg-tools_enabled')?.checked ?? null,
+    'log_conversations':    () => document.getElementById('cfg-log_conversations')?.checked ?? null,
+    'web_ui_palette':       () => document.getElementById('cfg-web_ui_palette')?.value ?? null,
+    'web_ui_vi_mode':       () => document.getElementById('cfg-web_ui_vi_mode')?.checked ?? null,
+  };
+  for (const [key, fn] of Object.entries(fields)) {
+    const val = fn();
+    if (val !== null) payload[key] = val;
+  }
+
+  try {
+    const d = await api('/api/v1/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    // Apply palette and vi mode immediately without page reload
+    if ('web_ui_palette' in payload) applyPalette(payload.web_ui_palette);
+    if ('web_ui_vi_mode' in payload) {
+      setViToggleState(payload.web_ui_vi_mode);
+      if (payload.web_ui_vi_mode) injectViMode(); else removeViMode?.();
+    }
+
+    if (status) status.textContent = `✓ saved ${d.saved?.join(', ') || ''}`;
+    setTimeout(() => { if (status) status.textContent = ''; }, 3000);
+  } catch(e) {
+    if (status) status.textContent = `✗ ${esc(e.message)}`;
+  }
+}
+
+
 // ── Init ─────────────────────────────────────────────────────────────────────
 loadDashboard();
 loadModels();
+
+// Restore chat history from localStorage
+restoreChatHistory();
+if (chatHistory.length > 0) {
+  const msgDiv = document.getElementById('chat-messages');
+  chatHistory.forEach(m => appendMsg(m.role, m.content, m.role === 'assistant' ? 'restored' : ''));
+  setTimeout(() => { msgDiv.scrollTop = msgDiv.scrollHeight; }, 50);
+}
 
 // Bootstrap vi mode and palette from runtime config in a single fetch
 (async function initWebUi() {
