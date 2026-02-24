@@ -2318,6 +2318,8 @@ async function sendToPane(pane, text, forceOp) {
       }
       if (fullText) {
         pane.history.push({ role: 'assistant', content: fullText, model: model || 'assistant' });
+        // TTS autoplay — speaks the complete response after streaming finishes
+        speakText(fullText);
       }
     }
   } catch(e) {
@@ -2327,6 +2329,95 @@ async function sendToPane(pane, text, forceOp) {
 }
 
 // ── Voice / Push-to-talk ─────────────────────────────────────────────────────
+// ── TTS / Audio Playback ──────────────────────────────────────────────────────
+let _ttsEnabled = false;
+let _ttsConfig = { model: 'tts-1', voice: 'alloy', speed: 1.0 };
+let _ttsAudioCtx = null;
+let _ttsCurrentSource = null;
+
+function _initAudioCtx() {
+  if (!_ttsAudioCtx) {
+    _ttsAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  // Resume if suspended (browser autoplay policy)
+  if (_ttsAudioCtx.state === 'suspended') _ttsAudioCtx.resume();
+  return _ttsAudioCtx;
+}
+
+async function speakText(text) {
+  if (!_ttsEnabled || !text?.trim()) return;
+  try {
+    stopTTS();
+    const payload = {
+      model: _ttsConfig.model || 'tts-1',
+      input: text,
+      voice: _ttsConfig.voice || 'alloy',
+      speed: _ttsConfig.speed || 1.0,
+    };
+    const resp = await fetch(BASE + '/v1/audio/speech', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer beigebox' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) { console.warn('TTS error:', resp.status); return; }
+    const arrayBuf = await resp.arrayBuffer();
+    const ctx = _initAudioCtx();
+    const audioBuf = await ctx.decodeAudioData(arrayBuf);
+    _ttsCurrentSource = ctx.createBufferSource();
+    _ttsCurrentSource.buffer = audioBuf;
+    _ttsCurrentSource.connect(ctx.destination);
+    _ttsCurrentSource.onended = () => {
+      _ttsCurrentSource = null;
+      const stopBtn = document.getElementById('tts-stop-btn');
+      if (stopBtn) stopBtn.style.display = 'none';
+    };
+    _ttsCurrentSource.start(0);
+    const stopBtn = document.getElementById('tts-stop-btn');
+    if (stopBtn) stopBtn.style.display = 'inline-block';
+  } catch(e) {
+    console.warn('TTS playback error:', e);
+  }
+}
+
+function stopTTS() {
+  if (_ttsCurrentSource) {
+    try { _ttsCurrentSource.stop(); } catch {}
+    _ttsCurrentSource = null;
+  }
+  const stopBtn = document.getElementById('tts-stop-btn');
+  if (stopBtn) stopBtn.style.display = 'none';
+}
+
+async function testTTS() {
+  const status = document.getElementById('cfg-save-status');
+  // Temporarily enable for test regardless of toggle state
+  const wasEnabled = _ttsEnabled;
+  _ttsEnabled = true;
+  // Read current form values for immediate test
+  const modelEl = document.getElementById('cfg-tts_model');
+  const voiceEl = document.getElementById('cfg-tts_voice');
+  const speedEl = document.getElementById('cfg-tts_speed');
+  const prevConfig = { ..._ttsConfig };
+  if (modelEl) _ttsConfig.model = modelEl.value || 'tts-1';
+  if (voiceEl) _ttsConfig.voice = voiceEl.value || 'alloy';
+  if (speedEl) _ttsConfig.speed = parseFloat(speedEl.value) || 1.0;
+  if (status) status.textContent = '▶ Testing TTS…';
+  await speakText('BeigeBox TTS test. Tap the line. Control the carrier.');
+  _ttsEnabled = wasEnabled;
+  _ttsConfig = prevConfig;
+  if (status) setTimeout(() => { if (status.textContent.startsWith('▶') ) status.textContent = ''; }, 3000);
+}
+
+function updateTTSConfig(cfg) {
+  _ttsEnabled = cfg?.voice?.tts_autoplay === true;
+  _ttsConfig = {
+    model: cfg?.voice?.tts_model || 'tts-1',
+    voice: cfg?.voice?.tts_voice || 'alloy',
+    speed: cfg?.voice?.tts_speed || 1.0,
+  };
+}
+// ── End TTS ───────────────────────────────────────────────────────────────────
+
 let _mediaRecorder = null;
 let _audioChunks = [];
 let _isRecording = false;
@@ -3533,12 +3624,60 @@ async function loadConfig() {
     html += cfgSelect('web_ui_palette', 'Palette theme', c.web_ui?.palette || 'default',
                       ['default','phosphor','cobalt','sakura','slate']);
     html += cfgToggle('web_ui_vi_mode', 'Vi mode', c.web_ui?.vi_mode ?? false);
-    html += cfgToggle('voice_enabled',  'Voice / PTT (requires STT service)', c.web_ui?.voice_enabled ?? false);
-    html += cfgInput('voice_hotkey',    'Voice hotkey', c.web_ui?.voice_hotkey || '');
+
+    // ── Voice / Audio ─────────────────────────────────────────────────────
+    html += '<div class="section-header" style="margin-top:14px">Voice / Audio</div>';
+    html += cfgToggle('voice_enabled', 'Enable mic button / Push-to-talk (requires STT service)', c.web_ui?.voice_enabled ?? false);
+    html += cfgInput('voice_hotkey', 'PTT hotkey (single key, e.g. v)', c.web_ui?.voice_hotkey || '');
+    html += cfgInput('stt_url', 'STT service URL', c.voice?.stt_url || '', 'text', 'e.g. http://localhost:9000  (blank = use backend URL)');
+    html += cfgToggle('tts_autoplay', 'Auto-play TTS after each assistant response', c.voice?.tts_autoplay ?? false);
+    html += `<div id="sub-tts_autoplay" style="display:${c.voice?.tts_autoplay ? 'block' : 'none'};margin-left:16px;margin-top:4px;border-left:2px solid var(--bg-border);padding-left:10px">`;
+    html += cfgInput('tts_url',   'TTS service URL', c.voice?.tts_url || '', 'text', 'e.g. http://localhost:8880  (blank = use backend URL)');
+    html += cfgInput('tts_model', 'TTS model', c.voice?.tts_model || 'tts-1', 'text', 'tts-1 · kokoro · etc.');
+    const ttsVoiceOptions = ['alloy','echo','fable','onyx','nova','shimmer','af','af_bella','af_sarah','am_adam','af_sky'];
+    html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">` +
+      `<label style="width:140px;font-size:12px;color:var(--muted)">TTS voice</label>` +
+      `<input id="cfg-tts_voice" list="tts-voice-list" value="${esc(c.voice?.tts_voice || 'alloy')}" ` +
+      `style="width:160px;background:var(--bg2);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px">` +
+      `<datalist id="tts-voice-list">${ttsVoiceOptions.map(v=>`<option value="${esc(v)}">`).join('')}</datalist></div>`;
+    html += cfgInput('tts_speed', 'Speed (0.25–4.0)', c.voice?.tts_speed ?? 1.0, 'number');
+    html += `<div style="margin-top:6px;display:flex;gap:8px">` +
+      `<button class="action-btn" onclick="testTTS()">▶ Test TTS</button>` +
+      `<button class="action-btn" id="tts-stop-btn" style="display:none" onclick="stopTTS()">■ Stop</button>` +
+      `</div>`;
+    html += `</div>`;
 
     // ── Session ───────────────────────────────────────────────────────────
     html += '<div class="section-header" style="margin-top:14px">Session Overrides</div>';
     html += cfgInput('system_prompt_prefix', 'System prompt prefix', c.runtime?.system_prompt_prefix || '');
+
+    // ── System Context ────────────────────────────────────────────────────
+    html += '<div class="section-header" style="margin-top:14px">System Context</div>';
+    html += cfgToggle('system_context_enabled', 'Inject system_context.md into every request', c.system_context?.enabled ?? false);
+    html += `<div id="sub-system_context_enabled" style="display:${c.system_context?.enabled ? 'block' : 'none'};margin-left:16px;margin-top:6px">`;
+    html += `<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Path: <code>${esc(c.system_context?.path || './system_context.md')}</code> — hot-reloaded on every request</div>`;
+    html += `<textarea id="cfg-system-context-content" rows="6" style="width:100%;font-family:monospace;font-size:12px;background:var(--bg2);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:6px;resize:vertical;box-sizing:border-box" placeholder="You are a helpful assistant specialising in..."></textarea>`;
+    html += `<div style="margin-top:4px;display:flex;gap:8px"><button class="action-btn" onclick="loadSystemContext()">↓ Load current</button><button class="action-btn" onclick="saveSystemContext()">↑ Save context</button></div>`;
+    html += '</div>';
+
+    // ── Generation Parameters ─────────────────────────────────────────────
+    html += '<div class="section-header" style="margin-top:14px">Generation Parameters</div>';
+    html += `<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Override parameters injected into every proxied request. Leave blank to let the frontend decide. <strong>Force override</strong> overrides even frontend-set values.</div>`;
+    html += cfgToggle('gen_force', 'Force override (override even frontend-set values)', c.generation?.force ?? false);
+    const genNum = (k, label, val, step='any', min='', max='') =>
+      `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">` +
+      `<label style="width:140px;font-size:12px;color:var(--muted)">${label}</label>` +
+      `<input id="cfg-${k}" type="number" step="${step}" ${min !== '' ? `min="${min}"` : ''} ${max !== '' ? `max="${max}"` : ''}` +
+      ` value="${val ?? ''}" placeholder="unset" style="width:90px;background:var(--bg2);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px">` +
+      `</div>`;
+    html += genNum('gen_temperature',    'Temperature',     c.generation?.temperature,    '0.01', '0', '2');
+    html += genNum('gen_top_p',          'Top P',           c.generation?.top_p,          '0.01', '0', '1');
+    html += genNum('gen_top_k',          'Top K',           c.generation?.top_k,          '1',    '0');
+    html += genNum('gen_num_ctx',        'Context window',  c.generation?.num_ctx,        '128',  '512');
+    html += genNum('gen_repeat_penalty', 'Repeat penalty',  c.generation?.repeat_penalty, '0.01', '0');
+    html += genNum('gen_max_tokens',     'Max tokens',      c.generation?.max_tokens,     '1',    '1');
+    html += genNum('gen_seed',           'Seed',            c.generation?.seed,           '1',    '0');
+    html += `<div style="margin-top:6px"><button class="action-btn" onclick="resetGenParams()" style="background:var(--warn,#554422);color:var(--fg)">✕ Clear all generation params</button></div>`;
 
     document.getElementById('config-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
     el.innerHTML = html;
@@ -3549,7 +3688,7 @@ async function loadConfig() {
       'cost_tracking_enabled','cost_track_openrouter','cost_track_local',
       'orchestrator_enabled','flight_recorder_enabled',
       'conversation_replay_enabled','semantic_map_enabled','auto_summarization_enabled',
-      'web_ui_vi_mode','voice_enabled',
+      'web_ui_vi_mode','voice_enabled','tts_autoplay','system_context_enabled','gen_force',
     ];
     toggleIds.forEach(id => {
       const cb = document.getElementById(`cfg-${id}`);
@@ -3558,13 +3697,18 @@ async function loadConfig() {
     });
     // Expand sub-options when parent feature flag is toggled
     ['cost_tracking_enabled','orchestrator_enabled','flight_recorder_enabled',
-     'semantic_map_enabled','auto_summarization_enabled'].forEach(id => {
+     'semantic_map_enabled','auto_summarization_enabled','system_context_enabled','tts_autoplay'].forEach(id => {
       const cb = document.getElementById(`cfg-${id}`);
       const sub = document.getElementById(`sub-${id}`);
       if (cb && sub) {
-        cb.addEventListener('change', () => { sub.style.display = cb.checked ? 'block' : 'none'; });
+        cb.addEventListener('change', () => {
+          sub.style.display = cb.checked ? 'block' : 'none';
+          if (id === 'system_context_enabled' && cb.checked) loadSystemContext();
+        });
       }
     });
+    // Auto-load context if already enabled
+    if (c.system_context?.enabled) loadSystemContext();
 
   } catch(e) {
     el.innerHTML = `<div class="error-box">Failed to load config: ${esc(e.message)}</div>`;
@@ -3585,17 +3729,21 @@ async function saveConfig() {
     'cost_tracking_enabled','cost_track_openrouter','cost_track_local',
     'orchestrator_enabled','flight_recorder_enabled',
     'conversation_replay_enabled','semantic_map_enabled','auto_summarization_enabled',
-    'web_ui_vi_mode','voice_enabled',
+    'web_ui_vi_mode','voice_enabled','tts_autoplay','system_context_enabled','gen_force',
   ];
   const strings = [
     'default_model','force_route','log_level','web_ui_palette',
     'voice_hotkey','system_prompt_prefix','auto_summary_model',
+    'stt_url','tts_url','tts_model','tts_voice',
   ];
   const numbers = [
     'orchestrator_max_parallel','orchestrator_task_timeout','orchestrator_total_timeout',
     'flight_retention_hours','flight_max_records',
     'semantic_similarity_threshold','semantic_max_topics',
     'auto_token_budget','auto_keep_last',
+    'gen_temperature','gen_top_p','gen_top_k','gen_num_ctx',
+    'gen_repeat_penalty','gen_max_tokens','gen_seed',
+    'tts_speed',
   ];
   bools.forEach(k => { const v = getChecked(k); if (v !== null) payload[k] = v; });
   strings.forEach(k => { const v = getVal(k); if (v !== null) payload[k] = v; });
@@ -3618,6 +3766,8 @@ async function saveConfig() {
       if (payload.voice_enabled) enableVoiceUI(payload.voice_hotkey || '');
       else { const btn = document.getElementById('mic-btn'); if (btn) btn.style.display = 'none'; }
     }
+    // Re-fetch config to pick up TTS changes live
+    try { const fresh = await api('/api/v1/config'); updateTTSConfig(fresh); } catch {}
 
     if (status) status.textContent = `✓ saved (${d.saved?.length || 0} keys)`;
     setTimeout(() => { if (status) status.textContent = ''; }, 3000);
@@ -3630,6 +3780,46 @@ async function saveConfig() {
   }
 }
 
+
+async function loadSystemContext() {
+  const ta = document.getElementById('cfg-system-context-content');
+  if (!ta) return;
+  try {
+    const d = await api('/api/v1/system-context');
+    ta.value = d.content || '';
+  } catch(e) {
+    ta.value = '';
+    console.warn('Failed to load system context:', e);
+  }
+}
+
+async function saveSystemContext() {
+  const ta = document.getElementById('cfg-system-context-content');
+  const status = document.getElementById('cfg-save-status');
+  if (!ta) return;
+  try {
+    await api('/api/v1/system-context', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: ta.value }),
+    });
+    if (status) status.textContent = '✓ system_context.md saved';
+    setTimeout(() => { if (status) status.textContent = ''; }, 3000);
+  } catch(e) {
+    if (status) status.textContent = `✗ ${esc(e.message)}`;
+  }
+}
+
+async function resetGenParams() {
+  const status = document.getElementById('cfg-save-status');
+  try {
+    await api('/api/v1/generation-params/reset', { method: 'POST' });
+    if (status) status.textContent = '✓ Generation params cleared';
+    setTimeout(() => { loadConfig(); if (status) status.textContent = ''; }, 1000);
+  } catch(e) {
+    if (status) status.textContent = `✗ ${esc(e.message)}`;
+  }
+}
 
 async function buildCentroids() {
   const btn = document.getElementById('centroids-btn');
@@ -3678,11 +3868,20 @@ initChatPanes();
     const palette = d.web_ui?.palette || 'default';
     if (palette !== 'default') applyPalette(palette);
 
-    // Voice
+    // Voice PTT
     if (d.web_ui?.voice_enabled) {
       enableVoiceUI(d.web_ui?.voice_hotkey || '');
     }
+
+    // TTS autoplay config
+    updateTTSConfig(d);
+
   } catch {}
+
+  // Unlock AudioContext on first user interaction (browser autoplay policy)
+  document.addEventListener('click', () => {
+    if (window.AudioContext || window.webkitAudioContext) _initAudioCtx();
+  }, { once: true });
 })();
 </script>
 </body>

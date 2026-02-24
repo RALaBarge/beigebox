@@ -155,11 +155,13 @@ auto_summarization:
   keep_last: 4                 # Always keep the N most recent messages intact
   summary_prefix: "Summary of earlier conversation: "
 
-# --- Voice (Push-to-talk) ---
+# --- Voice (Push-to-talk + TTS autoplay) ---
 voice:
   enabled: false               # Enable voice input/output
-  stt_url: ""                  # STT service URL (OpenAI-compatible /v1/audio/transcriptions)
-  tts_url: ""                  # TTS service URL (OpenAI-compatible /v1/audio/speech)
-  tts_voice: "af_heart"        # TTS voice name (Kokoro default)
+  stt_url: "http://whisper:8000"   # faster-whisper-server container
+  tts_url: "http://kokoro:8880"    # kokoro-fastapi container
+  tts_voice: "af_heart"            # Kokoro default — see /v1/audio/voices for full list
   tts_model: "kokoro"
-  hotkey: "alt+v"              # Push-to-talk hotkey (browser-scoped)
+  tts_speed: 1.0
+  tts_autoplay: false          # Set true to auto-speak assistant responses
+  hotkey: ""                   # Push-to-talk hotkey (e.g. "v")

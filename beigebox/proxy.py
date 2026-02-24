@@ -20,7 +20,7 @@ import time
 from datetime import datetime, timezone
 from uuid import uuid4
 import httpx
-from beigebox.config import get_config
+from beigebox.config import get_config, get_runtime_config
 from beigebox.storage.models import Message
 from beigebox.storage.sqlite_store import SQLiteStore
 from beigebox.storage.vector_store import VectorStore
@@ -476,8 +476,61 @@ class Proxy:
 
         return body
 
+    def _inject_generation_params(self, body: dict) -> dict:
+        """
+        Inject runtime generation parameters into the request body.
+
+        Reads from runtime_config.yaml so changes apply immediately without restart.
+        Only injects keys that are explicitly set (non-None). Frontend values are
+        NOT overridden — if the frontend already sent temperature, we leave it alone
+        unless the runtime config is set to force it.
+
+        Supported keys (all optional, all hot-reloaded):
+            gen_temperature      float   0.0–2.0
+            gen_top_p            float   0.0–1.0
+            gen_top_k            int     e.g. 40
+            gen_num_ctx          int     context window tokens, e.g. 4096
+            gen_repeat_penalty   float   e.g. 1.1
+            gen_max_tokens       int     max output tokens
+            gen_seed             int     for reproducibility
+            gen_stop             list    stop sequences
+            gen_force            bool    if true, override even if frontend sent value
+        """
+        rt = get_runtime_config()
+
+        force = rt.get("gen_force", False)
+
+        param_map = {
+            "gen_temperature":    "temperature",
+            "gen_top_p":          "top_p",
+            "gen_top_k":          "top_k",
+            "gen_num_ctx":        "num_ctx",
+            "gen_repeat_penalty": "repeat_penalty",
+            "gen_max_tokens":     "max_tokens",
+            "gen_seed":           "seed",
+            "gen_stop":           "stop",
+        }
+
+        for rt_key, body_key in param_map.items():
+            val = rt.get(rt_key)
+            if val is None:
+                continue
+            # Only inject if not already set by the frontend, unless force=true
+            if force or body_key not in body or body[body_key] is None:
+                body[body_key] = val
+
+        return body
+
+    def _inject_system_context(self, body: dict) -> dict:
+        """Inject system_context.md content into the request (hot-reloaded)."""
+        try:
+            from beigebox.system_context import inject_system_context
+            return inject_system_context(body, self.cfg)
+        except Exception as e:
+            logger.debug("system_context injection skipped: %s", e)
+            return body
+
     # ------------------------------------------------------------------
-    # Public forwarding methods
     # ------------------------------------------------------------------
 
     async def forward_chat_completion(self, body: dict) -> dict:
@@ -563,6 +616,12 @@ class Proxy:
             body["messages"] = await maybe_summarize(body.get("messages", []), self.cfg)
         except Exception as _e:
             logger.debug("auto_summarizer skipped: %s", _e)
+
+        # Inject system context (hot-reloaded from system_context.md)
+        body = self._inject_system_context(body)
+
+        # Inject runtime generation parameters (temperature, top_p, etc.)
+        body = self._inject_generation_params(body)
 
         # Log incoming user messages (skip synthetic)
         if not is_synthetic:
@@ -703,6 +762,12 @@ class Proxy:
             body["messages"] = await maybe_summarize(body.get("messages", []), self.cfg)
         except Exception as _e:
             logger.debug("auto_summarizer skipped: %s", _e)
+
+        # Inject system context (hot-reloaded from system_context.md)
+        body = self._inject_system_context(body)
+
+        # Inject runtime generation parameters (temperature, top_p, etc.)
+        body = self._inject_generation_params(body)
 
         # Log incoming user messages (skip synthetic)
         if not is_synthetic:

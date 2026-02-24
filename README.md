@@ -221,6 +221,7 @@ beigebox/
     config.py                    config loader, runtime hot-reload
     wiretap.py                   structured JSONL wire log
     summarizer.py                auto-summarization, context window management
+    system_context.py            hot-reloadable system_context.md injection
     costs.py                     cost aggregation queries
     flight_recorder.py           in-memory request timeline ring buffer
     replay.py                    conversation replay with routing context
@@ -320,6 +321,9 @@ beigebox/
 | `/api/v1/conversation/{id}/fork` | POST | Fork conversation at message N |
 | `/api/v1/conversation/{id}/semantic-map` | GET | Topic cluster map |
 | `/api/v1/build-centroids` | POST | Rebuild embedding classifier centroids |
+| `/api/v1/system-context` | GET | Read system_context.md contents |
+| `/api/v1/system-context` | POST | Write system_context.md (hot-reloads immediately) |
+| `/api/v1/generation-params/reset` | POST | Clear all runtime generation parameter overrides |
 | `/api/v1/operator` | POST | Run Operator agent |
 | `/api/v1/orchestrator` | POST | Run parallel task plan |
 | `/api/v1/harness/orchestrate` | POST | Goal-directed harness master (SSE stream) |
@@ -483,8 +487,8 @@ pytest tests/test_storage.py tests/test_proxy.py tests/test_hooks.py \
 
 - [ ] TTS wired into chat response pipeline (play assistant audio automatically)
 - [ ] Conversation export to fine-tuning formats (JSONL, Alpaca, ShareGPT)
-- [ ] System context injection (global prompt prefix via hot-reloadable system_context.md)
-- [ ] Full parameter exposure via API and web UI (generation params, routing weights, ensemble config)
+- [x] System context injection (global prompt prefix via hot-reloadable system_context.md)
+- [x] Full parameter exposure via API and web UI (generation params, routing weights, ensemble config)
 
 ---
 

@@ -102,7 +102,50 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # faster-whisper-server — STT (OpenAI-compatible /v1/audio/transcriptions)
+  # ---------------------------------------------------------------------------
+  whisper:
+    image: fedirz/faster-whisper-server:latest-cpu   # swap to :latest-cuda for GPU
+    container_name: beigebox-whisper
+    ports:
+      - "${WHISPER_PORT:-9000}:8000"
+    volumes:
+      - whisper_cache:/root/.cache/huggingface
+    environment:
+      - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-whisper-base}
+      # For GPU: set WHISPER__DEVICE=cuda and use the cuda image tag
+      - WHISPER__DEVICE=cpu
+      - WHISPER__INFERENCE_DEVICE=cpu
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s   # model download on first start
+
+  # ---------------------------------------------------------------------------
+  # Kokoro-FastAPI — TTS (OpenAI-compatible /v1/audio/speech)
+  # ---------------------------------------------------------------------------
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest   # swap to kokoro-fastapi-gpu:latest for GPU
+    container_name: beigebox-kokoro
+    ports:
+      - "${KOKORO_PORT:-8880}:8880"
+    volumes:
+      - kokoro_models:/app/models
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8880/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s  # model download on first start
+
 volumes:
   ollama_data:
   beigebox_data:
   open_webui_data:
+  whisper_cache:
+  kokoro_models:

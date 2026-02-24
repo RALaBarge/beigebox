@@ -465,6 +465,23 @@ async def api_config():
             "system_prompt_prefix": rt.get("system_prompt_prefix", ""),
             "tools_disabled":       rt.get("tools_disabled", []),
         },
+        # ── System Context ────────────────────────────────────────────
+        "system_context": {
+            "enabled": rt.get("system_context_enabled", cfg.get("system_context", {}).get("enabled", False)),
+            "path":    cfg.get("system_context", {}).get("path", "./system_context.md"),
+        },
+        # ── Generation Parameters ─────────────────────────────────────
+        "generation": {
+            "temperature":    rt.get("gen_temperature"),
+            "top_p":          rt.get("gen_top_p"),
+            "top_k":          rt.get("gen_top_k"),
+            "num_ctx":        rt.get("gen_num_ctx"),
+            "repeat_penalty": rt.get("gen_repeat_penalty"),
+            "max_tokens":     rt.get("gen_max_tokens"),
+            "seed":           rt.get("gen_seed"),
+            "stop":           rt.get("gen_stop"),
+            "force":          rt.get("gen_force", False),
+        },
     })
 
 
@@ -534,6 +551,18 @@ async def api_config_save(request: Request):
         "auto_token_budget":            "auto_token_budget",
         "auto_summary_model":           "auto_summary_model",
         "auto_keep_last":               "auto_keep_last",
+        # System context
+        "system_context_enabled":       "system_context_enabled",
+        # Generation parameters
+        "gen_temperature":              "gen_temperature",
+        "gen_top_p":                    "gen_top_p",
+        "gen_top_k":                    "gen_top_k",
+        "gen_num_ctx":                  "gen_num_ctx",
+        "gen_repeat_penalty":           "gen_repeat_penalty",
+        "gen_max_tokens":               "gen_max_tokens",
+        "gen_seed":                     "gen_seed",
+        "gen_stop":                     "gen_stop",
+        "gen_force":                    "gen_force",
     }
 
     for key, rt_key in allowed.items():
@@ -559,6 +588,68 @@ async def api_config_save(request: Request):
     if errors:
         return JSONResponse({"saved": updated, "errors": errors}, status_code=207)
     return JSONResponse({"saved": updated, "ok": True})
+
+
+@app.get("/api/v1/system-context")
+async def api_get_system_context():
+    """
+    Return the current contents of system_context.md.
+    Returns empty string if file does not exist yet.
+    """
+    cfg = get_config()
+    from beigebox.system_context import read_context_file
+    content = read_context_file(cfg)
+    rt = get_runtime_config()
+    sc_cfg = cfg.get("system_context", {})
+    enabled = rt.get("system_context_enabled", sc_cfg.get("enabled", False))
+    return JSONResponse({
+        "content": content,
+        "enabled": enabled,
+        "path": sc_cfg.get("path", "./system_context.md"),
+        "length": len(content),
+    })
+
+
+@app.post("/api/v1/system-context")
+async def api_set_system_context(request: Request):
+    """
+    Write new contents to system_context.md.
+    Hot-reloads immediately — next proxied request picks it up.
+
+    Body: {"content": "You are a helpful assistant..."}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    content = body.get("content", "")
+    if not isinstance(content, str):
+        return JSONResponse({"error": "content must be a string"}, status_code=400)
+
+    cfg = get_config()
+    from beigebox.system_context import write_context_file
+    ok = write_context_file(cfg, content)
+    if ok:
+        return JSONResponse({"ok": True, "length": len(content)})
+    return JSONResponse({"error": "failed to write system_context.md"}, status_code=500)
+
+
+@app.post("/api/v1/generation-params/reset")
+async def api_reset_generation_params():
+    """
+    Clear all runtime generation parameters (temperature, top_p, etc.)
+    so requests are forwarded with whatever the frontend sends.
+    """
+    gen_keys = [
+        "gen_temperature", "gen_top_p", "gen_top_k", "gen_num_ctx",
+        "gen_repeat_penalty", "gen_max_tokens", "gen_seed", "gen_stop", "gen_force",
+    ]
+    cleared = []
+    for key in gen_keys:
+        if update_runtime_config(key, None):
+            cleared.append(key)
+    return JSONResponse({"cleared": cleared, "ok": True})
 
 
 
