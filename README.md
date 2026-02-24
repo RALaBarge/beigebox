@@ -2,7 +2,9 @@
 
 **Tap the line. Control the carrier.**
 
-Transparent middleware proxy for local LLM stacks. Sits between your frontend (Open WebUI, etc.) and your backend (Ollama, etc.) and intercepts every request to add intelligent routing, storage, observability, tooling, and security — without either end knowing it's there.  Just getting started and not sure what front end to use?  We also offer a Javascript free* HTTP page complete with ai harnessing and orchestration tooling.  Have one AI drive a bunch of AI -- man its a crazy future!
+Transparent middleware proxy for local LLM stacks. Sits between your frontend (Open WebUI, etc.) and your backend (Ollama, etc.) and intercepts every request to add intelligent routing, storage, observability, tooling, and security — without either end knowing it's there.  
+
+Just getting started and not sure what front end to use?  We also offer a Javascript free* HTTP page complete with ai harnessing and orchestration tooling.  Have one AI drive a bunch of AI -- man its a crazy future!
 
 ```
 +---------------+         +--------------------------------------+         +---------------+
