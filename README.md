@@ -321,6 +321,7 @@ beigebox/
 | `/api/v1/conversation/{id}/fork` | POST | Fork conversation at message N |
 | `/api/v1/conversation/{id}/semantic-map` | GET | Topic cluster map |
 | `/api/v1/build-centroids` | POST | Rebuild embedding classifier centroids |
+| `/api/v1/export` | GET | Export conversations (`?format=jsonl\|alpaca\|sharegpt&model=`) |
 | `/api/v1/system-context` | GET | Read system_context.md contents |
 | `/api/v1/system-context` | POST | Write system_context.md (hot-reloads immediately) |
 | `/api/v1/generation-params/reset` | POST | Clear all runtime generation parameter overrides |
@@ -485,8 +486,9 @@ pytest tests/test_storage.py tests/test_proxy.py tests/test_hooks.py \
 
 ### Next
 
-- [ ] TTS wired into chat response pipeline (play assistant audio automatically)
-- [ ] Conversation export to fine-tuning formats (JSONL, Alpaca, ShareGPT)
+- [x] TTS auto-play (Web Audio API, plays assistant response after streaming, configurable voice/model/speed)
+- [x] STT/TTS routing to separate configurable service URLs (stt_url / tts_url in config/runtime)
+- [x] Conversation export to fine-tuning formats (JSONL, Alpaca, ShareGPT) — HTTP endpoint + web UI button
 - [x] System context injection (global prompt prefix via hot-reloadable system_context.md)
 - [x] Full parameter exposure via API and web UI (generation params, routing weights, ensemble config)
 

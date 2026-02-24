@@ -460,6 +460,15 @@ async def api_config():
             "voice_enabled": rt.get("voice_enabled", False),
             "voice_hotkey":  rt.get("voice_hotkey", ""),
         },
+        # ── Voice / Audio ─────────────────────────────────────────────
+        "voice": {
+            "stt_url":      rt.get("stt_url") or cfg.get("voice", {}).get("stt_url", ""),
+            "tts_url":      rt.get("tts_url") or cfg.get("voice", {}).get("tts_url", ""),
+            "tts_model":    rt.get("tts_model") or cfg.get("voice", {}).get("tts_model", "tts-1"),
+            "tts_voice":    rt.get("tts_voice") or cfg.get("voice", {}).get("tts_voice", "alloy"),
+            "tts_speed":    rt.get("tts_speed") or cfg.get("voice", {}).get("tts_speed", 1.0),
+            "tts_autoplay": rt.get("tts_autoplay", cfg.get("voice", {}).get("tts_autoplay", False)),
+        },
         # ── Runtime session overrides ─────────────────────────────────
         "runtime": {
             "system_prompt_prefix": rt.get("system_prompt_prefix", ""),
@@ -563,6 +572,13 @@ async def api_config_save(request: Request):
         "gen_seed":                     "gen_seed",
         "gen_stop":                     "gen_stop",
         "gen_force":                    "gen_force",
+        # Voice / Audio
+        "stt_url":                      "stt_url",
+        "tts_url":                      "tts_url",
+        "tts_model":                    "tts_model",
+        "tts_voice":                    "tts_voice",
+        "tts_speed":                    "tts_speed",
+        "tts_autoplay":                 "tts_autoplay",
     }
 
     for key, rt_key in allowed.items():
@@ -725,6 +741,62 @@ async def api_costs(days: int = 30):
     stats = cost_tracker.get_stats(days=days)
     stats["enabled"] = True
     return JSONResponse(stats)
+
+
+@app.get("/api/v1/export")
+async def api_export(
+    format: str = "jsonl",
+    model: str | None = None,
+):
+    """
+    Export conversations for fine-tuning.
+
+    Query params:
+        format  str  — jsonl | alpaca | sharegpt  (default: jsonl)
+        model   str  — filter to a specific model (optional)
+
+    Returns a JSON file download.
+
+    Formats:
+        jsonl      — {"messages": [{"role": ..., "content": ...}]} per conversation
+        alpaca     — {"instruction": ..., "input": "", "output": ...} per turn pair
+        sharegpt   — {"id": ..., "conversations": [{"from": "human"|"gpt", "value": ...}]}
+    """
+    if not sqlite_store:
+        return JSONResponse({"error": "Storage not initialized"}, status_code=503)
+
+    fmt = format.lower().strip()
+    if fmt not in ("jsonl", "alpaca", "sharegpt"):
+        return JSONResponse(
+            {"error": f"Unknown format '{fmt}'. Use: jsonl, alpaca, sharegpt"},
+            status_code=400,
+        )
+
+    model_filter = model or None
+
+    if fmt == "jsonl":
+        data = sqlite_store.export_jsonl(model_filter)
+        filename = "conversations.jsonl"
+        # True JSONL: one JSON object per line
+        content = "\n".join(json.dumps(r, ensure_ascii=False) for r in data) + "\n"
+        media_type = "application/x-ndjson"
+    elif fmt == "alpaca":
+        data = sqlite_store.export_alpaca(model_filter)
+        filename = "conversations_alpaca.json"
+        content = json.dumps(data, ensure_ascii=False, indent=2)
+        media_type = "application/json"
+    else:  # sharegpt
+        data = sqlite_store.export_sharegpt(model_filter)
+        filename = "conversations_sharegpt.json"
+        content = json.dumps(data, ensure_ascii=False, indent=2)
+        media_type = "application/json"
+
+    from fastapi.responses import Response
+    return Response(
+        content=content.encode("utf-8"),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/api/v1/model-performance")
@@ -1372,13 +1444,27 @@ async def ui():
 # Catch-all below handles anything not listed here.
 # ---------------------------------------------------------------------------
 
-async def _wire_and_forward(request: Request, route_label: str) -> StreamingResponse:
+def _get_voice_url(kind: str) -> str | None:
+    """
+    Return the configured STT or TTS base URL from runtime config, falling back
+    to config.yaml voice section, then None (which means use backend.url).
+    kind: 'stt' or 'tts'
+    """
+    rt = get_runtime_config()
+    cfg = get_config()
+    voice_cfg = cfg.get("voice", {})
+    key = f"{kind}_url"
+    return rt.get(key) or voice_cfg.get(key) or None
+
+
+async def _wire_and_forward(request: Request, route_label: str, override_base_url: str | None = None) -> StreamingResponse:
     """
     Generic forward: log to wiretap, stream response from backend verbatim.
     Used for all known-but-not-specially-handled OpenAI/Ollama endpoints.
+    override_base_url: if provided, forward to this base instead of config backend.url
     """
     cfg = get_config()
-    backend_url = cfg["backend"]["url"].rstrip("/")
+    backend_url = (override_base_url or cfg["backend"]["url"]).rstrip("/")
     path = request.url.path
     query = request.url.query
     target = f"{backend_url}{path}"
@@ -1423,17 +1509,17 @@ async def _wire_and_forward(request: Request, route_label: str) -> StreamingResp
 @app.post("/v1/audio/transcriptions")
 async def audio_transcriptions(request: Request):
     """STT — forward to configured STT service or backend."""
-    return await _wire_and_forward(request, "audio/transcriptions")
+    return await _wire_and_forward(request, "audio/transcriptions", _get_voice_url("stt"))
 
 @app.post("/v1/audio/speech")
 async def audio_speech(request: Request):
     """TTS — forward to configured TTS service or backend."""
-    return await _wire_and_forward(request, "audio/speech")
+    return await _wire_and_forward(request, "audio/speech", _get_voice_url("tts"))
 
 @app.post("/v1/audio/translations")
 async def audio_translations(request: Request):
     """Audio translation — forward to backend."""
-    return await _wire_and_forward(request, "audio/translations")
+    return await _wire_and_forward(request, "audio/translations", _get_voice_url("stt"))
 
 # OpenAI Embeddings
 @app.post("/v1/embeddings")

@@ -388,11 +388,16 @@ class HarnessOrchestrator:
     async def _run_operator(self, query: str) -> str:
         """Route a task to the BeigeBox operator agent via its own endpoint."""
         port = self.cfg.get("server", {}).get("port", 8000)
+        # Use 127.0.0.1 explicitly — 'localhost' can fail inside Docker
+        # depending on /etc/hosts configuration.
         async with httpx.AsyncClient(timeout=self.operator_timeout) as client:
             resp = await client.post(
-                f"http://localhost:{port}/api/v1/operator",
+                f"http://127.0.0.1:{port}/api/v1/operator",
                 json={"query": query},
             )
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("answer") or data.get("error") or str(data)
             resp.raise_for_status()
             data = resp.json()
             return data.get("answer") or data.get("error") or str(data)
@@ -472,23 +477,82 @@ class HarnessOrchestrator:
         return "\n\n".join(parts)
 
     @staticmethod
+    @staticmethod
     def _parse_json(raw: str, fallback: dict) -> dict:
-        """Try to parse JSON from LLM output, stripping markdown fences."""
+        """
+        Try to parse JSON from LLM output with multiple recovery strategies.
+
+        Handles:
+          - Markdown fences (```json ... ``` or ``` ... ```)
+          - Leading/trailing prose around a JSON object
+          - Trailing commas (common small-model mistake)
+          - Truncated JSON (attempt recovery by closing open braces/brackets)
+        """
+        import re
+
         text = raw.strip()
-        # Strip ```json ... ``` fences
+
+        # 1. Strip markdown fences
         if text.startswith("```"):
             lines = text.split("\n")
-            text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            # Try to find a JSON object in the text
-            import re
-            m = re.search(r'\{.*\}', text, re.DOTALL)
-            if m:
+            # Drop first line (```json or ```) and last line if it's a closing fence
+            inner = lines[1:]
+            if inner and inner[-1].strip() == "```":
+                inner = inner[:-1]
+            text = "\n".join(inner).strip()
+
+        def _try_parse(s: str) -> dict | None:
+            """Attempt json.loads with trailing-comma cleanup."""
+            try:
+                return json.loads(s)
+            except json.JSONDecodeError:
+                # Remove trailing commas before } or ]
+                cleaned = re.sub(r",\s*([}\]])", r"\1", s)
                 try:
-                    return json.loads(m.group())
+                    return json.loads(cleaned)
                 except json.JSONDecodeError:
-                    pass
+                    return None
+
+        # 2. Direct parse
+        result = _try_parse(text)
+        if result is not None:
+            return result
+
+        # 3. Extract first {...} block (handles leading/trailing prose)
+        m = re.search(r'\{.*\}', text, re.DOTALL)
+        if m:
+            result = _try_parse(m.group())
+            if result is not None:
+                return result
+
+        # 4. Truncation recovery — count unclosed braces and close them
+        try:
+            depth = 0
+            in_str = False
+            escape = False
+            for ch in text:
+                if escape:
+                    escape = False
+                    continue
+                if ch == '\\' and in_str:
+                    escape = True
+                    continue
+                if ch == '"':
+                    in_str = not in_str
+                    continue
+                if not in_str:
+                    if ch == '{':
+                        depth += 1
+                    elif ch == '}':
+                        depth -= 1
+            if depth > 0:
+                repaired = text.rstrip().rstrip(',') + "}" * depth
+                result = _try_parse(repaired)
+                if result is not None:
+                    logger.debug("HarnessOrchestrator: recovered truncated JSON (closed %d brace(s))", depth)
+                    return result
+        except Exception:
+            pass
+
         logger.warning("HarnessOrchestrator: could not parse JSON from LLM output: %s", raw[:200])
         return fallback

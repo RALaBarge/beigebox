@@ -1228,6 +1228,12 @@
       <button onclick="searchConvos()">Search</button>
       <span class="toolbar-spacer"></span>
       <span class="toolbar-label" id="search-status"></span>
+      <select id="export-format" style="background:var(--bg2);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px">
+        <option value="jsonl">JSONL</option>
+        <option value="alpaca">Alpaca</option>
+        <option value="sharegpt">ShareGPT</option>
+      </select>
+      <button onclick="exportConversations()" title="Download conversations for fine-tuning">↓ Export</button>
     </div>
     <div class="scroll-area" id="convos-body">
       <div class="empty">Enter a search query above to search conversations semantically.</div>
@@ -2518,7 +2524,31 @@ function appendMsg(role, text, model) {
 }
 
 // ── 3. Conversations ─────────────────────────────────────────────────────────
-async function searchConvos() {
+async function exportConversations() {
+  const fmt = document.getElementById('export-format')?.value || 'jsonl';
+  const status = document.getElementById('search-status');
+  if (status) status.textContent = `↓ exporting ${fmt}…`;
+  try {
+    const resp = await fetch(`${BASE}/api/v1/export?format=${encodeURIComponent(fmt)}`, {
+      headers: { 'Authorization': 'Bearer beigebox' },
+    });
+    if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
+    const blob = await resp.blob();
+    const cd = resp.headers.get('Content-Disposition') || '';
+    const match = cd.match(/filename="?([^"]+)"?/);
+    const filename = match ? match[1] : `conversations.${fmt === 'jsonl' ? 'jsonl' : 'json'}`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+    if (status) status.textContent = `✓ exported`;
+    setTimeout(() => { if (status) status.textContent = ''; }, 3000);
+  } catch(e) {
+    if (status) status.textContent = `✗ ${esc(e.message)}`;
+  }
+}
+
+
   const q = document.getElementById('search-input').value.trim();
   if (!q) return;
   const el = document.getElementById('convos-body');
@@ -2823,6 +2853,7 @@ async function runOp() {
       const answer = d.choices?.[0]?.message?.content || JSON.stringify(d);
       log.insertAdjacentHTML('beforeend',
         `<div class="op-answer">${esc(answer)}</div><div class="op-sep"></div>`);
+      speakText(answer);
     } else {
       const d = await api('/api/v1/operator', {
         method: 'POST',
@@ -2833,6 +2864,7 @@ async function runOp() {
       if (d.success) {
         log.insertAdjacentHTML('beforeend',
           `<div class="op-answer">${esc(d.answer)}</div><div class="op-sep"></div>`);
+        speakText(d.answer);
       } else {
         log.insertAdjacentHTML('beforeend',
           `<div class="op-error">✗ ${esc(d.error || 'unknown error')}</div><div class="op-sep"></div>`);

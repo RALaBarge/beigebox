@@ -288,6 +288,79 @@ class SQLiteStore:
             })
         return result
 
+    def export_jsonl(self, model_filter: str | None = None) -> list[dict]:
+        """
+        Export conversations as JSONL-style dicts (one per conversation).
+        Each entry: {"messages": [{"role": ..., "content": ...}, ...]}
+        Suitable for fine-tuning with most frameworks.
+        """
+        raw = self.export_all_json()
+        result = []
+        for conv in raw:
+            msgs = [
+                {"role": m["role"], "content": m["content"]}
+                for m in conv["messages"]
+                if m["role"] in ("user", "assistant")
+                and (not model_filter or m.get("model") == model_filter)
+            ]
+            # Must have at least one user+assistant pair
+            roles = {m["role"] for m in msgs}
+            if "user" in roles and "assistant" in roles:
+                result.append({"messages": msgs})
+        return result
+
+    def export_alpaca(self, model_filter: str | None = None) -> list[dict]:
+        """
+        Export as Alpaca-format instruction pairs.
+        Each user message + following assistant message becomes one record:
+          {"instruction": <user>, "input": "", "output": <assistant>}
+        """
+        raw = self.export_all_json()
+        result = []
+        for conv in raw:
+            msgs = [
+                m for m in conv["messages"]
+                if m["role"] in ("user", "assistant")
+                and (not model_filter or m.get("model") == model_filter)
+            ]
+            # Walk pairs
+            i = 0
+            while i < len(msgs) - 1:
+                if msgs[i]["role"] == "user" and msgs[i + 1]["role"] == "assistant":
+                    result.append({
+                        "instruction": msgs[i]["content"],
+                        "input": "",
+                        "output": msgs[i + 1]["content"],
+                    })
+                    i += 2
+                else:
+                    i += 1
+        return result
+
+    def export_sharegpt(self, model_filter: str | None = None) -> list[dict]:
+        """
+        Export as ShareGPT format.
+        Each conversation becomes one record:
+          {"conversations": [{"from": "human"|"gpt", "value": ...}, ...]}
+        """
+        role_map = {"user": "human", "assistant": "gpt", "system": "system"}
+        raw = self.export_all_json()
+        result = []
+        for conv in raw:
+            msgs = [
+                {"from": role_map.get(m["role"], m["role"]), "value": m["content"]}
+                for m in conv["messages"]
+                if m["role"] in ("user", "assistant", "system")
+                and (not model_filter or m.get("model") == model_filter)
+            ]
+            roles = {m["from"] for m in msgs}
+            if "human" in roles and "gpt" in roles:
+                result.append({
+                    "id": conv["conversation_id"],
+                    "conversations": msgs,
+                })
+        return result
+
     def get_stats(self) -> dict:
         """Return stats about stored data including token usage."""
         with self._connect() as conn:
