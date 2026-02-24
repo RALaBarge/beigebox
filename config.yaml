@@ -172,6 +172,24 @@ semantic_map:
   similarity_threshold: 0.5
   max_topics: 50
 
+# --- Harness Orchestrator (v1.0) ---
+# Goal-directed multi-agent coordinator with retry/resilience
+# Handles concurrent task execution with intelligent error recovery
+harness:
+  enabled: false
+  retry:
+    max_retries: 2                     # Retry transient errors up to 2 times
+    backoff_base: 1.5                  # Exponential backoff multiplier (1.5^attempt)
+    backoff_max: 10                    # Max backoff wait in seconds
+  stagger:
+    operator_seconds: 1.0              # Higher stagger for operator tasks (ChromaDB init)
+    model_seconds: 0.4                 # Lower stagger for model tasks (Ollama queues well)
+  timeouts:
+    task_seconds: 120                  # Per-task HTTP timeout
+    operator_seconds: 180              # Operator tasks need more time
+  store_runs: true                     # Persist orchestration runs to SQLite
+  max_stored_runs: 1000                # Keep last 1000 runs for analysis
+
 # --- Reserved for v0.7.0+ ---
 # Add features below as they're implemented
 
@@ -198,6 +216,7 @@ operator:
   max_iterations: 10
   shell:
     enabled: true
+    shell_binary: "/usr/local/bin/bb"  # Hardened busybox wrapper (preferred) or /bin/sh (fallback)
     allowed_commands:    # ONLY these base commands can be called — you edit this list
       - ls
       - cat
@@ -205,12 +224,14 @@ operator:
       - ps
       - df
       - free
-      - ollama
-      - beigebox
+      - ollama         # Model management
+      - beigebox       # System management
     blocked_patterns:    # extra safety — reject even allowlisted commands if they match
-      - "rm -rf"
-      - "sudo"
-      - "> /etc"
+      - "rm -rf"       # Catastrophic deletion
+      - "sudo"         # Privilege escalation
+      - "> /etc"       # System config modification
+      - "; "           # Command chaining
+      - "| "           # Pipe chaining
   data:
     sqlite_queries:      # named query templates the agent can call by name
       recent_conversations: >

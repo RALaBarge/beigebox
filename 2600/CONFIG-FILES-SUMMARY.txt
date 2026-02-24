@@ -1,0 +1,180 @@
+================================================================================
+CONFIGURATION FILES FOR v1.0 — Ready to Deploy
+================================================================================
+
+DEPLOYMENT STATUS: ✅ COMPLETE
+
+Two configuration files provided:
+
+1. config.yaml (PERMANENT)
+   - Location: /path/to/beigebox/config.yaml
+   - Changes: Requires restart to take effect
+   - Contains: All permanent settings
+   - Includes: Harness orchestrator config + Operator shell security config
+   - Status: ✅ Complete and ready to use
+
+2. runtime_config.yaml (SESSION OVERRIDES)
+   - Location: /path/to/beigebox/runtime_config.yaml
+   - Changes: Hot-reload (no restart needed)
+   - Contains: Temporary per-session overrides
+   - Includes: No harness/operator overrides (both are infrastructure settings)
+   - Status: ✅ No changes needed, keep as-is
+
+================================================================================
+KEY CONFIGURATION SECTIONS
+================================================================================
+
+In config.yaml:
+
+1. HARNESS ORCHESTRATOR (lines ~174-191)
+   ├─ enabled: false (set to true to enable)
+   ├─ retry: max_retries, backoff_base, backoff_max
+   ├─ stagger: operator_seconds (1.0), model_seconds (0.4)
+   ├─ timeouts: task_seconds (120), operator_seconds (180)
+   ├─ store_runs: true
+   └─ max_stored_runs: 1000
+
+2. OPERATOR SHELL SECURITY (lines ~217-234)
+   ├─ enabled: true
+   ├─ shell_binary: "/usr/local/bin/bb" (hardened) or "/bin/sh" (fallback)
+   ├─ allowed_commands: [ls, cat, grep, ps, df, free, ollama, beigebox]
+   └─ blocked_patterns: ["rm -rf", "sudo", "> /etc", "; ", "| "]
+
+================================================================================
+USAGE INSTRUCTIONS
+================================================================================
+
+STEP 1: Copy Files
+  cp outputs/config.yaml /path/to/beigebox/
+  cp outputs/runtime_config.yaml /path/to/beigebox/
+
+STEP 2: Review & Edit (if needed)
+  vim config.yaml
+  - Adjust harness retry settings if needed
+  - Adjust operator allowlist if needed
+  - Tighten blocked_patterns if needed
+
+STEP 3: Restart BeigeBox
+  pkill -f "python.*beigebox"
+  python -m beigebox dial
+
+STEP 4: Verify Configuration
+  tail -30 beigebox.log | grep -i "harness\|shell\|operator"
+
+  Should see:
+  ✅ "Harness orchestrator configured"
+  ✅ "Shell security: 7 allowed commands, 5 blocked patterns"
+
+================================================================================
+WHAT'S IN EACH FILE
+================================================================================
+
+config.yaml:
+  - Complete permanent configuration
+  - All sections from original config.yaml
+  - NEW: harness orchestrator section (174-191)
+  - NEW: operator.shell section with allowlist/patterns (217-234)
+  - Comments explain every parameter
+
+runtime_config.yaml:
+  - Session override template
+  - Currently NO harness/operator overrides needed
+  - Can be edited manually for one-off changes
+  - Changes hot-reload (no restart required)
+
+================================================================================
+CONFIGURATION MIRRORING
+================================================================================
+
+Are harness/operator settings 1:1 mirrored between config.yaml and runtime_config.yaml?
+
+NO — and this is intentional:
+
+  ✅ Harness: Permanent infrastructure setting
+     - Lives only in config.yaml
+     - Controls retry logic for all orchestrations
+     - Should not be overridden per-session
+
+  ✅ Operator shell: Permanent security setting
+     - Lives only in config.yaml
+     - Controls allowlist enforcement
+     - Should not be overridden per-session (security risk)
+
+This is correct. No 1:1 mirroring needed.
+
+If you need per-session overrides later, add to runtime_config.yaml:
+  harness_max_retries: 3        # null = use config.yaml default
+  operator_shell_enabled: null  # null = use config.yaml default
+
+But NOT recommended for production.
+
+================================================================================
+SCENARIOS & RECOMMENDED CONFIGURATIONS
+================================================================================
+
+DEVELOPMENT (Loose):
+  harness: enabled=true, max_retries=2
+  operator.shell: allowed_commands=[ls,cat,grep,ps,df,free,curl,git]
+
+TESTING (Medium):
+  harness: enabled=true, max_retries=2
+  operator.shell: allowed_commands=[ls,cat,grep,ps,df,free]
+
+PRODUCTION (Tight):
+  harness: enabled=true, max_retries=2, backoff_base=1.5
+  operator.shell: enabled=false (or tight allowlist)
+
+LXD CONTAINER (Recommended):
+  Run in container + app-level allowlist
+  operator.shell: allowed_commands=[ls,cat,grep,ps,df,free]
+
+See CONFIGURATION-GUIDE.md for detailed tuning instructions.
+
+================================================================================
+QUICK REFERENCE
+================================================================================
+
+Enable harness:
+  harness:
+    enabled: true
+
+Disable operator shell (maximum security):
+  operator:
+    shell:
+      enabled: false
+
+Tighten operator allowlist:
+  operator:
+    shell:
+      allowed_commands:
+        - ls
+        - cat
+        - grep
+
+Add strict blocking:
+  operator:
+    shell:
+      blocked_patterns:
+        - "rm"
+        - "sudo"
+        - ">"
+        - ";"
+        - "|"
+
+Increase retry reliability:
+  harness:
+    retry:
+      max_retries: 3
+      backoff_base: 2.0
+
+================================================================================
+READY TO DEPLOY ✅
+
+Both config files are complete and ready for immediate deployment.
+
+See CONFIGURATION-GUIDE.md for:
+  - Detailed parameter documentation
+  - Configuration scenarios
+  - Tuning guide
+  - Monitoring & compliance checklist
+  - Troubleshooting

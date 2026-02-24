@@ -35,12 +35,29 @@ CREATE TABLE IF NOT EXISTS messages (
     FOREIGN KEY (conversation_id) REFERENCES conversations(id)
 );
 
+CREATE TABLE IF NOT EXISTS harness_runs (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    goal TEXT NOT NULL,
+    targets TEXT NOT NULL,
+    model TEXT NOT NULL,
+    max_rounds INTEGER DEFAULT 8,
+    final_answer TEXT,
+    total_rounds INTEGER DEFAULT 0,
+    was_capped BOOLEAN DEFAULT 0,
+    total_latency_ms INTEGER DEFAULT 0,
+    error_count INTEGER DEFAULT 0,
+    events_jsonl TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_conversation
     ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp
     ON messages(timestamp);
 CREATE INDEX IF NOT EXISTS idx_messages_role
     ON messages(role);
+CREATE INDEX IF NOT EXISTS idx_harness_runs_created
+    ON harness_runs(created_at);
 """
 
 # v0.6 migration: add columns to existing databases (safe to re-run)
@@ -324,3 +341,62 @@ class SQLiteStore:
             "cost_usd": total_cost,
             "models": models,
         }
+
+    # ─ Harness orchestration run storage ──────────────────────────────────
+
+    def store_harness_run(self, run_dict: dict) -> None:
+        """Store a harness orchestration run."""
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO harness_runs
+                   (id, created_at, goal, targets, model, max_rounds, final_answer,
+                    total_rounds, was_capped, total_latency_ms, error_count, events_jsonl)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    run_dict["id"],
+                    run_dict["created_at"],
+                    run_dict["goal"],
+                    json.dumps(run_dict["targets"]),
+                    run_dict["model"],
+                    run_dict["max_rounds"],
+                    run_dict.get("final_answer", ""),
+                    run_dict["total_rounds"],
+                    run_dict.get("was_capped", False),
+                    run_dict["total_latency_ms"],
+                    run_dict["error_count"],
+                    run_dict["events_jsonl"],
+                ),
+            )
+        logger.debug("Stored harness run %s (goal=%s)", run_dict["id"], run_dict["goal"][:50])
+
+    def get_harness_run(self, run_id: str) -> dict | None:
+        """Retrieve a stored harness run by ID."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM harness_runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()
+        
+        if not row:
+            return None
+        
+        run = dict(row)
+        run["targets"] = json.loads(run["targets"])
+        run["events"] = [
+            json.loads(line) for line in run["events_jsonl"].split("\n") if line.strip()
+        ]
+        return run
+
+    def list_harness_runs(self, limit: int = 10) -> list[dict]:
+        """List recent harness runs."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT id, created_at, goal, total_rounds, total_latency_ms,
+                          error_count, was_capped
+                   FROM harness_runs
+                   ORDER BY created_at DESC
+                   LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        
+        return [dict(r) for r in rows]

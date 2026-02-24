@@ -12,6 +12,8 @@ Now with:
 """
 
 import logging
+import time
+import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -916,7 +918,7 @@ async def api_orchestrator(request: Request):
 @app.post("/api/v1/harness/orchestrate")
 async def api_harness_orchestrate(request: Request):
     """
-    Harness master orchestrator — goal-directed multi-agent coordinator.
+    Harness master orchestrator — goal-directed multi-agent coordinator with run persistence.
 
     Body:
         query    str           — the goal/task to accomplish
@@ -925,10 +927,10 @@ async def api_harness_orchestrate(request: Request):
         max_rounds int (opt)   — override max iteration rounds (default 8)
 
     Returns: text/event-stream of JSON events:
-        {type:"start",    goal, model, targets}
+        {type:"start",    run_id, goal, model, targets}
         {type:"plan",     round, reasoning, tasks:[{target,prompt,rationale}]}
         {type:"dispatch", round, task_count}
-        {type:"result",   round, target, prompt, content, latency_ms, status}
+        {type:"result",   round, target, prompt, content, latency_ms, status, error_type?, attempts}
         {type:"evaluate", round, assessment, action}
         {type:"finish",   answer, rounds, capped?}
         {type:"error",    message}
@@ -949,6 +951,7 @@ async def api_harness_orchestrate(request: Request):
 
     from beigebox.agents.harness_orchestrator import HarnessOrchestrator
     import json as _json
+    from datetime import datetime, timezone
 
     orch = HarnessOrchestrator(
         available_targets=targets,
@@ -958,11 +961,64 @@ async def api_harness_orchestrate(request: Request):
     )
 
     async def _event_stream():
+        events = []
+        error_count = 0
+        start_ts = time.time()
+        run_id = None
+        
         try:
             async for event in orch.run(goal):
+                events.append(event)
+                if event.get("type") == "error":
+                    error_count += 1
+                if event.get("type") == "start":
+                    run_id = event.get("run_id")
                 yield f"data: {_json.dumps(event)}\n\n"
         except Exception as e:
-            yield f"data: {_json.dumps({'type':'error','message':str(e)})}\n\n"
+            error_event = {'type':'error','message':str(e)}
+            events.append(error_event)
+            error_count += 1
+            yield f"data: {_json.dumps(error_event)}\n\n"
+        finally:
+            # Store run after completion
+            if orch.store_runs:
+                try:
+                    from beigebox.storage.sqlite_store import SQLiteStore
+                    cfg = get_config()
+                    store = SQLiteStore(cfg["storage"]["db_path"])
+                    
+                    total_latency = round((time.time() - start_ts) * 1000)
+                    final_answer = ""
+                    total_rounds = 0
+                    was_capped = False
+                    
+                    # Extract final answer and metadata from finish event
+                    for event in reversed(events):
+                        if event.get("type") == "finish":
+                            final_answer = event.get("answer", "")
+                            total_rounds = event.get("rounds", 0)
+                            was_capped = event.get("capped", False)
+                            break
+                    
+                    run_record = {
+                        "id": run_id or "unknown",
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "goal": goal,
+                        "targets": targets,
+                        "model": orch.model,
+                        "max_rounds": orch.max_rounds,
+                        "final_answer": final_answer,
+                        "total_rounds": total_rounds,
+                        "was_capped": was_capped,
+                        "total_latency_ms": total_latency,
+                        "error_count": error_count,
+                        "events_jsonl": "\n".join(_json.dumps(e) for e in events),
+                    }
+                    store.store_harness_run(run_record)
+                    logger.info(f"Stored harness run {run_id} (goal={goal[:50]}, rounds={total_rounds}, errors={error_count})")
+                except Exception as e:
+                    logger.error(f"Failed to store harness run: {e}")
+        
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(
@@ -974,6 +1030,91 @@ async def api_harness_orchestrate(request: Request):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.get("/api/v1/harness/{run_id}")
+def get_harness_run(run_id: str):
+    """
+    Retrieve a stored harness orchestration run by ID.
+    
+    Returns the full run record including all events for replay/analysis.
+    """
+    try:
+        from beigebox.storage.sqlite_store import SQLiteStore
+        cfg = get_config()
+        store = SQLiteStore(cfg["storage"]["db_path"])
+        
+        run = store.get_harness_run(run_id)
+        if not run:
+            return JSONResponse(
+                {"error": f"Harness run '{run_id}' not found"},
+                status_code=404
+            )
+        
+        return {
+            "id": run["id"],
+            "created_at": run["created_at"],
+            "goal": run["goal"],
+            "targets": json.loads(run["targets"]) if isinstance(run["targets"], str) else run["targets"],
+            "model": run["model"],
+            "max_rounds": run["max_rounds"],
+            "final_answer": run["final_answer"],
+            "total_rounds": run["total_rounds"],
+            "was_capped": run["was_capped"],
+            "total_latency_ms": run["total_latency_ms"],
+            "error_count": run["error_count"],
+            "events": run.get("events", []),
+        }
+    except Exception as e:
+        logger.error(f"Failed to retrieve harness run: {e}")
+        return JSONResponse(
+            {"error": f"Failed to retrieve run: {str(e)}"},
+            status_code=500
+        )
+
+
+@app.get("/api/v1/harness")
+def list_harness_runs(limit: int = 10):
+    """
+    List recent harness orchestration runs.
+    
+    Query parameters:
+        limit: int (default 10, max 100) — number of runs to return
+    
+    Returns a list of recent runs with metadata (without full event logs).
+    """
+    try:
+        # Clamp limit
+        limit = min(max(limit, 1), 100)
+        
+        from beigebox.storage.sqlite_store import SQLiteStore
+        cfg = get_config()
+        store = SQLiteStore(cfg["storage"]["db_path"])
+        
+        runs = store.list_harness_runs(limit=limit)
+        
+        return {
+            "count": len(runs),
+            "limit": limit,
+            "runs": [
+                {
+                    "id": r["id"],
+                    "created_at": r["created_at"],
+                    "goal": r["goal"][:100] if r["goal"] else "",  # Truncate for list view
+                    "total_rounds": r["total_rounds"],
+                    "total_latency_ms": r["total_latency_ms"],
+                    "error_count": r["error_count"],
+                    "was_capped": r["was_capped"],
+                }
+                for r in runs
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Failed to list harness runs: {e}")
+        return JSONResponse(
+            {"error": f"Failed to list runs: {str(e)}"},
+            status_code=500
+        )
 
 
 @app.post("/api/v1/operator")

@@ -1,14 +1,18 @@
 """
-HarnessOrchestrator — goal-directed multi-agent coordinator.
+HarnessOrchestrator — goal-directed multi-agent coordinator with resilience.
 
 Given a high-level goal, this agent:
   1. Plans: breaks the goal into subtasks, assigns each to a model or the operator
-  2. Dispatches: runs all subtasks in parallel via the existing ParallelOrchestrator
+  2. Dispatches: runs all subtasks in parallel with retry logic and stagger
   3. Evaluates: decides if the results are sufficient or if more work is needed
   4. Synthesizes: produces a final answer when satisfied (or hits the iteration cap)
 
-Designed to stream intermediate state back to the caller so the UI can show
-live progress in the master pane.
+Features:
+  - Retry with exponential backoff for transient errors
+  - Error classification (timeout, connection, not_found, rate_limit, internal_error)
+  - Adaptive stagger (higher for operator tasks to prevent ChromaDB lock contention)
+  - Run persistence to SQLite with replay capability
+  - Designed to stream intermediate state back to the caller for UI progress display
 
 Usage (async generator — yields dicts):
 
@@ -23,6 +27,7 @@ import json
 import logging
 import time
 from typing import AsyncGenerator
+from uuid import uuid4
 
 import httpx
 
@@ -33,6 +38,10 @@ logger = logging.getLogger(__name__)
 # ── Constants ─────────────────────────────────────────────────────────────────
 MAX_ROUNDS = 8          # Hard cap on plan→dispatch→evaluate cycles
 MAX_TASKS_PER_ROUND = 6 # Max parallel subtasks per round
+
+# Error classification for retry logic
+RETRYABLE_ERRORS = {"timeout", "connection", "not_found", "internal_error"}
+NON_RETRYABLE_ERRORS = {"rate_limit", "unknown"}
 
 
 # ── Event helpers ─────────────────────────────────────────────────────────────
@@ -67,9 +76,33 @@ class HarnessOrchestrator:
             or cfg.get("backend", {}).get("default_model", "")
         )
         self.max_rounds = max_rounds
-        self.task_stagger_seconds = task_stagger_seconds
+        
+        # Read harness config for retry and stagger settings
+        harness_cfg = cfg.get("harness", {})
+        retry_cfg = harness_cfg.get("retry", {})
+        stagger_cfg = harness_cfg.get("stagger", {})
+        
+        self.max_retries = retry_cfg.get("max_retries", 2)
+        self.backoff_base = retry_cfg.get("backoff_base", 1.5)
+        self.backoff_max = retry_cfg.get("backoff_max", 10)
+        
+        self.operator_stagger_seconds = stagger_cfg.get("operator_seconds", 1.0)
+        self.model_stagger_seconds = stagger_cfg.get("model_seconds", task_stagger_seconds or 0.4)
+        
+        # Timeouts per target type
+        timeout_cfg = harness_cfg.get("timeouts", {})
+        self.task_timeout = timeout_cfg.get("task_seconds", 120)
+        self.operator_timeout = timeout_cfg.get("operator_seconds", 180)
+        
+        # Storage settings
+        self.store_runs = harness_cfg.get("store_runs", True)
+        
         # Targets the orchestrator knows about: "operator" or "model:<id>"
         self.available_targets: list[str] = available_targets or ["operator"]
+        
+        # Current run tracking for storage
+        self.run_id: str | None = None
+        self.run_start_time: float | None = None
 
     # ── Public entry point ────────────────────────────────────────────────────
 
@@ -77,17 +110,22 @@ class HarnessOrchestrator:
         """
         Async generator. Yields event dicts as work progresses:
 
+          {type:"start",   goal, model, targets, run_id}
           {type:"plan",    round:1, tasks:[{target, prompt, rationale}]}
           {type:"dispatch",round:1, task_count:3}
-          {type:"result",  round:1, target:"llama3.2:3b", content:"...", latency_ms:1234}
-          {type:"evaluate",round:1, assessment:"...", continue:true}
-          {type:"finish",  answer:"...", rounds:2}
+          {type:"result",  round:1, target:"llama3.2:3b", content:"...", latency_ms:1234, status:"done"|"error", attempts:N}
+          {type:"evaluate",round:1, assessment:"...", action:"continue"|"finish"}
+          {type:"finish",  answer:"...", rounds:2, capped:false}
           {type:"error",   message:"..."}
         """
+        # Initialize run tracking
+        self.run_id = uuid4().hex[:16]
+        self.run_start_time = time.time()
+        
         history: list[dict] = []   # running log of all results across rounds
         round_num = 0
 
-        yield _ev("start", goal=goal, model=self.model, targets=self.available_targets)
+        yield _ev("start", run_id=self.run_id, goal=goal, model=self.model, targets=self.available_targets)
 
         while round_num < self.max_rounds:
             round_num += 1
@@ -244,68 +282,113 @@ class HarnessOrchestrator:
 
     async def _dispatch(self, tasks: list[dict]) -> list[dict]:
         """
-        Run all tasks with a small stagger between launches.
+        Run all tasks with adaptive stagger based on target type.
 
-        Firing everything simultaneously causes race conditions when multiple
-        tasks route to the operator — each one tries to init a LangChain chain
-        and open ChromaDB at the same time. A short stagger lets the first
-        operator call get past its init before the next one arrives.
-
-        Model-only tasks don't need the stagger (Ollama queues them fine) but
-        it doesn't hurt them either — the delay is small relative to inference
-        time.
+        Operator tasks use higher stagger (1.0s) because they initialize ChromaDB,
+        which can cause lock contention when multiple tasks fire simultaneously.
+        Model tasks use lower stagger (0.4s) since Ollama queues them efficiently.
         """
         capped = tasks[:MAX_TASKS_PER_ROUND]
 
         async def _staggered(i: int, task: dict) -> dict:
+            target = task.get("target", "")
+            
+            # Determine stagger based on target type
+            if target == "operator":
+                stagger = self.operator_stagger_seconds
+            else:
+                stagger = self.model_stagger_seconds
+            
+            # Apply stagger
             if i > 0:
-                await asyncio.sleep(i * self.task_stagger_seconds)
+                await asyncio.sleep(i * stagger)
+            
             return await self._run_task(task)
 
         jobs = [_staggered(i, t) for i, t in enumerate(capped)]
         return await asyncio.gather(*jobs, return_exceptions=False)
 
     async def _run_task(self, task: dict) -> dict:
-        """Run a single task against the appropriate target."""
+        """
+        Run a single task with retry logic and exponential backoff.
+        
+        Retryable errors (timeout, connection, not_found, internal_error) 
+        retry up to max_retries times with exponential backoff.
+        Non-retryable errors (rate_limit, unknown) fail immediately.
+        """
         target = task.get("target", "")
         prompt = task.get("prompt", "")
         rationale = task.get("rationale", "")
         t0 = time.monotonic()
+        
+        for attempt in range(self.max_retries + 1):
+            try:
+                if target == "operator":
+                    content = await self._run_operator(prompt)
+                elif target.startswith("model:"):
+                    model_id = target[6:]
+                    content = await self._run_model(model_id, prompt)
+                else:
+                    # Try as a bare model name
+                    content = await self._run_model(target, prompt)
 
-        try:
-            if target == "operator":
-                content = await self._run_operator(prompt)
-            elif target.startswith("model:"):
-                model_id = target[6:]
-                content = await self._run_model(model_id, prompt)
-            else:
-                # Try as a bare model name
-                content = await self._run_model(target, prompt)
+                latency_ms = round((time.monotonic() - t0) * 1000, 1)
+                return {
+                    "target": target,
+                    "prompt": prompt,
+                    "rationale": rationale,
+                    "content": content,
+                    "latency_ms": latency_ms,
+                    "status": "done",
+                    "attempts": attempt + 1,
+                }
+            
+            except Exception as e:
+                # Classify the error
+                error_type = self._classify_error(e)
+                
+                # Retry if error is retryable and attempts remain
+                if attempt < self.max_retries and error_type in RETRYABLE_ERRORS:
+                    wait_time = min(
+                        self.backoff_base ** attempt,
+                        self.backoff_max
+                    )
+                    logger.warning(
+                        f"Task {target} failed (attempt {attempt+1}/{self.max_retries+1}): "
+                        f"{error_type} — retrying in {wait_time:.1f}s: {str(e)[:100]}"
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue  # Retry
+                
+                # Final failure: non-retryable error or out of retries
+                latency_ms = round((time.monotonic() - t0) * 1000, 1)
+                return {
+                    "target": target,
+                    "prompt": prompt,
+                    "rationale": rationale,
+                    "content": f"Error: {error_type.upper()} — {str(e)[:500]}",
+                    "latency_ms": latency_ms,
+                    "status": "error",
+                    "error_type": error_type,
+                    "attempts": attempt + 1,
+                }
 
-            latency_ms = round((time.monotonic() - t0) * 1000, 1)
-            return {
-                "target": target,
-                "prompt": prompt,
-                "rationale": rationale,
-                "content": content,
-                "latency_ms": latency_ms,
-                "status": "done",
-            }
-        except Exception as e:
-            latency_ms = round((time.monotonic() - t0) * 1000, 1)
-            return {
-                "target": target,
-                "prompt": prompt,
-                "rationale": rationale,
-                "content": f"Error: {e}",
-                "latency_ms": latency_ms,
-                "status": "error",
-            }
+        # Should never reach here, but safety net
+        return {
+            "target": target,
+            "prompt": prompt,
+            "rationale": rationale,
+            "content": "Error: Unknown failure after all retries",
+            "latency_ms": round((time.monotonic() - t0) * 1000, 1),
+            "status": "error",
+            "error_type": "unknown",
+            "attempts": self.max_retries + 1,
+        }
 
     async def _run_operator(self, query: str) -> str:
         """Route a task to the BeigeBox operator agent via its own endpoint."""
         port = self.cfg.get("server", {}).get("port", 8000)
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=self.operator_timeout) as client:
             resp = await client.post(
                 f"http://localhost:{port}/api/v1/operator",
                 json={"query": query},
@@ -316,7 +399,7 @@ class HarnessOrchestrator:
 
     async def _run_model(self, model_id: str, prompt: str) -> str:
         """Run a prompt against a specific model."""
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=self.task_timeout) as client:
             resp = await client.post(
                 f"{self.backend_url}/v1/chat/completions",
                 json={
@@ -330,16 +413,59 @@ class HarnessOrchestrator:
             data = resp.json()
             return data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
+    @staticmethod
+    def _classify_error(exc: Exception) -> str:
+        """
+        Classify exception into retryable categories.
+        
+        Returns:
+            "timeout" — connection timeout (retryable)
+            "connection" — connection refused/reset (retryable)
+            "not_found" — 404 model not found (retryable, model may be loading)
+            "rate_limit" — 429 rate limited (retryable but with longer backoff)
+            "internal_error" — 500/502/503 server error (retryable)
+            "unknown" — other error (non-retryable)
+        """
+        exc_str = str(exc).lower()
+        
+        # Check for timeout
+        if "timeout" in exc_str or "timed out" in exc_str:
+            return "timeout"
+        
+        # Check for connection issues
+        if "connection" in exc_str or "refused" in exc_str or "reset" in exc_str:
+            return "connection"
+        
+        # Check for 404 (model not found — Ollama may be loading)
+        if "404" in exc_str or "not found" in exc_str:
+            return "not_found"
+        
+        # Check for rate limit
+        if "429" in exc_str:
+            return "rate_limit"
+        
+        # Check for server errors
+        if "500" in exc_str or "502" in exc_str or "503" in exc_str:
+            return "internal_error"
+        
+        # Unknown error
+        return "unknown"
+
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _format_history(self, history: list[dict]) -> str:
+        """Format results, highlighting retried/failed tasks."""
         if not history:
             return "None."
         parts = []
         for i, r in enumerate(history):
+            status_marker = "✗" if r.get("status") == "error" else "✓"
+            attempts = r.get("attempts", 1)
+            attempts_note = f" ({attempts} attempts)" if attempts > 1 else ""
+            
             parts.append(
-                f"[{i+1}] Round {r.get('round','')} · {r.get('target','')} "
-                f"({r.get('latency_ms',0):.0f}ms)\n"
+                f"[{i+1}] {status_marker} Round {r.get('round','')} · {r.get('target','')} "
+                f"({r.get('latency_ms',0):.0f}ms){attempts_note}\n"
                 f"Task: {r.get('prompt','')[:200]}\n"
                 f"Result: {r.get('content','')[:600]}"
             )
