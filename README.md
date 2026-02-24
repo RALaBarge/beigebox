@@ -426,14 +426,64 @@ runtime:
 
 ## Docker Quickstart
 
+### 1. Configure
+
 ```bash
 cd docker
-docker compose up -d
+cp .env.example .env
+# edit .env — set OLLAMA_DATA to your ~/.ollama path, adjust ports if needed
 ```
 
-Pulls `llama3.2:3b` and `nomic-embed-text` on first start. Embedding centroids are built automatically in the background on first boot -- no manual step needed. Web UI at `http://localhost:1337`. Point Open WebUI at `http://beigebox:8000/v1` (inter-container) or `http://localhost:1337/v1` (host) with any non-empty API key.
+### 2. Start
+
+Pick the profile that matches your machine:
 
 ```bash
+# NVIDIA GPU (recommended)
+docker compose --profile gpu up -d
+
+# CPU only
+docker compose --profile cpu up -d
+
+# GPU + voice (Whisper STT + Kokoro TTS)
+docker compose --profile gpu --profile voice up -d
+
+# Proxy only — point OLLAMA_HOST in .env at an existing Ollama instance
+docker compose up -d beigebox
+```
+
+### 3. Access
+
+| Service    | URL                      | Notes                        |
+|------------|--------------------------|------------------------------|
+| BeigeBox   | http://localhost:1337    | Web UI + API                 |
+| Open WebUI | http://localhost:3000    | Chat frontend (gpu/cpu only) |
+| Ollama     | http://localhost:11434   | Direct inference access      |
+| Whisper    | http://localhost:9000    | STT (voice profile only)     |
+| Kokoro     | http://localhost:8880    | TTS (voice profile only)     |
+
+Pulls `llama3.2:3b` and `nomic-embed-text` on first start if not already present. Embedding centroids are built automatically in the background. Point Open WebUI at `http://beigebox:8000/v1` (inter-container) or `http://localhost:1337/v1` (host) with any non-empty API key.
+
+### 4. Using an existing Ollama (remote or host)
+
+If you already have Ollama running — on the host, a LAN machine, or a Mac — skip the `ollama` container and point BeigeBox at it:
+
+```bash
+# in docker/.env
+OLLAMA_HOST=192.168.1.x   # LAN IP, or host.docker.internal for host machine
+```
+
+Then start without a profile:
+```bash
+docker compose up -d beigebox open-webui
+```
+
+### Dev loop
+
+```bash
+# Rebuild and restart only BeigeBox (leaves Ollama/WebUI untouched)
+docker compose up -d --build beigebox
+
 ./smoke.sh    # validate the full stack
 ```
 

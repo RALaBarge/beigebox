@@ -138,6 +138,8 @@ def client(tmp_path):
         "routing": {},
         "model_advertising": {"mode": "hidden"},
         "operator": {"model": "llama3.2"},
+        "backends_enabled": False,
+        "cost_tracking": {"enabled": False},
     }
 
     rt_path = tmp_path / "runtime_config.yaml"
@@ -155,20 +157,27 @@ def client(tmp_path):
 
     import beigebox.main  # ensure module is imported before patching
 
+    # Build mocks — use AsyncMock explicitly for anything the lifespan awaits
+    mock_preload = AsyncMock(return_value=None)
+
+    mock_da = MagicMock()
+    mock_da.from_config.return_value = MagicMock(enabled=False, model="")
+    mock_da.from_config.return_value.preload = AsyncMock(return_value=None)
+
+    mock_ec = MagicMock()
+    mock_ec.ready = True  # skip auto-build centroids background task
+
     with patch("beigebox.main.SQLiteStore"), \
          patch("beigebox.main.VectorStore"), \
          patch("beigebox.main.ToolRegistry") as MockTR, \
-         patch("beigebox.main.DecisionAgent") as MockDA, \
+         patch("beigebox.main.DecisionAgent", mock_da), \
          patch("beigebox.main.HookManager") as MockHM, \
-         patch("beigebox.main.get_embedding_classifier") as MockEC, \
-         patch("beigebox.main._preload_embedding_model"):
+         patch("beigebox.main.get_embedding_classifier", return_value=mock_ec), \
+         patch("beigebox.main.Proxy"), \
+         patch("beigebox.main._preload_embedding_model", mock_preload):
 
         MockTR.return_value.list_tools.return_value = []
-        MockDA.from_config.return_value = MagicMock(enabled=False, model="")
-        MockDA.from_config.return_value.preload = AsyncMock(return_value=None)
         MockHM.return_value.list_hooks.return_value = []
-        ec = MagicMock(); ec.ready = False
-        MockEC.return_value = ec
 
         from beigebox.main import app
         with TestClient(app, raise_server_exceptions=False) as c:

@@ -1404,6 +1404,7 @@ async def api_build_centroids():
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
+@app.post("/api/v1/web-ui/toggle-vi-mode")
 
 
 async def toggle_vi_mode():

@@ -1,34 +1,41 @@
 # BeigeBox — Full Stack
 # Tap the line. Control the carrier.
 #
-# QUICKSTART:
-#   ./setup.sh              # pulls models, starts everything
+# PROFILES:
+#   (none)          beigebox only — point OLLAMA_URL in .env at existing Ollama
+#   gpu             beigebox + Ollama (NVIDIA GPU) + Open WebUI
+#   cpu             beigebox + Ollama (CPU only)   + Open WebUI
+#   voice           adds Whisper (STT) + Kokoro (TTS) — combine with gpu or cpu
 #
-# OR MANUALLY:
-#   docker compose up -d                     # full stack (Ollama + BeigeBox + Open WebUI)
-#   docker compose up -d beigebox open-webui # already have Ollama on host
+# EXAMPLES:
+#   docker compose --profile gpu up -d                    # local GPU stack
+#   docker compose --profile cpu up -d                    # CPU-only stack
+#   docker compose --profile gpu --profile voice up -d    # GPU + voice
+#   docker compose up -d beigebox                         # proxy only, external Ollama
+#
+# CONFIGURATION:
+#   cp .env.example .env  → set OLLAMA_DATA, ports, API keys
 #
 # SERVICES:
-#   ollama     → :11434  LLM inference engine (GPU)
-#   beigebox   → :1337   transparent proxy + middleware
-#   open-webui → :3000   chat interface
-#
-# DATA:
-#   ollama_data    → host ~/.ollama mounted directly (shares host models)
-#   beigebox_data  → conversations, embeddings, logs (persistent)
-#   open_webui_data → Open WebUI settings/users (persistent)
+#   ollama      → :11434  LLM inference (gpu profile)
+#   ollama-cpu  → :11434  LLM inference (cpu profile)
+#   beigebox    → :1337   transparent proxy + middleware (always)
+#   open-webui  → :3000   chat interface (gpu or cpu profile)
+#   whisper     → :9000   speech-to-text (voice profile)
+#   kokoro      → :8880   text-to-speech (voice profile)
 
 services:
   # ---------------------------------------------------------------------------
-  # Ollama — LLM inference
+  # Ollama — GPU (NVIDIA)
   # ---------------------------------------------------------------------------
   ollama:
+    profiles: [gpu]
     image: ollama/ollama:latest
     container_name: beigebox-ollama
     ports:
       - "${OLLAMA_PORT:-11434}:11434"
     volumes:
-      - ${OLLAMA_DATA:-/home/jinx/.ollama}:/root/.ollama
+      - ${OLLAMA_DATA:-~/.ollama}:/root/.ollama
     deploy:
       resources:
         reservations:
@@ -42,18 +49,42 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s #load gpu drivers
+      start_period: 40s
+
+  # ---------------------------------------------------------------------------
+  # Ollama — CPU only
+  # ---------------------------------------------------------------------------
+  ollama-cpu:
+    profiles: [cpu]
+    image: ollama/ollama:latest
+    container_name: beigebox-ollama-cpu
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ${OLLAMA_DATA:-~/.ollama}:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ---------------------------------------------------------------------------
+  # Model pull — runs once on first start to ensure required models exist
+  # ---------------------------------------------------------------------------
   ollama-model-pull:
+    profiles: [gpu, cpu]
     image: curlimages/curl
-    depends_on: [ollama]
+    container_name: beigebox-model-pull
     command: >
       sh -c "sleep 3 &&
-      curl -s http://ollama:11434/api/pull -d '{\"name\":\"nomic-embed-text\"}' &&
-      curl -s http://ollama:11434/api/pull -d '{\"name\":\"llama3.2:3b\"}'"
+      curl -s http://${OLLAMA_HOST:-ollama}:11434/api/pull -d '{\"name\":\"nomic-embed-text\"}' &&
+      curl -s http://${OLLAMA_HOST:-ollama}:11434/api/pull -d '{\"name\":\"llama3.2:3b\"}'"
     restart: "no"
 
   # ---------------------------------------------------------------------------
-  # BeigeBox — transparent LLM proxy + middleware
+  # BeigeBox — transparent LLM proxy + middleware (always on)
   # ---------------------------------------------------------------------------
   beigebox:
     build:
@@ -68,7 +99,7 @@ services:
     environment:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GOOGLE_CSE_ID=${GOOGLE_CSE_ID:-}
-      - OLLAMA_HOST=ollama
+      - OLLAMA_HOST=${OLLAMA_HOST:-ollama}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/beigebox/health"]
@@ -80,6 +111,7 @@ services:
   # Open WebUI — chat frontend
   # ---------------------------------------------------------------------------
   open-webui:
+    profiles: [gpu, cpu]
     image: ghcr.io/open-webui/open-webui:main
     container_name: beigebox-webui
     ports:
@@ -87,12 +119,9 @@ services:
     volumes:
       - open_webui_data:/app/backend/data
     environment:
-      # Route ALL chat traffic through BeigeBox
       - OPENAI_API_BASE_URL=http://beigebox:8000/v1
       - OPENAI_API_KEY=not-needed
-      # Direct Ollama connection for model management (pull/delete/etc)
-      - OLLAMA_BASE_URL=http://ollama:11434
-      # Disable Open WebUI's built-in auth for local use (optional)
+      - OLLAMA_BASE_URL=http://${OLLAMA_HOST:-ollama}:11434
       - WEBUI_AUTH=${WEBUI_AUTH:-false}
     depends_on:
       beigebox:
@@ -100,10 +129,11 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # faster-whisper-server — STT (OpenAI-compatible /v1/audio/transcriptions)
+  # Whisper — STT (voice profile)
   # ---------------------------------------------------------------------------
   whisper:
-    image: fedirz/faster-whisper-server:latest-cpu   # swap to :latest-cuda for GPU
+    profiles: [voice]
+    image: fedirz/faster-whisper-server:latest-cpu
     container_name: beigebox-whisper
     ports:
       - "${WHISPER_PORT:-9000}:8000"
@@ -111,7 +141,6 @@ services:
       - whisper_cache:/root/.cache/huggingface
     environment:
       - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-whisper-base}
-      # For GPU: set WHISPER__DEVICE=cuda and use the cuda image tag
       - WHISPER__DEVICE=cpu
       - WHISPER__INFERENCE_DEVICE=cpu
     restart: unless-stopped
@@ -120,13 +149,14 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s   # model download on first start
+      start_period: 60s
 
   # ---------------------------------------------------------------------------
-  # Kokoro-FastAPI — TTS (OpenAI-compatible /v1/audio/speech)
+  # Kokoro — TTS (voice profile)
   # ---------------------------------------------------------------------------
   kokoro:
-    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest   # swap to kokoro-fastapi-gpu:latest for GPU
+    profiles: [voice]
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
     container_name: beigebox-kokoro
     ports:
       - "${KOKORO_PORT:-8880}:8880"
@@ -138,7 +168,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 120s  # model download on first start
+      start_period: 120s
 
 volumes:
   beigebox_data:
