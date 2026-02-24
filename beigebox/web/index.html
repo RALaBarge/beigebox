@@ -1407,7 +1407,7 @@
 </div>
 
 <!-- ── Ensemble Voting Modal ─────────────────────────────────────────────── -->
-<div id="ensemble-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1000; display:flex; align-items:center; justify-content:center;">
+<div id="ensemble-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1000; align-items:center; justify-content:center;">
   <div style="background:var(--bg-panel); border:1px solid var(--bg-border); border-radius:6px; padding:16px; width:90%; max-width:600px; max-height:80vh; overflow-y:auto;">
     <div style="font-weight:bold; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
       <span>🎯 Ensemble Voting</span>
@@ -2548,7 +2548,7 @@ async function exportConversations() {
   }
 }
 
-
+async function searchConvos() {
   const q = document.getElementById('search-input').value.trim();
   if (!q) return;
   const el = document.getElementById('convos-body');

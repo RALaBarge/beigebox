@@ -12,7 +12,7 @@ import pytest
 import yaml
 import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 
 # ── Config module tests ───────────────────────────────────────────────────────
@@ -165,7 +165,7 @@ def client(tmp_path):
 
         MockTR.return_value.list_tools.return_value = []
         MockDA.from_config.return_value = MagicMock(enabled=False, model="")
-        MockDA.from_config.return_value.preload = MagicMock(return_value=None)
+        MockDA.from_config.return_value.preload = AsyncMock(return_value=None)
         MockHM.return_value.list_hooks.return_value = []
         ec = MagicMock(); ec.ready = False
         MockEC.return_value = ec

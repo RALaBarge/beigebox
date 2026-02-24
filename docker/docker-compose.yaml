@@ -10,11 +10,11 @@
 #
 # SERVICES:
 #   ollama     → :11434  LLM inference engine (GPU)
-#   beigebox   → :8000   transparent proxy + middleware
+#   beigebox   → :1337   transparent proxy + middleware
 #   open-webui → :3000   chat interface
 #
 # DATA:
-#   ollama_data    → model weights (persistent)
+#   ollama_data    → host ~/.ollama mounted directly (shares host models)
 #   beigebox_data  → conversations, embeddings, logs (persistent)
 #   open_webui_data → Open WebUI settings/users (persistent)
 
@@ -28,7 +28,7 @@ services:
     ports:
       - "${OLLAMA_PORT:-11434}:11434"
     volumes:
-      - ollama_data:/root/.ollama
+      - ${OLLAMA_DATA:-/home/jinx/.ollama}:/root/.ollama
     deploy:
       resources:
         reservations:
@@ -43,7 +43,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s #load gpu drivers
-  ollama-init:
+  ollama-model-pull:
     image: curlimages/curl
     depends_on: [ollama]
     command: >
@@ -61,7 +61,7 @@ services:
       dockerfile: docker/Dockerfile
     container_name: beigebox
     ports:
-      - "${BEIGEBOX_PORT:-8000}:8000"
+      - "${BEIGEBOX_PORT:-1337}:8000"
     volumes:
       - beigebox_data:/app/data
       - ../hooks:/app/hooks:ro
@@ -69,9 +69,6 @@ services:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GOOGLE_CSE_ID=${GOOGLE_CSE_ID:-}
       - OLLAMA_HOST=ollama
-    depends_on:
-      ollama:
-        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/beigebox/health"]
@@ -144,7 +141,6 @@ services:
       start_period: 120s  # model download on first start
 
 volumes:
-  ollama_data:
   beigebox_data:
   open_webui_data:
   whisper_cache:

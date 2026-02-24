@@ -11,7 +11,7 @@ Just getting started and not sure what front end to use?  We also offer a Javasc
 ```
 +---------------+         +--------------------------------------+         +---------------+
 |               |  HTTP   |            BEIGEBOX                  |  HTTP   |               |
-|  Open WebUI   | ------->|  FastAPI Proxy · Port 8000           | ------> |  Ollama /     |
+|  Open WebUI   | ------->|  FastAPI Proxy · Port 1337           | ------> |  Ollama /     |
 |  (Frontend)   |<------- |                                      |<------- |  llama.cpp    |
 |               |         |  Hybrid Router                       |         |  (Backend)    |
 |  Port 3000    |         |  0. Session Cache  (instant)         |         +---------------+
@@ -179,7 +179,7 @@ Audio is captured as webm/opus (falling back to mp4 on Safari), sent to `/v1/aud
 
 ## Web UI
 
-Single-file, no build step, no external JS dependencies. Served at `http://localhost:8000`.
+Single-file, no build step, no external JS dependencies. Served at `http://localhost:1337`.
 
 | Tab | Key | Contents |
 |---|---|---|
@@ -431,7 +431,7 @@ cd docker
 docker compose up -d
 ```
 
-Pulls `llama3.2:3b` and `nomic-embed-text` on first start. Embedding centroids are built automatically in the background on first boot -- no manual step needed. Web UI at `http://localhost:8000`. Point Open WebUI at `http://localhost:8000/v1` with any non-empty API key.
+Pulls `llama3.2:3b` and `nomic-embed-text` on first start. Embedding centroids are built automatically in the background on first boot -- no manual step needed. Web UI at `http://localhost:1337`. Point Open WebUI at `http://beigebox:8000/v1` (inter-container) or `http://localhost:1337/v1` (host) with any non-empty API key.
 
 ```bash
 ./smoke.sh    # validate the full stack

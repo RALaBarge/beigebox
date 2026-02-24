@@ -6,7 +6,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-BB="http://localhost:8000"
+BB="http://localhost:1337"
 PASS=0
 FAIL=0
 

@@ -159,7 +159,7 @@ echo ""
 
 # Wait for services
 wait_for_service "Ollama" "${OLLAMA_HOST}/api/tags" 60
-wait_for_service "BeigeBox" "http://localhost:${BEIGEBOX_PORT:-8000}/beigebox/health" 30
+wait_for_service "BeigeBox" "http://localhost:${BEIGEBOX_PORT:-1337}/beigebox/health" 30
 wait_for_service "Open WebUI" "http://localhost:${WEBUI_PORT:-3000}" 30
 
 # Pull models
@@ -192,7 +192,7 @@ echo -e "  ${BOLD}${GREEN}  BeigeBox is ready!${NC}"
 echo -e "  ${BOLD}${GREEN}═══════════════════════════════════════════════════${NC}"
 echo ""
 echo -e "  ${CYAN}Open WebUI${NC}   → http://localhost:${WEBUI_PORT:-3000}"
-echo -e "  ${CYAN}BeigeBox API${NC} → http://localhost:${BEIGEBOX_PORT:-8000}/beigebox/health"
+echo -e "  ${CYAN}BeigeBox API${NC} → http://localhost:${BEIGEBOX_PORT:-1337}/beigebox/health"
 echo -e "  ${CYAN}Ollama API${NC}   → http://localhost:${OLLAMA_PORT:-11434}"
 echo ""
 echo -e "  ${DIM}Watch the wire:${NC}  docker exec beigebox python -m beigebox tap"

@@ -163,7 +163,7 @@ def cmd_ring(args):
     """Ping a running BeigeBox instance."""
     import httpx
 
-    url = args.url or "http://localhost:8000"
+    url = args.url or "http://localhost:1337"
     try:
         resp = httpx.get(f"{url}/beigebox/health", timeout=5)
         if resp.status_code == 200:
@@ -533,7 +533,7 @@ def main():
 
     # ring / status / ping / health
     def setup_ring(p):
-        p.add_argument("--url", "-u", default=None, help="BeigeBox URL (default: http://localhost:8000)")
+        p.add_argument("--url", "-u", default=None, help="BeigeBox URL (default: http://localhost:1337)")
 
     _add_command(sub, ["ring", "status", "ping", "health"],
                  "Ping a running BeigeBox instance", cmd_ring, setup_ring)
