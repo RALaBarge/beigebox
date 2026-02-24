@@ -239,6 +239,8 @@ beigebox/
       base.py                    BackendResponse dataclass, BaseBackend ABC
       ollama.py                  Ollama backend
       openrouter.py              OpenRouter backend, streaming cost capture
+      openai_compat.py           generic OpenAI-compatible backend (llama.cpp, vLLM, TGI, etc.)
+      retry_wrapper.py           exponential backoff retry wrapper for any backend
       router.py                  priority-based multi-backend router
 
     storage/
@@ -321,6 +323,9 @@ beigebox/
 | `/api/v1/operator` | POST | Run Operator agent |
 | `/api/v1/orchestrator` | POST | Run parallel task plan |
 | `/api/v1/harness/orchestrate` | POST | Goal-directed harness master (SSE stream) |
+| `/api/v1/harness/{run_id}` | GET | Retrieve stored harness run by ID |
+| `/api/v1/harness` | GET | List recent harness runs |
+| `/api/v1/ensemble` | POST | Multi-model ensemble vote -- judge selects best response |
 | `/api/v1/backends` | GET | Backend health and status |
 | `/{path:path}` | ANY | Catch-all -- forwards unknown paths to backend |
 
@@ -467,12 +472,19 @@ pytest tests/test_storage.py tests/test_proxy.py tests/test_hooks.py \
 - [x] Vi mode (zero bytes when disabled), palette themes, conversation forking
 - [x] Busybox bb shell hardening in Docker
 
+- [x] Generic OpenAI-compatible backend (llama.cpp, vLLM, TGI, Aphrodite, LocalAI)
+- [x] Backend retry with exponential backoff on transient errors (404/429/5xx)
+- [x] Multi-model ensemble voting -- judge LLM selects best response from N models
+- [x] Web UI mobile responsive layout -- breakpoints for tablet, mobile, small phone, landscape
+- [x] Runtime config bug fix -- feature flag toggling now correctly reads runtime_config first
+- [x] Operator shell security hardening -- allowlist, dangerous pattern blocking, audit logging, busybox wrapper
+
 ### Next
 
 - [ ] TTS wired into chat response pipeline (play assistant audio automatically)
 - [ ] Conversation export to fine-tuning formats (JSONL, Alpaca, ShareGPT)
-- [ ] Multi-model voting / ensemble responses
-- [ ] Web UI mobile layout
+- [ ] System context injection (global prompt prefix via hot-reloadable system_context.md)
+- [ ] Full parameter exposure via API and web UI (generation params, routing weights, ensemble config)
 
 ---
 

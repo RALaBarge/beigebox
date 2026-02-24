@@ -1198,6 +1198,7 @@
       <span class="toolbar-label">Panes:</span>
       <button onclick="addChatPane()" title="Add output pane (+)">＋</button>
       <button onclick="removeChatPane()" title="Remove last pane">－</button>
+      <button onclick="showEnsembleDialog()" title="Ensemble voting: send to multiple models and judge">🎯 Ensemble</button>
       <span style="color:var(--fg-muted);font-size:10px;margin-left:4px">max 4/page · [ ] to page</span>
       <span class="toolbar-spacer"></span>
       <div id="chat-page-nav">
@@ -1397,6 +1398,40 @@
     </div>
   </div>
 
+</div>
+
+<!-- ── Ensemble Voting Modal ─────────────────────────────────────────────── -->
+<div id="ensemble-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1000; display:flex; align-items:center; justify-content:center;">
+  <div style="background:var(--bg-panel); border:1px solid var(--bg-border); border-radius:6px; padding:16px; width:90%; max-width:600px; max-height:80vh; overflow-y:auto;">
+    <div style="font-weight:bold; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+      <span>🎯 Ensemble Voting</span>
+      <button onclick="closeEnsembleDialog()" style="background:none; border:none; cursor:pointer; font-size:18px; color:var(--fg-muted);">✕</button>
+    </div>
+    
+    <div style="margin-bottom:12px; font-size:12px; color:var(--fg-muted);">
+      Send the same prompt to multiple models in parallel, then use a judge LLM to evaluate and select the best response.
+    </div>
+    
+    <div style="margin-bottom:12px;">
+      <label style="display:block; font-size:12px; margin-bottom:4px; font-weight:bold;">Select Models (check at least 2):</label>
+      <div id="ensemble-model-list" style="border:1px solid var(--bg-border); border-radius:4px; padding:8px; background:var(--bg-input); max-height:200px; overflow-y:auto;">
+        <!-- Models injected by JS -->
+      </div>
+    </div>
+    
+    <div style="margin-bottom:12px;">
+      <label for="ensemble-judge-model" style="display:block; font-size:12px; margin-bottom:4px; font-weight:bold;">Judge Model:</label>
+      <select id="ensemble-judge-model" style="width:100%; padding:6px; background:var(--bg-input); border:1px solid var(--bg-border); border-radius:4px; color:var(--fg); font-size:12px;">
+        <!-- Options injected by JS -->
+      </select>
+      <div style="font-size:10px; color:var(--fg-muted); margin-top:4px;">The judge evaluates all responses and picks the best</div>
+    </div>
+    
+    <div style="display:flex; gap:8px; justify-content:flex-end;">
+      <button onclick="closeEnsembleDialog()" style="padding:6px 12px; background:var(--bg-border); border:1px solid var(--bg-border); border-radius:4px; cursor:pointer;">Cancel</button>
+      <button onclick="runEnsemble()" style="padding:6px 12px; background:var(--green); color:black; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Run Ensemble</button>
+    </div>
+  </div>
 </div>
 
 <!-- ── Vi mode toggle ───────────────────────────────────────────────────── -->
@@ -3175,7 +3210,166 @@ async function harnessOrchRun() {
   }
 }
 
-// ── 8. Config ─────────────────────────────────────────────────────────────────
+// ── 7b. Ensemble Voting ───────────────────────────────────────────────────────
+let ensembleSelectedModels = [];
+
+function showEnsembleDialog() {
+  const modal = document.getElementById('ensemble-modal');
+  const modelList = document.getElementById('ensemble-model-list');
+  const judgeSelect = document.getElementById('ensemble-judge-model');
+  
+  // Populate model list
+  modelList.innerHTML = '';
+  if (allModels && allModels.length > 0) {
+    allModels.forEach(m => {
+      const div = document.createElement('div');
+      div.style.cssText = 'display:flex; align-items:center; padding:4px 0;';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = m.id;
+      checkbox.style.marginRight = '8px';
+      checkbox.onchange = (e) => {
+        if (e.target.checked) {
+          if (!ensembleSelectedModels.includes(m.id)) ensembleSelectedModels.push(m.id);
+        } else {
+          ensembleSelectedModels = ensembleSelectedModels.filter(x => x !== m.id);
+        }
+      };
+      const label = document.createElement('label');
+      label.style.cssText = 'cursor:pointer; flex:1;';
+      label.appendChild(checkbox);
+      label.appendChild(document.createTextNode(m.id));
+      div.appendChild(label);
+      modelList.appendChild(div);
+    });
+  } else {
+    modelList.innerHTML = '<div style="color:var(--fg-muted); font-size:12px;">No models available</div>';
+  }
+  
+  // Populate judge model
+  judgeSelect.innerHTML = '';
+  if (allModels && allModels.length > 0) {
+    allModels.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.id;
+      judgeSelect.appendChild(opt);
+    });
+  }
+  
+  modal.style.display = 'flex';
+}
+
+function closeEnsembleDialog() {
+  document.getElementById('ensemble-modal').style.display = 'none';
+  ensembleSelectedModels = [];
+}
+
+async function runEnsemble() {
+  const modal = document.getElementById('ensemble-modal');
+  const input = document.getElementById('chat-input');
+  const judgeModel = document.getElementById('ensemble-judge-model').value;
+  
+  if (ensembleSelectedModels.length < 2) {
+    alert('Please select at least 2 models');
+    return;
+  }
+  
+  const prompt = input.value.trim();
+  if (!prompt) {
+    alert('Please enter a prompt');
+    return;
+  }
+  
+  closeEnsembleDialog();
+  
+  // Add a pane for ensemble results
+  addChatPane();
+  const paneId = `pane-${Date.now()}`;
+  const panes = document.querySelectorAll('[data-pane-id]');
+  const lastPane = panes[panes.length - 1];
+  if (lastPane) lastPane.id = paneId;
+  
+  const messageBox = lastPane?.querySelector('.chat-messages');
+  if (messageBox) {
+    messageBox.innerHTML = '<div style="color:var(--fg-muted); text-align:center; padding:16px;">⏳ Running ensemble… this may take a moment</div>';
+  }
+  
+  try {
+    const resp = await fetch('/api/v1/ensemble', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        models: ensembleSelectedModels,
+        judge_model: judgeModel,
+        prompt: prompt,
+      }),
+    });
+    
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+    
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const results = {};
+    let winner = '';
+    let verdict = '';
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        if (line.startsWith('data: ')) {
+          try {
+            const ev = JSON.parse(line.substring(6));
+            if (ev.type === 'result') {
+              results[ev.model] = ev.response;
+            } else if (ev.type === 'finish') {
+              winner = ev.winner;
+              verdict = ev.verdict;
+            }
+          } catch (e) {
+            // Skip non-JSON
+          }
+        }
+      }
+    }
+    
+    // Render results
+    if (messageBox) {
+      let html = '<div style="padding:12px; border:1px solid var(--bg-border); border-radius:4px;">';
+      html += `<div style="font-weight:bold; margin-bottom:8px; color:var(--green);">🏆 Winner: ${esc(winner)}</div>`;
+      html += `<div style="font-size:12px; margin-bottom:12px; color:var(--fg-dim); padding:8px; background:var(--bg-input); border-radius:3px; white-space:pre-wrap;">${esc(verdict)}</div>`;
+      html += '<div style="border-top:1px solid var(--bg-border); margin-top:12px; padding-top:12px;">';
+      
+      for (const model in results) {
+        const highlight = model === winner ? 'border-left:3px solid var(--green);' : '';
+        html += `<div style="margin-bottom:12px; padding:8px; background:var(--bg-input); border-radius:3px; ${highlight}">`;
+        html += `<div style="font-size:11px; font-weight:bold; margin-bottom:4px; color:var(--fg-muted);">${esc(model)}</div>`;
+        html += `<div style="font-size:12px; white-space:pre-wrap;">${esc(results[model])}</div>`;
+        html += '</div>';
+      }
+      
+      html += '</div></div>';
+      messageBox.innerHTML = html;
+    }
+  } catch (e) {
+    if (messageBox) {
+      messageBox.innerHTML = `<div class="error-box">Error: ${esc(e.message)}</div>`;
+    }
+  }
+  
+  input.value = '';
+  renderChatPanes();
+}
 function cfgInput(id, label, value, type='text') {
   return `<div class="kv-row" style="gap:12px;align-items:center">
     <span class="kv-key" style="min-width:160px">${esc(label)}</span>

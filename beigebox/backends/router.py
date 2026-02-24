@@ -17,6 +17,7 @@ from typing import AsyncIterator
 from beigebox.backends.base import BaseBackend, BackendResponse
 from beigebox.backends.ollama import OllamaBackend
 from beigebox.backends.openrouter import OpenRouterBackend
+from beigebox.backends.openai_compat import OpenAICompatibleBackend
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 PROVIDERS: dict[str, type[BaseBackend]] = {
     "ollama": OllamaBackend,
     "openrouter": OpenRouterBackend,
+    "openai_compat": OpenAICompatibleBackend,
 }
 
 
@@ -38,7 +40,18 @@ class MultiBackendRouter:
         for cfg in backends_config:
             backend = self._create_backend(cfg)
             if backend:
-                self.backends.append(backend)
+                # Wrap with retry logic for transient error handling
+                from beigebox.backends.retry_wrapper import RetryableBackendWrapper
+                max_retries = cfg.get("max_retries", 2)
+                backoff_base = cfg.get("backoff_base", 1.5)
+                backoff_max = cfg.get("backoff_max", 10.0)
+                wrapped = RetryableBackendWrapper(
+                    backend,
+                    max_retries=max_retries,
+                    backoff_base=backoff_base,
+                    backoff_max=backoff_max,
+                )
+                self.backends.append(wrapped)
 
         # Sort by priority (lower = first)
         self.backends.sort(key=lambda b: b.priority)

@@ -726,7 +726,11 @@ async def api_conversation_replay(conv_id: str):
     """Reconstruct a conversation with full routing context."""
     cfg = get_config()
     rt = get_runtime_config()
-    replay_enabled = rt.get("conversation_replay_enabled", cfg.get("conversation_replay", {}).get("enabled", False))
+    # Check runtime config first, fall back to static config
+    if "conversation_replay_enabled" in rt:
+        replay_enabled = rt.get("conversation_replay_enabled")
+    else:
+        replay_enabled = cfg.get("conversation_replay", {}).get("enabled", False)
     if not replay_enabled:
         return JSONResponse({
             "enabled": False,
@@ -857,7 +861,11 @@ async def api_semantic_map(conv_id: str):
     """Generate a semantic topic map for a conversation."""
     cfg = get_config()
     rt = get_runtime_config()
-    sm_enabled = rt.get("semantic_map_enabled", cfg.get("semantic_map", {}).get("enabled", False))
+    # Check runtime config first, fall back to static config
+    if "semantic_map_enabled" in rt:
+        sm_enabled = rt.get("semantic_map_enabled")
+    else:
+        sm_enabled = cfg.get("semantic_map", {}).get("enabled", False)
     if not sm_enabled:
         return JSONResponse({
             "enabled": False,

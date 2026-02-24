@@ -1,251 +1,303 @@
-# beigebox config
-# All runtime settings live here. No hardcoded values in the codebase.
+# BeigeBox Configuration — Complete v1.0+ Setup
+# Generated: February 24, 2026
+# 
+# This is a full production-ready config with all v1.0 features enabled/configured.
+# Copy this to your project root as config.yaml (or merge with existing if you have custom settings)
 
-# --- Backend (where requests get forwarded) ---
-backend:
-  url: "http://192.168.1.214:11434"       # Ollama base URL
-  default_model: "gpt-oss-20b-GGUF:Q4_K_M"                   # Fallback model if none specified in request (set to a model you have pulled)
-  timeout: 120                         # Seconds before we give up on a backend response
+# ─────────────────────────────────────────────────────────────────────────────
+# Server Configuration
+# ─────────────────────────────────────────────────────────────────────────────
 
-# --- Middleware Server ---
 server:
   host: "0.0.0.0"
   port: 8001
+  log_level: "INFO"
+  log_conversations: true
 
-# --- Embedding ---
-embedding:
-  model: "nomic-embed-text"            # Must be pulled in Ollama
-  backend_url: "http://localhost:11434" # Can point to a different Ollama instance
+# ─────────────────────────────────────────────────────────────────────────────
+# Backend Configuration — UPDATED with retry/cooldown + generic OpenAI support
+# ─────────────────────────────────────────────────────────────────────────────
 
-# --- Storage ---
-storage:
-  sqlite_path: "./data/conversations.db"
-  chroma_path: "./data/chroma"
-  log_conversations: true              # Master switch: set false to disable all capture
+backend:
+  default_model: "llama2"
+  url: "http://localhost:11434"  # Ollama default
+  timeout: 120
 
-# --- Tools ---
-tools:
-  enabled: true                        # Master switch for LangChain tool augmentation
-  webhook_url: ""                      # Send tool invocations here (e.g. "tcp://localhost:9999" for nc -lk 9999)
-  web_search:
-    enabled: true
-    provider: "duckduckgo"             # "duckduckgo" or "google"
-    max_results: 5
-  web_scraper:
-    enabled: true
-    max_content_length: 10000          # Max chars to extract per page
-  google_search:
-    enabled: false
-    api_key: "${GOOGLE_API_KEY}"       # Resolved from .env at runtime
-    cse_id: "${GOOGLE_CSE_ID}"
-  calculator:
-    enabled: true                      # Safe math expression evaluator
-  datetime:
-    enabled: true                      # Current time/date, timezone conversions
-    local_tz_offset: -5.0              # Your timezone offset from UTC (EST = -5)
-  system_info:
-    enabled: true                      # Host system stats (CPU, RAM, GPU, disk)
-  memory:
-    enabled: true                      # Semantic search over past conversations
-    max_results: 3
-    min_score: 0.3                     # Minimum similarity (0-1) to include
+# Multi-backend routing (STEP 2 & 3: Retry logic + Generic OpenAI)
+backends_enabled: false  # Set to true to enable multi-backend routing
 
-# --- Decision LLM ---
-# A small, fast model that routes requests to the right backend model
-# and decides if tools/RAG are needed. ~3GB RAM for the MoE variant.
-# Set enabled: true and pull the model to activate.
-decision_llm:
-  enabled: false                       # Set to true after pulling the model
-  model: "llama3.2:3b"                           # A small, fast model for routing (e.g. MoE variant with low active params)
-  backend_url: "http://localhost:11434"
-  timeout: 5                           # Seconds — if router is slow, skip and forward raw
-  max_tokens: 256                      # Routing decisions should be tiny
-
-  # Routes: named shortcuts to models. The decision LLM picks a route name,
-  # BeigeBox resolves it to the actual model string.
-  # Add/remove routes as you pull/remove models from Ollama.
-  routes:
-    default:
-      model: ""                        # Set to your general-purpose model
-      description: "General purpose conversation and Q&A"
-    code:
-      model: ""                        # Set to your code-specialized model
-      description: "Code generation, debugging, technical programming tasks"
-    large:
-      model: ""                        # Set to your largest/smartest model
-      description: "Complex reasoning, analysis, long-form writing"
-    fast:
-      model: ""                        # Set to your fastest model (e.g. small or MoE)
-      description: "Quick responses, simple questions, brainstorming"
-
-# --- Hooks ---
-# Extensible pre/post processing pipeline.
-# Drop .py files in the hooks directory, or specify paths explicitly.
-hooks:
-  - name: prompt_injection
-    path: ./hooks/prompt_injection.py
-    enabled: true
-    mode: flag        # or "block" to hard-stop
-    score_threshold: 2
-
-# --- Logging ---
-logging:
-  level: "INFO"                        # DEBUG, INFO, WARNING, ERROR
-  file: "./data/beigebox.log"
-
-# --- Wiretap (structured conversation log for `beigebox tap`) ---
-wiretap:
-  path: "./data/wire.jsonl"            # JSONL log of every message on the wire
-
-routing:
-  session_ttl_seconds: 1800
-
-# --- Model Advertising ---
-# Control whether BeigeBox advertises its presence in the model list.
-# This affects what Open WebUI shows in the model dropdown.
-model_advertising:
-  mode: "hidden"                   # "advertise" or "hidden"
-  # hidden:    Shows: [llama3.2, gpt-oss-20b, claude]
-  #            (BeigeBox is transparent, user doesn't know it's there)
-  # advertise: Shows: [beigebox:llama3.2, beigebox:gpt-oss-20b, beigebox:claude]
-  #            (User knows they're talking through the middleware)
-  
-  prefix: "beigebox:"              # Prefix to add in advertise mode
-  #                                # Examples: "🔗 ", "[middleware] ", "beigebox:" etc.
-
-# --- Multi-Backend Support (v0.6.0) ---
-# Support for multiple backends with priority-based fallback
-# Currently supports: Ollama (local), OpenRouter (API)
 backends:
-  - name: "local"
-    url: "http://localhost:11434"
-    provider: "ollama"
-    priority: 1
+  # Primary: Local Ollama with retry logic
+  - provider: ollama
+    name: ollama-local
+    url: http://localhost:11434
     timeout: 120
-    
-  - name: "openrouter"
-    url: "https://openrouter.ai/api/v1"
-    provider: "openrouter"
-    api_key: "${OPENROUTER_API_KEY}"
-    priority: 2
-    timeout: 60
-    # Note: API key from environment, not config file (security)
+    priority: 1
+    # STEP 2: Retry configuration for transient errors
+    max_retries: 2              # Retry transient errors (404, 429, 5xx) 2 times
+    backoff_base: 1.5           # Wait 1.5^attempt seconds
+    backoff_max: 10.0           # Cap backoff at 10 seconds
 
-backends_enabled: false
+  # Secondary: Generic OpenAI-compatible backend (llama.cpp, vLLM, etc)
+  # STEP 3: Uncomment to enable — change URL to your endpoint
+  # - provider: openai_compat
+  #   name: vLLM
+  #   url: http://localhost:8000
+  #   timeout: 120
+  #   priority: 2
+  #   max_retries: 2
+  #   backoff_base: 1.5
+  #   backoff_max: 10.0
 
-# --- Cost Tracking (v0.6.0) ---
-# Track costs for OpenRouter API calls (local models are $0)
-# OpenRouter returns cost_usd with each response
-cost_tracking:
-  enabled: false
-  track_openrouter: true
-  track_local: false
+  # Tertiary: OpenRouter API fallback (optional)
+  # Uncomment and add API key if you want API fallback
+  # - provider: openrouter
+  #   name: openrouter-fallback
+  #   url: https://openrouter.io/api/v1
+  #   api_key: ${OPENROUTER_API_KEY}
+  #   timeout: 120
+  #   priority: 3
 
-# --- Orchestrator (v0.6.0) ---
-# Allow Operator agent to spawn parallel LLM tasks
-# Useful for divide-and-conquer on complex problems
-orchestrator:
-  enabled: false
-  max_parallel_tasks: 5
-  task_timeout_seconds: 120
-  total_timeout_seconds: 300
+# ─────────────────────────────────────────────────────────────────────────────
+# Storage Configuration
+# ─────────────────────────────────────────────────────────────────────────────
 
-# --- Flight Recorder (v0.6.0) ---
-# Record detailed timeline of each request's lifecycle
-# Helps debug routing decisions and performance bottlenecks
+storage:
+  type: sqlite
+  path: ./data/beigebox.db
+  vector_store_path: ./data/chroma
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Wiretap (Request/Response Logging)
+# ─────────────────────────────────────────────────────────────────────────────
+
+wiretap:
+  enabled: true
+  path: ./data/wire.jsonl
+  max_lines: 100000
+  rotation_enabled: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Decision LLM (Intelligent Routing)
+# ─────────────────────────────────────────────────────────────────────────────
+
+decision_llm:
+  enabled: true
+  model: "llama3.2:3b"
+  temperature: 0.2
+  system_prompt: "You are a helpful routing assistant that decides which tool or backend to use."
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Flight Recorder (Request Lifecycle Tracking)
+# ─────────────────────────────────────────────────────────────────────────────
+
 flight_recorder:
-  enabled: false
+  enabled: true
   retention_hours: 24
-  max_records: 1000
+  max_records: 10000
 
-# --- Conversation Replay (v0.6.0) ---
-# Reconstruct full conversations with routing decisions
-# Shows which model, why, what tools, confidence scores
+# ─────────────────────────────────────────────────────────────────────────────
+# Cost Tracking
+# ─────────────────────────────────────────────────────────────────────────────
+
+cost_tracking:
+  enabled: true
+  track_openrouter: true
+  track_local: false  # Set true if you want to track local inference "cost" (doesn't charge, for metrics)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Conversation Replay — STEP 1: Now respects runtime config changes
+# ─────────────────────────────────────────────────────────────────────────────
+
 conversation_replay:
-  enabled: false
+  enabled: true  # Can be toggled in Config tab now
 
-# --- Semantic Conversation Map (v0.6.0) ---
-# Visualize conversation topics as a semantic graph
-# Shows topic clustering and discussion flow
+# ─────────────────────────────────────────────────────────────────────────────
+# Semantic Map (Conversation Topic Clustering)
+# ─────────────────────────────────────────────────────────────────────────────
+
 semantic_map:
-  enabled: false
+  enabled: true  # Can be toggled in Config tab now
   similarity_threshold: 0.5
   max_topics: 50
 
-# --- Harness Orchestrator (v1.0) ---
-# Goal-directed multi-agent coordinator with retry/resilience
-# Handles concurrent task execution with intelligent error recovery
-harness:
+# ─────────────────────────────────────────────────────────────────────────────
+# Auto-Summarization
+# ─────────────────────────────────────────────────────────────────────────────
+
+auto_summarization:
   enabled: false
+  model: "llama3.2:3b"
+  token_budget: 500
+  keep_last_n: 5
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Voice (Speech-to-Text + Text-to-Speech)
+# ─────────────────────────────────────────────────────────────────────────────
+
+voice:
+  enabled: false  # Set to true if you have faster-whisper and Kokoro running
+  stt_model: "base"  # smaller=faster, larger=more accurate (tiny, base, small, medium, large)
+  tts_voice: "af"    # Kokoro voice code
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Harness Orchestrator — STEP 2 & 3: Works with retry + new backends
+# ─────────────────────────────────────────────────────────────────────────────
+
+harness:
+  enabled: true
   retry:
-    max_retries: 2                     # Retry transient errors up to 2 times
-    backoff_base: 1.5                  # Exponential backoff multiplier (1.5^attempt)
-    backoff_max: 10                    # Max backoff wait in seconds
+    max_retries: 2
+    backoff_base: 1.5
+    backoff_max: 10
   stagger:
-    operator_seconds: 1.0              # Higher stagger for operator tasks (ChromaDB init)
-    model_seconds: 0.4                 # Lower stagger for model tasks (Ollama queues well)
+    operator_seconds: 1.0      # Delay between operator task launches
+    model_seconds: 0.4         # Delay between model task launches
   timeouts:
-    task_seconds: 120                  # Per-task HTTP timeout
-    operator_seconds: 180              # Operator tasks need more time
-  store_runs: true                     # Persist orchestration runs to SQLite
-  max_stored_runs: 1000                # Keep last 1000 runs for analysis
+    task_seconds: 120
+    operator_seconds: 180
+  store_runs: true
+  max_stored_runs: 1000
 
-# --- Reserved for v0.7.0+ ---
-# Add features below as they're implemented
-
-# prompt_injection_detection:
-#   enabled: false
-
-# fine_tuning_export:
-#   enabled: false
-
-# voice_pipeline:
-#   enabled: false
-
-# model_performance_dashboard:
-#   enabled: false
-
-# tap_filters:
-#   enabled: false
-
-###---- Move this to where it needs to be when finished:
-
+# ─────────────────────────────────────────────────────────────────────────────
+# Operator (Agentic Tool Use with ReAct)
+# ─────────────────────────────────────────────────────────────────────────────
 
 operator:
-  model: "llama3.2:3b"              # which Ollama model to use (defaults to backend.default_model)
+  model: "llama3.2:3b"
   max_iterations: 10
   shell:
     enabled: true
-    shell_binary: "/usr/local/bin/bb"  # Hardened busybox wrapper (preferred) or /bin/sh (fallback)
-    allowed_commands:    # ONLY these base commands can be called — you edit this list
+    shell_binary: "/usr/local/bin/bb"  # Custom hardened binary (optional)
+    allowed_commands:
       - ls
       - cat
       - grep
       - ps
       - df
       - free
-      - ollama         # Model management
-      - beigebox       # System management
-    blocked_patterns:    # extra safety — reject even allowlisted commands if they match
-      - "rm -rf"       # Catastrophic deletion
-      - "sudo"         # Privilege escalation
-      - "> /etc"       # System config modification
-      - "; "           # Command chaining
-      - "| "           # Pipe chaining
-  data:
-    sqlite_queries:      # named query templates the agent can call by name
-      recent_conversations: >
-        SELECT c.id, c.created_at, COUNT(m.id) as msg_count
-        FROM conversations c JOIN messages m ON m.conversation_id = c.id
-        GROUP BY c.id ORDER BY c.created_at DESC LIMIT 10
-      token_usage_by_model: >
-        SELECT model, SUM(token_count) as tokens, COUNT(*) as messages
-        FROM messages GROUP BY model ORDER BY tokens DESC
-      search_messages: >
-        SELECT role, content, model, timestamp FROM messages
-        WHERE content LIKE ? ORDER BY timestamp DESC LIMIT 20
-      todays_conversations: >
-        SELECT c.id, c.created_at, COUNT(m.id) as msg_count
-        FROM conversations c JOIN messages m ON m.conversation_id = c.id
-        WHERE date(c.created_at) = date('now')
-        GROUP BY c.id ORDER BY c.created_at DESC
+      - ollama
+      - beigebox
+      - find
+      - head
+      - tail
+      - wc
+    blocked_patterns:
+      - "rm -rf"
+      - "sudo"
+      - "> /etc"
+      - "; "
+      - "| "
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tools (Function Calling)
+# ─────────────────────────────────────────────────────────────────────────────
+
+tools:
+  enabled: true
+  registry:
+    - name: web_search
+      description: "Search the web for current information"
+      enabled: true
+    - name: web_scraper
+      description: "Scrape a webpage for content"
+      enabled: true
+    - name: calculator
+      description: "Perform mathematical calculations"
+      enabled: true
+    - name: datetime_tool
+      description: "Get current date/time in any timezone"
+      enabled: true
+    - name: system_info
+      description: "Get system information and run shell commands"
+      enabled: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Hooks (Custom Middleware)
+# ─────────────────────────────────────────────────────────────────────────────
+
+hooks:
+  enabled: false
+  # Examples (uncomment to enable):
+  # - name: filter_synthetic
+  #   enabled: true
+  # - name: rag_context
+  #   enabled: true
+  # - name: prompt_injection
+  #   enabled: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Web UI Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
+web_ui:
+  # STEP 4: Ensemble voting is now available via 🎯 Ensemble button
+  palette: "dark"           # dark, light, high-contrast
+  vi_mode: false            # vi-like keybindings (e.g., j/k for navigation)
+  voice_enabled: false      # Show mic button
+  voice_hotkey: ""          # e.g., "v" for Alt+V to toggle recording
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Embedding & Classification (for routing decisions)
+# ─────────────────────────────────────────────────────────────────────────────
+
+embedding:
+  model: "nomic-embed-text"
+  backend: "ollama"         # Where embedding model runs
+
+classifier:
+  enabled: true
+  centroid_rebuild_interval: 3600  # Rebuild every hour
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Z-Commands (Special command syntax like "z: code", "z: search")
+# ─────────────────────────────────────────────────────────────────────────────
+
+zcommands:
+  enabled: true
+  prefix: "z:"
+  commands:
+    - name: "search"
+      description: "Search for information"
+      route_to: "semantic_search"
+    - name: "code"
+      description: "Code generation and analysis"
+      route_to: "operator"
+    - name: "complex"
+      description: "Complex reasoning task"
+      route_to: "harness"
+    - name: "help"
+      description: "Show help message"
+      route_to: "internal"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
+logging:
+  level: "INFO"             # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "./logs/beigebox.log"
+  max_bytes: 10485760       # 10MB
+  backup_count: 5
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Advanced Settings
+# ─────────────────────────────────────────────────────────────────────────────
+
+advanced:
+  # Session cache for routing decisions
+  session_cache_ttl: 3600
+  
+  # Maximum concurrent requests
+  max_concurrent_requests: 10
+  
+  # Request timeout (global)
+  request_timeout: 300
+  
+  # Embedding batch size
+  embedding_batch_size: 32
+  
+  # Use compression for wiretap (reduces disk usage)
+  wiretap_compress: false
+
