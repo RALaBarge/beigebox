@@ -2,6 +2,8 @@
 
 **Tap the line. Control the carrier.**
 
+> **v0.9.9** — Release candidate. All features complete. Pending full test run for 1.0.
+
 Transparent middleware proxy for local LLM stacks. Sits between your frontend (Open WebUI, etc.) and your backend (Ollama, etc.) and intercepts every request to add intelligent routing, storage, observability, tooling, and security — without either end knowing it's there.  
 
 Just getting started and not sure what front end to use?  We also offer a Javascript free* HTTP page complete with ai harnessing and orchestration tooling.  Have one AI drive a bunch of AI -- man its a crazy future!
@@ -497,6 +499,44 @@ pytest tests/test_storage.py tests/test_proxy.py tests/test_hooks.py \
 ## Contributing
 
 By contributing you agree your work will be licensed under AGPLv3, and you grant the maintainer(s) a perpetual license to sub-license under alternative commercial terms.
+
+---
+
+## Changelog
+
+### v0.9.9 — Release Candidate
+- Conversation export to JSONL / Alpaca / ShareGPT via `GET /api/v1/export` and web UI button
+- TTS auto-play on assistant responses (Web Audio API, configurable voice/model/speed)  
+- STT and TTS routing to separate configurable service URLs (`stt_url`, `tts_url`)
+- Whisper + Kokoro-FastAPI added to `docker-compose.yaml` as optional services
+- TTS fires in Operator tab (model path and operator path)
+- System context injection (`system_context.md`, hot-reloadable, HTTP read/write API)
+- Full generation parameter exposure (`gen_temperature`, `gen_top_p`, etc. with force mode)
+- Dedicated Voice / Audio section in Config tab with test button
+- Harness `_parse_json` hardened: trailing commas, truncation recovery, embedded object extraction
+- Harness `_run_operator` fixed to use `127.0.0.1` (Docker loopback safe)
+- `smoke.sh` expanded to cover all features (17 test sections)
+- Test suite expanded: `test_system_context.py`, `test_proxy_injection.py`, `test_harness.py`, export tests
+
+### v0.9.2
+- Multi-model ensemble voting with judge LLM
+- Mobile-responsive web UI (tablet, mobile, small phone, landscape)
+- Generic OpenAI-compatible backend (llama.cpp, vLLM, TGI, Aphrodite, LocalAI)
+- Backend retry with exponential backoff
+
+### v0.9.0
+- Harness tab: Manual mode (parallel model runner) + Orchestrated mode (goal-directed master)
+- Voice push-to-talk: mic button, click/hold/hotkey, STT forwarding
+- Operator shell security hardening (allowlist, pattern blocking, audit logging, busybox wrapper)
+- Full config exposure in web UI with live apply
+- Vi mode, palette themes, conversation forking
+
+### v0.8.0
+- Flight recorder, conversation replay, semantic map
+- Wire tap with persistent filters and live mode
+- Prompt injection detection (flag and block modes)
+- Multi-pane chat with fan-out and per-pane targets
+- Auto-summarization for context window management
 
 ---
 

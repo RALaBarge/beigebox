@@ -201,7 +201,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="BeigeBox",
     description="Tap the line. Control the carrier.",
-    version="0.8.0",
+    version="0.9.9",
     lifespan=lifespan,
 )
 
@@ -291,7 +291,7 @@ async def health():
     """Health check."""
     return JSONResponse({
         "status": "ok",
-        "version": "0.8.0",
+        "version": "0.9.9",
         "decision_llm": decision_agent.enabled if decision_agent else False,
     })
 
@@ -305,7 +305,7 @@ async def api_info():
     """System info — what features are available."""
     cfg = get_config()
     return JSONResponse({
-        "version": "0.8.0",
+        "version": "0.9.9",
         "name": "BeigeBox",
         "description": "Transparent Pythonic LLM Proxy",
         "server": {

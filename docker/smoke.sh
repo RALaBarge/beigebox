@@ -14,7 +14,7 @@ _ok()   { echo "  ✓  $*"; ((PASS++)); }
 _fail() { echo "  ✗  $*"; ((FAIL++)); }
 _hdr()  { echo; echo "── $* ──────────────────────────────────"; }
 
-# ── 1. Stack startup ─────────────────────────────────────────────────────────
+# ── 1. Stack startup ──────────────────────────────────────────────────────────
 _hdr "Stack startup"
 docker compose up -d
 echo "  waiting for beigebox to become healthy…"
@@ -33,7 +33,7 @@ for i in {1..60}; do
   fi
 done
 
-# ── 2. BeigeBox-native endpoints ─────────────────────────────────────────────
+# ── 2. Core BeigeBox endpoints ────────────────────────────────────────────────
 _hdr "BeigeBox endpoints"
 for path in \
   /beigebox/health \
@@ -58,14 +58,14 @@ _hdr "OpenAI-compatible endpoints"
 curl -fsS "$BB/v1/models" >/dev/null \
   && _ok "GET /v1/models" || _fail "GET /v1/models"
 
-# ── 4. Ollama-native passthrough ─────────────────────────────────────────────
+# ── 4. Ollama-native passthrough ──────────────────────────────────────────────
 _hdr "Ollama passthrough"
 for path in /api/tags /api/version /api/ps; do
   curl -fsS "$BB$path" >/dev/null \
     && _ok "GET $path (passthrough)" || _fail "GET $path (passthrough)"
 done
 
-# ── 5. Catch-all unknown endpoint ────────────────────────────────────────────
+# ── 5. Catch-all unknown endpoint ─────────────────────────────────────────────
 _hdr "Catch-all passthrough"
 STATUS=$(curl -o /dev/null -s -w "%{http_code}" "$BB/v1/some-future-endpoint-xyz")
 if [[ "$STATUS" != "404" ]]; then
@@ -103,12 +103,106 @@ else
   _fail "wire log empty after chat"
 fi
 
-# ── 9. Search endpoint ────────────────────────────────────────────────────────
+# ── 9. Conversation storage ───────────────────────────────────────────────────
+_hdr "Conversation storage"
+STATS=$(curl -fsS "$BB/api/v1/stats")
+MSG_COUNT=$(echo "$STATS" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); print(d.get('messages',0))" 2>/dev/null || echo 0)
+if [[ "$MSG_COUNT" -gt 0 ]]; then
+  _ok "conversations stored ($MSG_COUNT messages)"
+else
+  _fail "no messages stored after chat"
+fi
+
+# ── 10. Semantic search ───────────────────────────────────────────────────────
 _hdr "Semantic search"
 curl -fsS "$BB/api/v1/search?q=hello&n=3" >/dev/null \
   && _ok "GET /api/v1/search" || _fail "GET /api/v1/search"
 
-# ── 10. bb wrapper (restricted busybox) ───────────────────────────────────────
+# ── 11. Config save + runtime hot-reload ─────────────────────────────────────
+_hdr "Config API"
+SAVE=$(curl -fsS -X POST "$BB/api/v1/config" \
+  -H 'Content-Type: application/json' \
+  -d '{"log_conversations":true}')
+echo "$SAVE" | grep -q "saved" \
+  && _ok "POST /api/v1/config saves settings" \
+  || _fail "POST /api/v1/config failed: $SAVE"
+
+CONFIG=$(curl -fsS "$BB/api/v1/config")
+echo "$CONFIG" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); assert d['storage']['log_conversations'] is True" 2>/dev/null \
+  && _ok "config hot-reload: saved value visible immediately" \
+  || _fail "config hot-reload: saved value not reflected"
+
+# ── 12. Generation params config ─────────────────────────────────────────────
+_hdr "Generation params"
+GPSET=$(curl -fsS -X POST "$BB/api/v1/config" \
+  -H 'Content-Type: application/json' \
+  -d '{"gen_temperature":0.7,"gen_max_tokens":256}')
+echo "$GPSET" | grep -q "saved" \
+  && _ok "POST /api/v1/config sets gen params" \
+  || _fail "POST /api/v1/config gen params failed: $GPSET"
+
+GPCFG=$(curl -fsS "$BB/api/v1/config")
+echo "$GPCFG" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); assert d['generation']['temperature']==0.7" 2>/dev/null \
+  && _ok "generation.temperature reflected in config" \
+  || _fail "generation.temperature not in config response"
+
+curl -fsS -X POST "$BB/api/v1/generation-params/reset" >/dev/null \
+  && _ok "POST /api/v1/generation-params/reset" \
+  || _fail "POST /api/v1/generation-params/reset"
+
+# ── 13. System context API ────────────────────────────────────────────────────
+_hdr "System context"
+SC_GET=$(curl -fsS "$BB/api/v1/system-context")
+echo "$SC_GET" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); assert 'content' in d and 'enabled' in d" 2>/dev/null \
+  && _ok "GET /api/v1/system-context returns expected shape" \
+  || _fail "GET /api/v1/system-context unexpected shape: $SC_GET"
+
+SC_SET=$(curl -fsS -X POST "$BB/api/v1/system-context" \
+  -H 'Content-Type: application/json' \
+  -d '{"content":"smoke test context"}')
+echo "$SC_SET" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); assert d.get('ok') is True" 2>/dev/null \
+  && _ok "POST /api/v1/system-context writes content" \
+  || _fail "POST /api/v1/system-context failed: $SC_SET"
+
+SC_VERIFY=$(curl -fsS "$BB/api/v1/system-context")
+echo "$SC_VERIFY" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); assert 'smoke test context' in d.get('content','')" 2>/dev/null \
+  && _ok "system context content round-trips" \
+  || _fail "system context content not persisted"
+
+# ── 14. Export endpoint ───────────────────────────────────────────────────────
+_hdr "Conversation export"
+for fmt in jsonl alpaca sharegpt; do
+  STATUS=$(curl -o /dev/null -s -w "%{http_code}" "$BB/api/v1/export?format=$fmt")
+  [[ "$STATUS" == "200" ]] \
+    && _ok "GET /api/v1/export?format=$fmt" \
+    || _fail "GET /api/v1/export?format=$fmt → HTTP $STATUS"
+done
+
+EXPORT_BAD=$(curl -o /dev/null -s -w "%{http_code}" "$BB/api/v1/export?format=invalid")
+[[ "$EXPORT_BAD" == "400" ]] \
+  && _ok "GET /api/v1/export?format=invalid → 400 (expected)" \
+  || _fail "GET /api/v1/export?format=invalid should be 400, got $EXPORT_BAD"
+
+# ── 15. Audio endpoint routing ────────────────────────────────────────────────
+_hdr "Audio endpoint routing"
+for path in /v1/audio/transcriptions /v1/audio/speech; do
+  STATUS=$(curl -o /dev/null -s -w "%{http_code}" -X POST "$BB$path" \
+    -H 'Content-Type: application/json' \
+    -d '{"model":"test","input":"test"}')
+  if [[ "$STATUS" != "000" && "$STATUS" != "404" ]]; then
+    _ok "$path routed (HTTP $STATUS — backend response expected)"
+  else
+    _fail "$path not routed (HTTP $STATUS)"
+  fi
+done
+
+# ── 16. bb wrapper (restricted busybox) ───────────────────────────────────────
 _hdr "bb shell wrapper"
 docker compose exec -T beigebox /usr/local/bin/bb ls /app >/dev/null \
   && _ok "bb ls /app succeeds" || _fail "bb ls /app failed"
@@ -120,7 +214,6 @@ else
   _fail "bb rm not blocked — got: $BLOCKED"
 fi
 
-# Confirm system_info routes through bb not /bin/sh
 SYSINFO=$(docker compose exec -T beigebox python3 -c "
 from beigebox.config import get_config
 from beigebox.tools.system_info import SystemInfoTool
@@ -134,21 +227,18 @@ else
   _fail "system_info unexpected output: ${SYSINFO:0:120}"
 fi
 
-# ── 11. Config save ───────────────────────────────────────────────────────────
-_hdr "Config API"
-SAVE=$(curl -fsS -X POST "$BB/api/v1/config" \
-  -H 'Content-Type: application/json' \
-  -d '{"log_conversations":true}')
-echo "$SAVE" | grep -q "saved" \
-  && _ok "POST /api/v1/config saves settings" \
-  || _fail "POST /api/v1/config failed: $SAVE"
-
-# ── 12. Restart resilience ────────────────────────────────────────────────────
+# ── 17. Restart resilience ────────────────────────────────────────────────────
 _hdr "Restart resilience"
 docker compose restart beigebox
 sleep 5
 curl -fsS "$BB/beigebox/health" >/dev/null \
   && _ok "healthy after restart" || _fail "not healthy after restart"
+
+CONFIG_PR=$(curl -fsS "$BB/api/v1/config")
+echo "$CONFIG_PR" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); assert 'web_ui' in d and 'voice' in d and 'generation' in d" 2>/dev/null \
+  && _ok "config shape intact after restart" \
+  || _fail "config missing expected sections after restart"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo
