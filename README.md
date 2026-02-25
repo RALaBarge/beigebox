@@ -50,7 +50,7 @@ flowchart LR
   EP[External Providers (OpenAI / OpenRouter / API)]
   VS[Vector Store (ChromaDB)]
 
-  FE -->|OpenAI API| BB
+  FE --> BB
   BB --> LM
   BB --> EP
   BB --> VS
