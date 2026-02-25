@@ -525,11 +525,16 @@ class Proxy:
 
     async def forward_chat_completion(self, body: dict) -> dict:
         """Forward a non-streaming chat completion request."""
+        import time as _time
+        _t0 = _time.monotonic()
+        _stages: dict[str, float] = {}
+
         model = self._get_model(body)
         conversation_id = self._extract_conversation_id(body)
 
         # Z-command parsing
         zcmd, body = self._process_z_command(body)
+        _stages["z_command"] = (_time.monotonic() - _t0) * 1000
 
         # Handle z: help — return help text directly without calling LLM
         if zcmd.is_help:
@@ -539,9 +544,11 @@ class Proxy:
             }
 
         # Pre-request hooks
+        _t_hooks = _time.monotonic()
         if self.hook_manager:
             context = self._build_hook_context(body, conversation_id, model, None)
             body = self.hook_manager.run_pre_request(body, context)
+        _stages["pre_hooks"] = (_time.monotonic() - _t_hooks) * 1000
 
         # Check for hook-initiated block (e.g. prompt injection detection)
         if "_beigebox_block" in body:
@@ -568,8 +575,10 @@ class Proxy:
                 body = self._inject_tool_context(body, tool_results)
 
         # Hybrid routing: session cache → z-command → embedding classifier → decision LLM
+        _t_route = _time.monotonic()
         body, decision = await self._hybrid_route(body, zcmd, conversation_id)
         model = body.get("model", model)  # Update model after routing
+        _stages["routing"] = (_time.monotonic() - _t_route) * 1000
 
         # Auto-summarize if conversation exceeds token budget
         try:
@@ -590,9 +599,12 @@ class Proxy:
 
         # Forward to backend — use router if available, otherwise direct
         cost_usd = None
+        backend_name = "direct"
+        _t_backend = _time.monotonic()
 
         if self.backend_router:
             response = await self.backend_router.forward(body)
+            _stages["backend"] = (_time.monotonic() - _t_backend) * 1000
             if not response.ok:
                 # Return error as a chat response so clients handle it gracefully
                 return {
@@ -602,14 +614,7 @@ class Proxy:
                 }
             data = response.data
             cost_usd = response.cost_usd
-            # Log backend used to wiretap
-            self.wire.log(
-                direction="internal",
-                role="system",
-                content=f"routed to backend '{response.backend_name}' ({response.latency_ms:.0f}ms)",
-                model=model,
-                conversation_id=conversation_id,
-            )
+            backend_name = response.backend_name
         else:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 resp = await client.post(
@@ -618,6 +623,7 @@ class Proxy:
                 )
                 resp.raise_for_status()
                 data = resp.json()
+            _stages["backend"] = (_time.monotonic() - _t_backend) * 1000
 
         # Log assistant response (skip synthetic)
         if not is_synthetic:
@@ -628,9 +634,24 @@ class Proxy:
                 self._log_response(conversation_id, assistant_content, model, cost_usd=cost_usd, latency_ms=response_latency)
 
         # Post-response hooks
+        _t_post = _time.monotonic()
         if self.hook_manager and not is_synthetic:
             context = self._build_hook_context(body, conversation_id, model, decision)
             data = self.hook_manager.run_post_response(body, data, context)
+        _stages["post_hooks"] = (_time.monotonic() - _t_post) * 1000
+
+        # Emit timing summary to wiretap
+        total_ms = (_time.monotonic() - _t0) * 1000
+        cost_str = f" · ${cost_usd:.6f}" if cost_usd else ""
+        self.wire.log(
+            direction="internal",
+            role="system",
+            content=f"completed via '{backend_name}' · {total_ms:.0f}ms total{cost_str}",
+            model=model,
+            conversation_id=conversation_id,
+            latency_ms=total_ms,
+            timing=_stages,
+        )
 
         return data
 
@@ -639,11 +660,16 @@ class Proxy:
         Forward a streaming chat completion request.
         Yields SSE chunks to the client while buffering the full response for logging.
         """
+        import time as _time
+        _t0 = _time.monotonic()
+        _stages: dict[str, float] = {}
+
         model = self._get_model(body)
         conversation_id = self._extract_conversation_id(body)
 
         # Z-command parsing
         zcmd, body = self._process_z_command(body)
+        _stages["z_command"] = (_time.monotonic() - _t0) * 1000
 
         # Handle z: help — return as a single SSE chunk
         if zcmd.is_help:
@@ -656,9 +682,11 @@ class Proxy:
             return
 
         # Pre-request hooks
+        _t_hooks = _time.monotonic()
         if self.hook_manager:
             context = self._build_hook_context(body, conversation_id, model, None)
             body = self.hook_manager.run_pre_request(body, context)
+        _stages["pre_hooks"] = (_time.monotonic() - _t_hooks) * 1000
 
         # Check for hook-initiated block (e.g. prompt injection detection)
         if "_beigebox_block" in body:
@@ -689,8 +717,10 @@ class Proxy:
                 body = self._inject_tool_context(body, tool_results)
 
         # Hybrid routing
+        _t_route = _time.monotonic()
         body, decision = await self._hybrid_route(body, zcmd, conversation_id)
         model = body.get("model", model)
+        _stages["routing"] = (_time.monotonic() - _t_route) * 1000
 
         # Auto-summarize if conversation exceeds token budget
         try:
@@ -712,7 +742,8 @@ class Proxy:
         # Buffer for the full response
         full_response = []
         stream_cost_usd: float | None = None
-        stream_t0 = time.monotonic()
+        backend_name = "direct"
+        _t_backend = _time.monotonic()
 
         if self.backend_router:
             # Stream via multi-backend router
@@ -775,8 +806,9 @@ class Proxy:
                             except (json.JSONDecodeError, IndexError):
                                 pass
 
-        # Wall-clock stream duration — stored as latency_ms for streaming responses
-        stream_latency_ms = round((time.monotonic() - stream_t0) * 1000, 1)
+        # Wall-clock stream duration
+        _stages["backend"] = (_time.monotonic() - _t_backend) * 1000
+        total_ms = (_time.monotonic() - _t0) * 1000
 
         # Log the complete response after streaming finishes (skip synthetic)
         if not is_synthetic:
@@ -787,16 +819,20 @@ class Proxy:
                     complete_text,
                     model,
                     cost_usd=stream_cost_usd,
-                    latency_ms=stream_latency_ms,
+                    latency_ms=round(_stages["backend"], 1),
                 )
-                if stream_cost_usd:
-                    self.wire.log(
-                        direction="internal",
-                        role="system",
-                        content=f"stream cost_usd={stream_cost_usd:.6f} latency_ms={stream_latency_ms} model={model}",
-                        model="cost-tracker",
-                        conversation_id=conversation_id,
-                    )
+
+        # Emit timing summary to wiretap
+        cost_str = f" · ${stream_cost_usd:.6f}" if stream_cost_usd else ""
+        self.wire.log(
+            direction="internal",
+            role="system",
+            content=f"stream completed via '{backend_name}' · {total_ms:.0f}ms total{cost_str}",
+            model=model,
+            conversation_id=conversation_id,
+            latency_ms=total_ms,
+            timing=_stages,
+        )
 
     async def list_models(self) -> dict:
         """Forward /v1/models request to backend(s), optionally rewriting model names."""

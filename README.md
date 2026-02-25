@@ -2,7 +2,7 @@
 
 **Tap the line. Control the carrier.**
 
-> **v0.9.9** — Release candidate. All features complete. Pending full test run for 1.0.
+> **v0.10.0** — Observability consolidated. Flight recorder merged into wiretap. Semantic map killed. 7 tabs, 214 tests.
 
 Transparent middleware proxy for local LLM stacks. Sits between your frontend (Open WebUI, etc.) and your backend (Ollama, etc.) and intercepts every request to add intelligent routing, storage, observability, tooling, and security — without either end knowing it's there.  
 
@@ -542,6 +542,17 @@ By contributing you agree your work will be licensed under AGPLv3, and you grant
 ---
 
 ## Changelog
+
+### v0.10.0 — Observability Consolidation
+- **Killed Semantic Map** — removed module, endpoint, tests, config, web UI tab. Conversation Replay covers the use case.
+- **Killed Flight Recorder** — merged per-stage timing into Wire Tap. Every request now emits a timing summary entry with `latency_ms` and per-stage `timing` breakdown directly in the wiretap JSONL.
+- Wire Tap entries with timing data show expandable breakdown bars (click "▸ timing breakdown")
+- Tab count reduced from 8 to 7: Dashboard, Chat, Conversations, Tap, Operator, Harness, Config
+- All dead `if recorder:` guards removed from proxy request pipeline (~60 lines)
+- `system_context:` and `generation:` sections added to config.yaml and config.docker.yaml
+- Placeholder `system_context.md` with usage documentation added to project root
+- README updated: new Customization section, API table, file tree, tab numbers
+- 214 tests passing, smoke.sh covers system context and generation param endpoints
 
 ### v0.9.9 — Release Candidate
 - Conversation export to JSONL / Alpaca / ShareGPT via `GET /api/v1/export` and web UI button

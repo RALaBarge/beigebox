@@ -2569,6 +2569,8 @@ const TAP_ROLE_COLOR = {
 const TAP_DIR_ARROW = { inbound: '──▶', outbound: '◀──', internal: '─●─' };
 const TAP_ROLE_ICON = { user:'▶', assistant:'◀', system:'●', decision:'⚖', tool:'⚡', error:'✗' };
 
+const TIMING_COLORS = { fast: '#a5d6a7', medium: '#fff176', slow: '#ffcc80', crit: '#ef9a9a' };
+
 function _renderTapEntry(e) {
   const ts    = e.ts ? new Date(e.ts).toLocaleTimeString() : '?';
   const role  = e.role || '?';
@@ -2586,15 +2588,49 @@ function _renderTapEntry(e) {
   const convPart  = conv  ? ` <span style="color:var(--fg-muted)">conv:${esc(conv.slice(0,12))}</span>` : '';
   const lenPart   = ` <span style="color:var(--fg-muted)">(${len}c)</span>`;
 
+  // Latency badge for entries with timing data
+  let latencyBadge = '';
+  if (e.latency_ms != null) {
+    const lc = latencyClass(e.latency_ms);
+    const lcolor = TIMING_COLORS[lc];
+    latencyBadge = ` <span style="font-family:'VT323',monospace;font-size:14px;color:${lcolor}">${e.latency_ms.toFixed(0)}ms</span>`;
+  }
+
   const preview = content.length > 300 ? content.slice(0, 300) + '…' : content;
   const contentLines = esc(preview).replace(/\n/g, '<br>    ');
+
+  // Timing breakdown bars (expandable)
+  let timingHtml = '';
+  if (e.timing && Object.keys(e.timing).length) {
+    const total = e.latency_ms || 1;
+    const uid = 'tap-timing-' + Math.random().toString(36).slice(2, 8);
+    let bars = '';
+    Object.entries(e.timing).forEach(([stage, ms]) => {
+      const pct = Math.min(100, (ms / total) * 100);
+      const lc = latencyClass(ms);
+      const bcolor = TIMING_COLORS[lc];
+      bars += `<div style="display:flex;gap:8px;align-items:center;padding:1px 0;font-size:10px">
+        <span style="color:var(--fg-muted);min-width:100px">${esc(stage)}</span>
+        <div style="flex:1;height:5px;background:var(--bg-border);border-radius:1px;overflow:hidden">
+          <div style="width:${pct.toFixed(1)}%;height:100%;background:${bcolor};border-radius:1px"></div>
+        </div>
+        <span style="color:var(--fg-dim);min-width:70px;text-align:right">${ms.toFixed(0)}ms (${pct.toFixed(0)}%)</span>
+      </div>`;
+    });
+    timingHtml = `<div style="margin-top:3px;padding-left:16px">
+      <span onclick="const el=document.getElementById('${uid}');el.style.display=el.style.display==='none'?'block':'none'"
+            style="cursor:pointer;color:var(--fg-muted);font-size:10px;user-select:none">▸ timing breakdown</span>
+      <div id="${uid}" style="display:none;margin-top:3px">${bars}</div>
+    </div>`;
+  }
 
   return `<div style="margin-bottom:6px;border-bottom:1px solid var(--bg-border);padding-bottom:5px">
     <span style="color:var(--fg-muted)">${esc(ts)}</span>
     <span style="color:var(--fg-dim)">${esc(arrow)}</span>
     <span style="color:${color};font-weight:500">${esc(icon)} ${esc(role.toUpperCase())}</span>
-    ${modelPart}${lenPart}${convPart}
+    ${modelPart}${lenPart}${latencyBadge}${convPart}
     <div style="margin-top:3px;padding-left:16px;color:var(--fg-dim)">${contentLines}</div>
+    ${timingHtml}
   </div>`;
 }
 

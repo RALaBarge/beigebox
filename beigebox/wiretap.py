@@ -78,8 +78,15 @@ class WireLog:
         conversation_id: str = "",
         token_count: int = 0,
         tool_name: str = "",
+        latency_ms: float | None = None,
+        timing: dict | None = None,
     ):
-        """Write a wire log entry."""
+        """Write a wire log entry.
+
+        Optional timing fields (used for request lifecycle tracking):
+            latency_ms: total end-to-end latency in milliseconds
+            timing: dict of {stage_name: ms} for per-stage breakdown
+        """
         self._ensure_open()
         entry = {
             "ts": datetime.now(timezone.utc).isoformat(),
@@ -92,6 +99,10 @@ class WireLog:
         }
         if tool_name:
             entry["tool"] = tool_name
+        if latency_ms is not None:
+            entry["latency_ms"] = round(latency_ms, 1)
+        if timing:
+            entry["timing"] = {k: round(v, 1) for k, v in timing.items()}
 
         # Store content — truncate for sanity but keep full for short messages
         if len(content) <= 2000:
