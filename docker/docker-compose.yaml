@@ -1,48 +1,44 @@
 # BeigeBox — Full Stack
 # Tap the line. Control the carrier.
 #
+# QUICKSTART:
+#   docker compose up -d          ← full working stack (CPU inference)
+#
 # PROFILES:
-#   (none)          beigebox only — point OLLAMA_URL in .env at existing Ollama
-#   gpu             beigebox + Ollama (NVIDIA GPU) + Open WebUI
-#   cpu             beigebox + Ollama (CPU only)   + Open WebUI
-#   voice           adds Whisper (STT) + Kokoro (TTS) — combine with gpu or cpu
+#   (default)       Ollama (CPU) + BeigeBox + Open WebUI — everything you need
+#   voice           adds Whisper (STT) + Kokoro (TTS)
 #
 # EXAMPLES:
-#   docker compose --profile gpu up -d                    # local GPU stack
-#   docker compose --profile cpu up -d                    # CPU-only stack
-#   docker compose --profile gpu --profile voice up -d    # GPU + voice
-#   docker compose up -d beigebox                         # proxy only, external Ollama
+#   docker compose up -d                         # full stack, CPU inference
+#   docker compose --profile voice up -d         # full stack + voice I/O
+#   docker compose up -d beigebox                # proxy only (external Ollama)
+#
+# NVIDIA GPU:
+#   Uncomment the 'deploy' block on the ollama service below, then:
+#   docker compose up -d
 #
 # CONFIGURATION:
-#   cp .env.example .env  → set OLLAMA_DATA, ports, API keys
+#   cp env.example .env  → set OLLAMA_DATA, ports, API keys
 #
 # SERVICES:
-#   ollama      → :11434  LLM inference (gpu profile)
-#   ollama-cpu  → :11434  LLM inference (cpu profile)
-#   beigebox    → :1337   transparent proxy + middleware (always)
-#   open-webui  → :3000   chat interface (gpu or cpu profile)
+#   ollama      → :11434  LLM inference engine
+#   beigebox    → :1337   transparent proxy + middleware
+#   open-webui  → :3000   chat interface
 #   whisper     → :9000   speech-to-text (voice profile)
 #   kokoro      → :8880   text-to-speech (voice profile)
 
 services:
   # ---------------------------------------------------------------------------
-  # Ollama — GPU (NVIDIA)
+  # Ollama — LLM inference (CPU by default)
   # ---------------------------------------------------------------------------
+  # For NVIDIA GPU: uncomment the 'deploy' block below and restart.
   ollama:
-    profiles: [gpu]
     image: ollama/ollama:latest
     container_name: beigebox-ollama
     ports:
       - "${OLLAMA_PORT:-11434}:11434"
     volumes:
-      - ${OLLAMA_DATA:-~/.ollama}:/root/.ollama
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      - ${OLLAMA_DATA:-ollama_data}:/root/.ollama
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "ollama", "list"]
@@ -50,41 +46,32 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    # ── Uncomment below for NVIDIA GPU acceleration ──
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
 
   # ---------------------------------------------------------------------------
-  # Ollama — CPU only
-  # ---------------------------------------------------------------------------
-  ollama-cpu:
-    profiles: [cpu]
-    image: ollama/ollama:latest
-    container_name: beigebox-ollama-cpu
-    ports:
-      - "${OLLAMA_PORT:-11434}:11434"
-    volumes:
-      - ${OLLAMA_DATA:-~/.ollama}:/root/.ollama
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
-  # ---------------------------------------------------------------------------
-  # Model pull — runs once on first start to ensure required models exist
+  # Model pull — runs once to ensure required models exist
   # ---------------------------------------------------------------------------
   ollama-model-pull:
-    profiles: [gpu, cpu]
     image: curlimages/curl
     container_name: beigebox-model-pull
+    depends_on:
+      ollama:
+        condition: service_started
     command: >
-      sh -c "sleep 3 &&
-      curl -s http://${OLLAMA_HOST:-ollama}:11434/api/pull -d '{\"name\":\"nomic-embed-text\"}' &&
-      curl -s http://${OLLAMA_HOST:-ollama}:11434/api/pull -d '{\"name\":\"llama3.2:3b\"}'"
+      sh -c "sleep 5 &&
+      curl -s http://ollama:11434/api/pull -d '{\"name\":\"nomic-embed-text\"}' &&
+      curl -s http://ollama:11434/api/pull -d '{\"name\":\"llama3.2:3b\"}'"
     restart: "no"
 
   # ---------------------------------------------------------------------------
-  # BeigeBox — transparent LLM proxy + middleware (always on)
+  # BeigeBox — transparent LLM proxy + middleware
   # ---------------------------------------------------------------------------
   beigebox:
     build:
@@ -100,6 +87,9 @@ services:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GOOGLE_CSE_ID=${GOOGLE_CSE_ID:-}
       - OLLAMA_HOST=${OLLAMA_HOST:-ollama}
+    depends_on:
+      ollama:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/beigebox/health"]
@@ -111,7 +101,6 @@ services:
   # Open WebUI — chat frontend
   # ---------------------------------------------------------------------------
   open-webui:
-    profiles: [gpu, cpu]
     image: ghcr.io/open-webui/open-webui:main
     container_name: beigebox-webui
     ports:
@@ -171,6 +160,7 @@ services:
       start_period: 120s
 
 volumes:
+  ollama_data:
   beigebox_data:
   open_webui_data:
   whisper_cache:

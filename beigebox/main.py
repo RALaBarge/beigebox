@@ -415,20 +415,8 @@ async def api_config():
             "task_timeout_seconds": rt.get("orchestrator_task_timeout", cfg.get("orchestrator", {}).get("task_timeout_seconds", 120)),
             "total_timeout_seconds": rt.get("orchestrator_total_timeout", cfg.get("orchestrator", {}).get("total_timeout_seconds", 300)),
         },
-        "flight_recorder": {
-            **cfg.get("flight_recorder", {}),
-            "enabled": rt.get("flight_recorder_enabled", cfg.get("flight_recorder", {}).get("enabled", False)),
-            "retention_hours": rt.get("flight_retention_hours", cfg.get("flight_recorder", {}).get("retention_hours", 24)),
-            "max_records": rt.get("flight_max_records", cfg.get("flight_recorder", {}).get("max_records", 1000)),
-        },
         "conversation_replay": {
             "enabled": rt.get("conversation_replay_enabled", cfg.get("conversation_replay", {}).get("enabled", False)),
-        },
-        "semantic_map": {
-            **cfg.get("semantic_map", {}),
-            "enabled": rt.get("semantic_map_enabled", cfg.get("semantic_map", {}).get("enabled", False)),
-            "similarity_threshold": rt.get("semantic_similarity_threshold", cfg.get("semantic_map", {}).get("similarity_threshold", 0.5)),
-            "max_topics": rt.get("semantic_max_topics", cfg.get("semantic_map", {}).get("max_topics", 50)),
         },
         "auto_summarization": {
             **cfg.get("auto_summarization", {}),
@@ -510,8 +498,8 @@ async def api_config_save(request: Request):
         # Session
         system_prompt_prefix, tools_disabled
         # Feature flags (bool)
-        cost_tracking_enabled, orchestrator_enabled, flight_recorder_enabled,
-        conversation_replay_enabled, semantic_map_enabled, auto_summarization_enabled
+        cost_tracking_enabled, orchestrator_enabled,
+        conversation_replay_enabled, auto_summarization_enabled
     """
     try:
         body = await request.json()
@@ -549,13 +537,7 @@ async def api_config_save(request: Request):
         "orchestrator_max_parallel":    "orchestrator_max_parallel",
         "orchestrator_task_timeout":    "orchestrator_task_timeout",
         "orchestrator_total_timeout":   "orchestrator_total_timeout",
-        "flight_recorder_enabled":      "flight_recorder_enabled",
-        "flight_retention_hours":       "flight_retention_hours",
-        "flight_max_records":           "flight_max_records",
         "conversation_replay_enabled":  "conversation_replay_enabled",
-        "semantic_map_enabled":         "semantic_map_enabled",
-        "semantic_similarity_threshold": "semantic_similarity_threshold",
-        "semantic_max_topics":          "semantic_max_topics",
         "auto_summarization_enabled":   "auto_summarization_enabled",
         "auto_token_budget":            "auto_token_budget",
         "auto_summary_model":           "auto_summary_model",
@@ -839,46 +821,6 @@ async def api_backends():
 # Flight Recorder (v0.6)
 # ---------------------------------------------------------------------------
 
-@app.get("/api/v1/flight-recorder")
-async def api_flight_recorder_list(n: int = 10):
-    """List recent flight records."""
-    if not proxy or not proxy.flight_store:
-        return JSONResponse({
-            "enabled": False,
-            "message": "Flight recorder is disabled. Set flight_recorder.enabled: true in config.",
-        })
-    records = proxy.flight_store.recent(n=n)
-    return JSONResponse({
-        "enabled": True,
-        "count": proxy.flight_store.count,
-        "records": [
-            {
-                "id": r.id,
-                "conversation_id": r.conversation_id,
-                "model": r.model,
-                "total_ms": r.total_ms,
-                "events": len(r.events),
-            }
-            for r in records
-        ],
-    })
-
-
-@app.get("/api/v1/flight-recorder/{record_id}")
-async def api_flight_recorder_detail(record_id: str):
-    """Get detailed flight record by ID."""
-    if not proxy or not proxy.flight_store:
-        return JSONResponse({
-            "enabled": False,
-            "message": "Flight recorder is disabled.",
-        })
-    record = proxy.flight_store.get(record_id)
-    if not record:
-        return JSONResponse({"error": "Record not found"}, status_code=404)
-    result = record.to_json()
-    result["text"] = record.render_text()
-    return JSONResponse(result)
-
 
 # ---------------------------------------------------------------------------
 # Conversation Replay (v0.6)
@@ -1017,37 +959,6 @@ async def api_tap(
     total = len(entries)
     entries = entries[-n:]
     return JSONResponse({"entries": entries, "total": total, "filtered": len(entries)})
-
-
-@app.get("/api/v1/conversation/{conv_id}/semantic-map")
-async def api_semantic_map(conv_id: str):
-    """Generate a semantic topic map for a conversation."""
-    cfg = get_config()
-    rt = get_runtime_config()
-    # Check runtime config first, fall back to static config
-    if "semantic_map_enabled" in rt:
-        sm_enabled = rt.get("semantic_map_enabled")
-    else:
-        sm_enabled = cfg.get("semantic_map", {}).get("enabled", False)
-    if not sm_enabled:
-        return JSONResponse({
-            "enabled": False,
-            "message": "Semantic map is disabled. Enable it in Config tab or set semantic_map.enabled: true in config.yaml.",
-        })
-    if not sqlite_store or not vector_store:
-        return JSONResponse({"error": "Storage not initialized"}, status_code=503)
-
-    from beigebox.semantic_map import SemanticMap
-    similarity_threshold = rt.get("semantic_similarity_threshold", cfg.get("semantic_map", {}).get("similarity_threshold", 0.5))
-    max_topics = rt.get("semantic_max_topics", cfg.get("semantic_map", {}).get("max_topics", 50))
-    mapper = SemanticMap(
-        sqlite=sqlite_store,
-        vector=vector_store,
-        similarity_threshold=similarity_threshold,
-        max_topics=max_topics,
-    )
-    result = mapper.build(conv_id)
-    return JSONResponse(result)
 
 
 # ---------------------------------------------------------------------------

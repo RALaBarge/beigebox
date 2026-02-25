@@ -46,7 +46,6 @@ for path in \
   /api/v1/model-performance \
   /api/v1/backends \
   /api/v1/tap \
-  /api/v1/flight-recorder \
   /api/v1/tools \
 ; do
   curl -fsS "$BB$path" >/dev/null \

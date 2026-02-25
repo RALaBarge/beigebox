@@ -136,11 +136,7 @@ The orchestrator LLM uses temperature 0.2 for deterministic planning. JSON parsi
 
 **Wire Tap** — Structured JSONL log of every message and forwarded request. Filterable by role and direction. Filters persist in localStorage. Live mode polls every 2s. Also queryable via `beigebox tap`.
 
-**Flight Recorder** — Per-request lifecycle timelines in a ring buffer. Per-stage timing with latency bars in the web UI.
-
 **Conversation Replay** — Reconstruct any conversation with full routing context: model, why it was chosen, tools invoked, backend used, cost per message.
-
-**Semantic Map** — Topic cluster map for any conversation via ChromaDB pairwise cosine similarity.
 
 **Model Performance** — Per-model avg / p50 / p95 latency, request counts, total cost. In `beigebox flash` and the web UI dashboard.
 
@@ -186,11 +182,10 @@ Single-file, no build step, no external JS dependencies. Served at `http://local
 | Dashboard | 1 | Stats cards, subsystem health, backends, cost charts, model performance |
 | Chat | 2 | Multi-pane streaming chat, per-pane model/target selector, fan-out to all panes |
 | Conversations | 3 | Semantic search grouped by conversation, replay, per-message forking |
-| Flight Recorder | 4 | Request timelines with per-stage latency bars |
-| Tap | 5 | Wire log, role/direction filters (persisted to localStorage), live mode |
-| Operator | 6 | ReAct agent REPL with backend/model target selector |
-| Harness | 7 | Parallel agent runner — Manual and Orchestrated modes |
-| Config | 8 | Full config viewer/editor, feature flag toggles with inline sub-options, Save & Apply |
+| Tap | 4 | Wire log, role/direction filters (persisted to localStorage), live mode |
+| Operator | 5 | ReAct agent REPL with backend/model target selector |
+| Harness | 6 | Parallel agent runner — Manual and Orchestrated modes |
+| Config | 7 | Full config viewer/editor, feature flag toggles with inline sub-options, Save & Apply |
 
 **Multi-pane chat** — Add up to 20 panes with the + button. Each pane has its own target (model or @operator). Send broadcasts to all visible panes simultaneously. Navigate pages with [ / ]. Close a pane with x (last pane clears instead of closing).
 
@@ -225,9 +220,7 @@ beigebox/
     summarizer.py                auto-summarization, context window management
     system_context.py            hot-reloadable system_context.md injection
     costs.py                     cost aggregation queries
-    flight_recorder.py           in-memory request timeline ring buffer
     replay.py                    conversation replay with routing context
-    semantic_map.py              topic clustering via ChromaDB
     orchestrator.py              parallel LLM task spawner (used by Operator tool)
 
     agents/
@@ -317,11 +310,9 @@ beigebox/
 | `/api/v1/model-performance` | GET | Latency percentiles by model |
 | `/api/v1/tap` | GET | Wire log with filters |
 | `/api/v1/search` | GET | Semantic search grouped by conversation |
-| `/api/v1/flight-recorder` | GET | Request timelines |
-| `/api/v1/flight-recorder/{id}` | GET | Detailed record with event breakdown |
+| `/api/v1/conversation/{id}/replay` | GET | Conversation replay with full routing context |
 | `/api/v1/conversation/{id}/replay` | GET | Replay with routing context |
 | `/api/v1/conversation/{id}/fork` | POST | Fork conversation at message N |
-| `/api/v1/conversation/{id}/semantic-map` | GET | Topic cluster map |
 | `/api/v1/build-centroids` | POST | Rebuild embedding classifier centroids |
 | `/api/v1/export` | GET | Export conversations (`?format=jsonl\|alpaca\|sharegpt&model=`) |
 | `/api/v1/system-context` | GET | Read system_context.md contents |
@@ -379,18 +370,8 @@ auto_summarization:
   summary_model: "llama3.2:3b"
   keep_last: 4
 
-flight_recorder:
-  enabled: false
-  retention_hours: 24
-  max_records: 1000
-
 conversation_replay:
   enabled: false
-
-semantic_map:
-  enabled: false
-  similarity_threshold: 0.5
-  max_topics: 50
 
 orchestrator:
   enabled: false
@@ -516,7 +497,7 @@ pytest tests/test_storage.py tests/test_proxy.py tests/test_hooks.py \
 - [x] Catch-all passthrough for any unknown endpoint
 - [x] LangChain ReAct operator agent
 - [x] Parallel orchestrator (Operator tool)
-- [x] Flight recorder, conversation replay, semantic map
+- [x] Conversation replay with full routing context
 - [x] Wire tap with persistent filters and live mode
 - [x] Prompt injection detection, flag and block modes
 - [x] Single-file web UI -- 8 tabs, full config editor, persistent state
@@ -582,7 +563,7 @@ By contributing you agree your work will be licensed under AGPLv3, and you grant
 - Vi mode, palette themes, conversation forking
 
 ### v0.8.0
-- Flight recorder, conversation replay, semantic map
+- Conversation replay with full routing context
 - Wire tap with persistent filters and live mode
 - Prompt injection detection (flag and block modes)
 - Multi-pane chat with fan-out and per-pane targets

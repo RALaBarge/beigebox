@@ -67,16 +67,9 @@ class Proxy:
         # Wire log — structured tap of everything on the line
         wire_path = self.cfg.get("wiretap", {}).get("path", "./data/wire.jsonl")
         self.wire = WireLog(wire_path)
-        # Flight recorder (v0.6) — in-memory request timelines
-        fr_cfg = self.cfg.get("flight_recorder", {})
-        self._flight_recorder_enabled = fr_cfg.get("enabled", False)
+        # Flight recorder removed (v0.9.9) — timing will merge into wiretap
+        self._flight_recorder_enabled = False
         self.flight_store = None
-        if self._flight_recorder_enabled:
-            from beigebox.flight_recorder import FlightRecorderStore
-            self.flight_store = FlightRecorderStore(
-                max_records=fr_cfg.get("max_records", 1000),
-                retention_hours=fr_cfg.get("retention_hours", 24),
-            )
         # Session routing cache — sticky model within a conversation
         # {conversation_id: (model_string, timestamp)}
         self._session_cache: dict[str, tuple[str, float]] = {}
@@ -538,13 +531,8 @@ class Proxy:
         model = self._get_model(body)
         conversation_id = self._extract_conversation_id(body)
 
-        # Flight recorder — start timeline
+        # Flight recorder removed — timing will merge into wiretap
         recorder = None
-        if self._flight_recorder_enabled:
-            from beigebox.flight_recorder import FlightRecord
-            recorder = FlightRecord(conversation_id=conversation_id, model=model)
-            recorder.log("Request Received", model=model,
-                         tokens=_estimate_tokens(self._get_latest_user_message(body)))
 
         # Z-command parsing
         zcmd, body = self._process_z_command(body)

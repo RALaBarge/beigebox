@@ -23,10 +23,6 @@
     --fg:            #D8DEE9;
     --fg-dim:        #6C7680;
     --fg-muted:      #4C5460;
-    --flight-fast:   #a5d6a7;
-    --flight-medium: #fff176;
-    --flight-slow:   #ffcc80;
-    --flight-crit:   #ef9a9a;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -339,51 +335,6 @@
     background: var(--bg-panel); border-top: 1px solid var(--bg-border);
     flex-shrink: 0;
   }
-
-  /* ── Flight recorder ─────────────────────────────────────────────────── */
-  .flight-record {
-    background: var(--bg-panel);
-    border: 1px solid var(--bg-border);
-    margin-bottom: 8px;
-    border-radius: 2px;
-    overflow: hidden;
-  }
-  .flight-header {
-    padding: 6px 12px;
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    cursor: pointer;
-    user-select: none;
-    border-bottom: 1px solid var(--bg-border);
-  }
-  .flight-header:hover { background: var(--bg-hover); }
-  .flight-id-text { color: var(--lavender); font-size: 12px; }
-  .flight-model-text { color: #ce93d8; font-size: 11px; }
-  .flight-total { font-family: 'VT323', monospace; font-size: 16px; }
-  .flight-total.fast   { color: var(--flight-fast); }
-  .flight-total.medium { color: var(--flight-medium); }
-  .flight-total.slow   { color: var(--flight-slow); }
-  .flight-total.crit   { color: var(--flight-crit); }
-  .flight-events { padding: 8px 12px; display: none; }
-  .flight-record.expanded .flight-events { display: block; }
-  .flight-event {
-    display: flex; gap: 12px; padding: 2px 0;
-    border-bottom: 1px solid var(--bg-border); font-size: 11px;
-  }
-  .flight-event-ms  { color: var(--fg-muted); min-width: 80px; text-align: right; }
-  .flight-event-stage { color: var(--fg); }
-  .flight-event-detail { color: var(--fg-dim); font-size: 10px; }
-  .flight-bar-row {
-    display: flex; gap: 8px; align-items: center;
-    padding: 2px 0; font-size: 10px;
-  }
-  .flight-bar-label { color: var(--fg-muted); min-width: 160px; }
-  .flight-bar-track {
-    flex: 1; height: 6px; background: var(--bg-border); border-radius: 1px; overflow: hidden;
-  }
-  .flight-bar-fill { height: 100%; border-radius: 1px; }
-  .flight-bar-ms { color: var(--fg-dim); min-width: 70px; text-align: right; }
 
   /* ── Conversations ────────────────────────────────────────────────────── */
   .conv-row {
@@ -1034,16 +985,6 @@
       font-weight: 500;
     }
     
-    /* Semantic map: full width */
-    #semantic-panel { padding: 8px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-    #semantic-canvas, #semantic-svg {
-      width: 100%;
-      height: 300px;
-      border: 1px solid var(--bg-border);
-      border-radius: 2px;
-      margin-bottom: 8px;
-    }
-    
     /* Ensemble: single column cards */
     #ensemble-panel { padding: 8px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
     .ensemble-result {
@@ -1063,17 +1004,6 @@
       color: var(--fg);
       font-size: 12px;
       line-height: 1.5;
-    }
-    
-    /* Flight Recorder: single column timeline */
-    #flight-panel { padding: 8px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-    .flight-event {
-      background: var(--bg-panel);
-      border-left: 3px solid var(--bg-border);
-      padding: 10px 12px;
-      margin-bottom: 6px;
-      border-radius: 2px;
-      font-size: 11px;
     }
     
     /* VI toggle: always visible on mobile */
@@ -1169,11 +1099,10 @@
   <div class="tab active" data-tab="dashboard" onclick="switchTab('dashboard')"><span class="tab-key">1</span>Dashboard</div>
   <div class="tab" data-tab="chat"      onclick="switchTab('chat')">     <span class="tab-key">2</span>Chat</div>
   <div class="tab" data-tab="convos"    onclick="switchTab('convos')">   <span class="tab-key">3</span>Conversations</div>
-  <div class="tab" data-tab="flight"    onclick="switchTab('flight')">   <span class="tab-key">4</span>Flight Recorder</div>
-  <div class="tab" data-tab="tap"       onclick="switchTab('tap')">      <span class="tab-key">5</span>Tap</div>
-  <div class="tab" data-tab="operator"  onclick="switchTab('operator')"> <span class="tab-key">6</span>Operator</div>
-  <div class="tab" data-tab="harness"   onclick="switchTab('harness')">  <span class="tab-key">7</span>Harness</div>
-  <div class="tab" data-tab="config"    onclick="switchTab('config')">   <span class="tab-key">8</span>Config</div>
+  <div class="tab" data-tab="tap"       onclick="switchTab('tap')">      <span class="tab-key">4</span>Tap</div>
+  <div class="tab" data-tab="operator"  onclick="switchTab('operator')"> <span class="tab-key">5</span>Operator</div>
+  <div class="tab" data-tab="harness"   onclick="switchTab('harness')">  <span class="tab-key">6</span>Harness</div>
+  <div class="tab" data-tab="config"    onclick="switchTab('config')">   <span class="tab-key">7</span>Config</div>
 </div>
 
 <!-- ── Content ─────────────────────────────────────────────────────────── -->
@@ -1240,21 +1169,7 @@
     </div>
   </div>
 
-  <!-- 4. Flight Recorder -->
-  <div class="panel" id="panel-flight">
-    <div class="toolbar">
-      <button onclick="loadFlight()">↺ Refresh</button>
-      <span class="toolbar-label" style="margin-left:8px">Count:</span>
-      <input id="flight-n" type="number" value="20" min="1" max="100" style="width:60px">
-      <span class="toolbar-spacer"></span>
-      <span class="last-updated" id="flight-updated"></span>
-    </div>
-    <div class="scroll-area" id="flight-body">
-      <div class="empty">Loading…</div>
-    </div>
-  </div>
-
-  <!-- 5. Tap -->
+  <!-- 4. Tap -->
   <div class="panel" id="panel-tap">
     <div class="toolbar">
       <button onclick="loadTap()">↺ Refresh</button>
@@ -1452,6 +1367,7 @@ const BASE = '';  // same origin
 let chatHistory = [];
 let currentModel = localStorage.getItem('bb_model') || '';
 let viModeActive = false;
+let allModels = [];
 
 // Persist and restore chat history across tab switches
 function saveChatHistory() {
@@ -1579,7 +1495,6 @@ function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
   if (name === 'dashboard') loadDashboard();
-  if (name === 'flight')    loadFlight();
   if (name === 'tap')       loadTap();
   if (name === 'config')    loadConfig();
   if (name === 'chat')      { initChatPanes(); loadModels(); }
@@ -1589,7 +1504,7 @@ function switchTab(name) {
 
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
-  const map = {'1':'dashboard','2':'chat','3':'convos','4':'flight','5':'tap','6':'operator','7':'harness','8':'config'};
+  const map = {'1':'dashboard','2':'chat','3':'convos','4':'tap','5':'operator','6':'harness','7':'config'};
   if (map[e.key]) switchTab(map[e.key]);
   // [ ] to page chat panes
   if (e.key === '[') chatPagePrev();
@@ -2107,6 +2022,7 @@ async function loadModelsForPanes() {
   try {
     const d = await api('/v1/models');
     models = (d.data || d.models || []).map(m => m.id || m.name || m);
+    allModels = models.map(id => ({id}));
   } catch {}
 
   document.querySelectorAll('.pane-target-sel').forEach(sel => {
@@ -2638,92 +2554,7 @@ async function forkConversation(convId, branchAt) {
   }
 }
 
-// ── 4. Flight Recorder ───────────────────────────────────────────────────────
-async function loadFlight() {
-  const el = document.getElementById('flight-body');
-  const n  = document.getElementById('flight-n').value || 20;
-  el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
-  try {
-    const d = await api(`/api/v1/flight-recorder?n=${n}`);
-    document.getElementById('flight-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
-    if (!d.enabled) {
-      el.innerHTML = featureDisabledMsg('Flight Recorder', 'flight_recorder_enabled',
-        'Records the full timing lifecycle of each request — latency per stage, routing decisions, model selection.');
-      return;
-    }
-    const records = d.records || [];
-    if (!records.length) {
-      el.innerHTML = '<div class="empty">No flight records yet. Send requests through BeigeBox.</div>';
-      return;
-    }
-    let html = `<div style="color:var(--fg-muted);font-size:11px;padding:0 0 8px">${d.count} total records · showing ${records.length}</div>`;
-    records.slice().reverse().forEach(r => {
-      const lc = latencyClass(r.total_ms);
-      html += `<div class="flight-record" id="fr-${esc(r.id)}">
-        <div class="flight-header" onclick="toggleFlight('${esc(r.id)}')">
-          <span class="flight-id-text">◈ ${esc(r.id)}</span>
-          <span class="flight-model-text">${esc(r.model || '')}</span>
-          <span style="flex:1"></span>
-          <span style="color:var(--fg-muted);font-size:10px">${r.events} events</span>
-          <span class="flight-total ${lc}">${r.total_ms.toFixed(0)}ms</span>
-          <span style="color:var(--fg-muted);font-size:11px">▸</span>
-        </div>
-        <div class="flight-events" id="fre-${esc(r.id)}">
-          <div class="empty"><span class="spinner"></span> Click to expand</div>
-        </div>
-      </div>`;
-    });
-    el.innerHTML = html;
-  } catch(e) {
-    el.innerHTML = apiErrorMsg(e, 'Flight Recorder', 'flight_recorder_enabled',
-      'Records the full timing lifecycle of each request.');
-  }
-}
-
-async function toggleFlight(id) {
-  const card = document.getElementById('fr-' + id);
-  const body = document.getElementById('fre-' + id);
-  if (!card) return;
-  const expanding = !card.classList.contains('expanded');
-  card.classList.toggle('expanded');
-  if (expanding && body.querySelector('.spinner')) {
-    try {
-      const d = await api('/api/v1/flight-recorder/' + id);
-      let html = '';
-      (d.events || []).forEach(ev => {
-        const det = ev.details ? Object.entries(ev.details).map(([k,v]) => `${k}=${v}`).join(' ') : '';
-        html += `<div class="flight-event">
-          <span class="flight-event-ms">${ev.elapsed_ms.toFixed(1)}ms</span>
-          <span class="flight-event-stage">${esc(ev.stage)}</span>
-          <span class="flight-event-detail">${esc(det)}</span>
-        </div>`;
-      });
-      // Breakdown bars
-      const bk = d.summary?.breakdown || {};
-      if (Object.keys(bk).length) {
-        html += '<hr>';
-        const total = d.summary.total_ms || 1;
-        Object.entries(bk).forEach(([stage, info]) => {
-          const pct = info.pct;
-          const lc  = latencyClass(info.ms);
-          const color = lc === 'fast' ? 'var(--flight-fast)' :
-                        lc === 'medium' ? 'var(--flight-medium)' :
-                        lc === 'slow' ? 'var(--flight-slow)' : 'var(--flight-crit)';
-          html += `<div class="flight-bar-row">
-            <span class="flight-bar-label">${esc(stage)}</span>
-            <div class="flight-bar-track"><div class="flight-bar-fill" style="width:${pct}%;background:${color}"></div></div>
-            <span class="flight-bar-ms">${info.ms.toFixed(0)}ms (${pct}%)</span>
-          </div>`;
-        });
-      }
-      body.innerHTML = html || '<div class="empty">No events.</div>';
-    } catch(e) {
-      body.innerHTML = apiErrorMsg(e, 'Flight Record Detail', 'flight_recorder_enabled', '');
-    }
-  }
-}
-
-// ── 5. Tap ────────────────────────────────────────────────────────────────────
+// ── 4. Tap ────────────────────────────────────────────────────────────────────
 
 let _tapLiveTimer = null;
 
@@ -3601,22 +3432,8 @@ async function loadConfig() {
     html += cfgInput('orchestrator_total_timeout','Total timeout (s)',  c.orchestrator?.total_timeout_seconds ?? 300, 'number');
     html += '</div>';
 
-    // Flight recorder
-    html += cfgToggle('flight_recorder_enabled', 'Flight recorder', c.flight_recorder?.enabled ?? false);
-    html += `<div id="sub-flight_recorder_enabled" style="display:${c.flight_recorder?.enabled ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
-    html += cfgInput('flight_retention_hours', 'Retention (hours)', c.flight_recorder?.retention_hours ?? 24, 'number');
-    html += cfgInput('flight_max_records',     'Max records',       c.flight_recorder?.max_records ?? 1000, 'number');
-    html += '</div>';
-
     // Conversation replay (no sub-options)
     html += cfgToggle('conversation_replay_enabled', 'Conversation replay', c.conversation_replay?.enabled ?? false);
-
-    // Semantic map
-    html += cfgToggle('semantic_map_enabled', 'Semantic map', c.semantic_map?.enabled ?? false);
-    html += `<div id="sub-semantic_map_enabled" style="display:${c.semantic_map?.enabled ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
-    html += cfgInput('semantic_similarity_threshold', 'Similarity threshold (0-1)', c.semantic_map?.similarity_threshold ?? 0.5, 'number');
-    html += cfgInput('semantic_max_topics',           'Max topics',                c.semantic_map?.max_topics ?? 50, 'number');
-    html += '</div>';
 
     // Auto-summarization
     html += cfgToggle('auto_summarization_enabled', 'Auto-summarization', c.auto_summarization?.enabled ?? false);
@@ -3718,8 +3535,8 @@ async function loadConfig() {
     const toggleIds = [
       'log_conversations','decision_llm_enabled','tools_enabled',
       'cost_tracking_enabled','cost_track_openrouter','cost_track_local',
-      'orchestrator_enabled','flight_recorder_enabled',
-      'conversation_replay_enabled','semantic_map_enabled','auto_summarization_enabled',
+      'orchestrator_enabled',
+      'conversation_replay_enabled','auto_summarization_enabled',
       'web_ui_vi_mode','voice_enabled','tts_autoplay','system_context_enabled','gen_force',
     ];
     toggleIds.forEach(id => {
@@ -3728,8 +3545,8 @@ async function loadConfig() {
       if (cb && lbl) cb.addEventListener('change', () => { lbl.textContent = cb.checked ? 'enabled' : 'disabled'; });
     });
     // Expand sub-options when parent feature flag is toggled
-    ['cost_tracking_enabled','orchestrator_enabled','flight_recorder_enabled',
-     'semantic_map_enabled','auto_summarization_enabled','system_context_enabled','tts_autoplay'].forEach(id => {
+    ['cost_tracking_enabled','orchestrator_enabled',
+     'auto_summarization_enabled','system_context_enabled','tts_autoplay'].forEach(id => {
       const cb = document.getElementById(`cfg-${id}`);
       const sub = document.getElementById(`sub-${id}`);
       if (cb && sub) {
@@ -3759,8 +3576,8 @@ async function saveConfig() {
   const bools = [
     'log_conversations','decision_llm_enabled','tools_enabled',
     'cost_tracking_enabled','cost_track_openrouter','cost_track_local',
-    'orchestrator_enabled','flight_recorder_enabled',
-    'conversation_replay_enabled','semantic_map_enabled','auto_summarization_enabled',
+    'orchestrator_enabled',
+    'conversation_replay_enabled','auto_summarization_enabled',
     'web_ui_vi_mode','voice_enabled','tts_autoplay','system_context_enabled','gen_force',
   ];
   const strings = [
@@ -3770,8 +3587,6 @@ async function saveConfig() {
   ];
   const numbers = [
     'orchestrator_max_parallel','orchestrator_task_timeout','orchestrator_total_timeout',
-    'flight_retention_hours','flight_max_records',
-    'semantic_similarity_threshold','semantic_max_topics',
     'auto_token_budget','auto_keep_last',
     'gen_temperature','gen_top_p','gen_top_k','gen_num_ctx',
     'gen_repeat_penalty','gen_max_tokens','gen_seed',

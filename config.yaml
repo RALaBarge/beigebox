@@ -88,15 +88,6 @@ decision_llm:
   system_prompt: "You are a helpful routing assistant that decides which tool or backend to use."
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Flight Recorder (Request Lifecycle Tracking)
-# ─────────────────────────────────────────────────────────────────────────────
-
-flight_recorder:
-  enabled: true
-  retention_hours: 24
-  max_records: 10000
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Cost Tracking
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -111,15 +102,6 @@ cost_tracking:
 
 conversation_replay:
   enabled: true  # Can be toggled in Config tab now
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Semantic Map (Conversation Topic Clustering)
-# ─────────────────────────────────────────────────────────────────────────────
-
-semantic_map:
-  enabled: true  # Can be toggled in Config tab now
-  similarity_threshold: 0.5
-  max_topics: 50
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Auto-Summarization
