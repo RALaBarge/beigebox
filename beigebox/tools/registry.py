@@ -18,6 +18,7 @@ from beigebox.tools.calculator import CalculatorTool
 from beigebox.tools.datetime_tool import DateTimeTool
 from beigebox.tools.system_info import SystemInfoTool
 from beigebox.tools.memory import MemoryTool
+from beigebox.tools.ensemble import EnsembleTool
 from beigebox.tools.notifier import ToolNotifier
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,17 @@ class ToolRegistry:
                 vector_store=vector_store,
                 max_results=mem_cfg.get("max_results", 3),
                 min_score=mem_cfg.get("min_score", 0.3),
+            )
+
+        # --- Ensemble (multi-model voting — disabled by default) ---
+        ens_cfg = tools_cfg.get("ensemble", {})
+        if ens_cfg.get("enabled", False):
+            from beigebox.config import get_config as _gc
+            op_cfg = _gc().get("operator", {})
+            default_judge = op_cfg.get("model") or _gc().get("backend", {}).get("default_model")
+            self.tools["ensemble"] = EnsembleTool(
+                judge_model=ens_cfg.get("judge_model") or default_judge,
+                max_models=ens_cfg.get("max_models", 6),
             )
 
         logger.info("Tool registry loaded: %s", list(self.tools.keys()))

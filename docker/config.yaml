@@ -1,0 +1,322 @@
+# BeigeBox Configuration — Complete v1.0+ Setup
+# Generated: February 24, 2026
+# 
+# This is a full production-ready config with all v1.0 features enabled/configured.
+# Copy this to your project root as config.yaml (or merge with existing if you have custom settings)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Server Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
+server:
+  host: "0.0.0.0"
+  port: 8001
+  log_level: "INFO"
+  log_conversations: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Backend Configuration — UPDATED with retry/cooldown + generic OpenAI support
+# ─────────────────────────────────────────────────────────────────────────────
+
+backend:
+  default_model: "llama2"
+  url: "http://localhost:11434"  # Ollama default
+  timeout: 120
+
+# Multi-backend routing (STEP 2 & 3: Retry logic + Generic OpenAI)
+backends_enabled: false  # Set to true to enable multi-backend routing
+
+backends:
+  # Primary: Local Ollama with retry logic
+  - provider: ollama
+    name: ollama-local
+    url: http://localhost:11434
+    timeout: 120
+    priority: 1
+    # STEP 2: Retry configuration for transient errors
+    max_retries: 2              # Retry transient errors (404, 429, 5xx) 2 times
+    backoff_base: 1.5           # Wait 1.5^attempt seconds
+    backoff_max: 10.0           # Cap backoff at 10 seconds
+
+  # Secondary: Generic OpenAI-compatible backend (llama.cpp, vLLM, etc)
+  # STEP 3: Uncomment to enable — change URL to your endpoint
+  # - provider: openai_compat
+  #   name: vLLM
+  #   url: http://localhost:8000
+  #   timeout: 120
+  #   priority: 2
+  #   max_retries: 2
+  #   backoff_base: 1.5
+  #   backoff_max: 10.0
+
+  # Tertiary: OpenRouter API fallback (optional)
+  # Uncomment and add API key if you want API fallback
+  # - provider: openrouter
+  #   name: openrouter-fallback
+  #   url: https://openrouter.io/api/v1
+  #   api_key: ${OPENROUTER_API_KEY}
+  #   timeout: 120
+  #   priority: 3
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Storage Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
+storage:
+  type: sqlite
+  path: ./data/beigebox.db
+  vector_store_path: ./data/chroma
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Wiretap (Request/Response Logging)
+# ─────────────────────────────────────────────────────────────────────────────
+
+wiretap:
+  enabled: true
+  path: ./data/wire.jsonl
+  max_lines: 100000
+  rotation_enabled: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Decision LLM (Intelligent Routing)
+# ─────────────────────────────────────────────────────────────────────────────
+
+decision_llm:
+  enabled: true
+  model: "llama3.2:3b"
+  temperature: 0.2
+  system_prompt: "You are a helpful routing assistant that decides which tool or backend to use."
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cost Tracking
+# ─────────────────────────────────────────────────────────────────────────────
+
+cost_tracking:
+  enabled: true
+  track_openrouter: true
+  track_local: false  # Set true if you want to track local inference "cost" (doesn't charge, for metrics)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Conversation Replay — STEP 1: Now respects runtime config changes
+# ─────────────────────────────────────────────────────────────────────────────
+
+conversation_replay:
+  enabled: true  # Can be toggled in Config tab now
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Auto-Summarization
+# ─────────────────────────────────────────────────────────────────────────────
+
+auto_summarization:
+  enabled: false
+  model: "llama3.2:3b"
+  token_budget: 500
+  keep_last_n: 5
+
+# ─────────────────────────────────────────────────────────────────────────────
+# System Context — Global Prompt Injection
+# ─────────────────────────────────────────────────────────────────────────────
+# Injects the contents of system_context.md into every proxied request as a
+# system message. Hot-reloaded on every request via mtime check — no restart
+# needed. Edit via the Config tab or POST /api/v1/system-context.
+
+system_context:
+  enabled: false
+  path: ./system_context.md
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Generation Parameters — Global Inference Overrides
+# ─────────────────────────────────────────────────────────────────────────────
+# Override generation parameters injected into every proxied request.
+# Leave values unset to let the frontend decide. Set 'force: true' to
+# override even frontend-provided values.
+# All values are runtime-adjustable via the Config tab or POST /api/v1/config.
+
+# generation:
+#   force: false
+#   temperature: ~       # 0.0–2.0
+#   top_p: ~             # 0.0–1.0
+#   top_k: ~             # integer
+#   num_ctx: ~           # context window size
+#   repeat_penalty: ~    # 0.0–2.0
+#   max_tokens: ~        # max response tokens
+#   seed: ~              # integer, for reproducibility
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Voice (Speech-to-Text + Text-to-Speech)
+# ─────────────────────────────────────────────────────────────────────────────
+
+voice:
+  enabled: false  # Set to true if you have faster-whisper and Kokoro running
+  stt_model: "base"  # smaller=faster, larger=more accurate (tiny, base, small, medium, large)
+  tts_voice: "af"    # Kokoro voice code
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Harness Orchestrator — STEP 2 & 3: Works with retry + new backends
+# ─────────────────────────────────────────────────────────────────────────────
+
+harness:
+  enabled: true
+  retry:
+    max_retries: 2
+    backoff_base: 1.5
+    backoff_max: 10
+  stagger:
+    operator_seconds: 1.0      # Delay between operator task launches
+    model_seconds: 0.4         # Delay between model task launches
+  timeouts:
+    task_seconds: 120
+    operator_seconds: 180
+  store_runs: true
+  max_stored_runs: 1000
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Operator (Agentic Tool Use with ReAct)
+# ─────────────────────────────────────────────────────────────────────────────
+
+operator:
+  model: "llama3.2:3b"
+  max_iterations: 10
+  shell:
+    enabled: true
+    shell_binary: "/usr/local/bin/bb"  # Custom hardened binary (optional)
+    allowed_commands:
+      - ls
+      - cat
+      - grep
+      - ps
+      - df
+      - free
+      - ollama
+      - beigebox
+      - find
+      - head
+      - tail
+      - wc
+    blocked_patterns:
+      - "rm -rf"
+      - "sudo"
+      - "> /etc"
+      - "; "
+      - "| "
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tools (Function Calling)
+# ─────────────────────────────────────────────────────────────────────────────
+
+tools:
+  enabled: true
+  registry:
+    - name: web_search
+      description: "Search the web for current information"
+      enabled: true
+    - name: web_scraper
+      description: "Scrape a webpage for content"
+      enabled: true
+    - name: calculator
+      description: "Perform mathematical calculations"
+      enabled: true
+    - name: datetime_tool
+      description: "Get current date/time in any timezone"
+      enabled: true
+    - name: system_info
+      description: "Get system information and run shell commands"
+      enabled: true
+
+  # Ensemble voting — lets the Operator compare multiple models on a prompt
+  # and get a judge verdict. Disabled by default; enable when you want the
+  # Operator to autonomously run multi-model comparisons.
+  ensemble:
+    enabled: false
+    judge_model: ""        # defaults to operator.model if blank
+    max_models: 6          # cap how many models the tool will query at once
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Hooks (Custom Middleware)
+# ─────────────────────────────────────────────────────────────────────────────
+
+hooks:
+  enabled: false
+  # Examples (uncomment to enable):
+  # - name: filter_synthetic
+  #   enabled: true
+  # - name: rag_context
+  #   enabled: true
+  # - name: prompt_injection
+  #   enabled: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Web UI Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
+web_ui:
+  # STEP 4: Ensemble voting is now available via 🎯 Ensemble button
+  palette: "dark"           # dark, light, high-contrast
+  vi_mode: false            # vi-like keybindings (e.g., j/k for navigation)
+  voice_enabled: false      # Show mic button
+  voice_hotkey: ""          # e.g., "v" for Alt+V to toggle recording
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Embedding & Classification (for routing decisions)
+# ─────────────────────────────────────────────────────────────────────────────
+
+embedding:
+  model: "nomic-embed-text"
+  backend: "ollama"         # Where embedding model runs
+
+classifier:
+  enabled: true
+  centroid_rebuild_interval: 3600  # Rebuild every hour
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Z-Commands (Special command syntax like "z: code", "z: search")
+# ─────────────────────────────────────────────────────────────────────────────
+
+zcommands:
+  enabled: true
+  prefix: "z:"
+  commands:
+    - name: "search"
+      description: "Search for information"
+      route_to: "semantic_search"
+    - name: "code"
+      description: "Code generation and analysis"
+      route_to: "operator"
+    - name: "complex"
+      description: "Complex reasoning task"
+      route_to: "harness"
+    - name: "help"
+      description: "Show help message"
+      route_to: "internal"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
+logging:
+  level: "INFO"             # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "./logs/beigebox.log"
+  max_bytes: 10485760       # 10MB
+  backup_count: 5
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Advanced Settings
+# ─────────────────────────────────────────────────────────────────────────────
+
+advanced:
+  # Session cache for routing decisions
+  session_cache_ttl: 3600
+  
+  # Maximum concurrent requests
+  max_concurrent_requests: 10
+  
+  # Request timeout (global)
+  request_timeout: 300
+  
+  # Embedding batch size
+  embedding_batch_size: 32
+  
+  # Use compression for wiretap (reduces disk usage)
+  wiretap_compress: false
+

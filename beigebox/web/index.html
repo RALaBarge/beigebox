@@ -1127,7 +1127,6 @@
       <span class="toolbar-label">Panes:</span>
       <button onclick="addChatPane()" title="Add output pane (+)">＋</button>
       <button onclick="removeChatPane()" title="Remove last pane">－</button>
-      <button onclick="showEnsembleDialog()" title="Ensemble voting: send to multiple models and judge">🎯 Ensemble</button>
       <span style="color:var(--fg-muted);font-size:10px;margin-left:4px">max 4/page · [ ] to page</span>
       <span class="toolbar-spacer"></span>
       <div id="chat-page-nav">
@@ -1233,6 +1232,8 @@
           style="border-radius:0;border:none;padding:2px 10px;font-size:11px;background:var(--lavender);color:#000">Manual</button>
         <button id="harness-mode-orchestrated" onclick="setHarnessMode('orchestrated')"
           style="border-radius:0;border:none;padding:2px 10px;font-size:11px;background:var(--bg-input);color:var(--fg-dim)">Orchestrated</button>
+        <button id="harness-mode-ensemble" onclick="setHarnessMode('ensemble')"
+          style="border-radius:0;border:none;padding:2px 10px;font-size:11px;background:var(--bg-input);color:var(--fg-dim)">Ensemble</button>
       </div>
       <span class="toolbar-spacer"></span>
       <span id="harness-manual-controls" style="display:flex;gap:6px;align-items:center">
@@ -1262,6 +1263,14 @@
         <button onclick="harnessOrchRun()" class="primary" id="harness-orch-run-btn">▶ Run</button>
         <button onclick="harnessOrchClear()">✕ Clear</button>
       </span>
+      <span id="harness-ensemble-controls" style="display:none;gap:6px;align-items:center">
+        <span class="toolbar-label" style="color:var(--yellow)">Judge:</span>
+        <select id="harness-ensemble-judge" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
+          <option value="">— use operator default —</option>
+        </select>
+        <button onclick="harnessEnsembleRun()" class="primary" id="harness-ensemble-run-btn">▶ Run Ensemble</button>
+        <button onclick="harnessEnsembleClear()">✕ Clear</button>
+      </span>
     </div>
 
     <!-- Manual: target chips -->
@@ -1280,11 +1289,19 @@
       <button onclick="harnessOrchAddTarget()" style="padding:2px 8px;font-size:11px">＋</button>
     </div>
 
+    <!-- Ensemble: model checklist -->
+    <div id="harness-ensemble-model-area" style="display:none;padding:6px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border)">
+      <div style="font-size:11px;color:var(--fg-muted);margin-bottom:4px">Select models to compare (min 2):</div>
+      <div id="harness-ensemble-model-list" style="display:flex;flex-wrap:wrap;gap:6px;max-height:80px;overflow-y:auto">
+        <span style="color:var(--fg-muted);font-size:11px">Loading models…</span>
+      </div>
+    </div>
+
     <!-- Prompt input (shared) -->
     <div style="padding:6px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border);display:flex;gap:8px;flex-shrink:0">
       <textarea id="harness-prompt" rows="2"
         style="flex:1;resize:none;font-size:12px;padding:4px 8px"
-        onkeydown="if(event.ctrlKey&&event.key==='Enter'){harnessMode==='manual'?harnessRun():harnessOrchRun()}"
+        onkeydown="if(event.ctrlKey&&event.key==='Enter'){harnessMode==='manual'?harnessRun():harnessMode==='orchestrated'?harnessOrchRun():harnessEnsembleRun()}"
         placeholder="Enter goal or prompt… (Ctrl+Enter to run)"></textarea>
     </div>
 
@@ -1305,6 +1322,11 @@
     <div id="harness-grid">
       <div class="empty">Add targets and enter a prompt to begin.</div>
     </div>
+
+    <!-- Ensemble: results grid -->
+    <div id="harness-ensemble-grid" style="display:none;flex:1;overflow-y:auto;padding:8px;display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start">
+      <div class="empty">Select models, enter a prompt, and run ensemble.</div>
+    </div>
   </div>
 
     <!-- 8. Config -->
@@ -1321,39 +1343,6 @@
 
 </div>
 
-<!-- ── Ensemble Voting Modal ─────────────────────────────────────────────── -->
-<div id="ensemble-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1000; align-items:center; justify-content:center;">
-  <div style="background:var(--bg-panel); border:1px solid var(--bg-border); border-radius:6px; padding:16px; width:90%; max-width:600px; max-height:80vh; overflow-y:auto;">
-    <div style="font-weight:bold; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
-      <span>🎯 Ensemble Voting</span>
-      <button onclick="closeEnsembleDialog()" style="background:none; border:none; cursor:pointer; font-size:18px; color:var(--fg-muted);">✕</button>
-    </div>
-    
-    <div style="margin-bottom:12px; font-size:12px; color:var(--fg-muted);">
-      Send the same prompt to multiple models in parallel, then use a judge LLM to evaluate and select the best response.
-    </div>
-    
-    <div style="margin-bottom:12px;">
-      <label style="display:block; font-size:12px; margin-bottom:4px; font-weight:bold;">Select Models (check at least 2):</label>
-      <div id="ensemble-model-list" style="border:1px solid var(--bg-border); border-radius:4px; padding:8px; background:var(--bg-input); max-height:200px; overflow-y:auto;">
-        <!-- Models injected by JS -->
-      </div>
-    </div>
-    
-    <div style="margin-bottom:12px;">
-      <label for="ensemble-judge-model" style="display:block; font-size:12px; margin-bottom:4px; font-weight:bold;">Judge Model:</label>
-      <select id="ensemble-judge-model" style="width:100%; padding:6px; background:var(--bg-input); border:1px solid var(--bg-border); border-radius:4px; color:var(--fg); font-size:12px;">
-        <!-- Options injected by JS -->
-      </select>
-      <div style="font-size:10px; color:var(--fg-muted); margin-top:4px;">The judge evaluates all responses and picks the best</div>
-    </div>
-    
-    <div style="display:flex; gap:8px; justify-content:flex-end;">
-      <button onclick="closeEnsembleDialog()" style="padding:6px 12px; background:var(--bg-border); border:1px solid var(--bg-border); border-radius:4px; cursor:pointer;">Cancel</button>
-      <button onclick="runEnsemble()" style="padding:6px 12px; background:var(--green); color:black; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Run Ensemble</button>
-    </div>
-  </div>
-</div>
 
 <!-- ── Vi mode toggle ───────────────────────────────────────────────────── -->
 <div id="vi-toggle" onclick="toggleViMode()" title="">
@@ -1534,7 +1523,7 @@ function featureDisabledMsg(featureName, configKey, extraHint) {
     padding:12px 16px;border-radius:2px;margin:8px 0">
     <div style="color:var(--yellow);font-size:12px;margin-bottom:6px">⚠ ${esc(featureName)} is disabled</div>
     <div style="color:var(--fg-dim);font-size:11px;line-height:1.7">
-      Enable it in the <a href="#" onclick="switchTab('config');return false" style="color:var(--cyan)">Config tab (8)</a>
+      Enable it in the <a href="#" onclick="switchTab('config');return false" style="color:var(--cyan)">Config tab (7)</a>
       by toggling <code>${esc(configKey)}</code> and clicking Save &amp; Apply.
       ${extraHint ? `<br>${extraHint}` : ''}
     </div>
@@ -1622,6 +1611,23 @@ async function loadDashboard() {
     // ── Subsystems ──
     const st = status.status === 'fulfilled' ? status.value : {};
     html += '<div class="section-header">Subsystems</div>';
+    if (!st.proxy) {
+      // Show ghost rows so a new user understands what this section does
+      const ghost = (name, detail) =>
+        `<div class="subsystem-row" style="opacity:0.35">
+          <span class="status-dot ok" style="display:inline-block;vertical-align:middle;margin-right:6px"></span>
+          <span class="subsystem-name">${name}</span>
+          <span class="subsystem-detail">${detail}</span>
+        </div>`;
+      html += ghost('Proxy',                'backend: http://ollama:11434');
+      html += ghost('Storage · SQLite',     '0 messages');
+      html += ghost('Storage · ChromaDB',   '');
+      html += ghost('Decision LLM',         'disabled');
+      html += ghost('Embedding Classifier', '');
+      html += ghost('Tools',                'web_search, calculator, datetime, memory, …');
+      html += `<div style="color:var(--fg-muted);font-size:10px;padding:6px 0 2px;letter-spacing:0.5px">
+        ↑ example — proxy is still starting up or not reachable</div>`;
+    }
     if (st.proxy) {
       html += subsystem('Proxy',              true,                   `backend: ${esc(st.proxy.backend_url || '—')}`);
       html += subsystem('Storage · SQLite',   st.storage?.sqlite,     st.storage?.stats ? `${st.storage.stats.total_messages ?? 0} messages` : '');
@@ -1629,8 +1635,6 @@ async function loadDashboard() {
       html += subsystem('Decision LLM',       st.routing?.decision_llm?.enabled, st.routing?.decision_llm?.model ? `model: ${esc(st.routing.decision_llm.model)}` : 'disabled');
       html += subsystem('Embedding Classifier', st.routing?.embedding_classifier?.ready, '');
       html += subsystem('Tools',              st.tools?.enabled,      st.tools?.available?.join(', ') || '');
-    } else {
-      html += '<div class="error-box" style="background:transparent;border-color:var(--fg-muted);color:var(--fg-muted)">No subsystems loaded — proxy may still be starting up.</div>';
     }
 
     // ── Backends ──
@@ -2085,6 +2089,22 @@ async function loadModelsForPanes() {
       orchModelSel.appendChild(opt);
     });
   }
+
+  // Also populate ensemble judge selector
+  const ensJudgeSel = document.getElementById('harness-ensemble-judge');
+  if (ensJudgeSel) {
+    const cur = ensJudgeSel.value;
+    ensJudgeSel.innerHTML = `<option value="">— use operator default —</option>`;
+    models.forEach(id => {
+      const opt = document.createElement('option');
+      opt.value = id; opt.textContent = id;
+      if (id === cur) opt.selected = true;
+      ensJudgeSel.appendChild(opt);
+    });
+  }
+
+  // Refresh ensemble checklist if it's currently visible
+  if (harnessMode === 'ensemble') harnessEnsemblePopulateModels();
 }
 
 function setPaneTarget(paneId, val) {
@@ -2950,41 +2970,51 @@ let harnessOrchTargets = []; // targets the master can use: [{key, label}]
 
 function setHarnessMode(mode) {
   harnessMode = mode;
+  const isMan  = mode === 'manual';
   const isOrch = mode === 'orchestrated';
+  const isEns  = mode === 'ensemble';
 
-  // Mode button styles
-  const manBtn = document.getElementById('harness-mode-manual');
+  // ── Mode button styles ──
+  const manBtn  = document.getElementById('harness-mode-manual');
   const orchBtn = document.getElementById('harness-mode-orchestrated');
-  if (manBtn) { manBtn.style.background = isOrch ? 'var(--bg-input)' : 'var(--lavender)'; manBtn.style.color = isOrch ? 'var(--fg-dim)' : '#000'; }
-  if (orchBtn) { orchBtn.style.background = isOrch ? 'var(--cyan)' : 'var(--bg-input)'; orchBtn.style.color = isOrch ? '#000' : 'var(--fg-dim)'; }
+  const ensBtn  = document.getElementById('harness-mode-ensemble');
+  if (manBtn)  { manBtn.style.background  = isMan  ? 'var(--lavender)' : 'var(--bg-input)'; manBtn.style.color  = isMan  ? '#000' : 'var(--fg-dim)'; }
+  if (orchBtn) { orchBtn.style.background = isOrch ? 'var(--cyan)'     : 'var(--bg-input)'; orchBtn.style.color = isOrch ? '#000' : 'var(--fg-dim)'; }
+  if (ensBtn)  { ensBtn.style.background  = isEns  ? 'var(--yellow)'   : 'var(--bg-input)'; ensBtn.style.color  = isEns  ? '#000' : 'var(--fg-dim)'; }
 
-  // Show/hide control bars
+  // ── Toolbar control bars ──
   const manControls = document.getElementById('harness-manual-controls');
   const orchControls = document.getElementById('harness-orch-controls');
-  if (manControls) manControls.style.display = isOrch ? 'none' : 'flex';
-  if (orchControls) orchControls.style.display = isOrch ? 'flex' : 'none';
+  const ensControls  = document.getElementById('harness-ensemble-controls');
+  if (manControls)  manControls.style.display  = isMan  ? 'flex' : 'none';
+  if (orchControls) orchControls.style.display  = isOrch ? 'flex' : 'none';
+  if (ensControls)  ensControls.style.display   = isEns  ? 'flex' : 'none';
 
-  // Show/hide target areas
-  const manTargets = document.getElementById('harness-target-list');
-  const orchTargetArea = document.getElementById('harness-orch-target-area');
-  if (manTargets) manTargets.style.display = isOrch ? 'none' : '';
-  if (orchTargetArea) { orchTargetArea.style.display = isOrch ? 'flex' : 'none'; }
+  // ── Target / model areas ──
+  const manTargets      = document.getElementById('harness-target-list');
+  const orchTargetArea  = document.getElementById('harness-orch-target-area');
+  const ensModelArea    = document.getElementById('harness-ensemble-model-area');
+  if (manTargets)     manTargets.style.display    = isMan  ? ''     : 'none';
+  if (orchTargetArea) orchTargetArea.style.display = isOrch ? 'flex' : 'none';
+  if (ensModelArea)   ensModelArea.style.display   = isEns  ? ''     : 'none';
 
-  // Show/hide grids
-  const manGrid = document.getElementById('harness-grid');
+  // ── Result grids ──
+  const manGrid   = document.getElementById('harness-grid');
   const orchLayout = document.getElementById('harness-orch-layout');
-  if (manGrid) manGrid.style.display = isOrch ? 'none' : '';
+  const ensGrid    = document.getElementById('harness-ensemble-grid');
+  if (manGrid)    manGrid.style.display    = isMan  ? ''     : 'none';
   if (orchLayout) orchLayout.style.display = isOrch ? 'flex' : 'none';
+  if (ensGrid)    ensGrid.style.display    = isEns  ? 'flex' : 'none';
 
-  // Update prompt placeholder
+  // ── Prompt placeholder ──
   const ta = document.getElementById('harness-prompt');
-  if (ta) ta.placeholder = isOrch
-    ? 'Describe the goal… the orchestrator will plan, delegate, and iterate. (Ctrl+Enter to run)'
-    : 'Prompt to send to all targets… (Ctrl+Enter to run)';
+  if (ta) ta.placeholder =
+    isOrch ? 'Describe the goal… the orchestrator will plan, delegate, and iterate. (Ctrl+Enter to run)' :
+    isEns  ? 'Prompt to compare across all selected models… (Ctrl+Enter to run)' :
+             'Prompt to send to all targets… (Ctrl+Enter to run)';
 
-  // Populate orch target chips if switching to orchestrated
+  // ── Seed orchestrated target pool on first switch ──
   if (isOrch && harnessOrchTargets.length === 0) {
-    // Default: add operator + any existing manual targets
     ['operator', ...harnessTargets.map(t => t.key)].forEach(key => {
       if (!harnessOrchTargets.find(t => t.key === key)) {
         const label = key === 'operator' ? 'operator' : key.startsWith('model:') ? key.slice(6) : key;
@@ -2993,6 +3023,9 @@ function setHarnessMode(mode) {
     });
     renderOrchTargetChips();
   }
+
+  // ── Populate ensemble model checklist on first switch ──
+  if (isEns) harnessEnsemblePopulateModels();
 }
 
 // ── Orchestrated target pool ──────────────────────────────────────────────────
@@ -3200,165 +3233,127 @@ async function harnessOrchRun() {
   }
 }
 
-// ── 7b. Ensemble Voting ───────────────────────────────────────────────────────
-let ensembleSelectedModels = [];
+// ── 7b. Ensemble Voting (Harness mode) ────────────────────────────────────────
+let ensembleSelectedModels = new Set();
 
-function showEnsembleDialog() {
-  const modal = document.getElementById('ensemble-modal');
-  const modelList = document.getElementById('ensemble-model-list');
-  const judgeSelect = document.getElementById('ensemble-judge-model');
-  
-  // Populate model list
-  modelList.innerHTML = '';
-  if (allModels && allModels.length > 0) {
-    allModels.forEach(m => {
-      const div = document.createElement('div');
-      div.style.cssText = 'display:flex; align-items:center; padding:4px 0;';
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.value = m.id;
-      checkbox.style.marginRight = '8px';
-      checkbox.onchange = (e) => {
-        if (e.target.checked) {
-          if (!ensembleSelectedModels.includes(m.id)) ensembleSelectedModels.push(m.id);
-        } else {
-          ensembleSelectedModels = ensembleSelectedModels.filter(x => x !== m.id);
-        }
-      };
-      const label = document.createElement('label');
-      label.style.cssText = 'cursor:pointer; flex:1;';
-      label.appendChild(checkbox);
-      label.appendChild(document.createTextNode(m.id));
-      div.appendChild(label);
-      modelList.appendChild(div);
-    });
-  } else {
-    modelList.innerHTML = '<div style="color:var(--fg-muted); font-size:12px;">No models available</div>';
-  }
-  
-  // Populate judge model
-  judgeSelect.innerHTML = '';
-  if (allModels && allModels.length > 0) {
-    allModels.forEach(m => {
-      const opt = document.createElement('option');
-      opt.value = m.id;
-      opt.textContent = m.id;
-      judgeSelect.appendChild(opt);
-    });
-  }
-  
-  modal.style.display = 'flex';
+function harnessEnsemblePopulateModels() {
+  const listEl = document.getElementById('harness-ensemble-model-list');
+  const judgeEl = document.getElementById('harness-ensemble-judge');
+  if (!listEl || !judgeEl) return;
+
+  listEl.innerHTML = '';
+  judgeEl.innerHTML = '<option value="">— use operator default —</option>';
+
+  (allModels || []).forEach(m => {
+    // Checkbox chip
+    const chip = document.createElement('label');
+    chip.style.cssText = 'display:flex;align-items:center;gap:4px;padding:2px 8px;border:1px solid var(--bg-border);border-radius:3px;cursor:pointer;font-size:11px;background:var(--bg-input);white-space:nowrap';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = m.id;
+    cb.checked = ensembleSelectedModels.has(m.id);
+    cb.onchange = () => {
+      if (cb.checked) ensembleSelectedModels.add(m.id);
+      else ensembleSelectedModels.delete(m.id);
+      chip.style.borderColor = cb.checked ? 'var(--yellow)' : 'var(--bg-border)';
+    };
+    if (cb.checked) chip.style.borderColor = 'var(--yellow)';
+    chip.appendChild(cb);
+    chip.appendChild(document.createTextNode(' ' + m.id));
+    listEl.appendChild(chip);
+
+    // Judge selector
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.id;
+    judgeEl.appendChild(opt);
+  });
 }
 
-function closeEnsembleDialog() {
-  document.getElementById('ensemble-modal').style.display = 'none';
-  ensembleSelectedModels = [];
-}
+async function harnessEnsembleRun() {
+  const prompt = document.getElementById('harness-prompt').value.trim();
+  if (!prompt) { alert('Enter a prompt first'); return; }
+  if (ensembleSelectedModels.size < 2) { alert('Select at least 2 models'); return; }
 
-async function runEnsemble() {
-  const modal = document.getElementById('ensemble-modal');
-  const input = document.getElementById('chat-input');
-  const judgeModel = document.getElementById('ensemble-judge-model').value;
-  
-  if (ensembleSelectedModels.length < 2) {
-    alert('Please select at least 2 models');
-    return;
-  }
-  
-  const prompt = input.value.trim();
-  if (!prompt) {
-    alert('Please enter a prompt');
-    return;
-  }
-  
-  closeEnsembleDialog();
-  
-  // Add a pane for ensemble results
-  addChatPane();
-  const paneId = `pane-${Date.now()}`;
-  const panes = document.querySelectorAll('[data-pane-id]');
-  const lastPane = panes[panes.length - 1];
-  if (lastPane) lastPane.id = paneId;
-  
-  const messageBox = lastPane?.querySelector('.chat-messages');
-  if (messageBox) {
-    messageBox.innerHTML = '<div style="color:var(--fg-muted); text-align:center; padding:16px;">⏳ Running ensemble… this may take a moment</div>';
-  }
-  
+  const judgeModel = document.getElementById('harness-ensemble-judge').value;
+  const grid = document.getElementById('harness-ensemble-grid');
+  if (!grid) return;
+
+  const models = [...ensembleSelectedModels];
+  grid.innerHTML = `<div style="padding:12px;color:var(--fg-muted);font-size:12px">⏳ Querying ${models.length} models…</div>`;
+
+  const runBtn = document.getElementById('harness-ensemble-run-btn');
+  if (runBtn) { runBtn.disabled = true; runBtn.textContent = '⏳ Running…'; }
+
+  // Create placeholder cards for each model
+  const cards = {};
+  grid.innerHTML = '';
+  models.forEach(model => {
+    const card = document.createElement('div');
+    card.style.cssText = 'flex:1;min-width:260px;max-width:460px;border:1px solid var(--bg-border);border-radius:3px;padding:10px;background:var(--bg-panel)';
+    card.innerHTML = `<div style="font-size:10px;color:var(--fg-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">${esc(model)}</div>
+      <div class="card-body" style="font-size:12px;line-height:1.6;color:var(--fg-dim)">waiting…</div>`;
+    grid.appendChild(card);
+    cards[model] = card;
+  });
+
+  // Winner banner placeholder
+  const banner = document.createElement('div');
+  banner.style.cssText = 'width:100%;padding:10px 14px;border:1px solid var(--bg-border);border-radius:3px;background:var(--bg-deep);font-size:12px';
+  banner.innerHTML = '<span style="color:var(--fg-muted)">Waiting for judge…</span>';
+  grid.insertBefore(banner, grid.firstChild);
+
   try {
     const resp = await fetch('/api/v1/ensemble', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        models: ensembleSelectedModels,
-        judge_model: judgeModel,
-        prompt: prompt,
-      }),
+      body: JSON.stringify({ models, judge_model: judgeModel || undefined, prompt }),
     });
-    
-    if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status}`);
-    }
-    
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
-    let buffer = '';
-    const results = {};
-    let winner = '';
-    let verdict = '';
-    
+    let buf = '';
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
-      
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
       for (const line of lines) {
-        if (!line.trim()) continue;
-        if (line.startsWith('data: ')) {
-          try {
-            const ev = JSON.parse(line.substring(6));
-            if (ev.type === 'result') {
-              results[ev.model] = ev.response;
-            } else if (ev.type === 'finish') {
-              winner = ev.winner;
-              verdict = ev.verdict;
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const ev = JSON.parse(line.slice(6));
+          if (ev.type === 'result' && cards[ev.model]) {
+            cards[ev.model].querySelector('.card-body').style.color = 'var(--fg)';
+            cards[ev.model].querySelector('.card-body').textContent = ev.response;
+            cards[ev.model].querySelector('div').style.color = 'var(--lavender)';
+          } else if (ev.type === 'finish') {
+            banner.innerHTML = `<div style="color:var(--green);font-weight:bold;margin-bottom:4px">🏆 Winner: ${esc(ev.winner)}</div>
+              <div style="font-size:11px;color:var(--fg-dim);white-space:pre-wrap">${esc(ev.verdict || '')}</div>`;
+            if (cards[ev.winner]) {
+              cards[ev.winner].style.borderColor = 'var(--green)';
+              cards[ev.winner].style.borderWidth = '2px';
             }
-          } catch (e) {
-            // Skip non-JSON
+          } else if (ev.type === 'error') {
+            banner.innerHTML = `<div class="error-box">Error: ${esc(ev.message)}</div>`;
           }
-        }
+        } catch {}
       }
-    }
-    
-    // Render results
-    if (messageBox) {
-      let html = '<div style="padding:12px; border:1px solid var(--bg-border); border-radius:4px;">';
-      html += `<div style="font-weight:bold; margin-bottom:8px; color:var(--green);">🏆 Winner: ${esc(winner)}</div>`;
-      html += `<div style="font-size:12px; margin-bottom:12px; color:var(--fg-dim); padding:8px; background:var(--bg-input); border-radius:3px; white-space:pre-wrap;">${esc(verdict)}</div>`;
-      html += '<div style="border-top:1px solid var(--bg-border); margin-top:12px; padding-top:12px;">';
-      
-      for (const model in results) {
-        const highlight = model === winner ? 'border-left:3px solid var(--green);' : '';
-        html += `<div style="margin-bottom:12px; padding:8px; background:var(--bg-input); border-radius:3px; ${highlight}">`;
-        html += `<div style="font-size:11px; font-weight:bold; margin-bottom:4px; color:var(--fg-muted);">${esc(model)}</div>`;
-        html += `<div style="font-size:12px; white-space:pre-wrap;">${esc(results[model])}</div>`;
-        html += '</div>';
-      }
-      
-      html += '</div></div>';
-      messageBox.innerHTML = html;
     }
   } catch (e) {
-    if (messageBox) {
-      messageBox.innerHTML = `<div class="error-box">Error: ${esc(e.message)}</div>`;
-    }
+    banner.innerHTML = `<div class="error-box">Error: ${esc(e.message)}</div>`;
+  } finally {
+    if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Run Ensemble'; }
   }
-  
-  input.value = '';
-  renderChatPanes();
+}
+
+function harnessEnsembleClear() {
+  ensembleSelectedModels.clear();
+  const grid = document.getElementById('harness-ensemble-grid');
+  if (grid) grid.innerHTML = '<div class="empty">Select models, enter a prompt, and run ensemble.</div>';
+  harnessEnsemblePopulateModels();
 }
 function cfgInput(id, label, value, type='text') {
   return `<div class="kv-row" style="gap:12px;align-items:center">

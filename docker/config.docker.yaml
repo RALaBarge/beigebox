@@ -50,6 +50,10 @@ tools:
     enabled: true
     max_results: 3
     min_score: 0.3
+  ensemble:
+    enabled: false
+    judge_model: ""
+    max_models: 6
 
 # --- Decision LLM ---
 decision_llm:
