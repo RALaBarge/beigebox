@@ -45,7 +45,7 @@ Minimal configuration. Fully extensible.
 ```mermaid
 flowchart LR
     FE["Frontend\n(Open WebUI / Custom Client)"]
-    BB["BeigeBox\nMiddleware Control Plane\n\n• Routing Engine\n• Policy Layer\n• Logging & Replay\n• Embedding Classifier"]
+    BB["BeigeBox\nMiddleware Control Plane • Routing Engine • Policy Layer • Logging & Replay • Embedding Classifier"]
 
     LM["Local Models\n(Ollama / GGUF)"]
     EP["External Providers\nOpenAI / OpenRouter / API"]
@@ -63,11 +63,11 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    P[Incoming Prompt]
-    D[Decision Model<br/>(Small / Local)]
-    L[Local Response]
-    R[Large Reasoning Model]
-    E[External Provider<br/>(OpenRouter / API)]
+    P["Incoming Prompt"]
+    D["Decision Model (Small / Local)"]
+    L["Local Response"]
+    R["Large Reasoning Model"]
+    E["External Provider (OpenRouter / API)"]
 
     P --> D
     D -->|Low Complexity| L
@@ -81,11 +81,11 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    FE[Frontend]
-    BB[BeigeBox]
-    DB[(Local Conversation Store)]
-    LOG[(Structured Logs)]
-    PROV[Model Provider<br/>(Local or Remote)]
+    FE["Frontend"]
+    BB["BeigeBox"]
+    DB[("Local Conversation Store")]
+    LOG[("Structured Logs")]
+    PROV["Model Provider (Local or Remote)"]
 
     FE --> BB
     BB --> PROV
