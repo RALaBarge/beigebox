@@ -114,6 +114,35 @@ auto_summarization:
   keep_last_n: 5
 
 # ─────────────────────────────────────────────────────────────────────────────
+# System Context — Global Prompt Injection
+# ─────────────────────────────────────────────────────────────────────────────
+# Injects the contents of system_context.md into every proxied request as a
+# system message. Hot-reloaded on every request via mtime check — no restart
+# needed. Edit via the Config tab or POST /api/v1/system-context.
+
+system_context:
+  enabled: false
+  path: ./system_context.md
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Generation Parameters — Global Inference Overrides
+# ─────────────────────────────────────────────────────────────────────────────
+# Override generation parameters injected into every proxied request.
+# Leave values unset to let the frontend decide. Set 'force: true' to
+# override even frontend-provided values.
+# All values are runtime-adjustable via the Config tab or POST /api/v1/config.
+
+# generation:
+#   force: false
+#   temperature: ~       # 0.0–2.0
+#   top_p: ~             # 0.0–1.0
+#   top_k: ~             # integer
+#   num_ctx: ~           # context window size
+#   repeat_penalty: ~    # 0.0–2.0
+#   max_tokens: ~        # max response tokens
+#   seed: ~              # integer, for reproducibility
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Voice (Speech-to-Text + Text-to-Speech)
 # ─────────────────────────────────────────────────────────────────────────────
 

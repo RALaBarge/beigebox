@@ -142,6 +142,14 @@ The orchestrator LLM uses temperature 0.2 for deterministic planning. JSON parsi
 
 ---
 
+## Customization
+
+**System Context** — Global prompt injection via `system_context.md`. Every proxied request gets this content prepended as a system message. Hot-reloaded on every request (mtime check, no restart). Editable via the Config tab, the HTTP API (`GET/POST /api/v1/system-context`), or directly on disk. Disabled by default.
+
+**Generation Parameters** — Override temperature, top_p, top_k, num_ctx, repeat_penalty, max_tokens, and seed globally across all proxied requests. Set via the Config tab or `POST /api/v1/config`. "Force override" mode overrides even frontend-provided values. Reset all with `POST /api/v1/generation-params/reset`.
+
+---
+
 ## Security
 
 **Prompt Injection Detection** — Pre-request hook scanning for boundary breaking, role overrides, DAN/jailbreak patterns, system prompt extraction, delimiter injection, encoding obfuscation, and prompt chaining.
