@@ -44,12 +44,12 @@ Minimal configuration. Fully extensible.
 
 ```mermaid
 flowchart LR
-    FE["Frontend\n(Open WebUI / Custom Client)"]
-    BB["BeigeBox\nMiddleware Control Plane • Routing Engine • Policy Layer • Logging & Replay • Embedding Classifier"]
+    FE["Frontend (Open WebUI / Custom Client)"]
+    BB["BeigeBox Middleware Control Plane • Routing Engine • Policy Layer • Logging & Replay • Embedding Classifier"]
 
-    LM["Local Models\n(Ollama / GGUF)"]
+    LM["Local Models (Ollama / GGUF)"]
     EP["External Providers\nOpenAI / OpenRouter / API"]
-    VS["Vector Store\n(ChromaDB)"]
+    VS["Vector Store" (ChromaDB)"]
 
     FE -->|OpenAI API| BB
     BB --> LM
