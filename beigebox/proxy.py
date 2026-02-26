@@ -549,6 +549,33 @@ class Proxy:
                 "model": "beigebox",
             }
 
+        # Handle z: fork — branch this conversation into a new ID
+        if zcmd.is_fork:
+            from uuid import uuid4 as _uuid4
+            new_id = _uuid4().hex
+            try:
+                n = self.sqlite.fork_conversation(conversation_id, new_id)
+                fork_msg = (
+                    f"🔀 **Forked.** Copied {n} message(s) into new conversation `{new_id[:12]}…`\n\n"
+                    f"Open a new chat and set the conversation ID to `{new_id}` to continue on the branch, "
+                    f"or use the Conversations tab to find it.\n\n"
+                    f"This conversation continues unchanged."
+                )
+            except Exception as _e:
+                logger.error("z: fork failed: %s", _e)
+                fork_msg = f"❌ Fork failed: {_e}"
+            self.wire.log(
+                direction="internal",
+                role="system",
+                content=f"z: fork → new_id={new_id} source={conversation_id}",
+                model="beigebox",
+                conversation_id=conversation_id,
+            )
+            return {
+                "choices": [{"message": {"role": "assistant", "content": fork_msg}}],
+                "model": "beigebox",
+            }
+
         # Pre-request hooks
         _t_hooks = _time.monotonic()
         if self.hook_manager:

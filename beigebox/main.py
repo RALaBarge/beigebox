@@ -805,6 +805,73 @@ async def api_model_performance(days: int = 30):
     return JSONResponse(data)
 
 
+@app.get("/api/v1/routing-stats")
+async def api_routing_stats(lines: int = 10000):
+    """
+    Session-cache hit rate from the wiretap.
+
+    Scans the tail of wire.jsonl (default last 10 000 entries) and counts:
+      - cache_hits   — requests served directly from session cache
+      - cache_misses — requests that required a real routing decision
+                       (embedding classifier or decision LLM)
+
+    Returns:
+        {
+            "cache_hits":    int,
+            "cache_misses":  int,
+            "total":         int,
+            "hit_rate":      float,   # 0.0 – 1.0
+            "sampled_lines": int,
+        }
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    cfg = get_config()
+    wire_path = _Path(cfg.get("wiretap", {}).get("path", "./data/wire.jsonl"))
+
+    hits = misses = sampled = 0
+
+    if wire_path.exists():
+        try:
+            # Read tail efficiently — open, seek from end, grab last `lines` newlines
+            with open(wire_path, "rb") as fh:
+                # Estimate ~200 bytes/entry; read enough to cover `lines` entries
+                fh.seek(0, 2)
+                size = fh.tell()
+                chunk = min(size, lines * 220)
+                fh.seek(-chunk, 2)
+                raw = fh.read().decode("utf-8", errors="replace")
+
+            for line in raw.splitlines()[-lines:]:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = _json.loads(line)
+                except Exception:
+                    continue
+                if entry.get("role") != "decision" or entry.get("dir") != "internal":
+                    continue
+                sampled += 1
+                model = entry.get("model", "")
+                if model == "session-cache":
+                    hits += 1
+                elif model in ("embedding-classifier", "decision-llm"):
+                    misses += 1
+        except Exception as e:
+            logger.warning("routing-stats: failed to read wiretap: %s", e)
+
+    total = hits + misses
+    return JSONResponse({
+        "cache_hits":    hits,
+        "cache_misses":  misses,
+        "total":         total,
+        "hit_rate":      round(hits / total, 4) if total else 0.0,
+        "sampled_lines": sampled,
+    })
+
+
 @app.get("/api/v1/backends")
 async def api_backends():
     """Health and status of all configured backends."""

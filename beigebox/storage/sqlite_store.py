@@ -174,7 +174,10 @@ class SQLiteStore:
                           COUNT(*) as requests,
                           AVG(latency_ms) as avg_lat,
                           AVG(token_count) as avg_tok,
-                          COALESCE(SUM(cost_usd), 0) as total_cost
+                          COALESCE(SUM(cost_usd), 0) as total_cost,
+                          AVG(CASE WHEN latency_ms > 0 AND token_count > 0
+                                   THEN token_count / (latency_ms / 1000.0)
+                                   ELSE NULL END) as avg_tps
                    FROM messages
                    WHERE role = 'assistant'
                      AND latency_ms IS NOT NULL
@@ -209,12 +212,13 @@ class SQLiteStore:
             model = row["model"]
             lats = latencies_by_model.get(model, [])
             by_model[model] = {
-                "requests":       row["requests"],
-                "avg_latency_ms": round(row["avg_lat"] or 0, 1),
-                "p50_latency_ms": _pct(lats, 50),
-                "p95_latency_ms": _pct(lats, 95),
-                "avg_tokens":     round(row["avg_tok"] or 0, 1),
-                "total_cost_usd": round(row["total_cost"] or 0, 6),
+                "requests":           row["requests"],
+                "avg_latency_ms":     round(row["avg_lat"] or 0, 1),
+                "p50_latency_ms":     _pct(lats, 50),
+                "p95_latency_ms":     _pct(lats, 95),
+                "avg_tokens":         round(row["avg_tok"] or 0, 1),
+                "avg_tokens_per_sec": round(row["avg_tps"] or 0, 1),
+                "total_cost_usd":     round(row["total_cost"] or 0, 6),
             }
 
         return {"by_model": by_model, "days_queried": days}

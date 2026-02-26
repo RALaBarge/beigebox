@@ -1684,13 +1684,14 @@ async function loadDashboard() {
   const el = document.getElementById('dash-body');
   el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
   try {
-    const [status, stats, backends, info, costs, perf] = await Promise.allSettled([
+    const [status, stats, backends, info, costs, perf, routing] = await Promise.allSettled([
       api('/api/v1/status'),
       api('/api/v1/stats'),
       api('/api/v1/backends'),
       api('/api/v1/info'),
       api('/api/v1/costs?days=30'),
       api('/api/v1/model-performance?days=30'),
+      api('/api/v1/routing-stats'),
     ]);
 
     let html = '';
@@ -1763,6 +1764,17 @@ async function loadDashboard() {
       html += kv('server',           `${esc(i.server?.host || '0.0.0.0')}:${i.server?.port || 8000}`);
     }
 
+    // ── Routing stats ──
+    const rd = routing.status === 'fulfilled' ? routing.value : null;
+    if (rd && rd.total > 0) {
+      html += '<div class="section-header">Routing · Session Cache</div>';
+      html += '<div class="card-grid">';
+      html += card('Cache Hit Rate', (rd.hit_rate * 100).toFixed(1) + '%', `${rd.total} routing decisions`);
+      html += card('Cache Hits',  rd.cache_hits,  'served from session cache');
+      html += card('Cache Misses', rd.cache_misses, 'required classifier / LLM');
+      html += '</div>';
+    }
+
     // ── Cost tracking ──
     const c30 = costs.status === 'fulfilled' ? costs.value : null;
     html += '<div class="section-header">Cost Tracking · 30 days</div>';
@@ -1789,18 +1801,22 @@ async function loadDashboard() {
       html += '<div class="cost-disabled">No latency data yet — recorded on non-streaming requests via the multi-backend router.</div>';
     } else {
       html += '<div class="chart-wrap"><div class="chart-title">Avg Latency by Model (ms)</div><canvas class="bb-chart" id="chart-latency" height="' + Math.max(60, Object.keys(perfData.by_model).length * 28) + '"></canvas></div>';
+      html += '<div class="chart-wrap"><div class="chart-title">Tokens / sec by Model</div><canvas class="bb-chart" id="chart-tps" height="' + Math.max(60, Object.keys(perfData.by_model).length * 28) + '"></canvas></div>';
       // Stats table
       html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px">';
       html += '<tr style="color:var(--fg-muted);border-bottom:1px solid var(--bg-border)">';
-      html += '<th style="text-align:left;padding:3px 8px">Model</th><th style="padding:3px 8px">Reqs</th><th style="padding:3px 8px">Avg ms</th><th style="padding:3px 8px">p50 ms</th><th style="padding:3px 8px">p95 ms</th><th style="padding:3px 8px">Avg tok</th><th style="padding:3px 8px">Cost</th></tr>';
+      html += '<th style="text-align:left;padding:3px 8px">Model</th><th style="padding:3px 8px">Reqs</th><th style="padding:3px 8px">Avg ms</th><th style="padding:3px 8px">p50 ms</th><th style="padding:3px 8px">p95 ms</th><th style="padding:3px 8px">tok/s</th><th style="padding:3px 8px">Avg tok</th><th style="padding:3px 8px">Cost</th></tr>';
       Object.entries(perfData.by_model).forEach(([name, m]) => {
         const p95cls = m.p95_latency_ms > 5000 ? 'color:var(--red)' : m.p95_latency_ms > 2000 ? 'color:var(--yellow)' : 'color:var(--green)';
+        const tps = m.avg_tokens_per_sec || 0;
+        const tpscls = tps > 50 ? 'color:var(--green)' : tps > 15 ? 'color:var(--cyan)' : tps > 0 ? 'color:var(--yellow)' : 'color:var(--fg-muted)';
         html += `<tr style="border-bottom:1px solid var(--bg-border)">
           <td style="padding:3px 8px;color:var(--fg)">${esc(name)}</td>
           <td style="padding:3px 8px;color:var(--cyan);text-align:center">${m.requests}</td>
           <td style="padding:3px 8px;color:var(--fg-dim);text-align:center">${m.avg_latency_ms}</td>
           <td style="padding:3px 8px;color:var(--fg-dim);text-align:center">${m.p50_latency_ms}</td>
           <td style="padding:3px 8px;text-align:center;${p95cls}">${m.p95_latency_ms}</td>
+          <td style="padding:3px 8px;text-align:center;${tpscls}">${tps > 0 ? tps.toFixed(1) : '—'}</td>
           <td style="padding:3px 8px;color:var(--fg-muted);text-align:center">${m.avg_tokens}</td>
           <td style="padding:3px 8px;color:var(--fg-muted);text-align:center">$${m.total_cost_usd.toFixed(4)}</td>
         </tr>`;
@@ -1818,6 +1834,7 @@ async function loadDashboard() {
     }
     if (perfData?.enabled && Object.keys(perfData.by_model || {}).length) {
       renderLatencyChart(perfData.by_model || {});
+      renderTpsChart(perfData.by_model || {});
     }
   } catch(e) {
     el.innerHTML = `<div class="error-box">Failed to load dashboard: ${esc(e.message)}</div>`;
@@ -2012,6 +2029,63 @@ function renderLatencyChart(byModel) {
     ctx.textAlign = 'left';
     ctx.font = '10px monospace';
     ctx.fillText(`${e.avg}ms avg  p95:${e.p95}ms`, PAD_L + Math.max(p95W, 1) + 6, y + barH);
+  });
+}
+
+function renderTpsChart(byModel) {
+  const canvas = document.getElementById('chart-tps');
+  if (!canvas) return;
+
+  const entries = Object.entries(byModel)
+    .map(([name, m]) => ({ name, tps: m.avg_tokens_per_sec || 0 }))
+    .filter(e => e.tps > 0)
+    .sort((a, b) => b.tps - a.tps)
+    .slice(0, 10);
+
+  if (!entries.length) {
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--fg-muted').trim();
+    ctx.font = '11px monospace';
+    ctx.fillText('No throughput data yet (requires token_count on non-streaming responses).', 10, 20);
+    return;
+  }
+
+  const maxVal = Math.max(...entries.map(e => e.tps), 1);
+  const dpr    = window.devicePixelRatio || 1;
+  const W      = canvas.offsetWidth || canvas.parentElement.offsetWidth || 600;
+  const ROW_H  = 24;
+  const PAD_L  = 160, PAD_R = 80, PAD_T = 6, PAD_B = 6;
+  const H      = PAD_T + entries.length * ROW_H + PAD_B;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.height = H + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const chartW     = W - PAD_L - PAD_R;
+  const barColor   = getComputedStyle(document.documentElement).getPropertyValue('--green').trim()   || '#A3BE8C';
+  const labelColor = getComputedStyle(document.documentElement).getPropertyValue('--fg-dim').trim()  || '#6C7680';
+  const valColor   = getComputedStyle(document.documentElement).getPropertyValue('--fg').trim()      || '#D8DEE9';
+
+  entries.forEach((e, i) => {
+    const y    = PAD_T + i * ROW_H;
+    const barH = ROW_H - 8;
+    const barW = (e.tps / maxVal) * chartW;
+
+    ctx.fillStyle = labelColor;
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'right';
+    const shortName = e.name.length > 22 ? '…' + e.name.slice(-20) : e.name;
+    ctx.fillText(shortName, PAD_L - 6, y + barH);
+
+    ctx.fillStyle = barColor;
+    ctx.fillRect(PAD_L, y + 2, Math.max(barW, 1), barH);
+
+    ctx.fillStyle = valColor;
+    ctx.textAlign = 'left';
+    ctx.font = '10px monospace';
+    ctx.fillText(`${e.tps.toFixed(1)} tok/s`, PAD_L + Math.max(barW, 1) + 6, y + barH);
   });
 }
 

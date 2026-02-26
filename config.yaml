@@ -227,6 +227,17 @@ tools:
       description: "Get system information and run shell commands"
       enabled: true
 
+  # ── Plugin system ─────────────────────────────────────────────────────────
+  # Drop any .py file with a *Tool class into ./plugins/ and it auto-registers.
+  # Set enabled: true here and per-plugin to activate.
+  plugins:
+    enabled: true
+    path: ./plugins
+    # Per-plugin overrides — key matches PLUGIN_NAME in the plugin file.
+    # Absent = enabled by default once the master switch is on.
+    # dice:
+    #   enabled: false
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Hooks (Custom Middleware)
 # ─────────────────────────────────────────────────────────────────────────────

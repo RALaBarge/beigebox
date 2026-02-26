@@ -111,6 +111,19 @@ class ToolRegistry:
 
         logger.info("Tool registry loaded: %s", list(self.tools.keys()))
 
+        # --- Plugins (auto-discovered from plugins/ directory) ---
+        from beigebox.tools.plugin_loader import load_plugins
+        from pathlib import Path as _Path
+        plugins_dir = _Path(__file__).parent.parent.parent / "plugins"
+        plugin_tools = load_plugins(plugins_dir, tools_cfg)
+        for name, tool in plugin_tools.items():
+            if name in self.tools:
+                logger.warning("Plugin '%s' conflicts with built-in tool — skipped", name)
+            else:
+                self.tools[name] = tool
+        if plugin_tools:
+            logger.info("Tool registry after plugins: %s", list(self.tools.keys()))
+
     def get(self, name: str):
         """Get a tool by name, or None if not registered."""
         return self.tools.get(name)

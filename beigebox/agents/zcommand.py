@@ -91,6 +91,9 @@ HELP_TEXT = """Available z-commands:
     z: time/date/clock     → current time and date
     z: sysinfo/system      → system resource stats
 
+  CONVERSATION
+    z: fork                → fork this conversation into a new branch
+
   CHAINING
     z: complex,search      → combine multiple directives
 
@@ -109,6 +112,7 @@ class ZCommand:
     message: str = ""               # The actual user message (z: prefix stripped)
     raw_directives: str = ""        # The raw directive string for logging
     is_help: bool = False           # True if z: help
+    is_fork: bool = False           # True if z: fork
 
 
 def parse_z_command(text: str) -> ZCommand:
@@ -136,6 +140,10 @@ def parse_z_command(text: str) -> ZCommand:
     # Check for help
     if first_token == "help":
         return ZCommand(active=True, is_help=True, message=HELP_TEXT, raw_directives="help")
+
+    # Check for fork
+    if first_token == "fork":
+        return ZCommand(active=True, is_fork=True, message=remaining, raw_directives="fork")
 
     # Parse comma-separated directives from the first token
     directive_tokens = [d.strip().lower() for d in first_token.split(",") if d.strip()]
