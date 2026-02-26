@@ -119,7 +119,7 @@ BeigeBox includes a built-in single-file web interface at `http://localhost:1337
 
 Optional vi-mode keybindings. Mobile-responsive. No JavaScript dependencies.
 
-<!-- TODO: add screenshot here -->
+![BeigeBox Dashboard](2600/screenshots/dashboard.png)
 
 ---
 
