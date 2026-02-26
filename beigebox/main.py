@@ -172,6 +172,13 @@ async def lifespan(app: FastAPI):
     logger.info("Decision LLM: %s", "enabled" if decision_agent.enabled else "disabled")
     logger.info("Embedding classifier: %s", ec_status)
     logger.info("Z-commands: enabled (prefix messages with 'z: <directive>')")
+    op_enabled = cfg.get("operator", {}).get("enabled", False)
+    if op_enabled:
+        op_allowed = cfg.get("operator", {}).get("allowed_tools", [])
+        scope = f"restricted to {op_allowed}" if op_allowed else "ALL registered tools"
+        logger.warning("Operator agent: ENABLED — LLM-driven tool execution active (%s)", scope)
+    else:
+        logger.info("Operator agent: disabled (set operator.enabled: true to activate)")
 
     # Preload models in background
     await _preload_embedding_model(cfg)
@@ -206,7 +213,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="BeigeBox",
     description="Tap the line. Control the carrier.",
-    version="0.10.0",
+    version="1.0.0",
     lifespan=lifespan,
 )
 
@@ -296,7 +303,7 @@ async def health():
     """Health check."""
     return JSONResponse({
         "status": "ok",
-        "version": "0.10.0",
+        "version": "1.0.0",
         "decision_llm": decision_agent.enabled if decision_agent else False,
     })
 
@@ -310,7 +317,7 @@ async def api_info():
     """System info — what features are available."""
     cfg = get_config()
     return JSONResponse({
-        "version": "0.10.0",
+        "version": "1.0.0",
         "name": "BeigeBox",
         "description": "Transparent Pythonic LLM Proxy",
         "server": {
@@ -1277,6 +1284,12 @@ async def api_operator(request: Request):
     Run the operator agent.
     Body: {"query": "your question"}
     """
+    cfg = get_config()
+    if not cfg.get("operator", {}).get("enabled", False):
+        return JSONResponse(
+            {"error": "Operator is disabled. Set operator.enabled: true in config.yaml to enable LLM-driven tool execution."},
+            status_code=403,
+        )
     try:
         body = await request.json()
         question = body.get("query", "").strip()

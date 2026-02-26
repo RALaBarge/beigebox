@@ -179,8 +179,10 @@ harness:
 # ─────────────────────────────────────────────────────────────────────────────
 
 operator:
+  enabled: false                        # CAUTION: enables LLM-driven tool execution. Review allowed_tools before enabling.
   model: "llama3.2:3b"
   max_iterations: 10
+  allowed_tools: []                     # Empty = all registered tools. Set explicitly to restrict: ["system_info", "memory", "calculator", "datetime"]
   shell:
     enabled: true
     shell_binary: "/usr/local/bin/bb"  # Custom hardened binary (optional)

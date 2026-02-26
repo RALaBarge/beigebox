@@ -78,8 +78,10 @@ decision_llm:
 
 # --- Operator ---
 operator:
+  enabled: false                          # CAUTION: enables LLM-driven tool execution. Review allowed_tools before enabling.
   model: "llama3.2:3b"                   # Defaults to backend.default_model
   max_iterations: 10
+  allowed_tools: []                       # Empty = all registered tools. Restrict: ["system_info", "memory", "calculator", "datetime"]
   shell:
     enabled: true
     # All shell commands are routed through /usr/local/bin/bb (restricted busybox).

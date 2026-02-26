@@ -131,7 +131,17 @@ class Operator:
         self._max_iter = self.cfg.get("operator", {}).get("max_iterations", 8)
         self._timeout = self.cfg.get("operator", {}).get("timeout", 60)
 
+        # Tool sandboxing: restrict which tools the LLM agent can call
+        allowed_tools = self.cfg.get("operator", {}).get("allowed_tools", [])
         tools = self._registry.tools
+        if allowed_tools:
+            tools = {k: v for k, v in tools.items() if k in allowed_tools}
+            blocked = set(self._registry.tools.keys()) - set(tools.keys())
+            if blocked:
+                logger.info("Operator tool sandbox: blocked %s", sorted(blocked))
+        self._tools = tools
+
+        tools = self._tools
         if tools:
             self._system = _SYSTEM.format(tools_block=_build_tools_block(tools))
         else:
@@ -167,9 +177,9 @@ class Operator:
     # ------------------------------------------------------------------
 
     def _run_tool(self, name: str, input_str: str) -> str:
-        tool = self._registry.tools.get(name)
+        tool = self._tools.get(name)
         if tool is None:
-            available = ", ".join(self._registry.tools.keys()) or "none"
+            available = ", ".join(self._tools.keys()) or "none"
             return f"Error: unknown tool '{name}'. Available: {available}"
         try:
             return str(tool.run(input_str))

@@ -398,9 +398,6 @@ class HarnessOrchestrator:
             resp.raise_for_status()
             data = resp.json()
             return data.get("answer") or data.get("error") or str(data)
-            resp.raise_for_status()
-            data = resp.json()
-            return data.get("answer") or data.get("error") or str(data)
 
     async def _run_model(self, model_id: str, prompt: str) -> str:
         """Run a prompt against a specific model."""

@@ -27,3 +27,6 @@ runtime:
   web_ui_palette: "default"  # "default" | "random" | "dracula" | "gruvbox" | "nord"
   # Log level override for this session
   log_level: ""              # "DEBUG" | "INFO" | "WARNING" | "ERROR" | "" = use config.yaml
+  # Voice settings (push-to-talk)
+  voice_enabled: false       # true = show mic button in web UI
+  voice_hotkey: ""           # optional hotkey for push-to-talk (e.g. "v")

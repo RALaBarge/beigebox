@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────
-# BeigeBox Setup — Tap the line. Own the conversation.
+# BeigeBox Setup — Tap the line. Control the carrier.
 #
 # This script:
 #   1. Starts the Docker stack (Ollama + BeigeBox + Open WebUI)
@@ -41,7 +41,7 @@ BANNER='
     ║   ██   ██ ██    ██  ██ ██                        ║
     ║   ██████   ██████  ██   ██                       ║
     ║                                                  ║
-    ║   Tap the line. Own the conversation.            ║
+    ║   Tap the line. Control the carrier.            ║
     ║                                                  ║
     ╚══════════════════════════════════════════════════╝
 '
