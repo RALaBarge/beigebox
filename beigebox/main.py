@@ -99,10 +99,15 @@ async def lifespan(app: FastAPI):
 
     # Storage
     sqlite_store = SQLiteStore(cfg["storage"]["sqlite_path"])
+    _storage_cfg  = cfg["storage"]
+    _embed_cfg    = cfg["embedding"]
+    _backend_type = _storage_cfg.get("vector_backend", "chromadb")
+    _backend_path = _storage_cfg.get("chroma_path") or _storage_cfg.get("vector_store_path", "./data/chroma")
+    from beigebox.storage.backends import make_backend as _make_backend
     vector_store = VectorStore(
-        chroma_path=cfg["storage"]["chroma_path"],
-        embedding_model=cfg["embedding"]["model"],
-        embedding_url=cfg["embedding"]["backend_url"],
+        embedding_model=_embed_cfg["model"],
+        embedding_url=_embed_cfg.get("backend_url") or cfg["backend"]["url"],
+        backend=_make_backend(_backend_type, path=_backend_path),
     )
 
     # Tools (pass vector_store for the memory tool)
@@ -1212,16 +1217,22 @@ async def api_operator(request: Request):
             return JSONResponse({"error": "query required"}, status_code=400)
         
         from beigebox.storage.vector_store import VectorStore
+        from beigebox.storage.backends import make_backend as _mk
         from beigebox.agents.operator import Operator
-        
+
         cfg = get_config()
         try:
+            _sc = cfg["storage"]
+            _ec = cfg["embedding"]
             vs = VectorStore(
-                chroma_path=cfg["storage"]["chroma_path"],
-                embedding_model=cfg["embedding"]["model"],
-                embedding_url=cfg["embedding"]["backend_url"],
+                embedding_model=_ec["model"],
+                embedding_url=_ec.get("backend_url") or cfg["backend"]["url"],
+                backend=_mk(
+                    _sc.get("vector_backend", "chromadb"),
+                    path=_sc.get("chroma_path") or _sc.get("vector_store_path", "./data/chroma"),
+                ),
             )
-        except:
+        except Exception:
             vs = None
         
         try:

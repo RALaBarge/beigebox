@@ -167,8 +167,24 @@
     align-items: baseline;
     flex-wrap: wrap;
   }
-  .kv-key   { color: var(--cyan);   min-width: 180px; font-size: 12px; }
+  .kv-key   { color: var(--cyan);   min-width: 180px; font-size: 12px; cursor: default; }
   .kv-val   { color: var(--fg);     font-size: 12px; word-break: break-all; }
+  /* Config tab hover tooltips */
+  #cfg-tooltip {
+    position: fixed;
+    z-index: 9999;
+    pointer-events: none;
+    max-width: 280px;
+    padding: 6px 10px;
+    background: var(--bg-panel);
+    border: 1px solid var(--cyan);
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--fg-dim);
+    line-height: 1.5;
+    box-shadow: 0 2px 8px rgba(0,0,0,.45);
+    display: none;
+  }
   .kv-ok    { color: var(--green);  }
   .kv-warn  { color: var(--yellow); }
   .kv-err   { color: var(--red);    }
@@ -1344,6 +1360,9 @@
 </div>
 
 
+<!-- Config tab tooltip -->
+<div id="cfg-tooltip"></div>
+
 <!-- ── Vi mode toggle ───────────────────────────────────────────────────── -->
 <div id="vi-toggle" onclick="toggleViMode()" title="">
   π
@@ -1558,6 +1577,86 @@ function kv(key, val, cls='') {
 function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+
+// ── Config tab hover tooltips ────────────────────────────────────────────────
+const TOOLTIPS = {
+  // Backend
+  default_model:               'Default model sent to the backend when the frontend does not specify one.',
+  // Storage
+  log_conversations:           'Persist every request/response pair to SQLite for replay and search.',
+  // Decision LLM
+  decision_llm_enabled:        'Enable a lightweight LLM to classify requests and drive routing decisions.',
+  // Tools
+  tools_enabled:               'Master switch — enables all registered tool integrations (web search, calculator, etc.).',
+  // Cost tracking
+  cost_tracking_enabled:       'Track estimated token costs per request and accumulate per-model totals.',
+  cost_track_openrouter:       'Include OpenRouter API requests in cost tracking.',
+  cost_track_local:            'Include local Ollama requests in cost tracking (estimates only).',
+  // Orchestrator
+  orchestrator_enabled:        'Enable the parallel task orchestrator for multi-step agentic workflows.',
+  orchestrator_max_parallel:   'Maximum number of sub-tasks the orchestrator runs simultaneously.',
+  orchestrator_task_timeout:   'Seconds before an individual sub-task is abandoned.',
+  orchestrator_total_timeout:  'Hard wall-clock limit (seconds) for an entire orchestration run.',
+  // Conversation replay
+  conversation_replay_enabled: 'Allow replaying past conversations with full context reconstruction from SQLite.',
+  // Auto-summarization
+  auto_summarization_enabled:  'Automatically compress long context windows when token count exceeds the budget.',
+  auto_token_budget:           'Trigger summarization when the conversation exceeds this many tokens.',
+  auto_summary_model:          'Model used to generate the summary. Leave blank to reuse the active model.',
+  auto_keep_last:              'Number of most-recent messages preserved verbatim after summarization.',
+  // Routing
+  force_route:                 'Pin every session to a specific routing bucket, overriding the decision LLM.',
+  // Logging
+  log_level:                   'Verbosity of server-side logs: DEBUG → INFO → WARNING → ERROR.',
+  // Web UI
+  web_ui_palette:              'Colour theme for this interface. Applied immediately on save.',
+  web_ui_vi_mode:              'Enable vi/vim keybindings in the chat input (hjkl, i, Esc, etc.).',
+  // Voice
+  voice_enabled:               'Show the microphone button and enable push-to-talk via the STT service URL.',
+  voice_hotkey:                'Keyboard key that triggers push-to-talk while the Chat tab is focused.',
+  stt_url:                     'Speech-to-text service endpoint (OpenAI-compatible /audio/transcriptions).',
+  tts_autoplay:                'Automatically play the assistant\'s response through the TTS service.',
+  tts_url:                     'Text-to-speech service endpoint (OpenAI-compatible /audio/speech).',
+  tts_model:                   'TTS model identifier passed to the service (e.g. tts-1, kokoro).',
+  tts_speed:                   'Playback speed multiplier (0.25 – 4.0). 1.0 = normal speed.',
+  // Session / system context
+  system_prompt_prefix:        'Text prepended to the system prompt of every proxied request at runtime.',
+  system_context_enabled:      'Inject the contents of system_context.md into every request\'s system prompt.',
+  // Generation parameters
+  gen_force:                   'When enabled, these values override parameters set by the frontend. When disabled, they only fill in missing values.',
+  gen_temperature:             'Sampling temperature (0 – 2). Higher = more creative/random; lower = more deterministic.',
+  gen_top_p:                   'Nucleus sampling threshold (0 – 1). Limits sampling to the top-P probability mass.',
+  gen_top_k:                   'Limits sampling to the top-K most likely tokens at each step.',
+  gen_num_ctx:                 'Context window size in tokens passed to Ollama models.',
+  gen_repeat_penalty:          'Penalty applied to repeated tokens. >1.0 discourages repetition.',
+  gen_max_tokens:              'Maximum tokens to generate per response.',
+  gen_seed:                    'Random seed for reproducible outputs (0 = random each time).',
+};
+
+(function initCfgTooltips() {
+  const tipEl = document.getElementById('cfg-tooltip');
+  if (!tipEl) return;
+  document.addEventListener('mouseover', e => {
+    const span = e.target.closest('[data-tip]');
+    if (!span) { tipEl.style.display = 'none'; return; }
+    const key  = span.dataset.tip;
+    const text = TOOLTIPS[key];
+    if (!text) return;
+    tipEl.textContent = text;
+    tipEl.style.display = 'block';
+  });
+  document.addEventListener('mousemove', e => {
+    if (tipEl.style.display === 'none') return;
+    const x = e.clientX + 14, y = e.clientY + 14;
+    const rw = tipEl.offsetWidth, rh = tipEl.offsetHeight;
+    tipEl.style.left = (x + rw > window.innerWidth  ? e.clientX - rw - 8 : x) + 'px';
+    tipEl.style.top  = (y + rh > window.innerHeight ? e.clientY - rh - 8 : y) + 'px';
+  });
+  document.addEventListener('mouseout', e => {
+    if (!e.target.closest('[data-tip]')) return;
+    if (!e.relatedTarget || !e.relatedTarget.closest('[data-tip]')) tipEl.style.display = 'none';
+  });
+})();
 
 function latencyClass(ms) {
   if (ms < 100)  return 'fast';
@@ -3357,14 +3456,14 @@ function harnessEnsembleClear() {
 }
 function cfgInput(id, label, value, type='text') {
   return `<div class="kv-row" style="gap:12px;align-items:center">
-    <span class="kv-key" style="min-width:160px">${esc(label)}</span>
+    <span class="kv-key" style="min-width:160px" data-tip="${id}">${esc(label)}</span>
     <input id="cfg-${id}" type="${type}" value="${esc(String(value ?? ''))}"
       style="flex:1;min-width:0;max-width:360px;height:26px;padding:2px 6px;font-size:12px">
   </div>`;
 }
 function cfgToggle(id, label, checked) {
   return `<div class="kv-row" style="gap:12px;align-items:center">
-    <span class="kv-key" style="min-width:160px">${esc(label)}</span>
+    <span class="kv-key" style="min-width:160px" data-tip="${id}">${esc(label)}</span>
     <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
       <input id="cfg-${id}" type="checkbox" ${checked ? 'checked' : ''}
         style="width:14px;height:14px;cursor:pointer">
@@ -3375,7 +3474,7 @@ function cfgToggle(id, label, checked) {
 function cfgSelect(id, label, value, options) {
   const opts = options.map(o => `<option value="${esc(o)}" ${o===value?'selected':''}>${esc(o)}</option>`).join('');
   return `<div class="kv-row" style="gap:12px;align-items:center">
-    <span class="kv-key" style="min-width:160px">${esc(label)}</span>
+    <span class="kv-key" style="min-width:160px" data-tip="${id}">${esc(label)}</span>
     <select id="cfg-${id}" style="height:26px;padding:2px 6px;font-size:12px;min-width:160px">${opts}</select>
   </div>`;
 }

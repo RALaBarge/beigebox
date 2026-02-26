@@ -163,8 +163,14 @@ def _run(cmd: str) -> str:
     # Security check 2: Execute with timeout
     try:
         shell = _get_shell()
+        # Busybox wrapper expects: bb <applet> [args], not bb -c <cmd>.
+        # Route shell commands through its sh applet so pipes/redirects work.
+        if os.path.basename(shell) == "bb":
+            argv = [shell, "sh", "-c", cmd]
+        else:
+            argv = [shell, "-c", cmd]
         result = subprocess.run(
-            [shell, "-c", cmd],
+            argv,
             capture_output=True,
             text=True,
             timeout=5,

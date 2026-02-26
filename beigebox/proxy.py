@@ -93,6 +93,12 @@ class Proxy:
             # Proactive eviction: sweep stale entries every ~100 writes
             if len(self._session_cache) % 100 == 0:
                 self._evict_session_cache()
+            # Hard cap: if still over limit after TTL eviction, drop oldest by timestamp
+            if len(self._session_cache) > 1000:
+                oldest = sorted(self._session_cache.items(), key=lambda x: x[1][1])
+                for k, _ in oldest[:len(self._session_cache) - 800]:
+                    del self._session_cache[k]
+                logger.debug("Session cache hard-capped: trimmed to %d entries", len(self._session_cache))
 
     def _evict_session_cache(self):
         """Remove all expired entries from the session cache."""

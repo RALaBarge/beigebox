@@ -197,12 +197,18 @@ def cmd_sweep(args):
     """Semantic search over stored conversations."""
     from beigebox.config import get_config
     from beigebox.storage.vector_store import VectorStore
+    from beigebox.storage.backends import make_backend
 
     cfg = get_config()
+    _sc = cfg["storage"]
+    _ec = cfg["embedding"]
     store = VectorStore(
-        chroma_path=cfg["storage"]["chroma_path"],
-        embedding_model=cfg["embedding"]["model"],
-        embedding_url=cfg["embedding"]["backend_url"],
+        embedding_model=_ec["model"],
+        embedding_url=_ec.get("backend_url") or cfg["backend"]["url"],
+        backend=make_backend(
+            _sc.get("vector_backend", "chromadb"),
+            path=_sc.get("chroma_path") or _sc.get("vector_store_path", "./data/chroma"),
+        ),
     )
 
     query = " ".join(args.query)
@@ -398,16 +404,22 @@ def cmd_operator(args):
     """
     from beigebox.config import get_config
     from beigebox.storage.vector_store import VectorStore
+    from beigebox.storage.backends import make_backend
     from beigebox.agents.operator import Operator
     print(BANNER)
-    print("  Operator online. Type 'exit' or Ctrl-C to disconnect.\\n")
+    print("  Operator online. Type 'exit' or Ctrl-C to disconnect.\n")
     cfg = get_config()
     # Stand up the vector store for semantic search
     try:
+        _sc = cfg["storage"]
+        _ec = cfg["embedding"]
         vector_store = VectorStore(
-            chroma_path=cfg["storage"]["chroma_path"],
-            embedding_model=cfg["embedding"]["model"],
-            embedding_url=cfg["embedding"]["backend_url"],
+            embedding_model=_ec["model"],
+            embedding_url=_ec.get("backend_url") or cfg["backend"]["url"],
+            backend=make_backend(
+                _sc.get("vector_backend", "chromadb"),
+                path=_sc.get("chroma_path") or _sc.get("vector_store_path", "./data/chroma"),
+            ),
         )
     except Exception as e:
         print(f"  ⚠ Vector store unavailable: {e}")

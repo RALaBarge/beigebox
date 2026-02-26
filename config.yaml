@@ -66,6 +66,10 @@ storage:
   type: sqlite
   path: ./data/beigebox.db
   vector_store_path: ./data/chroma
+  # Vector backend driver.  Currently only "chromadb" is supported.
+  # To add a backend: implement VectorBackend in storage/backends/<n>.py,
+  # register it in storage/backends/__init__.py, then set the key here.
+  vector_backend: chromadb
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Wiretap (Request/Response Logging)
