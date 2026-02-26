@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     busybox-static \
+    bubblewrap \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Busybox hardening ──────────────────────────────────────────────────────

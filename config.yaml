@@ -185,24 +185,29 @@ operator:
     enabled: true
     shell_binary: "/usr/local/bin/bb"  # Custom hardened binary (optional)
     allowed_commands:
-      - ls
       - cat
-      - grep
-      - ps
+      - cut
       - df
-      - free
-      - ollama
-      - beigebox
       - find
+      - free
+      - grep
       - head
+      - ls
+      - nproc
+      - nvidia-smi
+      - ps
       - tail
+      - uptime
       - wc
     blocked_patterns:
       - "rm -rf"
+      - "rm -r"
       - "sudo"
       - "> /etc"
-      - "; "
-      - "| "
+      - "> /app"
+      - "> /usr"
+      - "$()"
+      - "`"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tools (Function Calling)
