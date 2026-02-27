@@ -104,6 +104,8 @@ Session-sticky routing keeps a conversation on the same model once classified. M
 
 ## Web UI
 
+![BeigeBox Harness](2600/screenshots/multichat.png)
+
 BeigeBox includes a built-in single-file web interface at `http://localhost:1337` with eight tabs:
 
 | Tab | What it does |
@@ -119,7 +121,8 @@ BeigeBox includes a built-in single-file web interface at `http://localhost:1337
 
 Optional vi-mode keybindings. Mobile-responsive. No JavaScript dependencies.
 
-![BeigeBox Dashboard](2600/screenshots/dashboard.png)
+
+![BeigeBox Ensemble](2600/screenshots/ensenble.png)
 
 ---
 

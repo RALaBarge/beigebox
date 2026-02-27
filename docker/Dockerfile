@@ -45,11 +45,13 @@ RUN pip install --no-cache-dir ddgs
 # ── Application code ───────────────────────────────────────────────────────
 COPY beigebox/ beigebox/
 COPY docker/config.docker.yaml config.yaml
+COPY runtime_config.yaml runtime_config.yaml
 COPY scripts/ scripts/
 COPY hooks/ hooks/
 
 # ── Data directory ─────────────────────────────────────────────────────────
 RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
+RUN chown appuser:appuser /app/runtime_config.yaml
 
 USER appuser
 

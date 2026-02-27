@@ -121,5 +121,11 @@ def update_runtime_config(key: str, value) -> bool:
         global _runtime_mtime
         _runtime_mtime = 0.0
         return True
-    except Exception:
+    except Exception as e:
+        import logging as _log
+        _log.getLogger(__name__).error(
+            "update_runtime_config(%s) failed: %s (path=%s, writable=%s)",
+            key, e, _RUNTIME_CONFIG_PATH,
+            os.access(_RUNTIME_CONFIG_PATH.parent, os.W_OK),
+        )
         return False

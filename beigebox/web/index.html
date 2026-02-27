@@ -3820,8 +3820,22 @@ async function saveConfig() {
     // Re-fetch config to pick up TTS changes live
     try { const fresh = await api('/api/v1/config'); updateTTSConfig(fresh); } catch {}
 
-    if (status) status.textContent = `✓ saved (${d.saved?.length || 0} keys)`;
-    setTimeout(() => { if (status) status.textContent = ''; }, 3000);
+    if (status) {
+      const saved = d.saved?.length || 0;
+      const errors = d.errors?.length || 0;
+      if (errors > 0 && saved === 0) {
+        status.textContent = `✗ save failed — ${errors} key(s) could not be written. Check server logs.`;
+        status.style.color = 'var(--red, #f44)';
+        setTimeout(() => { if (status) { status.textContent = ''; status.style.color = ''; } }, 6000);
+      } else if (errors > 0) {
+        status.textContent = `⚠ saved ${saved} key(s), ${errors} failed`;
+        status.style.color = 'var(--yellow, #fa0)';
+        setTimeout(() => { if (status) { status.textContent = ''; status.style.color = ''; } }, 4000);
+      } else {
+        status.textContent = `✓ saved (${saved} keys)`;
+        setTimeout(() => { if (status) status.textContent = ''; }, 3000);
+      }
+    }
   } catch(e) {
     if (e.status === 404) {
       if (status) status.textContent = '✗ Config save endpoint not found — rebuild the container with the latest main.py';
