@@ -45,6 +45,7 @@ decision_agent: DecisionAgent | None = None
 hook_manager: HookManager | None = None
 backend_router: MultiBackendRouter | None = None
 cost_tracker: CostTracker | None = None
+embedding_classifier = None
 
 
 def _setup_logging(cfg: dict):
@@ -92,6 +93,7 @@ async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     global proxy, tool_registry, sqlite_store, vector_store
     global decision_agent, hook_manager, backend_router, cost_tracker
+    global embedding_classifier
 
     cfg = get_config()
     _setup_logging(cfg)
