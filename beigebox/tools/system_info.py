@@ -185,7 +185,7 @@ def _audit_log(command: str, result: str, allowed: bool) -> None:
 
 # ── Execution ─────────────────────────────────────────────────────────────────
 
-def _run(cmd: str, gpu: bool = False) -> str:
+def _run(cmd: str, gpu: bool = False, workspace_env: dict = None) -> str:
     """
     Run a shell command through the security stack.
 
@@ -197,6 +197,7 @@ def _run(cmd: str, gpu: bool = False) -> str:
     Args:
         cmd:  Shell command string. Must pass the allowlist.
         gpu:  If True, use the GPU bwrap profile (binds host /dev).
+        workspace_env: Optional dict of env vars to inject (e.g., PATH with workspace/bin).
     """
     is_allowed, reason = _is_command_allowed(cmd)
     if not is_allowed:
@@ -214,11 +215,17 @@ def _run(cmd: str, gpu: bool = False) -> str:
             else:
                 argv = [shell, "-c", cmd]
 
+        # Prepare environment: start with parent's env, inject workspace updates
+        env = os.environ.copy()
+        if workspace_env:
+            env.update(workspace_env)
+
         result = subprocess.run(
             argv,
             capture_output=True,
             text=True,
             timeout=5,
+            env=env,
             # Note: do NOT pass user= here — setuid requires root.
             # We're already running as non-root appuser.
         )
@@ -292,21 +299,26 @@ class SystemInfoTool:
         allowed = _get_allowed_commands()
         logger.info("Shell allowlist: %d commands", len(allowed))
 
-    def run(self, query: str = "") -> str:
-        """Gather and return system information."""
+    def run(self, query: str = "", workspace_env: dict = None) -> str:
+        """Gather and return system information.
+        
+        Args:
+            query: User query (unused, for interface compatibility)
+            workspace_env: Optional env dict to inject into shell (e.g., workspace PATH)
+        """
         sections = []
 
         # CPU
-        cpu_model = _run("grep -m1 'model name' /proc/cpuinfo | cut -d: -f2")
-        cpu_cores = _run("nproc")
-        load      = _run("cat /proc/loadavg | cut -d' ' -f1-3")
+        cpu_model = _run("grep -m1 'model name' /proc/cpuinfo | cut -d: -f2", workspace_env=workspace_env)
+        cpu_cores = _run("nproc", workspace_env=workspace_env)
+        load      = _run("cat /proc/loadavg | cut -d' ' -f1-3", workspace_env=workspace_env)
         if cpu_model:
             sections.append(
                 f"CPU: {cpu_model.strip()} ({cpu_cores} cores, load: {load})"
             )
 
         # Memory
-        mem_info = _run("free -h | grep Mem")
+        mem_info = _run("free -h | grep Mem", workspace_env=workspace_env)
         if mem_info:
             parts = mem_info.split()
             if len(parts) >= 4:
@@ -320,6 +332,7 @@ class SystemInfoTool:
             "nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu"
             " --format=csv,noheader,nounits 2>/dev/null",
             gpu=True,
+            workspace_env=workspace_env,
         )
         if gpu_info:
             for line in gpu_info.strip().split("\n"):
@@ -333,7 +346,7 @@ class SystemInfoTool:
             sections.append("GPU: nvidia-smi not available")
 
         # Disk
-        disk = _run("df -h / | tail -1")
+        disk = _run("df -h / | tail -1", workspace_env=workspace_env)
         if disk:
             parts = disk.split()
             if len(parts) >= 5:
@@ -347,7 +360,7 @@ class SystemInfoTool:
             sections.append(ollama)
 
         # Uptime
-        uptime = _run("uptime -p")
+        uptime = _run("uptime -p", workspace_env=workspace_env)
         if uptime:
             sections.append(f"Uptime: {uptime}")
 

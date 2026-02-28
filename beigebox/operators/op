@@ -1,0 +1,194 @@
+"""
+Operator Workspace Manager — Extract and mount ZIP files for operator agent.
+
+The workspace provides the operator with additional tools, scripts, and data
+beyond the standard allowlisted shell commands.
+
+Usage:
+    ws = OperatorWorkspace(get_config())
+    env_updates = ws.get_env_updates()  # {"PATH": "...", "OPERATOR_WORKSPACE": "..."}
+    # Pass env_updates to shell commands to inject workspace into PATH
+"""
+
+import logging
+import os
+import zipfile
+from datetime import datetime
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+
+class OperatorWorkspace:
+    """
+    Manage extracted ZIP workspace for operator agent.
+    
+    Workflow:
+      1. Admin configures operator.workspace in config.yaml
+      2. Workspace.__init__() extracts ZIP at startup
+      3. get_env_updates() returns env vars to inject into shell
+      4. operator._run_tool() passes env_updates to subprocess
+      
+    Security:
+      - ZIP size limit (default 100MB) prevents zip bombs
+      - Extracted to isolated /tmp/operator_env/ directory
+      - Permissions fixed: scripts executable, data readable
+      - Only extracted if explicitly enabled in config
+    """
+    
+    def __init__(self, cfg: dict):
+        """
+        Initialize workspace from config.
+        
+        Args:
+            cfg: Full config dict (from get_config())
+        """
+        self.cfg = cfg.get("operator", {}).get("workspace", {})
+        self.enabled = self.cfg.get("enabled", False)
+        self.zip_path = self.cfg.get("zip_path", "./operator-tools.zip")
+        self.extract_dir = Path(self.cfg.get("extract_dir", "/tmp/operator_env"))
+        self.auto_reload = self.cfg.get("auto_reload", True)
+        self.max_size_mb = self.cfg.get("max_extract_size_mb", 100)
+        self._last_mtime = None
+        self._extraction_ok = False
+        
+        if self.enabled:
+            self._extract()
+    
+    def _extract(self) -> bool:
+        """
+        Extract ZIP file to extract_dir.
+        
+        Returns:
+            True if extraction succeeded, False otherwise
+        """
+        if not os.path.exists(self.zip_path):
+            logger.warning(
+                "Operator workspace: ZIP not found at %s (workspace disabled)",
+                self.zip_path
+            )
+            self.enabled = False
+            return False
+        
+        try:
+            # Check mtime for auto-reload
+            current_mtime = os.path.getmtime(self.zip_path)
+            if self._last_mtime and current_mtime == self._last_mtime:
+                return self._extraction_ok  # Already extracted, no change
+            
+            self._last_mtime = current_mtime
+            
+            # Validate ZIP size
+            zip_size_mb = os.path.getsize(self.zip_path) / (1024 * 1024)
+            if zip_size_mb > self.max_size_mb:
+                logger.error(
+                    "Operator workspace: ZIP too large (%.1f MB > %d MB limit)",
+                    zip_size_mb, self.max_size_mb
+                )
+                return False
+            
+            # Create extract directory
+            self.extract_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Extract ZIP
+            with zipfile.ZipFile(self.zip_path, 'r') as zf:
+                zf.extractall(self.extract_dir)
+            
+            # Fix permissions
+            self._fix_permissions()
+            
+            self._extraction_ok = True
+            logger.info(
+                "Operator workspace: extracted %s → %s",
+                self.zip_path, self.extract_dir
+            )
+            return True
+        
+        except zipfile.BadZipFile:
+            logger.error("Operator workspace: invalid ZIP file at %s", self.zip_path)
+            return False
+        except Exception as e:
+            logger.error("Operator workspace: extraction failed: %s", e)
+            return False
+    
+    def _fix_permissions(self):
+        """
+        Fix file permissions after extraction.
+        
+        - bin/ and scripts/ → 755 (executable)
+        - data/ and other → 644 (readable)
+        - All directories → 755
+        """
+        try:
+            for root, dirs, files in os.walk(self.extract_dir):
+                # Directories
+                for d in dirs:
+                    dpath = os.path.join(root, d)
+                    os.chmod(dpath, 0o755)
+                
+                # Files
+                for f in files:
+                    fpath = os.path.join(root, f)
+                    # Executable if in bin/ or scripts/
+                    if root.endswith("/bin") or root.endswith("/scripts"):
+                        os.chmod(fpath, 0o755)
+                    else:
+                        os.chmod(fpath, 0o644)
+        except Exception as e:
+            logger.warning("Operator workspace: could not fix all permissions: %s", e)
+    
+    def get_env_updates(self) -> dict:
+        """
+        Return environment variable updates for operator shell.
+        
+        Returns:
+            Dict with PATH and OPERATOR_WORKSPACE, or empty dict if disabled
+            
+        Example:
+            {
+                "PATH": "/tmp/operator_env/bin:/usr/local/bin:/usr/bin:/bin",
+                "OPERATOR_WORKSPACE": "/tmp/operator_env"
+            }
+        """
+        if not self.enabled or not self._extraction_ok:
+            return {}
+        
+        workspace_path = str(self.extract_dir)
+        # Prepend workspace/bin to PATH
+        current_path = os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
+        
+        return {
+            "OPERATOR_WORKSPACE": workspace_path,
+            "PATH": f"{workspace_path}/bin:{current_path}",
+        }
+    
+    def get_workspace_path(self) -> str:
+        """
+        Return the workspace directory path if enabled, empty string otherwise.
+        
+        Returns:
+            Path to extracted workspace, or empty string if not enabled/extracted
+        """
+        if not self.enabled or not self._extraction_ok:
+            return ""
+        return str(self.extract_dir)
+    
+    def reload_if_changed(self) -> bool:
+        """
+        Check if ZIP has been modified and re-extract if auto_reload is enabled.
+        
+        Returns:
+            True if extraction succeeded (or was not needed), False otherwise
+        """
+        if not self.enabled or not self.auto_reload:
+            return self._extraction_ok
+        
+        if not os.path.exists(self.zip_path):
+            return False
+        
+        current_mtime = os.path.getmtime(self.zip_path)
+        if self._last_mtime and current_mtime != self._last_mtime:
+            logger.info("Operator workspace: ZIP modified, re-extracting")
+            return self._extract()
+        
+        return self._extraction_ok

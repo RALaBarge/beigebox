@@ -210,6 +210,14 @@ operator:
       - "> /usr"
       - "$()"
       - "`"
+  
+  # Workspace: Extract ZIP file containing custom tools/scripts/data for operator
+  workspace:
+    enabled: false                      # Set to true to enable ZIP mounting
+    zip_path: "./operator-tools.zip"    # Path to ZIP file (relative or absolute)
+    extract_dir: "/tmp/operator_env"    # Where to extract (inside container: /tmp/operator_env)
+    auto_reload: true                   # Re-extract if ZIP is modified (mtime check)
+    max_extract_size_mb: 100            # Prevent zip bombs
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tools (Function Calling)

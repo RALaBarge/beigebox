@@ -116,9 +116,15 @@ class Operator:
 
     def __init__(self, vector_store=None):
         from beigebox.tools.registry import ToolRegistry
+        from beigebox.operators.workspace import OperatorWorkspace
 
         self.cfg = get_config()
         self.vector_store = vector_store
+        
+        # Initialize workspace (ZIP extraction + env setup)
+        self.workspace = OperatorWorkspace(self.cfg)
+        self.workspace_env = self.workspace.get_env_updates()
+        
         self._registry = ToolRegistry(vector_store=vector_store)
         self._model = (
             self.cfg.get("operator", {}).get("model")
@@ -147,10 +153,12 @@ class Operator:
         else:
             self._system = _NO_TOOLS_SYSTEM
 
+        workspace_info = f" (workspace: {self.workspace.get_workspace_path()})" if self.workspace_env else ""
         logger.info(
-            "Operator ready (model=%s, tools=%s)",
+            "Operator ready (model=%s, tools=%s%s)",
             self._model,
             list(tools.keys()),
+            workspace_info,
         )
 
     # ------------------------------------------------------------------
@@ -182,7 +190,11 @@ class Operator:
             available = ", ".join(self._tools.keys()) or "none"
             return f"Error: unknown tool '{name}'. Available: {available}"
         try:
-            return str(tool.run(input_str))
+            # Special handling for system_info: pass workspace environment
+            if name == "system_info" and self.workspace_env:
+                return str(tool.run(input_str, workspace_env=self.workspace_env))
+            else:
+                return str(tool.run(input_str))
         except Exception as e:
             return f"Error running {name}: {e}"
 
