@@ -1,20 +1,44 @@
-# docker-compose.yml
-version: "3.9"
-
 # BeigeBox — Full Stack
 # Tap the line. Control the carrier.
+#
+# QUICKSTART:
+#   docker compose up -d          ← full working stack (CPU inference)
+#
+# PROFILES:
+#   (default)       Ollama (CPU) + BeigeBox + Open WebUI — everything you need
+#   voice           adds Whisper (STT) + Kokoro (TTS)
+#
+# EXAMPLES:
+#   docker compose up -d                         # full stack, CPU inference
+#   docker compose --profile voice up -d         # full stack + voice I/O
+#   docker compose up -d beigebox                # proxy only (external Ollama)
+#
+# NVIDIA GPU:
+#   Uncomment the 'deploy' block on the ollama service below, then:
+#   docker compose up -d
+#
+# CONFIGURATION:
+#   cp env.example .env  → set OLLAMA_DATA, ports, API keys
+#
+# SERVICES:
+#   ollama      → :11434  LLM inference engine
+#   beigebox    → :1337   transparent proxy + middleware
+#   open-webui  → :3000   chat interface
+#   whisper     → :9000   speech-to-text (voice profile)
+#   kokoro      → :8880   text-to-speech (voice profile)
 
 services:
   # ---------------------------------------------------------------------------
   # Ollama — LLM inference (CPU by default)
   # ---------------------------------------------------------------------------
+  # For NVIDIA GPU: uncomment the 'deploy' block below and restart.
   ollama:
     image: ollama/ollama:latest
     container_name: beigebox-ollama
     ports:
       - "${OLLAMA_PORT:-11434}:11434"
     volumes:
-      - "${OLLAMA_DATA:-ollama_data}:/root/.ollama"
+      - ${OLLAMA_DATA:-ollama_data}:/root/.ollama
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "ollama", "list"]
@@ -22,6 +46,14 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+   #   ── Uncomment below for NVIDIA GPU acceleration ──
+     deploy:
+       resources:
+         reservations:
+           devices:
+             - driver: nvidia
+               count: all
+               capabilities: [gpu]
 
   # ---------------------------------------------------------------------------
   # Model pull — runs once to ensure required models exist
@@ -30,18 +62,12 @@ services:
     image: curlimages/curl
     container_name: beigebox-model-pull
     depends_on:
-      - ollama
+      ollama:
+        condition: service_started
     command: >
-      sh -c "
-      echo 'Waiting for Ollama...' &&
-      for i in $(seq 1 60); do
-        curl -fsS http://ollama:11434/api/tags >/dev/null && break;
-        sleep 2;
-      done &&
-      echo 'Pulling models...' &&
-      curl -fsS http://ollama:11434/api/pull -d '{\"name\":\"nomic-embed-text\"}' &&
-      curl -fsS http://ollama:11434/api/pull -d '{\"name\":\"llama3.2:3b\"}'
-      "
+      sh -c "sleep 5 &&
+      curl -s http://ollama:11434/api/pull -d '{\"name\":\"nomic-embed-text\"}' &&
+      curl -s http://ollama:11434/api/pull -d '{\"name\":\"llama3.2:3b\"}'"
     restart: "no"
 
   # ---------------------------------------------------------------------------
@@ -62,7 +88,8 @@ services:
       - GOOGLE_CSE_ID=${GOOGLE_CSE_ID:-}
       - OLLAMA_HOST=${OLLAMA_HOST:-ollama}
     depends_on:
-      - ollama
+      ollama:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/beigebox/health"]
@@ -86,14 +113,15 @@ services:
       - OLLAMA_BASE_URL=http://${OLLAMA_HOST:-ollama}:11434
       - WEBUI_AUTH=${WEBUI_AUTH:-false}
     depends_on:
-      - beigebox
+      beigebox:
+        condition: service_started
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
   # Whisper — STT (voice profile)
   # ---------------------------------------------------------------------------
   whisper:
-    profiles: ["voice"]
+    profiles: [voice]
     image: fedirz/faster-whisper-server:latest-cpu
     container_name: beigebox-whisper
     ports:
@@ -116,7 +144,7 @@ services:
   # Kokoro — TTS (voice profile)
   # ---------------------------------------------------------------------------
   kokoro:
-    profiles: ["voice"]
+    profiles: [voice]
     image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
     container_name: beigebox-kokoro
     ports:

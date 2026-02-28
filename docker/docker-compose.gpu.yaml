@@ -1,0 +1,11 @@
+# docker-compose.gpu.yml
+version: "3.9"
+
+services:
+  # Compose-mode GPU enablement (no Swarm deploy block)
+  ollama:
+    gpus: all
+    # Optional (usually not required, but can help on some Linux setups)
+    # environment:
+    #   - NVIDIA_VISIBLE_DEVICES=all
+    #   - NVIDIA_DRIVER_CAPABILITIES=compute,utility
