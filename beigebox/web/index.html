@@ -3601,6 +3601,7 @@ async function loadConfig() {
 
     // ── Operator ─────────────────────────────────────────────────────────
     html += '<div class="section-header" style="margin-top:14px">Operator</div>';
+    html += cfgToggle('operator_enabled', 'Enabled (LLM-driven tool execution)', c.operator?.enabled ?? false);
     html += kv('model', esc(c.operator?.model || '—'));
     html += kv('max iterations', String(c.operator?.max_iterations || 10));
     html += kv('shell', badge(c.operator?.shell_enabled));
@@ -3739,7 +3740,7 @@ async function loadConfig() {
     const toggleIds = [
       'log_conversations','decision_llm_enabled','tools_enabled',
       'cost_tracking_enabled','cost_track_openrouter','cost_track_local',
-      'orchestrator_enabled',
+      'orchestrator_enabled','operator_enabled',
       'conversation_replay_enabled','auto_summarization_enabled',
       'web_ui_vi_mode','voice_enabled','tts_autoplay','system_context_enabled','gen_force',
     ];
@@ -3780,7 +3781,7 @@ async function saveConfig() {
   const bools = [
     'log_conversations','decision_llm_enabled','tools_enabled',
     'cost_tracking_enabled','cost_track_openrouter','cost_track_local',
-    'orchestrator_enabled',
+    'orchestrator_enabled','operator_enabled',
     'conversation_replay_enabled','auto_summarization_enabled',
     'web_ui_vi_mode','voice_enabled','tts_autoplay','system_context_enabled','gen_force',
   ];

@@ -402,6 +402,7 @@ async def api_config():
         },
         # ── Operator ─────────────────────────────────────────────────
         "operator": {
+            "enabled":        rt.get("operator_enabled", cfg.get("operator", {}).get("enabled", False)),
             "model":          cfg.get("operator", {}).get("model", ""),
             "max_iterations": cfg.get("operator", {}).get("max_iterations", 10),
             "shell_enabled":  cfg.get("operator", {}).get("shell", {}).get("enabled", False),
@@ -558,6 +559,8 @@ async def api_config_save(request: Request):
         "auto_keep_last":               "auto_keep_last",
         # System context
         "system_context_enabled":       "system_context_enabled",
+        # Operator
+        "operator_enabled":             "operator_enabled",
         # Generation parameters
         "gen_temperature":              "gen_temperature",
         "gen_top_p":                    "gen_top_p",
@@ -1287,7 +1290,9 @@ async def api_operator(request: Request):
     Body: {"query": "your question"}
     """
     cfg = get_config()
-    if not cfg.get("operator", {}).get("enabled", False):
+    rt = get_runtime_config()
+    op_enabled = rt.get("operator_enabled", cfg.get("operator", {}).get("enabled", False))
+    if not op_enabled:
         return JSONResponse(
             {"error": "Operator is disabled. Set operator.enabled: true in config.yaml to enable LLM-driven tool execution."},
             status_code=403,
