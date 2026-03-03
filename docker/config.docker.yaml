@@ -66,15 +66,19 @@ decision_llm:
     default:
       model: "llama3.2:3b"
       description: "General purpose conversation and Q&A"
+      wasm_module: "opener_strip"
     code:
       model: "llama3.2:3b"
       description: "Code generation, debugging, technical programming tasks"
+      # no wasm_module — code responses should not be stripped
     large:
       model: "llama3.2:3b"
       description: "Complex reasoning, analysis, long-form writing"
+      wasm_module: "opener_strip"
     fast:
       model: "llama3.2:3b"
       description: "Quick responses, simple questions, brainstorming"
+      wasm_module: "opener_strip"
 
 # --- Operator ---
 operator:

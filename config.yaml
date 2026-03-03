@@ -37,6 +37,8 @@ backends:
     max_retries: 2              # Retry transient errors (404, 429, 5xx) 2 times
     backoff_base: 1.5           # Wait 1.5^attempt seconds
     backoff_max: 10.0           # Cap backoff at 10 seconds
+    # latency_p95_threshold_ms: 3000  # Latency-aware routing: skip if rolling P95 > 3s (0 = disabled)
+    # traffic_split: 70         # A/B split weight (relative, e.g. 70/30 across two backends; 0 = priority order)
 
   # Secondary: Generic OpenAI-compatible backend (llama.cpp, vLLM, etc)
   # STEP 3: Uncomment to enable — change URL to your endpoint
@@ -57,6 +59,17 @@ backends:
   #   api_key: ${OPENROUTER_API_KEY}
   #   timeout: 120
   #   priority: 3
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Agent Workspace — persistent shared directory
+# ─────────────────────────────────────────────────────────────────────────────
+# Drop files into workspace/in/ on the host — agents see them at /workspace/in
+# (read-only inside the bwrap sandbox). Agents write output to /workspace/out/,
+# which you can retrieve directly from the host at workspace/out/.
+
+workspace:
+  path: ./workspace
+  max_mb: 0     # 0 = no limit. Set e.g. 100 to warn at 100 MB.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Storage Configuration
@@ -90,6 +103,15 @@ decision_llm:
   model: "llama3.2:3b"
   temperature: 0.2
   system_prompt: "You are a helpful routing assistant that decides which tool or backend to use."
+  # routes:          # Define named routes with per-route model + wasm_module hints
+  #   default:
+  #     model: "llama3.2:3b"
+  #     description: "General purpose conversation and Q&A"
+  #     wasm_module: "opener_strip"   # suggest WASM post-processing for this route
+  #   code:
+  #     model: "llama3.2:3b"
+  #     description: "Code generation, debugging, technical tasks"
+  #     # no wasm_module — code responses should not be stripped
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Cost Tracking
@@ -244,6 +266,8 @@ tools:
     # Absent = enabled by default once the master switch is on.
     # dice:
     #   enabled: false
+    zip_inspector:
+      enabled: true
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Hooks (Custom Middleware)
@@ -304,6 +328,34 @@ zcommands:
       route_to: "internal"
 
 # ─────────────────────────────────────────────────────────────────────────────
+# WASM Transform Modules — post-processing pipeline
+# ─────────────────────────────────────────────────────────────────────────────
+# Drop compiled .wasm (WASI target) files into ./wasm_modules/ and register them
+# here. The decision LLM can then select a module per request; the module reads
+# the full response from stdin and writes the (possibly modified) response to stdout.
+# Any language that compiles to WASI works (Rust, C, Go, AssemblyScript, …).
+# Requires: pip install wasmtime
+
+wasm:
+  enabled: false
+  modules_dir: "./wasm_modules"      # informational; actual path is per-module below
+  modules:
+    passthrough:
+      path: "./wasm_modules/passthrough.wasm"
+      enabled: false
+      description: "Identity transform — passes response through unmodified (reference impl)"
+    opener_strip:
+      path: "./wasm_modules/opener_strip.wasm"
+      enabled: false
+      description: "Strip sycophantic opener phrases (Certainly!, Of course!, etc.)"
+    # pii_redactor:
+    #   path: "./wasm_modules/pii_redactor.wasm"
+    #   enabled: false
+    #   description: "Strip PII from responses"
+  default_module: ""                 # Optional: always run this module regardless of routing
+  timeout_ms: 500                    # Abort and pass through if module exceeds this
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Logging Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -313,6 +365,42 @@ logging:
   file: "./logs/beigebox.log"
   max_bytes: 10485760       # 10MB
   backup_count: 5
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-Model Options — Ollama inference settings per model name
+# ─────────────────────────────────────────────────────────────────────────────
+# ``options`` is passed directly to Ollama and controls the model loader.
+# num_gpu: number of layers to offload to GPU (99 = all, 0 = CPU-only)
+# num_ctx: context window size (overrides the global gen_num_ctx for this model)
+# Any Ollama ``options`` key is accepted (num_thread, f16_kv, rope_scaling, etc.)
+#
+# These are applied at request time — Ollama picks them up on the next model
+# load.  If the model is already resident, send ``keep_alive: 0`` once to evict
+# it first, then the next request will reload with the new settings.
+
+# models:
+#   llama3.2:3b:
+#     options:
+#       num_gpu: 99          # offload all layers to GPU
+#   llama2:70b:
+#     options:
+#       num_gpu: 20          # partial offload — stay within VRAM budget
+#       num_ctx: 4096
+#   mistral:7b:
+#     options:
+#       num_gpu: 0           # force CPU inference (benchmark / comparison)
+#       num_ctx: 8192
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Auth — Single API Key
+# ─────────────────────────────────────────────────────────────────────────────
+# Set api_key to a non-empty string to require authentication on all endpoints.
+# The web UI (/), /ui, /beigebox/health, and /api/v1/status are always exempt.
+# Accepted via: Authorization: Bearer <key>, api-key header, or ?api_key= param.
+# Empty string (default) disables auth entirely.
+
+# auth:
+#   api_key: ""
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Advanced Settings

@@ -239,6 +239,27 @@ echo "$CONFIG_PR" | python3 -c \
   && _ok "config shape intact after restart" \
   || _fail "config missing expected sections after restart"
 
+# ── 18. WASM runtime ──────────────────────────────────────────────────────────
+_hdr "WASM runtime"
+WASM_ST=$(curl -fsS "$BB/api/v1/status")
+echo "$WASM_ST" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); assert 'wasm' in d" 2>/dev/null \
+  && _ok "status includes wasm key" \
+  || _fail "status missing wasm key"
+echo "$WASM_ST" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); w=d['wasm']; assert 'enabled' in w and 'modules' in w" 2>/dev/null \
+  && _ok "wasm status has expected shape (enabled, modules)" \
+  || _fail "wasm status unexpected shape"
+
+# ── 19. Agent workspace ───────────────────────────────────────────────────────
+_hdr "Agent workspace"
+docker compose exec -T beigebox test -d /app/workspace/in \
+  && _ok "/app/workspace/in exists in container" \
+  || _fail "/app/workspace/in not found — check docker-compose.yaml volume mount"
+docker compose exec -T beigebox test -d /app/workspace/out \
+  && _ok "/app/workspace/out exists in container" \
+  || _fail "/app/workspace/out not found"
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo
 echo "────────────────────────────────────────────"

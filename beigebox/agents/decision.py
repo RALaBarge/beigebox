@@ -40,6 +40,7 @@ class Decision:
     reasoning: str = ""              # Brief explanation (for logging/debug)
     confidence: float = 1.0          # 0-1, how sure the router is
     fallback: bool = False           # True if this is a default/fallback decision
+    wasm_module: str = ""            # WASM transform module to apply post-response
 
 
 DEFAULT_DECISION = Decision(fallback=True)
@@ -57,11 +58,15 @@ Available routes (models):
 Available tools:
 {tools_block}
 
+Available WASM transform modules (applied to the model response after generation):
+{wasm_block}
+
 Analyze the user's message and return a JSON object with these fields:
 - "model": the route name to use (from the routes above)
 - "needs_search": true if the question requires current/recent information from the web
 - "needs_rag": true if the question references past conversations or would benefit from conversation history context
 - "tools": array of tool names to invoke before sending to the model (empty array if none needed)
+- "wasm_module": name of WASM transform module to apply to the response (from the list above), or "" for none
 - "reasoning": one sentence explaining your decision
 
 Rules:
@@ -69,6 +74,7 @@ Rules:
 - Only set needs_search=true for questions about current events, recent data, or things that change over time
 - Only set needs_rag=true if the user references "we discussed", "earlier", "last time", "remember", or similar
 - Only include tools that are clearly needed — when in doubt, use none
+- Only select a wasm_module if the content clearly requires post-processing — when in doubt, use ""
 - RESPOND ONLY WITH THE JSON OBJECT. No markdown, no explanation, no code fences."""
 
 
@@ -78,7 +84,9 @@ def _build_routes_block(routes: dict) -> str:
     for name, cfg in routes.items():
         desc = cfg.get("description", "")
         model = cfg.get("model", name)
-        lines.append(f'- "{name}": model={model} — {desc}')
+        wasm_hint = cfg.get("wasm_module", "")
+        hint_str = f" [suggest wasm: {wasm_hint}]" if wasm_hint else ""
+        lines.append(f'- "{name}": model={model} — {desc}{hint_str}')
     return "\n".join(lines) if lines else "- No custom routes configured. Use the default model."
 
 
@@ -87,6 +95,21 @@ def _build_tools_block(tool_names: list[str]) -> str:
     if not tool_names:
         return "- No tools available."
     return "\n".join(f'- "{t}"' for t in tool_names)
+
+
+def _build_wasm_block(modules: dict) -> str:
+    """Format available WASM modules into a block for the system prompt."""
+    enabled = {
+        name: cfg for name, cfg in modules.items()
+        if cfg.get("enabled", True)
+    }
+    if not enabled:
+        return "- No WASM modules configured."
+    lines = []
+    for name, cfg in enabled.items():
+        desc = cfg.get("description", "")
+        lines.append(f'- "{name}": {desc}')
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +135,7 @@ class DecisionAgent:
         routes: dict | None = None,
         available_tools: list[str] | None = None,
         default_model: str = "",
+        wasm_modules: dict | None = None,
     ):
         self.model = model
         self.backend_url = backend_url.rstrip("/")
@@ -119,12 +143,14 @@ class DecisionAgent:
         self.routes = routes or {}
         self.available_tools = available_tools or []
         self.default_model = default_model
+        self.wasm_modules = wasm_modules or {}
         self.enabled = bool(model and backend_url)
 
         # Pre-build the system prompt
         self._system_prompt = DECISION_SYSTEM_PROMPT.format(
             routes_block=_build_routes_block(self.routes),
             tools_block=_build_tools_block(self.available_tools),
+            wasm_block=_build_wasm_block(self.wasm_modules),
         )
 
         if self.enabled:
@@ -146,6 +172,9 @@ class DecisionAgent:
         if not d_cfg.get("enabled", False):
             return cls()  # Disabled agent
 
+        wasm_cfg = cfg.get("wasm", {})
+        wasm_modules = wasm_cfg.get("modules", {}) if wasm_cfg.get("enabled", False) else {}
+
         return cls(
             model=d_cfg.get("model", ""),
             backend_url=d_cfg.get("backend_url", cfg["backend"]["url"]),
@@ -153,6 +182,7 @@ class DecisionAgent:
             routes=d_cfg.get("routes", {}),
             available_tools=available_tools or [],
             default_model=cfg["backend"].get("default_model", ""),
+            wasm_modules=wasm_modules,
         )
 
     def _resolve_model(self, route_name: str) -> str:
@@ -178,6 +208,12 @@ class DecisionAgent:
         route_name = data.get("model", "default")
         resolved_model = self._resolve_model(route_name)
 
+        # Validate wasm_module — ignore hallucinated names
+        wasm_module = str(data.get("wasm_module", ""))
+        if wasm_module and wasm_module not in self.wasm_modules:
+            logger.warning("Decision LLM picked unknown WASM module '%s', ignoring", wasm_module)
+            wasm_module = ""
+
         return Decision(
             model=resolved_model,
             needs_search=bool(data.get("needs_search", False)),
@@ -185,6 +221,7 @@ class DecisionAgent:
             tools=[t for t in data.get("tools", []) if t in self.available_tools],
             reasoning=str(data.get("reasoning", "")),
             confidence=float(data.get("confidence", 0.8)),
+            wasm_module=wasm_module,
         )
 
     async def decide(self, user_message: str) -> Decision:

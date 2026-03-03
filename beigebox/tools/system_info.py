@@ -99,6 +99,9 @@ def _bwrap_argv(gpu: bool = False) -> list[str]:
         # ── scratch only ─────────────────────────────────────────────────
         "--tmpfs", "/tmp",
         "--chdir", "/tmp",
+        # ── persistent agent workspace ────────────────────────────────────
+        "--ro-bind-try", "/app/workspace/in",  "/workspace/in",   # user drops files here
+        "--bind-try",    "/app/workspace/out", "/workspace/out",  # agent writes here
         # ── explicitly NOT mounting: /app /home /root /etc (writable) ───
     ]
     if gpu:

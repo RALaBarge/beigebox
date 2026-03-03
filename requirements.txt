@@ -19,6 +19,9 @@ beautifulsoup4>=4.12.0
 requests>=2.31.0
 lxml>=5.0
 
+# WASM runtime
+wasmtime
+
 # Dev / Test
 pytest>=8.0
 pytest-asyncio>=0.24.0

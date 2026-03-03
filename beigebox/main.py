@@ -12,15 +12,19 @@ Now with:
 """
 
 import logging
+import os
 import time
 import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
 from beigebox.config import get_config, get_runtime_config, update_runtime_config
 from beigebox.proxy import Proxy
@@ -210,6 +214,64 @@ async def lifespan(app: FastAPI):
 
 
 # ---------------------------------------------------------------------------
+# Auth middleware — single API key, disabled when key is empty
+# ---------------------------------------------------------------------------
+
+# Paths that never require auth (web UI + basic health checks)
+_AUTH_EXEMPT = frozenset(["/", "/ui", "/beigebox/health", "/api/v1/status"])
+
+
+class ApiKeyMiddleware(BaseHTTPMiddleware):
+    """
+    Simple single-key API key guard.
+
+    Reads auth.api_key from config on every request so the key can be
+    changed in config.yaml without a restart.  Empty string = disabled.
+
+    Accepts the key via:
+      Authorization: Bearer <key>
+      api-key: <key>          (OpenAI-style header)
+      ?api_key=<key>          (query param fallback)
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        cfg = get_config()
+        api_key = cfg.get("auth", {}).get("api_key", "")
+        if not api_key:
+            return await call_next(request)
+
+        if request.url.path in _AUTH_EXEMPT:
+            return await call_next(request)
+
+        # Static assets (/web/...) are also exempt
+        if request.url.path.startswith("/web/"):
+            return await call_next(request)
+
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()
+        else:
+            token = (
+                request.headers.get("api-key", "")
+                or request.query_params.get("api_key", "")
+            )
+
+        if token == api_key:
+            return await call_next(request)
+
+        return JSONResponse(
+            {
+                "error": {
+                    "message": "Invalid API key. Provide it via Authorization: Bearer <key>, api-key header, or ?api_key= query param.",
+                    "type": "invalid_request_error",
+                    "code": "invalid_api_key",
+                }
+            },
+            status_code=401,
+        )
+
+
+# ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
 app = FastAPI(
@@ -218,6 +280,8 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+app.add_middleware(ApiKeyMiddleware)
 
 
 # ---------------------------------------------------------------------------
@@ -710,6 +774,10 @@ async def api_status():
             "model": cfg.get("operator", {}).get("model", ""),
             "shell_enabled": cfg.get("operator", {}).get("shell", {}).get("enabled", False),
         },
+        "wasm": {
+            "enabled": proxy.wasm_runtime.enabled if proxy else False,
+            "modules": proxy.wasm_runtime.list_modules() if proxy else [],
+        },
     })
 
 
@@ -886,7 +954,7 @@ async def api_routing_stats(lines: int = 10000):
 
 @app.get("/api/v1/backends")
 async def api_backends():
-    """Health and status of all configured backends."""
+    """Health and status of all configured backends, with rolling latency stats."""
     if not backend_router:
         cfg = get_config()
         return JSONResponse({
@@ -894,10 +962,10 @@ async def api_backends():
             "message": "Multi-backend routing is disabled. Set backends_enabled: true in config.",
             "primary_backend": cfg.get("backend", {}).get("url", ""),
         })
-    health = await backend_router.health()
+    backends_list = await backend_router.health()
     return JSONResponse({
         "enabled": True,
-        "backends": health,
+        "backends": backends_list,  # list, not dict
     })
 
 
@@ -1412,6 +1480,71 @@ async def api_build_centroids():
             return JSONResponse({"success": False, "error": "build_centroids() returned False — check Ollama is running"}, status_code=500)
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+@app.get("/api/v1/workspace")
+async def api_workspace():
+    """List files in workspace/in and workspace/out with sizes and timestamps."""
+    cfg = get_config()
+    ws_cfg = cfg.get("workspace", {})
+    ws_path_raw = ws_cfg.get("path", "./workspace")
+    max_mb = ws_cfg.get("max_mb", 0)
+
+    # Resolve relative paths from the app root (parent of the beigebox package dir)
+    app_root = Path(__file__).parent.parent
+    ws_path = (app_root / ws_path_raw).resolve()
+
+    def scan_dir(dirpath: Path) -> tuple[list[dict], int]:
+        entries = []
+        total = 0
+        if not dirpath.exists():
+            return entries, total
+        for entry in os.scandir(dirpath):
+            if entry.name == ".gitkeep":
+                continue
+            stat = entry.stat()
+            entries.append({
+                "name": entry.name,
+                "size": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+            })
+            total += stat.st_size
+        entries.sort(key=lambda e: e["name"])
+        return entries, total
+
+    in_files, in_bytes = scan_dir(ws_path / "in")
+    out_files, out_bytes = scan_dir(ws_path / "out")
+
+    return JSONResponse({
+        "in": in_files,
+        "out": out_files,
+        "in_bytes": in_bytes,
+        "out_bytes": out_bytes,
+        "max_mb": max_mb,
+    })
+
+
+@app.delete("/api/v1/workspace/out/{filename}")
+async def api_workspace_delete(filename: str):
+    """Delete a file from workspace/out/. Guards against path traversal."""
+    if "/" in filename or ".." in filename:
+        return JSONResponse({"ok": False, "error": "Invalid filename"}, status_code=400)
+
+    cfg = get_config()
+    ws_path_raw = cfg.get("workspace", {}).get("path", "./workspace")
+    app_root = Path(__file__).parent.parent
+    target = (app_root / ws_path_raw / "out" / filename).resolve()
+
+    # Double-check resolved path is inside workspace/out
+    out_dir = (app_root / ws_path_raw / "out").resolve()
+    if not str(target).startswith(str(out_dir) + os.sep) and target != out_dir:
+        return JSONResponse({"ok": False, "error": "Invalid path"}, status_code=400)
+
+    if not target.exists():
+        return JSONResponse({"ok": False, "error": "File not found"}, status_code=404)
+
+    target.unlink()
+    return JSONResponse({"ok": True})
+
 
 @app.post("/api/v1/web-ui/toggle-vi-mode")
 

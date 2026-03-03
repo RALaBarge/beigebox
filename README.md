@@ -75,7 +75,8 @@ Session-sticky routing keeps a conversation on the same model once classified. M
 
 ### Observability
 
-- **Wiretap** — structured JSONL log of every request, response, routing decision, tool call, and timing breakdown
+- **Wiretap** — structured JSONL log of every request, response, routing decision, tool call, WASM transform, and timing breakdown
+- **TTFT tracking** — time to first token captured on every streaming response, surfaced in wiretap timing line
 - **Cost tracking** — per-request, per-model, per-day spend for API backends (OpenRouter cost extraction built in)
 - **Model performance** — tokens/sec, cache hit rate, latency percentiles from SQLite
 - **Flight recorder** — request lifecycle timelines with per-stage timing
@@ -93,6 +94,13 @@ Session-sticky routing keeps a conversation on the same model once classified. M
 - **ChromaDB** — vector embeddings for semantic search and classification
 - **Conversation replay** — reconstruct any conversation with full routing context
 - **Conversation forking** — branch a conversation into a new thread via `z: fork`
+
+### Post-processing (WASM)
+
+- **WASM transform modules** — drop a compiled `.wasm` (WASI target) into `wasm_modules/` and route responses through it; modules read the response from stdin and write modified output to stdout
+- Any language that compiles to WASI works (Rust, C, Go, AssemblyScript)
+- Timeout-enforced (configurable `timeout_ms`) — if the module times out, the original response passes through unmodified
+- Included example: `opener_strip` — strips sycophantic openers ("Certainly!", "Of course!", etc.) from responses in both streaming and non-streaming paths
 
 ### Hooks & Plugins
 
@@ -183,6 +191,7 @@ auto_summarization.enabled: false # Context window management
 cost_tracking.enabled: false     # Per-request spend tracking
 backends_enabled: false          # Multi-backend routing with failover
 voice.enabled: false             # Push-to-talk STT/TTS
+wasm.enabled: false              # WASM post-processing transform modules
 ```
 
 ---
@@ -195,6 +204,7 @@ voice.enabled: false             # Push-to-talk STT/TTS
 - **Non-root container** — runs as `appuser` (UID 1000)
 - **No network in sandbox** — bwrap `--unshare-all` isolates shell commands from the network
 - **Blocked patterns** — belt-and-suspenders regex blocking on top of the allowlist
+- **Agent workspace** — `workspace/in/` is read-only inside the sandbox (you drop files), `workspace/out/` is writable (agents leave results); both are host bind-mounts accessible without entering the container
 
 ---
 
@@ -237,7 +247,7 @@ Ollama-native endpoints (`/api/tags`, `/api/chat`, `/api/generate`, etc.) are fo
 ```
 beigebox/
 ├── main.py                 FastAPI app — all endpoints
-├── proxy.py                Core proxy — routing, streaming, hooks, logging
+├── proxy.py                Core proxy — routing, streaming, hooks, WASM, logging
 ├── config.py               Config loader with hot-reload
 ├── cli.py                  CLI entry point
 ├── costs.py                Cost tracking
@@ -246,6 +256,7 @@ beigebox/
 ├── replay.py               Conversation replay
 ├── summarizer.py           Auto-summarization
 ├── system_context.py       System prompt injection
+├── wasm_runtime.py         WASM module loader and async transform runner
 ├── wiretap.py              Structured wire logging
 ├── agents/
 │   ├── decision.py         Decision LLM (Tier 4 routing)
@@ -280,6 +291,14 @@ beigebox/
 └── web/
     ├── index.html          Single-file web UI (no build step)
     └── vi.js               Optional vi-mode keybindings
+
+workspace/
+├── in/                     Drop files here — agents see /workspace/in (read-only)
+└── out/                    Agents write here — retrieve results from host
+
+wasm_modules/
+├── passthrough/            Reference Rust/WASI module (stdin → stdout identity)
+└── opener_strip/           Strips sycophantic openers from responses
 ```
 
 ---

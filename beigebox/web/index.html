@@ -547,6 +547,57 @@
   .chat-pane-messages::-webkit-scrollbar { width: 4px; }
   .chat-pane-messages::-webkit-scrollbar-thumb { background: var(--bg-border); }
 
+  /* ── Pane settings drawer ────────────────────────────────────────────── */
+  .pane-settings-drawer {
+    display: none;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--bg-border);
+    padding: 7px 8px 5px;
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+  .pane-settings-drawer.open { display: block; }
+  .pane-cfg-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 5px;
+    flex-wrap: wrap;
+  }
+  .pane-cfg-pair {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+  .pane-cfg-pair label {
+    color: var(--dim);
+    font-size: 10px;
+    white-space: nowrap;
+    min-width: 48px;
+    letter-spacing: 0.2px;
+  }
+  .pane-cfg-pair input[type="number"] {
+    width: 58px;
+    padding: 1px 4px;
+    font-size: 11px;
+    height: 20px;
+  }
+  .pane-settings-drawer textarea {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 11px;
+    min-height: 44px;
+    resize: vertical;
+    padding: 3px 6px;
+    margin-top: 2px;
+  }
+  .pane-settings-drawer .pane-cfg-section-label {
+    color: var(--dim);
+    font-size: 10px;
+    letter-spacing: 0.3px;
+    margin-bottom: 2px;
+  }
+
   /* ── Chat page nav ───────────────────────────────────────────────────── */
   #chat-page-nav {
     display: flex;
@@ -1725,6 +1776,7 @@ async function loadDashboard() {
       html += ghost('Decision LLM',         'disabled');
       html += ghost('Embedding Classifier', '');
       html += ghost('Tools',                'web_search, calculator, datetime, memory, …');
+      html += ghost('WASM Runtime',        'disabled');
       html += `<div style="color:var(--fg-muted);font-size:10px;padding:6px 0 2px;letter-spacing:0.5px">
         ↑ example — proxy is still starting up or not reachable</div>`;
     }
@@ -1733,19 +1785,76 @@ async function loadDashboard() {
       html += subsystem('Storage · SQLite',   st.storage?.sqlite,     st.storage?.stats ? `${st.storage.stats.total_messages ?? 0} messages` : '');
       html += subsystem('Storage · ChromaDB', st.storage?.vector,     '');
       html += subsystem('Decision LLM',       st.routing?.decision_llm?.enabled, st.routing?.decision_llm?.model ? `model: ${esc(st.routing.decision_llm.model)}` : 'disabled');
-      html += subsystem('Embedding Classifier', st.routing?.embedding_classifier?.ready, '');
+      const ecOk = st.routing?.embedding_classifier?.ready;
+      html += `<div class="subsystem-row"><span class="status-dot ${ecOk ? 'ok' : 'err'}" style="display:inline-block;vertical-align:middle;margin-right:6px"></span><span class="subsystem-name">Embedding Classifier</span><span class="subsystem-detail" style="flex:1"></span><button id="dash-rebuild-btn" onclick="rebuildCentroids()" style="font-size:10px;padding:2px 8px;margin-left:8px">Rebuild</button></div>`;
       html += subsystem('Tools',              st.tools?.enabled,      st.tools?.available?.join(', ') || '');
+      if (st.wasm !== undefined) {
+        const wasmDetail = st.wasm.enabled
+          ? (st.wasm.modules?.length ? st.wasm.modules.join(', ') : 'enabled · no modules loaded')
+          : 'disabled';
+        html += subsystem('WASM Runtime', st.wasm.enabled && (st.wasm.modules?.length > 0), wasmDetail);
+      }
     }
+
+    // ── Workspace ──
+    try {
+      const ws = await api('/api/v1/workspace');
+      html += `<div class="section-header" style="display:flex;align-items:center;justify-content:space-between">
+        <span>Workspace</span>
+        <button onclick="loadDashboard()" style="font-size:10px;padding:2px 8px">↺ Refresh</button>
+      </div>`;
+      const fmtB = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n/1024).toFixed(1)} KB` : `${(n/1048576).toFixed(1)} MB`;
+      const renderWsPanel = (files, label, isDeletable) => {
+        let p = `<div style="flex:1;min-width:0"><div style="font-size:11px;color:var(--fg-muted);margin-bottom:4px">${label}</div>`;
+        p += `<div style="border:1px solid var(--bg-border);border-radius:2px;padding:4px 6px;min-height:40px;font-size:11px">`;
+        if (!files.length) {
+          p += `<div style="color:var(--fg-muted);font-style:italic">(empty)</div>`;
+        } else {
+          files.forEach(f => {
+            p += `<div style="display:flex;align-items:center;gap:6px;padding:1px 0">`;
+            p += `<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</span>`;
+            p += `<span style="color:var(--fg-muted);flex-shrink:0">${fmtB(f.size)}</span>`;
+            if (isDeletable) {
+              p += `<button onclick="deleteWorkspaceOut(${JSON.stringify(f.name)})" style="font-size:10px;padding:0 5px;line-height:1.6;flex-shrink:0" title="Delete">✕</button>`;
+            }
+            p += `</div>`;
+          });
+        }
+        p += `</div></div>`;
+        return p;
+      };
+      html += `<div style="display:flex;gap:12px;align-items:flex-start">`;
+      html += renderWsPanel(ws.in,  'IN (read-only)',          false);
+      html += renderWsPanel(ws.out, 'OUT (writable by agents)', true);
+      html += `</div>`;
+      // Totals row
+      const maxBytes = (ws.max_mb || 0) * 1024 * 1024;
+      const pct = maxBytes > 0 ? ws.out_bytes / maxBytes : 0;
+      const warnStr = maxBytes > 0 ? ` <span style="color:${pct > 0.8 ? 'var(--red)' : 'var(--fg-muted)'}">[${(pct*100).toFixed(0)}% of ${ws.max_mb} MB${pct > 0.8 ? ' ⚠' : ''}]</span>` : '';
+      html += `<div style="display:flex;gap:12px;font-size:10px;color:var(--fg-muted);margin-top:4px">`;
+      html += `<div style="flex:1">Total: ${fmtB(ws.in_bytes)}</div>`;
+      html += `<div style="flex:1">Total: ${fmtB(ws.out_bytes)}${warnStr}</div>`;
+      html += `</div>`;
+    } catch(_) { /* workspace endpoint unavailable — skip section */ }
 
     // ── Backends ──
     const bk = backends.status === 'fulfilled' ? backends.value : {};
     html += '<div class="section-header">Backends</div>';
     if (bk.enabled) {
       (bk.backends || []).forEach(b => {
+        const degradedBadge = b.degraded
+          ? ' <span style="color:var(--red);font-size:10px;font-weight:bold">⚠ degraded</span>' : '';
+        const providerBadge = b.provider
+          ? ` <span style="color:var(--fg-muted);font-size:10px">[${esc(b.provider)}]</span>` : '';
+        const p95str = b.rolling_p95_ms != null
+          ? `p95: ${b.rolling_p95_ms}ms (${b.rolling_samples} samples)`
+          : 'p95: no data yet';
+        const thresholdStr = b.latency_threshold_ms > 0
+          ? ` · threshold: ${b.latency_threshold_ms}ms` : '';
         html += subsystem(
-          `${esc(b.name)} <span class="badge badge-dim">${esc(b.provider)}</span>`,
-          b.healthy,
-          `priority ${b.priority} · ${b.url}`
+          `${esc(b.name)}${providerBadge}${degradedBadge}`,
+          b.healthy && !b.degraded,
+          `priority ${b.priority} · ${p95str}${thresholdStr}`
         );
       });
     } else {
@@ -1805,17 +1914,22 @@ async function loadDashboard() {
       // Stats table
       html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px">';
       html += '<tr style="color:var(--fg-muted);border-bottom:1px solid var(--bg-border)">';
-      html += '<th style="text-align:left;padding:3px 8px">Model</th><th style="padding:3px 8px">Reqs</th><th style="padding:3px 8px">Avg ms</th><th style="padding:3px 8px">p50 ms</th><th style="padding:3px 8px">p95 ms</th><th style="padding:3px 8px">tok/s</th><th style="padding:3px 8px">Avg tok</th><th style="padding:3px 8px">Cost</th></tr>';
+      html += '<th style="text-align:left;padding:3px 8px">Model</th><th style="padding:3px 8px">Reqs</th><th style="padding:3px 8px">Avg ms</th><th style="padding:3px 8px">p50</th><th style="padding:3px 8px">p90</th><th style="padding:3px 8px">p95</th><th style="padding:3px 8px">p99</th><th style="padding:3px 8px">TTFT</th><th style="padding:3px 8px">tok/s</th><th style="padding:3px 8px">Avg tok</th><th style="padding:3px 8px">Cost</th></tr>';
       Object.entries(perfData.by_model).forEach(([name, m]) => {
         const p95cls = m.p95_latency_ms > 5000 ? 'color:var(--red)' : m.p95_latency_ms > 2000 ? 'color:var(--yellow)' : 'color:var(--green)';
+        const p99cls = m.p99_latency_ms > 8000 ? 'color:var(--red)' : m.p99_latency_ms > 4000 ? 'color:var(--yellow)' : 'color:var(--green)';
         const tps = m.avg_tokens_per_sec || 0;
         const tpscls = tps > 50 ? 'color:var(--green)' : tps > 15 ? 'color:var(--cyan)' : tps > 0 ? 'color:var(--yellow)' : 'color:var(--fg-muted)';
+        const ttft = m.avg_ttft_ms != null ? m.avg_ttft_ms + ' ms' : '—';
         html += `<tr style="border-bottom:1px solid var(--bg-border)">
           <td style="padding:3px 8px;color:var(--fg)">${esc(name)}</td>
           <td style="padding:3px 8px;color:var(--cyan);text-align:center">${m.requests}</td>
           <td style="padding:3px 8px;color:var(--fg-dim);text-align:center">${m.avg_latency_ms}</td>
           <td style="padding:3px 8px;color:var(--fg-dim);text-align:center">${m.p50_latency_ms}</td>
+          <td style="padding:3px 8px;color:var(--fg-dim);text-align:center">${m.p90_latency_ms ?? '—'}</td>
           <td style="padding:3px 8px;text-align:center;${p95cls}">${m.p95_latency_ms}</td>
+          <td style="padding:3px 8px;text-align:center;${p99cls}">${m.p99_latency_ms ?? '—'}</td>
+          <td style="padding:3px 8px;color:var(--fg-muted);text-align:center">${ttft}</td>
           <td style="padding:3px 8px;text-align:center;${tpscls}">${tps > 0 ? tps.toFixed(1) : '—'}</td>
           <td style="padding:3px 8px;color:var(--fg-muted);text-align:center">${m.avg_tokens}</td>
           <td style="padding:3px 8px;color:var(--fg-muted);text-align:center">$${m.total_cost_usd.toFixed(4)}</td>
@@ -1978,13 +2092,13 @@ function renderLatencyChart(byModel) {
   if (!canvas) return;
 
   const entries = Object.entries(byModel)
-    .map(([name, m]) => ({ name, avg: m.avg_latency_ms, p50: m.p50_latency_ms, p95: m.p95_latency_ms }))
+    .map(([name, m]) => ({ name, avg: m.avg_latency_ms, p50: m.p50_latency_ms, p95: m.p95_latency_ms, p99: m.p99_latency_ms ?? m.p95_latency_ms }))
     .sort((a, b) => b.avg - a.avg)
     .slice(0, 10);
 
   if (!entries.length) return;
 
-  const maxVal = Math.max(...entries.map(e => e.p95), 1);
+  const maxVal = Math.max(...entries.map(e => e.p99), 1);
   const dpr  = window.devicePixelRatio || 1;
   const W    = canvas.offsetWidth || canvas.parentElement.offsetWidth || 600;
   const ROW_H = 24;
@@ -1998,8 +2112,9 @@ function renderLatencyChart(byModel) {
   ctx.scale(dpr, dpr);
 
   const chartW = W - PAD_L - PAD_R;
-  const avgColor = getComputedStyle(document.documentElement).getPropertyValue('--cyan').trim()    || '#88C0D0';
-  const p95Color = getComputedStyle(document.documentElement).getPropertyValue('--yellow').trim()  || '#EBCB8B';
+  const avgColor  = getComputedStyle(document.documentElement).getPropertyValue('--cyan').trim()    || '#88C0D0';
+  const p95Color  = getComputedStyle(document.documentElement).getPropertyValue('--yellow').trim()  || '#EBCB8B';
+  const p99Color  = getComputedStyle(document.documentElement).getPropertyValue('--red').trim()     || '#BF616A';
   const labelColor= getComputedStyle(document.documentElement).getPropertyValue('--fg-dim').trim() || '#6C7680';
   const valColor  = getComputedStyle(document.documentElement).getPropertyValue('--fg').trim()     || '#D8DEE9';
 
@@ -2014,7 +2129,12 @@ function renderLatencyChart(byModel) {
     const shortName = e.name.length > 22 ? '…' + e.name.slice(-20) : e.name;
     ctx.fillText(shortName, PAD_L - 6, y + barH);
 
-    // p95 bar (background, wider)
+    // p99 bar (outermost, red tint)
+    const p99W = (e.p99 / maxVal) * chartW;
+    ctx.fillStyle = p99Color + '33';
+    ctx.fillRect(PAD_L, y + 2, Math.max(p99W, 1), barH);
+
+    // p95 bar (middle, yellow tint)
     const p95W = (e.p95 / maxVal) * chartW;
     ctx.fillStyle = p95Color + '55';
     ctx.fillRect(PAD_L, y + 2, Math.max(p95W, 1), barH);
@@ -2028,7 +2148,7 @@ function renderLatencyChart(byModel) {
     ctx.fillStyle = valColor;
     ctx.textAlign = 'left';
     ctx.font = '10px monospace';
-    ctx.fillText(`${e.avg}ms avg  p95:${e.p95}ms`, PAD_L + Math.max(p95W, 1) + 6, y + barH);
+    ctx.fillText(`${e.avg}ms avg  p95:${e.p95}ms  p99:${e.p99}ms`, PAD_L + Math.max(p99W, 1) + 6, y + barH);
   });
 }
 
@@ -2119,10 +2239,23 @@ function initChatPanes() {
   loadModelsForPanes();
 }
 
+function _defaultPaneConfig() {
+  return { temperature: null, top_p: null, top_k: null,
+           num_ctx: null, max_tokens: null, repeat_penalty: null,
+           seed: null, num_gpu: null, force_reload: false, system_prompt: '' };
+}
+
+function _hasPaneConfig(cfg) {
+  if (!cfg) return false;
+  return cfg.temperature !== null || cfg.top_p !== null || cfg.top_k !== null ||
+         cfg.num_ctx !== null || cfg.max_tokens !== null || cfg.repeat_penalty !== null ||
+         cfg.seed !== null || cfg.num_gpu !== null || !!cfg.force_reload || !!cfg.system_prompt;
+}
+
 function addChatPane() {
   if (chatPanes.length >= 20) return; // soft cap
   const id = ++chatPaneIdSeq;
-  chatPanes.push({ id, target: currentModel || '', history: [] });
+  chatPanes.push({ id, target: currentModel || '', history: [], config: _defaultPaneConfig() });
   // If the new pane would be on a new page, navigate there
   const newPage = Math.floor((chatPanes.length - 1) / PANES_PER_PAGE);
   chatPageIdx = newPage;
@@ -2163,7 +2296,9 @@ function renderChatPanes() {
     div.className = 'chat-pane';
     div.id = `chat-pane-${pane.id}`;
 
-    // Pane header with target selector
+    // Pane header with target selector and settings gear
+    const cfg = pane.config || _defaultPaneConfig();
+    const cfgActive = _hasPaneConfig(cfg);
     div.innerHTML = `
       <div class="chat-pane-header">
         <span class="pane-label">#${pane.id}</span>
@@ -2171,8 +2306,11 @@ function renderChatPanes() {
           <option value="">default model</option>
           <option value="@op" ${pane.target==='@op'?'selected':''}>@operator</option>
         </select>
+        <button id="pane-cfg-btn-${pane.id}" onclick="togglePaneSettings(${pane.id})"
+          title="Pane settings" style="opacity:${cfgActive?'1':'0.45'};color:${openPaneSettings.has(pane.id)?'var(--accent)':''}">⚙</button>
         <button onclick="clearPane(${pane.id})" title="Clear this pane">✕</button>
       </div>
+      ${renderPaneSettingsDrawer(pane)}
       <div class="chat-pane-messages" id="pane-msgs-${pane.id}"></div>`;
 
     container.appendChild(div);
@@ -2278,6 +2416,80 @@ async function loadModelsForPanes() {
 
   // Refresh ensemble checklist if it's currently visible
   if (harnessMode === 'ensemble') harnessEnsemblePopulateModels();
+}
+
+// Track which pane drawers are open across re-renders
+const openPaneSettings = new Set();
+
+function togglePaneSettings(paneId) {
+  if (openPaneSettings.has(paneId)) openPaneSettings.delete(paneId);
+  else openPaneSettings.add(paneId);
+  const drawer = document.getElementById(`pane-cfg-drawer-${paneId}`);
+  const btn = document.getElementById(`pane-cfg-btn-${paneId}`);
+  if (drawer) drawer.classList.toggle('open', openPaneSettings.has(paneId));
+  if (btn) btn.style.color = openPaneSettings.has(paneId) ? 'var(--accent)' : '';
+}
+
+function setPaneConfig(paneId, key, val) {
+  const pane = chatPanes.find(p => p.id === paneId);
+  if (!pane) return;
+  if (!pane.config) pane.config = _defaultPaneConfig();
+  pane.config[key] = val;
+  // Update gear button to indicate active config
+  const btn = document.getElementById(`pane-cfg-btn-${paneId}`);
+  if (btn) {
+    btn.style.opacity = _hasPaneConfig(pane.config) ? '1' : '0.45';
+    if (!openPaneSettings.has(paneId)) btn.style.color = '';
+  }
+}
+
+function resetPaneConfig(paneId) {
+  const pane = chatPanes.find(p => p.id === paneId);
+  if (!pane) return;
+  pane.config = _defaultPaneConfig();
+  renderChatPanes();
+}
+
+function renderPaneSettingsDrawer(pane) {
+  const c = pane.config || _defaultPaneConfig();
+  const isOpen = openPaneSettings.has(pane.id);
+
+  function numField(key, placeholder, min, max, step) {
+    const val = (c[key] !== null && c[key] !== undefined) ? c[key] : '';
+    return `<input type="number" min="${min}" max="${max}" step="${step}"
+      placeholder="${placeholder}" value="${val}"
+      onchange="setPaneConfig(${pane.id},'${key}',this.value===''?null:Number(this.value))">`;
+  }
+
+  return `<div class="pane-settings-drawer${isOpen ? ' open' : ''}" id="pane-cfg-drawer-${pane.id}">
+    <div class="pane-cfg-row">
+      <div class="pane-cfg-pair"><label>Temp</label>${numField('temperature','inherit',0,2,0.05)}</div>
+      <div class="pane-cfg-pair"><label>Top-P</label>${numField('top_p','inherit',0,1,0.01)}</div>
+      <div class="pane-cfg-pair"><label>Top-K</label>${numField('top_k','inherit',1,200,1)}</div>
+    </div>
+    <div class="pane-cfg-row">
+      <div class="pane-cfg-pair"><label>Ctx</label>${numField('num_ctx','inherit',512,131072,512)}</div>
+      <div class="pane-cfg-pair"><label>Max tkns</label>${numField('max_tokens','inherit',1,32768,1)}</div>
+      <div class="pane-cfg-pair"><label>Rpt pen.</label>${numField('repeat_penalty','inherit',0,2,0.05)}</div>
+    </div>
+    <div class="pane-cfg-row">
+      <div class="pane-cfg-pair"><label>GPU layers</label>${numField('num_gpu','inherit',-1,999,1)}</div>
+      <div class="pane-cfg-pair" style="gap:4px;margin-left:4px">
+        <input type="checkbox" id="pane-cfg-force-reload-${pane.id}" ${c.force_reload?'checked':''}
+          onchange="setPaneConfig(${pane.id},'force_reload',this.checked)"
+          style="width:12px;height:12px;cursor:pointer" title="Evict model from VRAM before next send so it reloads with new GPU layers">
+        <label style="min-width:0;cursor:pointer" for="pane-cfg-force-reload-${pane.id}" title="Evict model from VRAM before next send so it reloads with new GPU layers">↺ reload</label>
+      </div>
+      <div class="pane-cfg-pair"><label>Seed</label>${numField('seed','random',0,2147483647,1)}</div>
+    </div>
+    <div class="pane-cfg-section-label">System prompt <span style="opacity:0.5">(overrides global — blank = inherit)</span></div>
+    <textarea placeholder="e.g. You are a concise coding assistant…"
+      onchange="setPaneConfig(${pane.id},'system_prompt',this.value)">${esc(c.system_prompt || '')}</textarea>
+    <div style="text-align:right;margin-top:5px">
+      <button style="font-size:10px;padding:2px 8px;height:20px;opacity:0.7"
+        onclick="resetPaneConfig(${pane.id})">Reset</button>
+    </div>
+  </div>`;
 }
 
 function setPaneTarget(paneId, val) {
@@ -2390,8 +2602,24 @@ async function sendToPane(pane, text, forceOp) {
     } else {
       // Stream to model
       const model = pane.target || '';
-      const body = { messages: pane.history.filter(m => m.role !== 'assistant' || m.content), stream: true };
+      const wc = pane.config || _defaultPaneConfig();
+
+      // Build message list — inject per-pane system prompt if set
+      let msgs = pane.history.filter(m => m.role !== 'assistant' || m.content);
+      if (wc.system_prompt) {
+        msgs = [{ role: 'system', content: wc.system_prompt },
+                ...msgs.filter(m => m.role !== 'system')];
+      }
+
+      const body = { messages: msgs, stream: true };
       if (model) body.model = model;
+
+      // Attach per-pane config for the proxy to apply (highest priority override)
+      if (_hasPaneConfig(wc)) {
+        const wcc = { ...wc };
+        delete wcc.system_prompt; // already handled via messages
+        body._window_config = wcc;
+      }
 
       const resp = await fetch(BASE + '/v1/chat/completions', {
         method: 'POST',
@@ -2433,6 +2661,12 @@ async function sendToPane(pane, text, forceOp) {
       }
       if (fullText) {
         pane.history.push({ role: 'assistant', content: fullText, model: model || 'assistant' });
+        // force_reload is one-shot — clear after use so next send doesn't re-evict
+        if (pane.config?.force_reload) {
+          setPaneConfig(pane.id, 'force_reload', false);
+          const cb = document.getElementById(`pane-cfg-force-reload-${pane.id}`);
+          if (cb) cb.checked = false;
+        }
         // TTS autoplay — speaks the complete response after streaming finishes
         speakText(fullText);
       }
@@ -3900,6 +4134,30 @@ async function buildCentroids() {
   } finally {
     if (btn) btn.disabled = false;
     setTimeout(() => { if (status) status.textContent = ''; }, 5000);
+  }
+}
+
+async function rebuildCentroids() {
+  const btn = document.getElementById('dash-rebuild-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const d = await api('/api/v1/build-centroids', { method: 'POST' });
+    if (d.success) loadDashboard();
+    else alert(`Rebuild failed: ${d.error}`);
+  } catch(e) {
+    alert(`Rebuild error: ${e.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Rebuild'; }
+  }
+}
+
+async function deleteWorkspaceOut(filename) {
+  try {
+    const d = await api(`/api/v1/workspace/out/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+    if (d.ok) loadDashboard();
+    else alert(`Delete failed: ${d.error}`);
+  } catch(e) {
+    alert(`Delete error: ${e.message}`);
   }
 }
 

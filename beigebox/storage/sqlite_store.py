@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS messages (
     token_count INTEGER DEFAULT 0,
     cost_usd REAL DEFAULT NULL,
     latency_ms REAL DEFAULT NULL,
+    ttft_ms REAL DEFAULT NULL,
     custom_field_1 TEXT DEFAULT NULL,
     custom_field_2 TEXT DEFAULT NULL,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id)
@@ -60,12 +61,15 @@ CREATE INDEX IF NOT EXISTS idx_harness_runs_created
     ON harness_runs(created_at);
 """
 
-# v0.6 migration: add columns to existing databases (safe to re-run)
+# Migrations: add columns to existing databases (safe to re-run)
 MIGRATIONS = [
+    # v0.6
     "ALTER TABLE messages ADD COLUMN cost_usd REAL DEFAULT NULL",
     "ALTER TABLE messages ADD COLUMN latency_ms REAL DEFAULT NULL",
     "ALTER TABLE messages ADD COLUMN custom_field_1 TEXT DEFAULT NULL",
     "ALTER TABLE messages ADD COLUMN custom_field_2 TEXT DEFAULT NULL",
+    # v0.7 — TTFT persistence
+    "ALTER TABLE messages ADD COLUMN ttft_ms REAL DEFAULT NULL",
 ]
 
 
@@ -110,16 +114,16 @@ class SQLiteStore:
                 (conversation_id, created_at),
             )
 
-    def store_message(self, msg: Message, cost_usd: float | None = None, latency_ms: float | None = None):
+    def store_message(self, msg: Message, cost_usd: float | None = None, latency_ms: float | None = None, ttft_ms: float | None = None):
         """Store a single message. Creates conversation if needed."""
         self.ensure_conversation(msg.conversation_id, msg.timestamp)
         with self._connect() as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO messages
-                   (id, conversation_id, role, content, model, timestamp, token_count, cost_usd, latency_ms)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (id, conversation_id, role, content, model, timestamp, token_count, cost_usd, latency_ms, ttft_ms)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (msg.id, msg.conversation_id, msg.role, msg.content,
-                 msg.model, msg.timestamp, msg.token_count, cost_usd, latency_ms),
+                 msg.model, msg.timestamp, msg.token_count, cost_usd, latency_ms, ttft_ms),
             )
         logger.debug("Stored message %s (role=%s, conv=%s)", msg.id, msg.role, msg.conversation_id)
 
@@ -157,17 +161,23 @@ class SQLiteStore:
             {
                 "by_model": {
                     "<model>": {
-                        "requests":       int,
-                        "avg_latency_ms": float,
-                        "p50_latency_ms": float,
-                        "p95_latency_ms": float,
-                        "avg_tokens":     float,
-                        "total_cost_usd": float,
+                        "requests":           int,
+                        "avg_latency_ms":     float,
+                        "p50_latency_ms":     float,
+                        "p90_latency_ms":     float,
+                        "p95_latency_ms":     float,
+                        "p99_latency_ms":     float,
+                        "avg_ttft_ms":        float | None,
+                        "avg_tokens":         float,
+                        "avg_tokens_per_sec": float,
+                        "total_cost_usd":     float,
                     }, ...
                 },
                 "days_queried": int,
             }
         """
+        period = f"-{days} days"
+
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT model,
@@ -175,31 +185,33 @@ class SQLiteStore:
                           AVG(latency_ms) as avg_lat,
                           AVG(token_count) as avg_tok,
                           COALESCE(SUM(cost_usd), 0) as total_cost,
-                          AVG(CASE WHEN latency_ms > 0 AND token_count > 0
-                                   THEN token_count / (latency_ms / 1000.0)
-                                   ELSE NULL END) as avg_tps
+                          AVG(ttft_ms) as avg_ttft
                    FROM messages
                    WHERE role = 'assistant'
                      AND latency_ms IS NOT NULL
                      AND timestamp > datetime('now', ?)
                    GROUP BY model
                    ORDER BY requests DESC""",
-                (f"-{days} days",),
+                (period,),
             ).fetchall()
 
-            latencies_by_model: dict[str, list[float]] = {}
+            # Fetch per-row latency + ttft for percentiles and improved tok/s
+            perf_by_model: dict[str, list[tuple[float, float | None, int]]] = {}
             for row in rows:
                 model = row["model"]
-                lat_rows = conn.execute(
-                    """SELECT latency_ms FROM messages
+                detail_rows = conn.execute(
+                    """SELECT latency_ms, ttft_ms, token_count FROM messages
                        WHERE role = 'assistant'
                          AND model = ?
                          AND latency_ms IS NOT NULL
                          AND timestamp > datetime('now', ?)
                        ORDER BY latency_ms""",
-                    (model, f"-{days} days"),
+                    (model, period),
                 ).fetchall()
-                latencies_by_model[model] = [r["latency_ms"] for r in lat_rows]
+                perf_by_model[model] = [
+                    (r["latency_ms"], r["ttft_ms"], r["token_count"] or 0)
+                    for r in detail_rows
+                ]
 
         def _pct(vals: list[float], p: float) -> float:
             if not vals:
@@ -207,17 +219,33 @@ class SQLiteStore:
             idx = min(int(len(vals) * p / 100), len(vals) - 1)
             return round(vals[idx], 1)
 
+        def _avg_tps(rows: list[tuple[float, float | None, int]]) -> float:
+            """Tokens/sec using generation latency (total − TTFT) when available."""
+            rates = []
+            for lat, ttft, tok in rows:
+                if tok <= 0:
+                    continue
+                gen_ms = (lat - ttft) if (ttft is not None and lat > ttft) else lat
+                if gen_ms > 0:
+                    rates.append(tok / (gen_ms / 1000.0))
+            return round(sum(rates) / len(rates), 1) if rates else 0.0
+
         by_model = {}
         for row in rows:
             model = row["model"]
-            lats = latencies_by_model.get(model, [])
+            perf = perf_by_model.get(model, [])
+            lats = [p[0] for p in perf]
+            avg_ttft = row["avg_ttft"]
             by_model[model] = {
                 "requests":           row["requests"],
                 "avg_latency_ms":     round(row["avg_lat"] or 0, 1),
                 "p50_latency_ms":     _pct(lats, 50),
+                "p90_latency_ms":     _pct(lats, 90),
                 "p95_latency_ms":     _pct(lats, 95),
+                "p99_latency_ms":     _pct(lats, 99),
+                "avg_ttft_ms":        round(avg_ttft, 1) if avg_ttft is not None else None,
                 "avg_tokens":         round(row["avg_tok"] or 0, 1),
-                "avg_tokens_per_sec": round(row["avg_tps"] or 0, 1),
+                "avg_tokens_per_sec": _avg_tps(perf),
                 "total_cost_usd":     round(row["total_cost"] or 0, 6),
             }
 
@@ -252,8 +280,8 @@ class SQLiteStore:
                 conn.execute(
                     """INSERT INTO messages
                        (id, conversation_id, role, content, model,
-                        timestamp, token_count, cost_usd, latency_ms)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        timestamp, token_count, cost_usd, latency_ms, ttft_ms)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         uuid4().hex,
                         new_conv_id,
@@ -264,6 +292,7 @@ class SQLiteStore:
                         msg.get("token_count", 0),
                         msg.get("cost_usd"),
                         msg.get("latency_ms"),
+                        msg.get("ttft_ms"),
                     ),
                 )
         logger.info(

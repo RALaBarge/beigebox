@@ -29,8 +29,10 @@ from beigebox.agents.zcommand import parse_z_command, ZCommand, HELP_TEXT
 from beigebox.agents.embedding_classifier import EmbeddingClassifier, EmbeddingDecision
 from beigebox.hooks import HookManager
 from beigebox.wiretap import WireLog
+from beigebox.wasm_runtime import WasmRuntime
 from beigebox.agents.agentic_scorer import score_agentic_intent
 from beigebox.backends.openrouter import _COST_SENTINEL_PREFIX
+from beigebox.cache import SemanticCache, ToolResultCache
 logger = logging.getLogger(__name__)
 def _estimate_tokens(text: str) -> int:
     """Rough token estimate: ~4 chars per token for English text."""
@@ -67,10 +69,19 @@ class Proxy:
         # Wire log — structured tap of everything on the line
         wire_path = self.cfg.get("wiretap", {}).get("path", "./data/wire.jsonl")
         self.wire = WireLog(wire_path)
+        # WASM transform runtime
+        self.wasm_runtime = WasmRuntime(self.cfg)
+        if self.wasm_runtime.enabled:
+            logger.info("WasmRuntime: %d module(s) loaded: %s", len(self.wasm_runtime.list_modules()), self.wasm_runtime.list_modules())
         # Session routing cache — sticky model within a conversation
         # {conversation_id: (model_string, timestamp)}
         self._session_cache: dict[str, tuple[str, float]] = {}
         self._session_ttl: int = self.cfg.get("routing", {}).get("session_ttl_seconds", 1800)
+        # Semantic response cache + tool result cache
+        self.semantic_cache = SemanticCache(self.cfg)
+        self.tool_cache = ToolResultCache(
+            ttl=self.cfg.get("semantic_cache", {}).get("tool_ttl_seconds", 300.0),
+        )
 
     # ------------------------------------------------------------------
     # Session cache helpers
@@ -180,7 +191,7 @@ class Proxy:
                 timestamp=message.timestamp,
             ))
 
-    def _log_response(self, conversation_id: str, content: str, model: str, cost_usd: float | None = None, latency_ms: float | None = None):
+    def _log_response(self, conversation_id: str, content: str, model: str, cost_usd: float | None = None, latency_ms: float | None = None, ttft_ms: float | None = None):
         """Store the assistant response."""
         if not self.log_enabled or not content.strip():
             return
@@ -192,7 +203,7 @@ class Proxy:
             model=model,
             token_count=tokens,
         )
-        self.sqlite.store_message(message, cost_usd=cost_usd, latency_ms=latency_ms)
+        self.sqlite.store_message(message, cost_usd=cost_usd, latency_ms=latency_ms, ttft_ms=ttft_ms)
         # Wire tap
         cost_info = f" cost=${cost_usd:.6f}" if cost_usd else ""
         self.wire.log(
@@ -517,6 +528,116 @@ class Proxy:
 
         return body
 
+    def _inject_model_options(self, body: dict) -> dict:
+        """
+        Inject per-model Ollama options from the ``models:`` config section.
+
+        Any key under ``models.<name>.options`` is merged into ``body["options"]``,
+        which Ollama forwards to the model loader.  Useful for per-model GPU control:
+
+            models:
+              llama3.2:3b:
+                options:
+                  num_gpu: 99          # offload all layers
+              llama2:70b:
+                options:
+                  num_gpu: 20          # partial VRAM budget
+              mistral:7b:
+                options:
+                  num_gpu: 0           # force CPU
+                  num_ctx: 8192        # also raise context for this model
+
+        Config-provided values are merged last so they take precedence over
+        whatever the frontend may have put in ``options``.  Unrecognised keys
+        are passed through to Ollama unchanged.
+        """
+        model = body.get("model", "")
+        if not model:
+            return body
+        model_cfg = self.cfg.get("models", {}).get(model, {})
+        options = model_cfg.get("options", {})
+        if not options:
+            return body
+        # Merge: frontend options first, config options win on conflict
+        body_opts = dict(body.get("options") or {})
+        body_opts.update(options)
+        body["options"] = body_opts
+        logger.debug("Model options injected for '%s': %s", model, list(options.keys()))
+        return body
+
+    def _apply_window_config(self, body: dict) -> tuple[dict, bool]:
+        """
+        Apply per-pane window config sent by the frontend as ``_window_config``.
+
+        The frontend embeds a ``_window_config`` dict in the request body for any
+        pane that has non-default settings.  These override all other config layers
+        (global runtime config, per-model options) since they represent an explicit
+        per-session user choice.  The key is stripped before the body is forwarded.
+
+        Supported fields (all optional, null/missing = skip):
+            temperature, top_p, top_k, num_ctx, max_tokens,
+            repeat_penalty, seed  — top-level body params
+            num_gpu               — goes into body["options"]["num_gpu"]
+            force_reload          — if true, caller should evict model before forwarding
+            system_prompt         — handled by the frontend (not re-injected here)
+
+        Returns: (body, force_reload) — force_reload signals the caller to evict
+        the model from Ollama first so it reloads fresh with the new options.
+        """
+        wc = body.pop("_window_config", None)
+        if not wc:
+            return body, False
+
+        param_map = {
+            "temperature":    "temperature",
+            "top_p":          "top_p",
+            "top_k":          "top_k",
+            "num_ctx":        "num_ctx",
+            "max_tokens":     "max_tokens",
+            "repeat_penalty": "repeat_penalty",
+            "seed":           "seed",
+        }
+        applied = []
+        for wc_key, body_key in param_map.items():
+            val = wc.get(wc_key)
+            if val is not None:
+                body[body_key] = val
+                applied.append(wc_key)
+
+        num_gpu = wc.get("num_gpu")
+        if num_gpu is not None:
+            opts = dict(body.get("options") or {})
+            opts["num_gpu"] = int(num_gpu)
+            body["options"] = opts
+            applied.append("num_gpu")
+
+        force_reload = bool(wc.get("force_reload"))
+
+        if applied:
+            logger.debug("Window config applied: %s%s", applied, " (force_reload)" if force_reload else "")
+        return body, force_reload
+
+    async def _evict_model(self, model: str) -> None:
+        """
+        Evict a model from Ollama by sending keep_alive=0.
+
+        Ollama unloads the model immediately; the next request will reload it
+        fresh, picking up any new options (e.g. num_gpu).  Fires a best-effort
+        request to the native /api/generate endpoint — errors are logged but do
+        not block the follow-up chat request.
+        """
+        if not model:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                await client.post(
+                    f"{self.backend_url}/api/generate",
+                    json={"model": model, "keep_alive": 0},
+                )
+            logger.info("Evicted model '%s' from Ollama (will reload with new options)", model)
+        except Exception as e:
+            logger.warning("Failed to evict model '%s': %s", model, e)
+
     def _inject_system_context(self, body: dict) -> dict:
         """Inject system_context.md content into the request (hot-reloaded)."""
         try:
@@ -626,6 +747,14 @@ class Proxy:
         # Inject runtime generation parameters (temperature, top_p, etc.)
         body = self._inject_generation_params(body)
 
+        # Inject per-model Ollama options (num_gpu, num_ctx, etc.)
+        body = self._inject_model_options(body)
+
+        # Apply per-pane window config (highest priority — overrides all other layers)
+        body, _force_reload = self._apply_window_config(body)
+        if _force_reload:
+            await self._evict_model(body.get("model", ""))
+
         # Log incoming user messages (skip synthetic)
         if not is_synthetic:
             self._log_messages(conversation_id, body.get("messages", []), model)
@@ -657,6 +786,18 @@ class Proxy:
                 resp.raise_for_status()
                 data = resp.json()
             _stages["backend"] = (_time.monotonic() - _t_backend) * 1000
+
+        # WASM transform (non-streaming) — operates on full response dict
+        wasm_mod = decision.wasm_module if decision else ""
+        if not is_synthetic and wasm_mod:
+            data = await self.wasm_runtime.transform_response(wasm_mod, data)
+            self.wire.log(
+                direction="internal",
+                role="wasm",
+                content=f"transform applied: module={wasm_mod}",
+                model=model,
+                conversation_id=conversation_id,
+            )
 
         # Log assistant response (skip synthetic)
         if not is_synthetic:
@@ -768,6 +909,33 @@ class Proxy:
         # Inject runtime generation parameters (temperature, top_p, etc.)
         body = self._inject_generation_params(body)
 
+        # Inject per-model Ollama options (num_gpu, num_ctx, etc.)
+        body = self._inject_model_options(body)
+
+        # Apply per-pane window config (highest priority — overrides all other layers)
+        body, _force_reload = self._apply_window_config(body)
+        if _force_reload:
+            await self._evict_model(body.get("model", ""))
+
+        # Semantic cache lookup (before logging or backend call)
+        user_message = self._get_latest_user_message(body)
+        if not is_synthetic:
+            cache_hit = await self.semantic_cache.lookup(user_message)
+            if cache_hit is not None:
+                cached_text, cached_model = cache_hit
+                self.wire.log(
+                    direction="internal", role="system",
+                    content=f"semantic cache hit — serving cached response (model={cached_model})",
+                    model=cached_model, conversation_id=conversation_id,
+                )
+                chunk = json.dumps({
+                    "choices": [{"delta": {"content": cached_text}, "finish_reason": "stop", "index": 0}],
+                    "model": cached_model,
+                })
+                yield f"data: {chunk}\n"
+                yield "data: [DONE]\n"
+                return
+
         # Log incoming user messages (skip synthetic)
         if not is_synthetic:
             self._log_messages(conversation_id, body.get("messages", []), model)
@@ -777,6 +945,11 @@ class Proxy:
         stream_cost_usd: float | None = None
         backend_name = "direct"
         _t_backend = _time.monotonic()
+        _first_chunk = True  # TTFT sentinel
+        # When a WASM module is active, buffer the stream and re-emit after
+        # transformation so the client receives the transformed content.
+        wasm_mod = decision.wasm_module if decision else ""
+        _wasm_buffer_mode = bool(wasm_mod and self.wasm_runtime.enabled)
 
         if self.backend_router:
             # Stream via multi-backend router
@@ -791,7 +964,12 @@ class Proxy:
                     except (ValueError, TypeError):
                         pass
                     continue
-                yield line + "\n"
+                if _first_chunk:
+                    _stages["ttft_ms"] = (_time.monotonic() - _t_backend) * 1000
+                    _first_chunk = False
+                # In WASM buffer mode, collect but don't yield to client yet
+                if not _wasm_buffer_mode:
+                    yield line + "\n"
                 # Parse to buffer content
                 if line.startswith("data: "):
                     data_str = line[6:]
@@ -820,8 +998,12 @@ class Proxy:
                     async for line in resp.aiter_lines():
                         if not line:
                             continue
-                        # Yield raw SSE line to client
-                        yield line + "\n"
+                        if _first_chunk:
+                            _stages["ttft_ms"] = (_time.monotonic() - _t_backend) * 1000
+                            _first_chunk = False
+                        # In WASM buffer mode, collect but don't yield to client yet
+                        if not _wasm_buffer_mode:
+                            yield line + "\n"
                         # Parse to buffer content
                         if line.startswith("data: "):
                             data_str = line[6:]
@@ -846,6 +1028,25 @@ class Proxy:
         # Log the complete response after streaming finishes (skip synthetic)
         if not is_synthetic:
             complete_text = "".join(full_response)
+            # WASM transform — runs on assembled text in both modes.
+            # In buffer mode the transformed text is re-emitted to the client below.
+            if complete_text and wasm_mod:
+                complete_text = await self.wasm_runtime.transform_text(wasm_mod, complete_text)
+                self.wire.log(
+                    direction="internal",
+                    role="wasm",
+                    content=f"transform applied: module={wasm_mod}",
+                    model=model,
+                    conversation_id=conversation_id,
+                )
+            # Re-emit transformed content to client (WASM buffer mode only)
+            if _wasm_buffer_mode and complete_text:
+                emit_chunk = json.dumps({
+                    "choices": [{"delta": {"content": complete_text}, "finish_reason": "stop", "index": 0}],
+                    "model": model,
+                })
+                yield f"data: {emit_chunk}\n"
+                yield "data: [DONE]\n"
             if complete_text:
                 self._log_response(
                     conversation_id,
@@ -853,14 +1054,19 @@ class Proxy:
                     model,
                     cost_usd=stream_cost_usd,
                     latency_ms=round(_stages["backend"], 1),
+                    ttft_ms=round(_stages["ttft_ms"], 1) if "ttft_ms" in _stages else None,
                 )
+                # Store in semantic cache for future similar queries
+                if not is_synthetic:
+                    self.semantic_cache.store(user_message, complete_text, model)
 
         # Emit timing summary to wiretap
         cost_str = f" · ${stream_cost_usd:.6f}" if stream_cost_usd else ""
+        ttft_str = f" · TTFT {_stages['ttft_ms']:.0f}ms" if "ttft_ms" in _stages else ""
         self.wire.log(
             direction="internal",
             role="system",
-            content=f"stream completed via '{backend_name}' · {total_ms:.0f}ms total{cost_str}",
+            content=f"stream completed via '{backend_name}' · {total_ms:.0f}ms total{cost_str}{ttft_str}",
             model=model,
             conversation_id=conversation_id,
             latency_ms=total_ms,
