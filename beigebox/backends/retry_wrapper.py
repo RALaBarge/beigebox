@@ -61,10 +61,31 @@ class RetryableBackendWrapper:
         # 429: rate limit, 500/502/503/504: transient server errors
         return status_code in (429, 500, 502, 503, 504)
 
-    def _backoff_seconds(self, attempt: int) -> float:
-        """Calculate backoff time for attempt N (exponential)."""
+    def _backoff_seconds(self, attempt: int, retry_after: float | None = None) -> float:
+        """Calculate backoff time for attempt N, respecting Retry-After if present."""
+        if retry_after is not None and retry_after > 0:
+            return min(retry_after, self.backoff_max)
         delay = self.backoff_base ** attempt
         return min(delay, self.backoff_max)
+
+    @staticmethod
+    def _retry_after(response: httpx.Response) -> float | None:
+        """Parse Retry-After header (seconds or HTTP-date). Returns seconds or None."""
+        val = response.headers.get("retry-after") or response.headers.get("x-ratelimit-reset-requests")
+        if not val:
+            return None
+        try:
+            return float(val)
+        except ValueError:
+            # HTTP-date format — compute delta from now
+            from email.utils import parsedate_to_datetime
+            from datetime import datetime, timezone
+            try:
+                reset_dt = parsedate_to_datetime(val)
+                delta = (reset_dt - datetime.now(timezone.utc)).total_seconds()
+                return max(delta, 0.0)
+            except Exception:
+                return None
 
     async def forward(self, body: dict) -> BackendResponse:
         """Forward with retry on transient errors."""
@@ -89,7 +110,9 @@ class RetryableBackendWrapper:
 
             # Transient error — retry if attempts remain
             if attempt < self.max_retries:
-                backoff = self._backoff_seconds(attempt + 1)
+                # 429 gets a longer default backoff since rate-limit windows are typically >1s
+                base_backoff = self._backoff_seconds(attempt + 1)
+                backoff = max(base_backoff, 5.0) if response.status_code == 429 else base_backoff
                 logger.warning(
                     "Backend '%s' transient %d for '%s', retry in %.1fs (%d/%d)",
                     self.name,
@@ -125,6 +148,7 @@ class RetryableBackendWrapper:
         """
         model = body.get("model", "")
         last_exc: Exception | None = None
+        retry_after_hint: float | None = None
 
         for attempt in range(self.max_retries + 1):
             try:
@@ -141,15 +165,18 @@ class RetryableBackendWrapper:
                     )
                     raise
                 last_exc = e
+                retry_after_hint = self._retry_after(e.response) if status == 429 else None
             except Exception as e:
                 # Connection error, timeout, etc.
                 last_exc = e
+                retry_after_hint = None
 
             if attempt < self.max_retries:
-                backoff = self._backoff_seconds(attempt + 1)
+                backoff = self._backoff_seconds(attempt + 1, retry_after_hint)
                 logger.warning(
-                    "Backend '%s' stream error for '%s', retry in %.1fs (%d/%d): %s",
-                    self.name, model, backoff, attempt + 1, self.max_retries, last_exc,
+                    "Backend '%s' stream error for '%s', retry in %.1fs (%d/%d)%s: %s",
+                    self.name, model, backoff, attempt + 1, self.max_retries,
+                    " (Retry-After)" if retry_after_hint else "", last_exc,
                 )
                 await asyncio.sleep(backoff)
             else:
