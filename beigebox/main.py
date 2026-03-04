@@ -51,6 +51,7 @@ decision_agent: DecisionAgent | None = None
 hook_manager: HookManager | None = None
 backend_router: MultiBackendRouter | None = None
 cost_tracker: CostTracker | None = None
+_harness_injection_queues: dict[str, asyncio.Queue] = {}
 embedding_classifier = None
 
 
@@ -864,21 +865,24 @@ async def api_export(
 
 @app.get("/api/v1/model-performance")
 async def api_model_performance(days: int = 30):
-    """
-    Per-model latency and throughput stats.
-
-    Query params:
-        days  int  — lookback window (default 30)
-
-    Returns avg/p50/p95 latency, request count, avg tokens, and total cost per model.
-    Note: latency data is only recorded for non-streaming requests via the
-    multi-backend router. Streaming latency tracking is approximate.
-    """
+    """Per-model latency and throughput stats."""
     if not sqlite_store:
         return JSONResponse({"error": "Storage not initialized"}, status_code=503)
-    data = sqlite_store.get_model_performance(days=days)
+    rt = get_runtime_config()
+    since = rt.get("perf_stats_since") or None
+    data = sqlite_store.get_model_performance(days=days, since=since)
     data["enabled"] = True
+    data["since"] = since
     return JSONResponse(data)
+
+
+@app.post("/api/v1/model-performance/reset")
+async def api_model_performance_reset():
+    """Set perf_stats_since to now, effectively zeroing the visible stats window."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    update_runtime_config("perf_stats_since", now)
+    return JSONResponse({"ok": True, "since": now})
 
 
 @app.get("/api/v1/routing-stats")
@@ -1247,12 +1251,14 @@ async def api_harness_orchestrate(request: Request):
     import json as _json
     from datetime import datetime, timezone
 
+    inj_queue: asyncio.Queue = asyncio.Queue()
     orch = HarnessOrchestrator(
         available_targets=targets,
         model=model_override,
         max_rounds=max_rounds,
         task_stagger_seconds=task_stagger,
         backend_router=backend_router,
+        injection_queue=inj_queue,
     )
 
     async def _event_stream():
@@ -1268,6 +1274,7 @@ async def api_harness_orchestrate(request: Request):
                     error_count += 1
                 if event.get("type") == "start":
                     run_id = event.get("run_id")
+                    _harness_injection_queues[run_id] = inj_queue
                 yield f"data: {_json.dumps(event)}\n\n"
         except Exception as e:
             error_event = {'type':'error','message':str(e)}
@@ -1275,6 +1282,8 @@ async def api_harness_orchestrate(request: Request):
             error_count += 1
             yield f"data: {_json.dumps(error_event)}\n\n"
         finally:
+            if run_id and run_id in _harness_injection_queues:
+                del _harness_injection_queues[run_id]
             # Store run after completion
             if orch.store_runs:
                 try:
@@ -1325,6 +1334,23 @@ async def api_harness_orchestrate(request: Request):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.post("/api/v1/harness/{run_id}/inject")
+async def api_harness_inject(run_id: str, request: Request):
+    """Inject a steering message into an active orchestration run."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+    message = (body.get("message") or "").strip()
+    if not message:
+        return JSONResponse({"error": "message required"}, status_code=400)
+    queue = _harness_injection_queues.get(run_id)
+    if queue is None:
+        return JSONResponse({"error": "run not found or already completed"}, status_code=404)
+    await queue.put(message)
+    return JSONResponse({"ok": True})
 
 
 @app.get("/api/v1/harness/{run_id}")

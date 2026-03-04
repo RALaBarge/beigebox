@@ -153,9 +153,13 @@ class SQLiteStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def get_model_performance(self, days: int = 30) -> dict:
+    def get_model_performance(self, days: int = 30, since: str | None = None) -> dict:
         """
         Return per-model latency and throughput stats for the given period.
+
+        Args:
+            days:  lookback window (ignored when since is set)
+            since: ISO timestamp string — only include data after this point
 
         Returns:
             {
@@ -176,11 +180,16 @@ class SQLiteStore:
                 "days_queried": int,
             }
         """
-        period = f"-{days} days"
+        if since:
+            ts_filter = since
+            ts_clause = "AND timestamp > ?"
+        else:
+            ts_filter = f"-{days} days"
+            ts_clause = "AND timestamp > datetime('now', ?)"
 
         with self._connect() as conn:
             rows = conn.execute(
-                """SELECT model,
+                f"""SELECT model,
                           COUNT(*) as requests,
                           AVG(latency_ms) as avg_lat,
                           AVG(token_count) as avg_tok,
@@ -189,10 +198,10 @@ class SQLiteStore:
                    FROM messages
                    WHERE role = 'assistant'
                      AND latency_ms IS NOT NULL
-                     AND timestamp > datetime('now', ?)
+                     {ts_clause}
                    GROUP BY model
                    ORDER BY requests DESC""",
-                (period,),
+                (ts_filter,),
             ).fetchall()
 
             # Fetch per-row latency + ttft for percentiles and improved tok/s
@@ -200,13 +209,13 @@ class SQLiteStore:
             for row in rows:
                 model = row["model"]
                 detail_rows = conn.execute(
-                    """SELECT latency_ms, ttft_ms, token_count FROM messages
+                    f"""SELECT latency_ms, ttft_ms, token_count FROM messages
                        WHERE role = 'assistant'
                          AND model = ?
                          AND latency_ms IS NOT NULL
-                         AND timestamp > datetime('now', ?)
+                         {ts_clause}
                        ORDER BY latency_ms""",
-                    (model, period),
+                    (model, ts_filter),
                 ).fetchall()
                 perf_by_model[model] = [
                     (r["latency_ms"], r["ttft_ms"], r["token_count"] or 0)

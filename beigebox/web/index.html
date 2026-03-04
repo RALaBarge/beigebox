@@ -1694,6 +1694,11 @@ async function pollHealth() {
 pollHealth();
 setInterval(pollHealth, 10000);
 
+async function resetPerfStats() {
+  await api('/api/v1/model-performance/reset', { method: 'POST' });
+  loadDashboard();
+}
+
 // ── 1. Dashboard ─────────────────────────────────────────────────────────────
 async function loadDashboard() {
   const el = document.getElementById('dash-body');
@@ -1869,7 +1874,11 @@ async function loadDashboard() {
 
     // ── Model Performance ──
     const perfData = perf.status === 'fulfilled' ? perf.value : null;
-    html += '<div class="section-header">Model Performance · 30 days</div>';
+    const perfSince = perfData?.since ? ` · since ${new Date(perfData.since).toLocaleDateString()}` : ' · 30 days';
+    html += `<div class="section-header" style="display:flex;align-items:center;justify-content:space-between">
+      <span>Model Performance${perfSince}</span>
+      <button class="action-btn" style="font-size:10px;padding:2px 8px" onclick="resetPerfStats()">⟳ Reset Stats</button>
+    </div>`;
     if (!perfData || !perfData.enabled || !Object.keys(perfData.by_model || {}).length) {
       html += '<div class="cost-disabled">No latency data yet — recorded on non-streaming requests via the multi-backend router.</div>';
     } else {
@@ -2190,6 +2199,7 @@ let _orModels = [];        // full OR model list (fetched lazily)
 let _orPinned = new Set(); // currently pinned model IDs
 let _orBrowserOpen = false;
 let _orLoaded = false;
+let _orSort = { col: null, dir: 1 }; // sort state: col = 'name'|'price', dir = 1|-1
 
 // Pane state
 const PANES_PER_PAGE = 4;
@@ -3244,6 +3254,59 @@ function renderOrchTargetChips() {
 
 let _orchAbort = null; // AbortController for cancelling a run
 
+function buildOrchMd(goal, events) {
+  const lines = [];
+  const startEv = events.find(e => e.type === 'start') || {};
+  const finishEv = events.find(e => e.type === 'finish') || {};
+  lines.push(`# Harness Orchestration Report`);
+  lines.push(`\n**Run ID:** ${startEv.run_id || '—'}  `);
+  lines.push(`**Goal:** ${goal}  `);
+  lines.push(`**Model:** ${startEv.model || '—'}  `);
+  lines.push(`**Targets:** ${(startEv.targets || []).join(', ')}  `);
+  lines.push(`**Date:** ${new Date().toISOString()}  `);
+
+  const rounds = {};
+  for (const ev of events) {
+    const r = ev.round;
+    if (!r) continue;
+    if (!rounds[r]) rounds[r] = { plan: null, tasks: [], results: [], evaluate: null, injected: [] };
+    if (ev.type === 'plan') rounds[r].plan = ev;
+    if (ev.type === 'result') rounds[r].results.push(ev);
+    if (ev.type === 'evaluate') rounds[r].evaluate = ev;
+    if (ev.type === 'injected') rounds[r].injected.push(ev.message);
+  }
+
+  for (const [rn, rd] of Object.entries(rounds)) {
+    lines.push(`\n---\n## Round ${rn}`);
+    if (rd.injected.length) {
+      lines.push(`\n> **Steering:** ${rd.injected.join(' | ')}`);
+    }
+    if (rd.plan) {
+      lines.push(`\n### Plan\n${rd.plan.reasoning || ''}`);
+      for (const t of (rd.plan.tasks || [])) {
+        lines.push(`\n**Target:** \`${t.target}\`  \n**Prompt:** ${t.prompt}  \n*Rationale: ${t.rationale || '—'}*`);
+      }
+    }
+    if (rd.results.length) {
+      lines.push(`\n### Results`);
+      for (const r of rd.results) {
+        const status = r.status === 'done' ? '✓' : '✗';
+        lines.push(`\n#### ${status} \`${r.target}\` — ${r.latency_ms}ms (${r.attempts} attempt${r.attempts!==1?'s':''})\n\n${r.content || ''}`);
+      }
+    }
+    if (rd.evaluate) {
+      const icon = rd.evaluate.action === 'finish' ? '✅' : '🔄';
+      lines.push(`\n### Evaluation ${icon} ${rd.evaluate.action.toUpperCase()}\n${rd.evaluate.assessment || ''}`);
+    }
+  }
+
+  if (finishEv.answer) {
+    lines.push(`\n---\n## Final Answer\n\n${finishEv.answer}`);
+    if (finishEv.capped) lines.push(`\n*(Round cap reached)*`);
+  }
+  return lines.join('\n');
+}
+
 function harnessOrchClear() {
   if (_orchAbort) { _orchAbort.abort(); _orchAbort = null; }
   const master = document.getElementById('harness-master-body');
@@ -3271,6 +3334,27 @@ async function harnessOrchRun() {
   btn.textContent = '⟳ Running…';
   masterBody.innerHTML = `<div style="color:var(--cyan);font-size:11px">Goal: ${esc(goal)}</div><div class="empty" style="margin-top:8px"><span class="spinner"></span> Planning…</div>`;
   orchGrid.innerHTML = '';
+
+  // Show injection input
+  let _orchRunId = null;
+  const injectBar = document.createElement('div');
+  injectBar.id = 'orch-inject-bar';
+  injectBar.style.cssText = 'display:flex;gap:6px;margin-top:8px;padding:6px;background:var(--bg-deep);border:1px solid var(--bg-border);border-radius:4px';
+  injectBar.innerHTML = `<input id="orch-inject-input" type="text" placeholder="Steer the orchestrator… (sent before next round)" style="flex:1;background:var(--bg);color:var(--fg);border:1px solid var(--bg-border);border-radius:3px;padding:4px 8px;font-size:12px">
+    <button class="action-btn" onclick="orchInject()">↗ Inject</button>`;
+  masterBody.parentElement.insertBefore(injectBar, masterBody.nextSibling);
+
+  window.orchInject = async function() {
+    const msg = document.getElementById('orch-inject-input')?.value?.trim();
+    if (!msg || !_orchRunId) return;
+    try {
+      await api(`/api/v1/harness/${_orchRunId}/inject`, { method: 'POST', body: JSON.stringify({ message: msg }) });
+      document.getElementById('orch-inject-input').value = '';
+      appendMaster(`<div style="margin-top:4px;padding:3px 8px;border-left:2px solid var(--cyan);font-size:11px;color:var(--cyan)">↗ Injected: ${esc(msg)}</div>`);
+    } catch(e) {
+      appendMaster(`<div class="error-box" style="font-size:11px">Inject failed: ${esc(e.message)}</div>`);
+    }
+  };
 
   _orchAbort = new AbortController();
 
@@ -3353,6 +3437,8 @@ async function harnessOrchRun() {
     masterBody.scrollTop = masterBody.scrollHeight;
   }
 
+  const _runEvents = [];  // collected for MD export
+
   try {
     const resp = await fetch(BASE + '/api/v1/harness/orchestrate', {
       method: 'POST',
@@ -3386,10 +3472,16 @@ async function harnessOrchRun() {
 
         let ev;
         try { ev = JSON.parse(raw); } catch { continue; }
+        _runEvents.push(ev);
 
         switch (ev.type) {
           case 'start':
+            _orchRunId = ev.run_id;
             appendMaster(`<div style="color:var(--fg-muted);font-size:11px">Model: ${esc(ev.model)} · Targets: ${ev.targets.map(esc).join(', ')}</div>`);
+            break;
+
+          case 'injected':
+            appendMaster(`<div style="padding:2px 8px;border-left:2px solid var(--cyan);font-size:11px;color:var(--cyan);margin-top:4px">↗ Steering applied: ${esc(ev.message)}</div>`);
             break;
 
           case 'plan': {
@@ -3424,17 +3516,24 @@ async function harnessOrchRun() {
               </div>`);
             break;
 
-          case 'finish':
+          case 'finish': {
+            const mdBlob = buildOrchMd(goal, _runEvents);
+            const mdUrl = URL.createObjectURL(new Blob([mdBlob], {type:'text/markdown'}));
+            const fname = `harness-run-${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.md`;
             appendMaster(`
               <div style="margin-top:12px;border-top:2px solid var(--green);padding-top:10px">
                 <span style="color:var(--green);font-size:11px">✓ DONE${ev.capped?' (round cap)':''} · ${ev.rounds} round${ev.rounds!==1?'s':''}</span>
                 <div style="margin-top:8px;font-size:12px;line-height:1.6;white-space:pre-wrap">${esc(ev.answer||'')}</div>
+                <div style="margin-top:8px"><a href="${mdUrl}" download="${fname}" class="action-btn" style="text-decoration:none">⬇ Download Report (.md)</a></div>
               </div>`);
+            document.getElementById('orch-inject-bar')?.remove();
             btn.disabled = false; btn.textContent = '▶ Run';
             break;
+          }
 
           case 'error':
             appendMaster(`<div class="error-box" style="margin-top:8px">${esc(ev.message||'Unknown error')}</div>`);
+            document.getElementById('orch-inject-bar')?.remove();
             btn.disabled = false; btn.textContent = '▶ Run';
             break;
         }
@@ -3444,6 +3543,7 @@ async function harnessOrchRun() {
     if (e.name !== 'AbortError') {
       appendMaster(`<div class="error-box">${esc(e.message)}</div>`);
     }
+    document.getElementById('orch-inject-bar')?.remove();
     btn.disabled = false; btn.textContent = '▶ Run';
   }
 }
@@ -3699,12 +3799,15 @@ async function loadConfig() {
     html += kv('session TTL', `${c.routing?.session_ttl_seconds || 1800}s`);
 
     // ── Backends ─────────────────────────────────────────────────────────
-    html += '<div class="section-header" style="margin-top:14px">Multi-Backend</div>';
+    const hasOrBackend = (c.backends || []).some(b => b.provider === 'openrouter');
+    const orActiveStyle = hasOrBackend && c.backends_enabled
+      ? 'margin-top:14px;border:1px solid var(--lavender);border-radius:4px;padding:4px 8px;box-shadow:0 0 6px var(--lavender)33'
+      : 'margin-top:14px';
+    html += `<div class="section-header" style="${orActiveStyle}">Multi-Backend${hasOrBackend && c.backends_enabled ? ' <span style="font-size:10px;color:var(--lavender);margin-left:6px">● ON</span>' : ''}</div>`;
     html += '<div id="backends-section"></div>';
 
     // ── OpenRouter Models ─────────────────────────────────────────────────
-    const hasOrBackend = (c.backends || []).some(b => b.provider === 'openrouter');
-    html += '<div class="section-header" style="margin-top:14px">OpenRouter Models</div>';
+    html += `<div class="section-header" style="${orActiveStyle}">OpenRouter Models${hasOrBackend && c.backends_enabled ? ' <span style="font-size:10px;color:var(--lavender);margin-left:6px">● ON</span>' : ''}</div>`;
     if (!hasOrBackend) {
       html += `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">No OpenRouter backend configured. Add a backend with <code>provider: openrouter</code> to use this feature.</div>`;
     } else {
@@ -4122,6 +4225,8 @@ function renderOrSection() {
          </span>`
       ).join('');
 
+  const sortArrow = (col) => _orSort.col === col ? (_orSort.dir === 1 ? ' ▲' : ' ▼') : '';
+  const thStyle = 'cursor:pointer;padding:4px 8px;color:var(--fg-muted);font-size:11px;user-select:none';
   const browserHtml = _orBrowserOpen ? `
     <div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;overflow:hidden">
       <div style="padding:6px 8px;background:var(--bg2);border-bottom:1px solid var(--border)">
@@ -4129,7 +4234,13 @@ function renderOrSection() {
           oninput="renderOrModelList(this.value)"
           style="width:100%;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:12px;box-sizing:border-box">
       </div>
-      <div id="or-model-list" style="max-height:320px;overflow-y:auto;font-size:12px">
+      <div style="display:flex;align-items:center;background:var(--bg-deep);border-bottom:1px solid var(--border)">
+        <span style="width:24px;flex-shrink:0"></span>
+        <span style="flex:1;${thStyle}" onclick="orSortBy('name')">Name${sortArrow('name')}</span>
+        <span style="min-width:36px;text-align:right;${thStyle}">Ctx</span>
+        <span style="min-width:80px;text-align:right;${thStyle}" onclick="orSortBy('price')">Price/M${sortArrow('price')}</span>
+      </div>
+      <div id="or-model-list" style="max-height:300px;overflow-y:auto;font-size:12px">
         <div class="empty"><span class="spinner"></span> Loading models…</div>
       </div>
     </div>` : '';
@@ -4164,11 +4275,23 @@ async function toggleOrBrowser() {
   }
 }
 
+function orSortBy(col) {
+  if (_orSort.col === col) _orSort.dir *= -1;
+  else { _orSort.col = col; _orSort.dir = 1; }
+  renderOrSection();
+  if (_orLoaded) renderOrModelList(document.getElementById('or-search')?.value || '');
+}
+
 function renderOrModelList(filter) {
   const listEl = document.getElementById('or-model-list');
   if (!listEl) return;
   const q = (filter || '').toLowerCase();
-  const filtered = q ? _orModels.filter(m => (m.id||'').toLowerCase().includes(q) || (m.name||'').toLowerCase().includes(q)) : _orModels;
+  let filtered = q ? _orModels.filter(m => (m.id||'').toLowerCase().includes(q) || (m.name||'').toLowerCase().includes(q)) : [..._orModels];
+  if (_orSort.col === 'name') {
+    filtered.sort((a, b) => _orSort.dir * (a.name||a.id||'').localeCompare(b.name||b.id||''));
+  } else if (_orSort.col === 'price') {
+    filtered.sort((a, b) => _orSort.dir * ((parseFloat(a.pricing?.prompt||'0') + parseFloat(a.pricing?.completion||'0')) - (parseFloat(b.pricing?.prompt||'0') + parseFloat(b.pricing?.completion||'0'))));
+  }
   if (!filtered.length) {
     listEl.innerHTML = `<div style="padding:12px;color:var(--muted)">No models match</div>`;
     return;
@@ -4218,6 +4341,8 @@ async function saveOrPinned() {
   try {
     await api('/api/v1/openrouter/pinned', { method: 'POST', body: JSON.stringify({ pinned: [..._orPinned] }) });
     if (status) { status.textContent = '✓ Pinned models saved'; setTimeout(() => { status.textContent = ''; }, 2000); }
+    _orBrowserOpen = false;
+    renderOrSection();
     loadModelsForPanes();
   } catch(e) {
     if (status) { status.textContent = `✗ ${esc(e.message)}`; setTimeout(() => { status.textContent = ''; }, 3000); }

@@ -67,11 +67,13 @@ class HarnessOrchestrator:
         max_rounds: int = MAX_ROUNDS,
         task_stagger_seconds: float = 0.4,
         backend_router=None,
+        injection_queue: asyncio.Queue | None = None,
     ):
         cfg = get_config()
         self.cfg = cfg
         self.backend_url = cfg["backend"]["url"].rstrip("/")
         self.backend_router = backend_router
+        self.injection_queue = injection_queue
         self.model = (
             model
             or cfg.get("operator", {}).get("model")
@@ -129,12 +131,25 @@ class HarnessOrchestrator:
 
         yield _ev("start", run_id=self.run_id, goal=goal, model=self.model, targets=self.available_targets)
 
+        injections: list[str] = []
+
         while round_num < self.max_rounds:
             round_num += 1
 
+            # Drain any user-injected steering messages before planning
+            if self.injection_queue:
+                while not self.injection_queue.empty():
+                    try:
+                        msg = self.injection_queue.get_nowait()
+                        injections.append(msg)
+                        yield _ev("injected", message=msg, round=round_num)
+                    except asyncio.QueueEmpty:
+                        break
+
             # ── 1. Plan ───────────────────────────────────────────────────────
             try:
-                plan_result = await self._plan(goal, history, round_num)
+                plan_result = await self._plan(goal, history, round_num, injections=injections)
+                injections.clear()
             except Exception as e:
                 yield _ev("error", message=f"Planning failed: {e}")
                 return
@@ -194,7 +209,7 @@ class HarnessOrchestrator:
 
     # ── LLM calls ─────────────────────────────────────────────────────────────
 
-    async def _plan(self, goal: str, history: list[dict], round_num: int) -> dict:
+    async def _plan(self, goal: str, history: list[dict], round_num: int, injections: list[str] | None = None) -> dict:
         """
         Ask the orchestrator LLM to produce a task plan (or finish if done).
         Returns: {action: "dispatch"|"finish", tasks: [...], reasoning: "...", answer: "..."}
@@ -224,10 +239,16 @@ class HarnessOrchestrator:
             "- Respond with ONLY the JSON object, no markdown, no explanation outside JSON"
         )
 
+        injection_block = ""
+        if injections:
+            msgs = "\n".join(f"  - {m}" for m in injections)
+            injection_block = f"\n\nSTEERING INSTRUCTIONS FROM USER (high priority — follow these):\n{msgs}"
+
         user = (
             f"Goal: {goal}\n\n"
             f"Round: {round_num}\n\n"
             f"Results so far:\n{history_summary}"
+            f"{injection_block}"
         )
 
         raw = await self._llm_call(system, user)
