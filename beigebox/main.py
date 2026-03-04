@@ -886,6 +886,37 @@ async def api_model_performance_reset():
     return JSONResponse({"ok": True, "since": now})
 
 
+@app.get("/api/v1/model-options")
+async def api_get_model_options():
+    """Return current runtime model_options (num_gpu per model)."""
+    rt = get_runtime_config()
+    return JSONResponse({"model_options": rt.get("model_options", {})})
+
+
+@app.post("/api/v1/model-options")
+async def api_set_model_option(request: Request):
+    """
+    Set or clear num_gpu for a specific model.
+    Body: {"model": "llama3.2:3b", "num_gpu": 0}  — 0=CPU, 99=GPU, null=inherit
+    """
+    body = await request.json()
+    model_name = body.get("model", "").strip()
+    if not model_name:
+        return JSONResponse({"error": "model required"}, status_code=400)
+    num_gpu = body.get("num_gpu")  # int or null
+
+    rt = get_runtime_config()
+    model_opts = dict(rt.get("model_options") or {})
+
+    if num_gpu is None:
+        model_opts.pop(model_name, None)
+    else:
+        model_opts[model_name] = int(num_gpu)
+
+    update_runtime_config("model_options", model_opts)
+    return JSONResponse({"ok": True, "model": model_name, "num_gpu": num_gpu})
+
+
 @app.get("/api/v1/routing-stats")
 async def api_routing_stats(lines: int = 10000):
     """

@@ -530,35 +530,38 @@ class Proxy:
 
     def _inject_model_options(self, body: dict) -> dict:
         """
-        Inject per-model Ollama options from the ``models:`` config section.
+        Inject per-model Ollama options from config and runtime_config.
 
-        Any key under ``models.<name>.options`` is merged into ``body["options"]``,
-        which Ollama forwards to the model loader.  Useful for per-model GPU control:
+        Priority (highest wins):
+          1. runtime_config model_options  — set via UI, hot-reloaded
+          2. config.yaml models.<name>.options  — static, requires restart
 
-            models:
-              llama3.2:3b:
-                options:
-                  num_gpu: 99          # offload all layers
-              llama2:70b:
-                options:
-                  num_gpu: 20          # partial VRAM budget
-              mistral:7b:
-                options:
-                  num_gpu: 0           # force CPU
-                  num_ctx: 8192        # also raise context for this model
-
-        Config-provided values are merged last so they take precedence over
-        whatever the frontend may have put in ``options``.  Unrecognised keys
-        are passed through to Ollama unchanged.
+        runtime_config structure (flat num_gpu per model):
+            runtime:
+              model_options:
+                llama3.2:3b: 0      # CPU
+                mistral:7b: 99      # all GPU layers
+                llama2:70b: 20      # partial offload
         """
+        from beigebox.config import get_runtime_config
         model = body.get("model", "")
         if not model:
             return body
+
+        # Layer 1: static config options
         model_cfg = self.cfg.get("models", {}).get(model, {})
-        options = model_cfg.get("options", {})
+        options = dict(model_cfg.get("options", {}))
+
+        # Layer 2: runtime model_options (num_gpu override per model)
+        rt_model_opts = get_runtime_config().get("model_options", {})
+        if model in rt_model_opts:
+            num_gpu = rt_model_opts[model]
+            if num_gpu is not None:
+                options["num_gpu"] = int(num_gpu)
+
         if not options:
             return body
-        # Merge: frontend options first, config options win on conflict
+        # Merge: frontend options first, then our config layers on top
         body_opts = dict(body.get("options") or {})
         body_opts.update(options)
         body["options"] = body_opts

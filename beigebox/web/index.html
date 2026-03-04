@@ -3924,6 +3924,11 @@ async function loadConfig() {
     html += genNum('gen_seed',           'Seed',            c.generation?.seed,           '1',    '0');
     html += `<div style="margin-top:6px"><button class="action-btn" onclick="resetGenParams()" style="background:var(--warn,#554422);color:var(--fg)">✕ Clear all generation params</button></div>`;
 
+    // ── Model GPU/CPU Preferences ──────────────────────────────────────────
+    html += '<div class="section-header" style="margin-top:14px">Model GPU / CPU</div>';
+    html += `<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Per-model GPU layer preference. Saved to runtime_config — hot-reloaded, no restart needed. Takes effect on next model load (use ↺ reload in chat pane to force).</div>`;
+    html += `<div id="model-gpu-section"><div class="empty"><span class="spinner"></span> Loading…</div></div>`;
+
     document.getElementById('config-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
     el.innerHTML = html;
 
@@ -3931,6 +3936,8 @@ async function loadConfig() {
     if (document.getElementById('backends-section')) initBackendsSection(c);
     // Load OR section if placeholder was rendered
     if (document.getElementById('or-section')) loadOrSection();
+    // Load model GPU preferences section
+    loadModelGpuSection();
 
     // Wire toggle labels + expand/collapse sub-options
     const toggleIds = [
@@ -4080,6 +4087,77 @@ async function resetGenParams() {
     setTimeout(() => { loadConfig(); if (status) status.textContent = ''; }, 1000);
   } catch(e) {
     if (status) status.textContent = `✗ ${esc(e.message)}`;
+  }
+}
+
+// ── Model GPU/CPU Preferences ─────────────────────────────────────────────
+
+async function loadModelGpuSection() {
+  const el = document.getElementById('model-gpu-section');
+  if (!el) return;
+  try {
+    const [modelsResp, optsResp] = await Promise.all([
+      api('/v1/models'),
+      api('/api/v1/model-options'),
+    ]);
+    const localModels = (modelsResp.data || [])
+      .map(m => m.id)
+      .filter(id => !id.includes('/'))
+      .sort();
+    const saved = optsResp.model_options || {};
+    if (!localModels.length) {
+      el.innerHTML = '<div style="color:var(--fg-muted);font-size:11px">No local models found.</div>';
+      return;
+    }
+    let html = '<div style="display:flex;flex-direction:column;gap:6px">';
+    for (const m of localModels) {
+      const cur = saved[m];  // int or undefined
+      const mode = cur === undefined ? 'inherit' : cur === 0 ? 'cpu' : cur === 99 ? 'gpu' : 'custom';
+      const customVal = (mode === 'custom') ? cur : '';
+      html += `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--bg-border)">
+        <span style="flex:1;font-size:12px;color:var(--fg)">${esc(m)}</span>
+        <select id="mgpu-sel-${esc(m)}" onchange="onModelGpuChange('${esc(m)}')"
+          style="background:var(--bg);color:var(--fg);border:1px solid var(--bg-border);border-radius:3px;padding:2px 4px;font-size:11px">
+          <option value="inherit"${mode==='inherit'?' selected':''}>inherit</option>
+          <option value="gpu"${mode==='gpu'?' selected':''}>GPU (all)</option>
+          <option value="cpu"${mode==='cpu'?' selected':''}>CPU (0)</option>
+          <option value="custom"${mode==='custom'?' selected':''}>custom</option>
+        </select>
+        <input id="mgpu-num-${esc(m)}" type="number" min="0" max="999" step="1"
+          value="${customVal}" placeholder="layers"
+          style="width:64px;background:var(--bg);color:var(--fg);border:1px solid var(--bg-border);border-radius:3px;padding:2px 4px;font-size:11px;display:${mode==='custom'?'block':'none'}">
+        <button class="action-btn" style="font-size:10px;padding:2px 8px" onclick="saveModelGpu('${esc(m)}')">Save</button>
+      </div>`;
+    }
+    html += '</div>';
+    el.innerHTML = html;
+  } catch(e) {
+    if (el) el.innerHTML = `<div style="color:var(--red);font-size:11px">Failed: ${esc(e.message)}</div>`;
+  }
+}
+
+function onModelGpuChange(model) {
+  const sel = document.getElementById(`mgpu-sel-${model}`);
+  const numInput = document.getElementById(`mgpu-num-${model}`);
+  if (sel && numInput) numInput.style.display = sel.value === 'custom' ? 'block' : 'none';
+}
+
+async function saveModelGpu(model) {
+  const sel = document.getElementById(`mgpu-sel-${model}`);
+  const numInput = document.getElementById(`mgpu-num-${model}`);
+  if (!sel) return;
+  let num_gpu = null;
+  if (sel.value === 'gpu') num_gpu = 99;
+  else if (sel.value === 'cpu') num_gpu = 0;
+  else if (sel.value === 'custom') num_gpu = parseInt(numInput?.value) || 0;
+  // 'inherit' leaves num_gpu = null → clears override
+  try {
+    await api('/api/v1/model-options', { method: 'POST', body: JSON.stringify({ model, num_gpu }) });
+    // Brief visual feedback
+    const btn = sel.parentElement?.querySelector('button');
+    if (btn) { const orig = btn.textContent; btn.textContent = '✓'; setTimeout(() => btn.textContent = orig, 1200); }
+  } catch(e) {
+    alert(`Failed to save: ${e.message}`);
   }
 }
 
