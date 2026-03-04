@@ -103,13 +103,37 @@ def get_effective_backends_config() -> tuple[bool, list[dict]]:
     Return (backends_enabled, backends_list) merging runtime config onto static config.
     Runtime config takes precedence — lets you configure backends via the hot-reloaded
     runtime_config.yaml without touching config.yaml or restarting.
+
+    Always ensures an Ollama backend is present so local models are never left
+    without a route when only API backends (e.g. OpenRouter) are configured at runtime.
     """
     cfg = get_config()
     rt = get_runtime_config()
     enabled = rt.get("backends_enabled", cfg.get("backends_enabled", False))
     # Runtime backends list (if present) fully replaces static config list
-    backends = rt.get("backends") if rt.get("backends") is not None else cfg.get("backends", [])
-    return bool(enabled), list(backends)
+    backends = list(rt.get("backends") if rt.get("backends") is not None else cfg.get("backends", []))
+
+    # If runtime backends exist but none is an Ollama backend, inject the primary one
+    # from static config so local model requests always have a valid route.
+    if backends and not any(b.get("provider") == "ollama" for b in backends):
+        static_ollama = next(
+            (b for b in cfg.get("backends", []) if b.get("provider") == "ollama"),
+            None,
+        )
+        if static_ollama is None:
+            # Fall back to constructing one from the primary backend URL
+            primary_url = cfg.get("backend", {}).get("url", "").rstrip("/")
+            if primary_url:
+                static_ollama = {
+                    "provider": "ollama",
+                    "name": "ollama-local",
+                    "url": primary_url,
+                    "priority": 1,
+                }
+        if static_ollama:
+            backends = [static_ollama] + backends
+
+    return bool(enabled), backends
 
 
 def update_runtime_config(key: str, value) -> bool:

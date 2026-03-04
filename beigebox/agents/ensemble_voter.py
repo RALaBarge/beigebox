@@ -56,6 +56,7 @@ class EnsembleVoter:
 
         Yields:
           {type:"dispatch", model_count:N}
+          {type:"token", model:"...", token:"..."}  -- streamed incrementally
           {type:"result", model:"...", response:"...", latency_ms:123}
           ...repeat for each model...
           {type:"evaluate", winner:"...", reasoning:"...", all_responses:[...]}
@@ -66,15 +67,34 @@ class EnsembleVoter:
         # ── 1. Dispatch ────────────────────────────────────────────────────────
         yield _ev("dispatch", model_count=len(self.models))
 
-        responses = await self._query_all_models(prompt)
+        responses: list[tuple[str, str, int]] = []
 
-        for model_name, response, latency in responses:
-            yield _ev(
-                "result",
-                model=model_name,
-                response=response,
-                latency_ms=latency,
+        if self.backend_router:
+            # Streaming path: tokens arrive as they're generated across all models
+            queue: asyncio.Queue = asyncio.Queue()
+            pending = len(self.models)
+            tasks = [
+                asyncio.create_task(
+                    self._stream_model_to_queue(model, prompt, queue)
+                )
+                for model in self.models
+            ]
+            while pending > 0:
+                ev = await queue.get()
+                yield ev
+                if ev.get("type") == "result":
+                    responses.append((ev["model"], ev["response"], ev["latency_ms"]))
+                    pending -= 1
+            await asyncio.gather(*tasks, return_exceptions=True)
+        else:
+            # Non-streaming fallback (no router)
+            results = await asyncio.gather(
+                *[self._query_model(m, prompt) for m in self.models],
+                return_exceptions=False,
             )
+            responses = list(results)
+            for model_name, response, latency in responses:
+                yield _ev("result", model=model_name, response=response, latency_ms=latency)
 
         if not responses:
             yield _ev("error", message="No responses from any model")
@@ -111,17 +131,47 @@ class EnsembleVoter:
 
     # ── Model queries ──────────────────────────────────────────────────────────
 
-    async def _query_all_models(
-        self, prompt: str
-    ) -> list[tuple[str, str, int]]:
-        """Query all models in parallel. Returns [(model_name, response, latency_ms), ...]"""
-        tasks = [
-            self._query_model(model, prompt) for model in self.models
-        ]
-        return await asyncio.gather(*tasks, return_exceptions=False)
+    async def _stream_model_to_queue(
+        self, model: str, prompt: str, queue: asyncio.Queue
+    ) -> None:
+        """Stream a single model's response, putting token/result events into queue."""
+        start = time.time()
+        tokens: list[str] = []
+        body = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7,
+            "stream": True,
+        }
+        try:
+            async for line in self.backend_router.forward_stream(body):
+                if not line.startswith("data: "):
+                    continue
+                data_str = line[6:]
+                if data_str.strip() == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_str)
+                    delta = (
+                        chunk.get("choices", [{}])[0]
+                        .get("delta", {})
+                        .get("content", "")
+                    )
+                    if delta:
+                        tokens.append(delta)
+                        await queue.put(_ev("token", model=model, token=delta))
+                except (json.JSONDecodeError, IndexError):
+                    pass
+            full = "".join(tokens)
+            latency = int((time.time() - start) * 1000)
+            await queue.put(_ev("result", model=model, response=full, latency_ms=latency))
+        except Exception as e:
+            logger.error("Stream failed for %s: %s", model, e)
+            latency = int((time.time() - start) * 1000)
+            await queue.put(_ev("result", model=model, response=f"Error: {e}", latency_ms=latency))
 
     async def _query_model(self, model: str, prompt: str) -> tuple[str, str, int]:
-        """Query a single model. Returns (model_name, response, latency_ms)."""
+        """Non-streaming fallback. Returns (model_name, response, latency_ms)."""
         start = time.time()
         body = {
             "model": model,
@@ -130,28 +180,21 @@ class EnsembleVoter:
             "stream": False,
         }
         try:
-            if self.backend_router:
-                resp = await self.backend_router.forward(body)
-                if not resp.ok:
-                    raise Exception(resp.error or f"backend error {resp.status_code}")
-                content = resp.content
-            else:
-                async with httpx.AsyncClient(timeout=120) as client:
-                    response = await client.post(
-                        f"{self.backend_url}/v1/chat/completions",
-                        json=body,
-                    )
-                    response.raise_for_status()
-                    data = response.json()
-                    content = (
-                        data.get("choices", [{}])[0]
-                        .get("message", {})
-                        .get("content", "")
-                    )
+            async with httpx.AsyncClient(timeout=120) as client:
+                response = await client.post(
+                    f"{self.backend_url}/v1/chat/completions", json=body
+                )
+                response.raise_for_status()
+                data = response.json()
+                content = (
+                    data.get("choices", [{}])[0]
+                    .get("message", {})
+                    .get("content", "")
+                )
             latency = int((time.time() - start) * 1000)
             return (model, content, latency)
         except Exception as e:
-            logger.error(f"Failed to query {model}: {e}")
+            logger.error("Failed to query %s: %s", model, e)
             latency = int((time.time() - start) * 1000)
             return (model, f"Error: {str(e)}", latency)
 
@@ -210,9 +253,7 @@ class EnsembleVoter:
                         .get("message", {})
                         .get("content", "")
                     )
-                # Parse JSON from response
-                verdict = self._parse_json(content)
-                return verdict
+            return self._parse_json(content)
         except Exception as e:
             logger.error(f"Judge call failed: {e}")
             # Fallback: pick first response

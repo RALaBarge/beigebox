@@ -3502,6 +3502,7 @@ async function harnessEnsembleRun() {
 
   // Create placeholder cards for each model
   const cards = {};
+  const cardHasTokens = {};
   grid.innerHTML = '';
   models.forEach(model => {
     const card = document.createElement('div');
@@ -3540,9 +3541,20 @@ async function harnessEnsembleRun() {
         if (!line.startsWith('data: ')) continue;
         try {
           const ev = JSON.parse(line.slice(6));
-          if (ev.type === 'result' && cards[ev.model]) {
-            cards[ev.model].querySelector('.card-body').style.color = 'var(--fg)';
-            cards[ev.model].querySelector('.card-body').textContent = ev.response;
+          if (ev.type === 'token' && cards[ev.model]) {
+            const body = cards[ev.model].querySelector('.card-body');
+            if (!cardHasTokens[ev.model]) {
+              body.textContent = '';
+              body.style.color = 'var(--fg)';
+              cardHasTokens[ev.model] = true;
+            }
+            body.textContent += ev.token;
+          } else if (ev.type === 'result' && cards[ev.model]) {
+            const body = cards[ev.model].querySelector('.card-body');
+            if (!cardHasTokens[ev.model]) {
+              body.style.color = 'var(--fg)';
+              body.textContent = ev.response;
+            }
             cards[ev.model].querySelector('div').style.color = 'var(--lavender)';
           } else if (ev.type === 'finish') {
             banner.innerHTML = `<div style="color:var(--green);font-weight:bold;margin-bottom:4px">🏆 Winner: ${esc(ev.winner)}</div>
