@@ -917,6 +917,13 @@ class Proxy:
         if _force_reload:
             await self._evict_model(body.get("model", ""))
 
+        # Emit routing metadata so the UI can show which model/path is handling this
+        if not is_synthetic:
+            routing_meta = {"bb_type": "routing", "model": model}
+            if zcmd.active and zcmd.route:
+                routing_meta["via"] = zcmd.route  # e.g. "operator"
+            yield f"data: {json.dumps(routing_meta)}\n\n"
+
         # Semantic cache lookup (before logging or backend call)
         user_message = self._get_latest_user_message(body)
         if not is_synthetic:

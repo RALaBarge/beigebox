@@ -2616,6 +2616,7 @@ async function sendToPane(pane, text, forceOp) {
       let fullText = '';
       let assistantDiv = null;
       let bubble = null;
+      let isError = false;
       pane._streaming = { text: '', model: model || 'assistant' };
 
       while (true) {
@@ -2628,6 +2629,43 @@ async function sendToPane(pane, text, forceOp) {
           if (data === '[DONE]') break;
           try {
             const j = JSON.parse(data);
+
+            // Routing metadata event — show indicator before response arrives
+            if (j.bb_type === 'routing') {
+              const liveArea = document.getElementById(`pane-msgs-${pane.id}`);
+              if (liveArea) {
+                const routedModel = j.model || '';
+                const paneTarget = pane.target || '';
+                const viaOp = j.via === 'operator';
+                const rerouted = routedModel && paneTarget && routedModel !== paneTarget;
+                if (viaOp || rerouted) {
+                  const badge = document.createElement('div');
+                  badge.style.cssText = 'font-size:10px;color:var(--lavender);padding:2px 6px;margin-bottom:2px;opacity:0.8';
+                  badge.textContent = viaOp
+                    ? `⚙ via Operator (${routedModel})`
+                    : `↪ rerouted → ${routedModel}`;
+                  liveArea.appendChild(badge);
+                }
+              }
+              continue;
+            }
+
+            // Error chunk from router — show as error box, not assistant text
+            if (j.model === 'beigebox-error') {
+              const errText = j.choices?.[0]?.delta?.content || 'Backend error';
+              const liveArea = document.getElementById(`pane-msgs-${pane.id}`);
+              if (liveArea) {
+                const errDiv = document.createElement('div');
+                errDiv.className = 'error-box';
+                errDiv.style.cssText = 'margin:4px 0;font-size:12px';
+                errDiv.textContent = errText.replace(/^\n+/, '');
+                liveArea.appendChild(errDiv);
+                _scrollNearBottom(liveArea);
+              }
+              isError = true;
+              continue;
+            }
+
             const delta = j.choices?.[0]?.delta?.content || '';
             if (delta) {
               fullText += delta;
