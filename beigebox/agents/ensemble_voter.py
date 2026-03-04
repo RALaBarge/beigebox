@@ -36,6 +36,7 @@ class EnsembleVoter:
         models: list[str],
         judge_model: str | None = None,
         temperature: float = 0.2,
+        backend_router=None,
     ):
         cfg = get_config()
         self.cfg = cfg
@@ -47,6 +48,7 @@ class EnsembleVoter:
             or cfg.get("backend", {}).get("default_model", "")
         )
         self.temperature = temperature
+        self.backend_router = backend_router
 
     async def vote(self, prompt: str) -> AsyncGenerator[dict, None]:
         """
@@ -121,26 +123,33 @@ class EnsembleVoter:
     async def _query_model(self, model: str, prompt: str) -> tuple[str, str, int]:
         """Query a single model. Returns (model_name, response, latency_ms)."""
         start = time.time()
+        body = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7,
+            "stream": False,
+        }
         try:
-            async with httpx.AsyncClient(timeout=120) as client:
-                response = await client.post(
-                    f"{self.backend_url}/v1/chat/completions",
-                    json={
-                        "model": model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.7,
-                        "stream": False,
-                    },
-                )
-                response.raise_for_status()
-                data = response.json()
-                content = (
-                    data.get("choices", [{}])[0]
-                    .get("message", {})
-                    .get("content", "")
-                )
-                latency = int((time.time() - start) * 1000)
-                return (model, content, latency)
+            if self.backend_router:
+                resp = await self.backend_router.forward(body)
+                if not resp.ok:
+                    raise Exception(resp.error or f"backend error {resp.status_code}")
+                content = resp.content
+            else:
+                async with httpx.AsyncClient(timeout=120) as client:
+                    response = await client.post(
+                        f"{self.backend_url}/v1/chat/completions",
+                        json=body,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    content = (
+                        data.get("choices", [{}])[0]
+                        .get("message", {})
+                        .get("content", "")
+                    )
+            latency = int((time.time() - start) * 1000)
+            return (model, content, latency)
         except Exception as e:
             logger.error(f"Failed to query {model}: {e}")
             latency = int((time.time() - start) * 1000)
@@ -173,27 +182,34 @@ class EnsembleVoter:
             f"Choose from: {models_list}"
         )
 
+        judge_body = {
+            "model": self.judge_model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": self.temperature,
+            "stream": False,
+        }
         try:
-            async with httpx.AsyncClient(timeout=60) as client:
-                response = await client.post(
-                    f"{self.backend_url}/v1/chat/completions",
-                    json={
-                        "model": self.judge_model,
-                        "messages": [
-                            {"role": "system", "content": system},
-                            {"role": "user", "content": user},
-                        ],
-                        "temperature": self.temperature,
-                        "stream": False,
-                    },
-                )
-                response.raise_for_status()
-                data = response.json()
-                content = (
-                    data.get("choices", [{}])[0]
-                    .get("message", {})
-                    .get("content", "")
-                )
+            if self.backend_router:
+                resp = await self.backend_router.forward(judge_body)
+                if not resp.ok:
+                    raise Exception(resp.error or f"backend error {resp.status_code}")
+                content = resp.content
+            else:
+                async with httpx.AsyncClient(timeout=60) as client:
+                    response = await client.post(
+                        f"{self.backend_url}/v1/chat/completions",
+                        json=judge_body,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    content = (
+                        data.get("choices", [{}])[0]
+                        .get("message", {})
+                        .get("content", "")
+                    )
                 # Parse JSON from response
                 verdict = self._parse_json(content)
                 return verdict

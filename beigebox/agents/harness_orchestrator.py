@@ -66,10 +66,12 @@ class HarnessOrchestrator:
         model: str | None = None,
         max_rounds: int = MAX_ROUNDS,
         task_stagger_seconds: float = 0.4,
+        backend_router=None,
     ):
         cfg = get_config()
         self.cfg = cfg
         self.backend_url = cfg["backend"]["url"].rstrip("/")
+        self.backend_router = backend_router
         self.model = (
             model
             or cfg.get("operator", {}).get("model")
@@ -265,18 +267,24 @@ class HarnessOrchestrator:
 
     async def _llm_call(self, system: str, user: str) -> str:
         """Single non-streaming LLM call to the orchestrator model."""
+        body = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "stream": False,
+            "temperature": 0.2,
+        }
+        if self.backend_router:
+            resp = await self.backend_router.forward(body)
+            if not resp.ok:
+                raise Exception(resp.error or f"backend error {resp.status_code}")
+            return resp.content
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 f"{self.backend_url}/v1/chat/completions",
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                    "stream": False,
-                    "temperature": 0.2,
-                },
+                json=body,
                 headers={"Authorization": "Bearer beigebox"},
             )
             resp.raise_for_status()
@@ -415,14 +423,20 @@ class HarnessOrchestrator:
 
     async def _run_model(self, model_id: str, prompt: str) -> str:
         """Run a prompt against a specific model."""
+        body = {
+            "model": model_id,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+        }
+        if self.backend_router:
+            resp = await self.backend_router.forward(body)
+            if not resp.ok:
+                raise Exception(resp.error or f"backend error {resp.status_code}")
+            return resp.content
         async with httpx.AsyncClient(timeout=self.task_timeout) as client:
             resp = await client.post(
                 f"{self.backend_url}/v1/chat/completions",
-                json={
-                    "model": model_id,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "stream": False,
-                },
+                json=body,
                 headers={"Authorization": "Bearer beigebox"},
             )
             resp.raise_for_status()

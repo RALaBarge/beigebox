@@ -1779,7 +1779,7 @@ async function loadDashboard() {
             p += `<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</span>`;
             p += `<span style="color:var(--fg-muted);flex-shrink:0">${fmtB(f.size)}</span>`;
             if (isDeletable) {
-              p += `<button onclick="deleteWorkspaceOut(${JSON.stringify(f.name)})" style="font-size:10px;padding:0 5px;line-height:1.6;flex-shrink:0" title="Delete">✕</button>`;
+              p += `<button data-fname="${esc(f.name)}" onclick="deleteWorkspaceOut(this.dataset.fname)" style="font-size:10px;padding:0 5px;line-height:1.6;flex-shrink:0" title="Delete">✕</button>`;
             }
             p += `</div>`;
           });
@@ -3599,13 +3599,8 @@ async function loadConfig() {
   const el = document.getElementById('config-body');
   el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
   try {
-    const [cfg, tools] = await Promise.allSettled([
-      api('/api/v1/config'),
-      api('/api/v1/tools'),
-    ]);
-
-    const c = cfg.status === 'fulfilled' ? cfg.value : {};
-    const t = tools.status === 'fulfilled' ? tools.value : {};
+    const cfg = await api('/api/v1/config').catch(() => ({}));
+    const c = cfg || {};
 
     let html = '';
 
@@ -3651,7 +3646,7 @@ async function loadConfig() {
     // ── Tools ────────────────────────────────────────────────────────────
     html += '<div class="section-header" style="margin-top:14px">Tools</div>';
     html += cfgToggle('tools_enabled', 'Tools master switch', c.tools?.enabled ?? false);
-    const toolList = (t.tools || []);
+    const toolList = Object.keys(c.tools || {}).filter(k => k !== 'enabled');
     if (toolList.length) html += kv('registered', toolList.map(n=>`<span class="badge badge-ok">${esc(n)}</span>`).join(' '));
     // Individual tool toggles (informational — toggling requires config.yaml edit for now)
     if (c.tools?.web_search)  html += kv('web_search',  badge(c.tools.web_search.enabled));
@@ -3939,12 +3934,43 @@ async function resetGenParams() {
 
 let _backendsState = null; // {enabled: bool, backends: [{name, provider, url, api_key, priority}]}
 const _bbInputStyle = 'background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px';
+const _bbProviderDefaults = { openrouter: 'https://openrouter.ai/api/v1' };
 
 function initBackendsSection(configData) {
   _backendsState = {
     enabled: configData.backends_enabled || false,
     backends: (configData.backends || []).map(b => ({...b})),
   };
+  renderBackendsSection();
+}
+
+function _bb_enabledChange(checked) {
+  _backendsState.enabled = checked;
+  if (checked) {
+    // Auto-add Ollama backend if none exists
+    if (!_backendsState.backends.some(b => b.provider === 'ollama')) {
+      _backendsState.backends.unshift({
+        name: 'ollama-local', provider: 'ollama',
+        url: 'http://ollama:11434', priority: 1, api_key: '',
+      });
+    }
+    // Auto-add OpenRouter backend if none exists
+    if (!_backendsState.backends.some(b => b.provider === 'openrouter')) {
+      _backendsState.backends.push({
+        name: 'openrouter', provider: 'openrouter',
+        url: _bbProviderDefaults.openrouter, priority: 2, api_key: '',
+      });
+    }
+  }
+  renderBackendsSection();
+}
+
+function _bb_providerChange(i, provider) {
+  _backendsState.backends[i].provider = provider;
+  // Auto-fill URL with provider default if field is currently empty
+  if (!_backendsState.backends[i].url && _bbProviderDefaults[provider]) {
+    _backendsState.backends[i].url = _bbProviderDefaults[provider];
+  }
   renderBackendsSection();
 }
 
@@ -3955,7 +3981,7 @@ function renderBackendsSection() {
 
   let html = `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:4px 0 10px">
     <input type="checkbox" id="backends-enabled-cb" ${enabled ? 'checked' : ''}
-      onchange="_backendsState.enabled=this.checked">
+      onchange="_bb_enabledChange(this.checked)">
     <span style="font-size:12px">Enable multi-backend routing</span>
   </label>`;
 
@@ -3976,6 +4002,11 @@ function _renderBackendCard(b, i) {
   const needsKey = b.provider === 'openrouter' || b.provider === 'openai_compat';
   const provOpts = providers.map(p =>
     `<option value="${p}" ${b.provider===p?'selected':''}>${p}</option>`).join('');
+  const urlPlaceholder = _bbProviderDefaults[b.provider] || 'http://host:port';
+  const noApiKey = b.provider === 'openrouter' && !b.api_key;
+  const apiKeyWarning = noApiKey
+    ? `<span style="color:var(--warn,#f90);font-size:10px;margin-left:6px" title="Add your OpenRouter API key to use this backend">⚠ no API key</span>`
+    : '';
 
   return `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:6px">
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">
@@ -3987,14 +4018,14 @@ function _renderBackendCard(b, i) {
       </div>
       <div style="display:flex;flex-direction:column;gap:2px">
         <label style="font-size:10px;color:var(--muted)">Provider</label>
-        <select onchange="_backendsState.backends[${i}].provider=this.value;renderBackendsSection()"
+        <select onchange="_bb_providerChange(${i},this.value)"
           style="${_bbInputStyle}">
           ${provOpts}
         </select>
       </div>
       <div style="display:flex;flex-direction:column;gap:2px;flex:1;min-width:180px">
         <label style="font-size:10px;color:var(--muted)">URL</label>
-        <input type="text" value="${esc(b.url||'')}" placeholder="http://host:port"
+        <input type="text" value="${esc(b.url||'')}" placeholder="${esc(urlPlaceholder)}"
           oninput="_backendsState.backends[${i}].url=this.value"
           style="width:100%;${_bbInputStyle}">
       </div>
@@ -4006,7 +4037,7 @@ function _renderBackendCard(b, i) {
       </div>
     </div>
     ${needsKey ? `<div style="display:flex;flex-direction:column;gap:2px;margin-top:4px">
-      <label style="font-size:10px;color:var(--muted)">API Key <span style="color:var(--muted);font-style:italic">(leave as *** to keep existing)</span></label>
+      <label style="font-size:10px;color:var(--muted)">API Key${apiKeyWarning} <span style="color:var(--muted);font-style:italic">(leave as *** to keep existing)</span></label>
       <input type="password" value="${esc(b.api_key||'')}" placeholder="sk-or-..."
         oninput="_backendsState.backends[${i}].api_key=this.value"
         style="width:100%;font-family:monospace;${_bbInputStyle}">
@@ -4074,7 +4105,7 @@ function renderOrSection() {
     : [..._orPinned].map(id =>
         `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:2px 8px;font-size:11px;margin:2px">
            ${esc(id)}
-           <button onclick="toggleOrPin(${JSON.stringify(id)});saveOrPinned()" title="Remove"
+           <button data-mid="${esc(id)}" onclick="toggleOrPin(this.dataset.mid);saveOrPinned()" title="Remove"
              style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px;padding:0;line-height:1">✕</button>
          </span>`
       ).join('');
@@ -4140,9 +4171,9 @@ function renderOrModelList(filter) {
       ? '<span style="color:#4c4">free</span>'
       : `$${(pp*1e6).toFixed(2)}/$${(cp*1e6).toFixed(2)}`;
     const checked = _orPinned.has(id) ? 'checked' : '';
-    return `<div style="display:flex;align-items:center;gap:10px;padding:5px 10px;border-bottom:1px solid var(--bg-border);cursor:pointer"
-              onclick="toggleOrPin(${JSON.stringify(id)});renderOrModelList(document.getElementById('or-search')?.value||'')">
-      <input type="checkbox" ${checked} onclick="event.stopPropagation();toggleOrPin(${JSON.stringify(id)});renderOrModelList(document.getElementById('or-search')?.value||'')" style="cursor:pointer">
+    return `<div data-mid="${esc(id)}" style="display:flex;align-items:center;gap:10px;padding:5px 10px;border-bottom:1px solid var(--bg-border);cursor:pointer"
+              onclick="toggleOrPin(this.dataset.mid);renderOrModelList(document.getElementById('or-search')?.value||'')">
+      <input type="checkbox" data-mid="${esc(id)}" ${checked} onclick="event.stopPropagation();toggleOrPin(this.dataset.mid);renderOrModelList(document.getElementById('or-search')?.value||'')" style="cursor:pointer">
       <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(id)}">${esc(name)}</span>
       <span style="color:var(--muted);min-width:36px;text-align:right">${esc(String(ctx))}</span>
       <span style="color:var(--muted);min-width:80px;text-align:right;font-size:11px">${pricing}</span>
@@ -4162,7 +4193,7 @@ function toggleOrPin(modelId) {
       chipsContainer.innerHTML = [..._orPinned].map(id =>
         `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:2px 8px;font-size:11px;margin:2px">
            ${esc(id)}
-           <button onclick="toggleOrPin(${JSON.stringify(id)});saveOrPinned()" title="Remove"
+           <button data-mid="${esc(id)}" onclick="toggleOrPin(this.dataset.mid);saveOrPinned()" title="Remove"
              style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px;padding:0;line-height:1">✕</button>
          </span>`
       ).join('');

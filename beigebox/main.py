@@ -1252,6 +1252,7 @@ async def api_harness_orchestrate(request: Request):
         model=model_override,
         max_rounds=max_rounds,
         task_stagger_seconds=task_stagger,
+        backend_router=backend_router,
     )
 
     async def _event_stream():
@@ -1515,7 +1516,7 @@ async def api_ensemble(request: Request):
 
     from beigebox.agents.ensemble_voter import EnsembleVoter
 
-    voter = EnsembleVoter(models=models, judge_model=judge_model)
+    voter = EnsembleVoter(models=models, judge_model=judge_model, backend_router=backend_router)
 
     async def event_generator():
         try:
