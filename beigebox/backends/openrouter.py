@@ -205,6 +205,12 @@ class OpenRouterBackend(BaseBackend):
         except Exception:
             return False
 
+    def supports_model(self, model: str) -> bool:
+        """OpenRouter handles any provider/model style ID (contains '/'), plus pinned models."""
+        if "/" in model:
+            return True
+        return super().supports_model(model)
+
     async def list_models(self) -> list[str]:
         """Return pinned OpenRouter model IDs (from runtime_config.yaml)."""
         from beigebox.config import get_runtime_config

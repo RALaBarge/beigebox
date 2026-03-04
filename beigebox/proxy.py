@@ -1074,17 +1074,38 @@ class Proxy:
         )
 
     async def list_models(self) -> dict:
-        """Forward /v1/models request to backend(s), optionally rewriting model names."""
-        if self.backend_router:
-            # Aggregate models from all backends
-            data = await self.backend_router.list_all_models()
-        else:
+        """Forward /v1/models request to backend(s), optionally rewriting model names.
+
+        Always fetches from the direct Ollama backend URL first so local models
+        are visible regardless of whether multi-backend routing is enabled.
+        Router backends (e.g. pinned OpenRouter models) are merged on top.
+        """
+        seen: set[str] = set()
+        all_models: list[dict] = []
+
+        # Always include local Ollama models
+        try:
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.get(f"{self.backend_url}/v1/models")
                 resp.raise_for_status()
-                data = resp.json()
-        
-        # Apply model name transformation if configured
+                for m in resp.json().get("data", []):
+                    mid = m.get("id") or m.get("name") or ""
+                    if mid and mid not in seen:
+                        seen.add(mid)
+                        all_models.append(m)
+        except Exception:
+            pass
+
+        # Merge in router backends (pinned OR models, vLLM, etc.)
+        if self.backend_router:
+            router_data = await self.backend_router.list_all_models()
+            for m in router_data.get("data", []):
+                mid = m.get("id") or m.get("name") or ""
+                if mid and mid not in seen:
+                    seen.add(mid)
+                    all_models.append(m)
+
+        data = {"object": "list", "data": all_models}
         data = self._transform_model_names(data)
         return data
     

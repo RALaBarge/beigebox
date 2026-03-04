@@ -38,6 +38,8 @@ from beigebox.backends.router import MultiBackendRouter
 from beigebox.costs import CostTracker
 
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Globals — initialized at startup
 # ---------------------------------------------------------------------------
@@ -979,51 +981,52 @@ async def api_backends_apply(request: Request):
     except Exception:
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
-    enabled = bool(body.get("enabled", False))
-    new_backends = body.get("backends", [])
-    if not isinstance(new_backends, list):
-        return JSONResponse({"error": "backends must be a list"}, status_code=400)
+    try:
+        enabled = bool(body.get("enabled", False))
+        new_backends = body.get("backends", [])
+        if not isinstance(new_backends, list):
+            return JSONResponse({"error": "backends must be a list"}, status_code=400)
 
-    # Preserve existing API keys when the UI submits the "***" masked placeholder
-    rt = get_runtime_config()
-    cfg = get_config()
-    existing = rt.get("backends") if rt.get("backends") is not None else cfg.get("backends", [])
-    existing_by_name = {b.get("name"): b for b in existing}
+        # Preserve existing API keys when the UI submits the "***" masked placeholder
+        rt = get_runtime_config()
+        cfg = get_config()
+        existing = rt.get("backends") if rt.get("backends") is not None else cfg.get("backends", [])
+        existing_by_name = {b.get("name"): b for b in (existing or [])}
 
-    resolved = []
-    for b in new_backends:
-        b = dict(b)
-        raw_key = b.get("api_key", "")
-        if raw_key in ("***", "***redacted***", ""):
-            existing_b = existing_by_name.get(b.get("name"), {})
-            b["api_key"] = existing_b.get("api_key", "")
-        resolved.append(b)
+        resolved = []
+        for b in new_backends:
+            b = dict(b)
+            raw_key = b.get("api_key", "")
+            if raw_key in ("***", "***redacted***", ""):
+                existing_b = existing_by_name.get(b.get("name"), {})
+                b["api_key"] = existing_b.get("api_key", "")
+            resolved.append(b)
 
-    update_runtime_config("backends_enabled", enabled)
-    update_runtime_config("backends", resolved)
+        update_runtime_config("backends_enabled", enabled)
+        update_runtime_config("backends", resolved)
 
-    # Rebuild the router in-place
-    new_router = None
-    if enabled and resolved:
-        try:
-            new_router = MultiBackendRouter(resolved)
-        except Exception as e:
-            return JSONResponse({"error": f"Router build failed: {e}"}, status_code=500)
+        # Rebuild the router in-place
+        new_router = None
+        if enabled and resolved:
+            try:
+                new_router = MultiBackendRouter(resolved)
+            except Exception as e:
+                logger.error("Router build failed: %s", e, exc_info=True)
+                return JSONResponse({"error": f"Router build failed: {e}"}, status_code=500)
 
-    backend_router = new_router
-    if proxy:
-        proxy.backend_router = new_router
+        backend_router = new_router
+        if proxy:
+            proxy.backend_router = new_router
 
-    logger.info(
-        "Backends reloaded via API: enabled=%s, %d backend(s)",
-        enabled, len(resolved) if enabled else 0,
-    )
-    return JSONResponse({"ok": True, "enabled": enabled, "backends": len(resolved) if enabled else 0})
+        logger.info(
+            "Backends reloaded via API: enabled=%s, %d backend(s)",
+            enabled, len(resolved) if enabled else 0,
+        )
+        return JSONResponse({"ok": True, "enabled": enabled, "backends": len(resolved) if enabled else 0})
 
-
-# ---------------------------------------------------------------------------
-# Flight Recorder (v0.6)
-# ---------------------------------------------------------------------------
+    except Exception as e:
+        logger.error("api_backends_apply unexpected error: %s", e, exc_info=True)
+        return JSONResponse({"error": f"Unexpected error: {e}"}, status_code=500)
 
 
 # ---------------------------------------------------------------------------

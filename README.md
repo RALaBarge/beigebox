@@ -157,7 +157,6 @@ BeigeBox includes a built-in single-file web interface at `http://localhost:1337
 | **Dashboard** | Storage stats, model performance charts (P50/P90/P99, TTFT), cost breakdown, backend health with rolling P95 |
 | **Chat** | Multi-pane streaming chat — fan out to N models simultaneously, per-pane settings |
 | **Conversations** | Semantic search, replay, fork, export |
-| **Flight Recorder** | Request lifecycle timelines with latency breakdown |
 | **Tap** | Live wiretap stream with role/direction filters |
 | **Operator** | Interactive agent with tool execution |
 | **Harness** | Parallel model comparison + orchestrated goal-driven mode + ensemble voting |

@@ -89,6 +89,12 @@ class OllamaBackend(BaseBackend):
         except Exception:
             return False
 
+    def supports_model(self, model: str) -> bool:
+        """Ollama never handles provider/model style IDs (those belong to API backends)."""
+        if "/" in model:
+            return False
+        return super().supports_model(model)
+
     async def list_models(self) -> list[str]:
         """Fetch available models from Ollama."""
         try:
