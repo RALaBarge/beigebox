@@ -2221,6 +2221,12 @@ function subsystem(name, ok, detail) {
 // ── 2. Chat ──────────────────────────────────────────────────────────────────
 // ── 2. Chat (multi-pane) ─────────────────────────────────────────────────────
 
+// OpenRouter browser state
+let _orModels = [];        // full OR model list (fetched lazily)
+let _orPinned = new Set(); // currently pinned model IDs
+let _orBrowserOpen = false;
+let _orLoaded = false;
+
 // Pane state
 const PANES_PER_PAGE = 4;
 let chatPanes = [];      // [{id, target, history}]
@@ -2318,6 +2324,14 @@ function renderChatPanes() {
     // Re-render history
     const msgArea = div.querySelector(`#pane-msgs-${pane.id}`);
     pane.history.forEach(m => appendMsgToPane(pane.id, m.role, m.content, m.model || '', msgArea));
+    // Restore in-flight stream as a live partial bubble
+    if (pane._streaming) {
+      const sd = document.createElement('div');
+      sd.className = 'msg assistant';
+      sd.dataset.streaming = 'true';
+      sd.innerHTML = `<div class="meta">${esc(pane._streaming.model)} · live</div><div class="bubble">${esc(pane._streaming.text)}</div>`;
+      msgArea.appendChild(sd);
+    }
   });
 
   // Populate model selectors
@@ -2514,6 +2528,11 @@ function clearPane(paneId) {
   renderChatPanes();
 }
 
+function _scrollNearBottom(el) {
+  if (!el) return;
+  if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) el.scrollTop = el.scrollHeight;
+}
+
 function appendMsgToPane(paneId, role, text, model, container) {
   const area = container || document.getElementById(`pane-msgs-${paneId}`);
   if (!area) return null;
@@ -2523,7 +2542,7 @@ function appendMsgToPane(paneId, role, text, model, container) {
     <div class="meta">${esc(role === 'user' ? 'you' : (model || role))} · ${new Date().toLocaleTimeString()}</div>
     <div class="bubble">${esc(text)}</div>`;
   area.appendChild(div);
-  area.scrollTop = area.scrollHeight;
+  _scrollNearBottom(area);
   return div;
 }
 
@@ -2585,7 +2604,7 @@ async function sendToPane(pane, text, forceOp) {
   const typingId = `typing-${pane.id}-${Date.now()}`;
   area.insertAdjacentHTML('beforeend',
     `<div class="typing-indicator" id="${typingId}"><span></span><span></span><span></span></div>`);
-  area.scrollTop = area.scrollHeight;
+  _scrollNearBottom(area);
 
   try {
     if (isOp) {
@@ -2634,6 +2653,7 @@ async function sendToPane(pane, text, forceOp) {
       let fullText = '';
       let assistantDiv = null;
       let bubble = null;
+      pane._streaming = { text: '', model: model || 'assistant' };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -2648,18 +2668,32 @@ async function sendToPane(pane, text, forceOp) {
             const delta = j.choices?.[0]?.delta?.content || '';
             if (delta) {
               fullText += delta;
+              pane._streaming.text = fullText;
               if (!assistantDiv) {
                 const usedModel = j.model || model || 'assistant';
-                assistantDiv = appendMsgToPane(pane.id, 'assistant', '', usedModel, area);
-                bubble = assistantDiv?.querySelector('.bubble');
+                pane._streaming.model = usedModel;
+                const liveArea = document.getElementById(`pane-msgs-${pane.id}`);
+                if (liveArea) {
+                  assistantDiv = appendMsgToPane(pane.id, 'assistant', '', usedModel, liveArea);
+                  if (assistantDiv) assistantDiv.dataset.streaming = 'true';
+                  bubble = assistantDiv?.querySelector('.bubble');
+                }
+              }
+              // Re-find bubble if DOM was rebuilt (page switch)
+              if (bubble && !bubble.isConnected) {
+                const liveArea = document.getElementById(`pane-msgs-${pane.id}`);
+                assistantDiv = liveArea?.querySelector('[data-streaming="true"]') || null;
+                bubble = assistantDiv?.querySelector('.bubble') || null;
               }
               if (bubble) bubble.textContent = fullText;
-              area.scrollTop = area.scrollHeight;
+              _scrollNearBottom(document.getElementById(`pane-msgs-${pane.id}`));
             }
           } catch {}
         }
       }
       if (fullText) {
+        delete pane._streaming;
+        if (assistantDiv) delete assistantDiv.dataset.streaming;
         pane.history.push({ role: 'assistant', content: fullText, model: model || 'assistant' });
         // force_reload is one-shot — clear after use so next send doesn't re-evict
         if (pane.config?.force_reload) {
@@ -2672,6 +2706,7 @@ async function sendToPane(pane, text, forceOp) {
       }
     }
   } catch(e) {
+    delete pane._streaming;
     document.getElementById(typingId)?.remove();
     appendMsgToPane(pane.id, 'assistant', `Error: ${e.message}`, 'error', area);
   }
@@ -3890,10 +3925,16 @@ async function loadConfig() {
 
     // ── Backends ─────────────────────────────────────────────────────────
     html += '<div class="section-header" style="margin-top:14px">Multi-Backend</div>';
-    html += kv('enabled', badge(c.backends_enabled));
-    (c.backends || []).forEach((b, i) => {
-      html += kv(`backend ${i+1}`, `<span class="badge badge-lav">${esc(b.name||'?')}</span> ${esc(b.url||'')} <span class="badge">${esc(b.provider||'')}</span>`);
-    });
+    html += '<div id="backends-section"></div>';
+
+    // ── OpenRouter Models ─────────────────────────────────────────────────
+    const hasOrBackend = (c.backends || []).some(b => b.provider === 'openrouter');
+    html += '<div class="section-header" style="margin-top:14px">OpenRouter Models</div>';
+    if (!hasOrBackend) {
+      html += `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">No OpenRouter backend configured. Add a backend with <code>provider: openrouter</code> to use this feature.</div>`;
+    } else {
+      html += `<div id="or-section"><div class="empty"><span class="spinner"></span> Loading…</div></div>`;
+    }
 
     // ── Model Advertising ─────────────────────────────────────────────────
     html += '<div class="section-header" style="margin-top:14px">Model Advertising</div>';
@@ -3969,6 +4010,11 @@ async function loadConfig() {
 
     document.getElementById('config-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
     el.innerHTML = html;
+
+    // Initialize editable backends section
+    if (document.getElementById('backends-section')) initBackendsSection(c);
+    // Load OR section if placeholder was rendered
+    if (document.getElementById('or-section')) loadOrSection();
 
     // Wire toggle labels + expand/collapse sub-options
     const toggleIds = [
@@ -4118,6 +4164,252 @@ async function resetGenParams() {
     setTimeout(() => { loadConfig(); if (status) status.textContent = ''; }, 1000);
   } catch(e) {
     if (status) status.textContent = `✗ ${esc(e.message)}`;
+  }
+}
+
+// ── Multi-Backend Editor ──────────────────────────────────────────────────
+
+let _backendsState = null; // {enabled: bool, backends: [{name, provider, url, api_key, priority}]}
+const _bbInputStyle = 'background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px';
+
+function initBackendsSection(configData) {
+  _backendsState = {
+    enabled: configData.backends_enabled || false,
+    backends: (configData.backends || []).map(b => ({...b})),
+  };
+  renderBackendsSection();
+}
+
+function renderBackendsSection() {
+  const el = document.getElementById('backends-section');
+  if (!el || !_backendsState) return;
+  const { enabled, backends } = _backendsState;
+
+  let html = `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:4px 0 10px">
+    <input type="checkbox" id="backends-enabled-cb" ${enabled ? 'checked' : ''}
+      onchange="_backendsState.enabled=this.checked">
+    <span style="font-size:12px">Enable multi-backend routing</span>
+  </label>`;
+
+  backends.forEach((b, i) => { html += _renderBackendCard(b, i); });
+
+  html += `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
+    <button class="action-btn" onclick="addBackend()">+ Add Backend</button>
+    <button class="action-btn" onclick="applyBackends()"
+      style="background:var(--accent,#446);color:var(--fg)">↺ Apply & Reload</button>
+    <span id="backends-apply-status" style="font-size:12px;color:var(--muted)"></span>
+  </div>`;
+
+  el.innerHTML = html;
+}
+
+function _renderBackendCard(b, i) {
+  const providers = ['ollama', 'openrouter', 'openai_compat'];
+  const needsKey = b.provider === 'openrouter' || b.provider === 'openai_compat';
+  const provOpts = providers.map(p =>
+    `<option value="${p}" ${b.provider===p?'selected':''}>${p}</option>`).join('');
+
+  return `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:6px">
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <label style="font-size:10px;color:var(--muted)">Name</label>
+        <input type="text" value="${esc(b.name||'')}" placeholder="my-backend"
+          oninput="_backendsState.backends[${i}].name=this.value"
+          style="width:120px;${_bbInputStyle}">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <label style="font-size:10px;color:var(--muted)">Provider</label>
+        <select onchange="_backendsState.backends[${i}].provider=this.value;renderBackendsSection()"
+          style="${_bbInputStyle}">
+          ${provOpts}
+        </select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px;flex:1;min-width:180px">
+        <label style="font-size:10px;color:var(--muted)">URL</label>
+        <input type="text" value="${esc(b.url||'')}" placeholder="http://host:port"
+          oninput="_backendsState.backends[${i}].url=this.value"
+          style="width:100%;${_bbInputStyle}">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <label style="font-size:10px;color:var(--muted)">Priority</label>
+        <input type="number" value="${b.priority||1}" min="1" max="99"
+          oninput="_backendsState.backends[${i}].priority=parseInt(this.value)||1"
+          style="width:56px;${_bbInputStyle}">
+      </div>
+    </div>
+    ${needsKey ? `<div style="display:flex;flex-direction:column;gap:2px;margin-top:4px">
+      <label style="font-size:10px;color:var(--muted)">API Key <span style="color:var(--muted);font-style:italic">(leave as *** to keep existing)</span></label>
+      <input type="password" value="${esc(b.api_key||'')}" placeholder="sk-or-..."
+        oninput="_backendsState.backends[${i}].api_key=this.value"
+        style="width:100%;font-family:monospace;${_bbInputStyle}">
+    </div>` : ''}
+    <div style="margin-top:6px">
+      <button class="action-btn" onclick="removeBackend(${i})"
+        style="color:var(--warn,#f66);border-color:var(--warn,#f66)">✕ Remove</button>
+    </div>
+  </div>`;
+}
+
+function addBackend() {
+  if (!_backendsState) return;
+  _backendsState.backends.push({ name: '', provider: 'ollama', url: '', priority: 1, api_key: '' });
+  renderBackendsSection();
+}
+
+function removeBackend(i) {
+  if (!_backendsState) return;
+  _backendsState.backends.splice(i, 1);
+  renderBackendsSection();
+}
+
+async function applyBackends() {
+  const status = document.getElementById('backends-apply-status');
+  if (status) status.textContent = '⚙ Applying…';
+  try {
+    const d = await api('/api/v1/backends/apply', {
+      method: 'POST',
+      body: JSON.stringify({ enabled: _backendsState.enabled, backends: _backendsState.backends }),
+    });
+    if (status) {
+      const n = d.backends || 0;
+      status.textContent = d.enabled ? `✓ ${n} backend${n===1?'':'s'} active` : '✓ Disabled';
+      setTimeout(() => { if (status) status.textContent = ''; }, 3000);
+    }
+    // Refresh config tab and model dropdowns to reflect new backends
+    _orLoaded = false;
+    loadConfig();
+    loadModelsForPanes();
+  } catch(e) {
+    if (status) status.textContent = `✗ ${esc(e.message)}`;
+  }
+}
+
+// ── OpenRouter Model Browser ──────────────────────────────────────────────
+
+async function loadOrSection() {
+  const el = document.getElementById('or-section');
+  if (!el) return;
+  try {
+    const d = await api('/api/v1/openrouter/pinned');
+    _orPinned = new Set(d.pinned || []);
+  } catch(e) {
+    _orPinned = new Set();
+  }
+  renderOrSection();
+}
+
+function renderOrSection() {
+  const el = document.getElementById('or-section');
+  if (!el) return;
+  const chips = _orPinned.size === 0
+    ? `<span style="color:var(--muted);font-size:12px">No models pinned</span>`
+    : [..._orPinned].map(id =>
+        `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:2px 8px;font-size:11px;margin:2px">
+           ${esc(id)}
+           <button onclick="toggleOrPin(${JSON.stringify(id)});saveOrPinned()" title="Remove"
+             style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px;padding:0;line-height:1">✕</button>
+         </span>`
+      ).join('');
+
+  const browserHtml = _orBrowserOpen ? `
+    <div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;overflow:hidden">
+      <div style="padding:6px 8px;background:var(--bg2);border-bottom:1px solid var(--border)">
+        <input id="or-search" type="text" placeholder="Filter models…"
+          oninput="renderOrModelList(this.value)"
+          style="width:100%;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:12px;box-sizing:border-box">
+      </div>
+      <div id="or-model-list" style="max-height:320px;overflow-y:auto;font-size:12px">
+        <div class="empty"><span class="spinner"></span> Loading models…</div>
+      </div>
+    </div>` : '';
+
+  el.innerHTML = `
+    <div style="margin-bottom:6px;display:flex;flex-wrap:wrap;gap:4px;align-items:center">
+      ${chips}
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:6px">
+      <button class="action-btn" onclick="toggleOrBrowser()">${_orBrowserOpen ? '▲ Hide Browser' : '🔍 Browse & Add Models'}</button>
+      <button class="action-btn" onclick="saveOrPinned()">💾 Save Pinned</button>
+    </div>
+    ${browserHtml}`;
+
+  if (_orBrowserOpen && _orLoaded) renderOrModelList(document.getElementById('or-search')?.value || '');
+}
+
+async function toggleOrBrowser() {
+  _orBrowserOpen = !_orBrowserOpen;
+  renderOrSection();
+  if (_orBrowserOpen && !_orLoaded) {
+    try {
+      const d = await api('/api/v1/openrouter/models');
+      _orModels = d.data || [];
+      _orLoaded = true;
+    } catch(e) {
+      const listEl = document.getElementById('or-model-list');
+      if (listEl) listEl.innerHTML = `<div style="padding:12px;color:var(--warn)">Failed to load models: ${esc(e.message)}</div>`;
+      return;
+    }
+    renderOrModelList('');
+  }
+}
+
+function renderOrModelList(filter) {
+  const listEl = document.getElementById('or-model-list');
+  if (!listEl) return;
+  const q = (filter || '').toLowerCase();
+  const filtered = q ? _orModels.filter(m => (m.id||'').toLowerCase().includes(q) || (m.name||'').toLowerCase().includes(q)) : _orModels;
+  if (!filtered.length) {
+    listEl.innerHTML = `<div style="padding:12px;color:var(--muted)">No models match</div>`;
+    return;
+  }
+  listEl.innerHTML = filtered.map(m => {
+    const id = m.id || '';
+    const name = m.name || id;
+    const ctx = m.context_length ? (m.context_length >= 1000 ? Math.round(m.context_length/1000)+'k' : m.context_length) : '—';
+    const pp = parseFloat(m.pricing?.prompt || '0');
+    const cp = parseFloat(m.pricing?.completion || '0');
+    const pricing = (pp === 0 && cp === 0)
+      ? '<span style="color:#4c4">free</span>'
+      : `$${(pp*1e6).toFixed(2)}/$${(cp*1e6).toFixed(2)}`;
+    const checked = _orPinned.has(id) ? 'checked' : '';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:5px 10px;border-bottom:1px solid var(--bg-border);cursor:pointer"
+              onclick="toggleOrPin(${JSON.stringify(id)});renderOrModelList(document.getElementById('or-search')?.value||'')">
+      <input type="checkbox" ${checked} onclick="event.stopPropagation();toggleOrPin(${JSON.stringify(id)});renderOrModelList(document.getElementById('or-search')?.value||'')" style="cursor:pointer">
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(id)}">${esc(name)}</span>
+      <span style="color:var(--muted);min-width:36px;text-align:right">${esc(String(ctx))}</span>
+      <span style="color:var(--muted);min-width:80px;text-align:right;font-size:11px">${pricing}</span>
+    </div>`;
+  }).join('');
+}
+
+function toggleOrPin(modelId) {
+  if (_orPinned.has(modelId)) _orPinned.delete(modelId);
+  else _orPinned.add(modelId);
+  // Re-render chips only (don't rebuild full section to preserve browser state)
+  const chipsContainer = document.querySelector('#or-section > div:first-child');
+  if (chipsContainer) {
+    if (_orPinned.size === 0) {
+      chipsContainer.innerHTML = `<span style="color:var(--muted);font-size:12px">No models pinned</span>`;
+    } else {
+      chipsContainer.innerHTML = [..._orPinned].map(id =>
+        `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:2px 8px;font-size:11px;margin:2px">
+           ${esc(id)}
+           <button onclick="toggleOrPin(${JSON.stringify(id)});saveOrPinned()" title="Remove"
+             style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px;padding:0;line-height:1">✕</button>
+         </span>`
+      ).join('');
+    }
+  }
+}
+
+async function saveOrPinned() {
+  const status = document.getElementById('cfg-save-status');
+  try {
+    await api('/api/v1/openrouter/pinned', { method: 'POST', body: JSON.stringify({ pinned: [..._orPinned] }) });
+    if (status) { status.textContent = '✓ Pinned models saved'; setTimeout(() => { status.textContent = ''; }, 2000); }
+    loadModelsForPanes();
+  } catch(e) {
+    if (status) { status.textContent = `✗ ${esc(e.message)}`; setTimeout(() => { status.textContent = ''; }, 3000); }
   }
 }
 

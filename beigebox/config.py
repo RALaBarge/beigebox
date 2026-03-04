@@ -15,7 +15,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 _CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
-_RUNTIME_CONFIG_PATH = Path(__file__).parent.parent / "runtime_config.yaml"
+# data/ is mounted as a Docker volume so runtime settings survive image rebuilds
+_RUNTIME_CONFIG_PATH = Path(__file__).parent.parent / "data" / "runtime_config.yaml"
 
 _config: dict | None = None
 
@@ -95,6 +96,20 @@ def get_runtime_config() -> dict:
         pass  # Keep last good config on parse error
 
     return _runtime_config
+
+
+def get_effective_backends_config() -> tuple[bool, list[dict]]:
+    """
+    Return (backends_enabled, backends_list) merging runtime config onto static config.
+    Runtime config takes precedence — lets you configure backends via the hot-reloaded
+    runtime_config.yaml without touching config.yaml or restarting.
+    """
+    cfg = get_config()
+    rt = get_runtime_config()
+    enabled = rt.get("backends_enabled", cfg.get("backends_enabled", False))
+    # Runtime backends list (if present) fully replaces static config list
+    backends = rt.get("backends") if rt.get("backends") is not None else cfg.get("backends", [])
+    return bool(enabled), list(backends)
 
 
 def update_runtime_config(key: str, value) -> bool:

@@ -163,6 +163,14 @@ class MultiBackendRouter:
                 return b
         return None
 
+    def get_openrouter_backend(self):
+        """Return first OpenRouterBackend (unwrapped from RetryableBackendWrapper), or None."""
+        for b in self.backends:
+            inner = getattr(b, "backend", b)
+            if isinstance(inner, OpenRouterBackend):
+                return inner
+        return None
+
     def _partition_backends(self, model: str) -> tuple[list[BaseBackend], list[BaseBackend]]:
         """
         Split backends into (fast, degraded) lists for two-pass routing.

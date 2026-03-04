@@ -206,20 +206,25 @@ class OpenRouterBackend(BaseBackend):
             return False
 
     async def list_models(self) -> list[str]:
-        """Fetch available models from OpenRouter."""
+        """Return pinned OpenRouter model IDs (from runtime_config.yaml)."""
+        from beigebox.config import get_runtime_config
+        pinned = get_runtime_config().get("openrouter_pinned_models", [])
+        if not pinned:
+            return []
+        return list(pinned)
+
+    async def list_models_details(self) -> list[dict]:
+        """Return full OpenRouter model dicts (id, name, context_length, pricing) for the browser."""
         if not self.api_key:
             return []
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.get(
                     f"{self.url}/models",
                     headers=self._headers(),
                 )
                 resp.raise_for_status()
-                data = resp.json()
-                models = [m.get("id", "") for m in data.get("data", [])]
-                self._available_models = [m for m in models if m]
-                return self._available_models
+                return resp.json().get("data", [])
         except Exception as e:
-            logger.warning("Failed to list OpenRouter models: %s", e)
+            logger.warning("Failed to fetch OR model details: %s", e)
             return []

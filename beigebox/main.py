@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
-from beigebox.config import get_config, get_runtime_config, update_runtime_config
+from beigebox.config import get_config, get_runtime_config, update_runtime_config, get_effective_backends_config
 from beigebox.proxy import Proxy
 from beigebox.storage.sqlite_store import SQLiteStore
 from beigebox.storage.vector_store import VectorStore
@@ -135,10 +135,10 @@ async def lifespan(app: FastAPI):
     embedding_classifier = get_embedding_classifier()
     ec_status = "ready" if embedding_classifier.ready else "no centroids — will auto-build at startup"
 
-    # Multi-backend router (v0.6)
+    # Multi-backend router — reads effective config (runtime_config.yaml overrides config.yaml)
     backend_router = None
-    if cfg.get("backends_enabled", False):
-        backends_cfg = cfg.get("backends", [])
+    backends_enabled, backends_cfg = get_effective_backends_config()
+    if backends_enabled:
         if backends_cfg:
             backend_router = MultiBackendRouter(backends_cfg)
             logger.info("Multi-backend router: enabled (%d backends)", len(backend_router.backends))
@@ -474,11 +474,12 @@ async def api_config():
         # ── Model advertising ─────────────────────────────────────────
         "model_advertising": cfg.get("model_advertising", {}),
         # ── Multi-backend ─────────────────────────────────────────────
-        "backends_enabled": cfg.get("backends_enabled", False),
+        # Effective config: runtime_config.yaml overrides config.yaml
+        "backends_enabled": get_effective_backends_config()[0],
         "backends": [
-            {k: ("***redacted***" if "key" in k.lower() else v)
+            {k: ("***" if "key" in k.lower() and v else v)
              for k, v in b.items()}
-            for b in cfg.get("backends", [])
+            for b in get_effective_backends_config()[1]
         ],
         # ── Feature flags ─────────────────────────────────────────────
         "cost_tracking": {
@@ -967,6 +968,64 @@ async def api_backends():
         "enabled": True,
         "backends": backends_list,  # list, not dict
     })
+
+
+@app.post("/api/v1/backends/apply")
+async def api_backends_apply(request: Request):
+    """
+    Save backends config to runtime_config.yaml and rebuild the router without restart.
+
+    Accepts: {"enabled": bool, "backends": [{name, provider, url, api_key, priority, ...}]}
+
+    API keys set to "***" (the UI masked placeholder) are preserved from the existing config.
+    """
+    global backend_router
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    enabled = bool(body.get("enabled", False))
+    new_backends = body.get("backends", [])
+    if not isinstance(new_backends, list):
+        return JSONResponse({"error": "backends must be a list"}, status_code=400)
+
+    # Preserve existing API keys when the UI submits the "***" masked placeholder
+    rt = get_runtime_config()
+    cfg = get_config()
+    existing = rt.get("backends") if rt.get("backends") is not None else cfg.get("backends", [])
+    existing_by_name = {b.get("name"): b for b in existing}
+
+    resolved = []
+    for b in new_backends:
+        b = dict(b)
+        raw_key = b.get("api_key", "")
+        if raw_key in ("***", "***redacted***", ""):
+            existing_b = existing_by_name.get(b.get("name"), {})
+            b["api_key"] = existing_b.get("api_key", "")
+        resolved.append(b)
+
+    update_runtime_config("backends_enabled", enabled)
+    update_runtime_config("backends", resolved)
+
+    # Rebuild the router in-place
+    new_router = None
+    if enabled and resolved:
+        try:
+            new_router = MultiBackendRouter(resolved)
+        except Exception as e:
+            return JSONResponse({"error": f"Router build failed: {e}"}, status_code=500)
+
+    backend_router = new_router
+    if proxy:
+        proxy.backend_router = new_router
+
+    logger.info(
+        "Backends reloaded via API: enabled=%s, %d backend(s)",
+        enabled, len(resolved) if enabled else 0,
+    )
+    return JSONResponse({"ok": True, "enabled": enabled, "backends": len(resolved) if enabled else 0})
 
 
 # ---------------------------------------------------------------------------
@@ -1544,6 +1603,39 @@ async def api_workspace_delete(filename: str):
 
     target.unlink()
     return JSONResponse({"ok": True})
+
+
+@app.get("/api/v1/openrouter/models")
+async def openrouter_models_browse():
+    """Fetch all OR models for the browser (rich data: name, context, pricing)."""
+    if not backend_router:
+        return JSONResponse({"error": "backends not enabled"}, status_code=400)
+    or_backend = backend_router.get_openrouter_backend()
+    if not or_backend:
+        return JSONResponse({"error": "no OpenRouter backend configured"}, status_code=404)
+    models = await or_backend.list_models_details()
+    return JSONResponse({"data": models})
+
+
+@app.get("/api/v1/openrouter/pinned")
+async def openrouter_pinned_get():
+    """Return current pinned model IDs."""
+    pinned = get_runtime_config().get("openrouter_pinned_models", [])
+    return JSONResponse({"pinned": pinned})
+
+
+@app.post("/api/v1/openrouter/pinned")
+async def openrouter_pinned_save(request: Request):
+    """Save pinned model list to runtime_config.yaml."""
+    try:
+        body = await request.json()
+        pinned = body.get("pinned", [])
+        if not isinstance(pinned, list):
+            return JSONResponse({"error": "pinned must be a list"}, status_code=400)
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+    ok = update_runtime_config("openrouter_pinned_models", pinned)
+    return JSONResponse({"ok": ok, "pinned": pinned})
 
 
 @app.post("/api/v1/web-ui/toggle-vi-mode")
