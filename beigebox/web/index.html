@@ -140,6 +140,16 @@
     padding-bottom: 4px;
   }
   .section-header:first-child { margin-top: 0; }
+  details.cfg-section { margin-top: 10px; }
+  details.cfg-section > summary.section-header {
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    margin-top: 0;
+  }
+  details.cfg-section > summary.section-header::-webkit-details-marker { display: none; }
+  details.cfg-section > summary.section-header::before { content: '▸ '; opacity: 0.5; }
+  details.cfg-section[open] > summary.section-header::before { content: '▾ '; }
 
   /* ── Grid cards ──────────────────────────────────────────────────────── */
   .card-grid {
@@ -3760,125 +3770,131 @@ async function loadConfig() {
       <span id="cfg-save-status" style="font-size:11px;color:var(--fg-dim)"></span>
     </div>`;
 
+    const SO = (name, open=false) => `<details${open?' open':''} class="cfg-section"><summary class="section-header">${name}</summary>`;
+    const SC = '</details>';
+
     // ── Backend ──────────────────────────────────────────────────────────
-    html += '<div class="section-header">Backend</div>';
+    html += SO('Backend', true);
     html += kv('backend url', esc(c.backend?.url || '—'));
     html += kv('embedding model', esc(c.embedding?.model || '—'));
     html += kv('embedding url', esc(c.embedding?.backend_url || '—'));
     html += cfgInput('default_model', 'Default model', c.backend?.default_model || '');
     html += kv('timeout', `${c.backend?.timeout || 120}s`);
+    html += SC;
 
     // ── Server ───────────────────────────────────────────────────────────
-    html += '<div class="section-header" style="margin-top:14px">Server</div>';
+    html += SO('Server');
     html += kv('host', esc(c.server?.host || '0.0.0.0'));
     html += kv('port', String(c.server?.port || 8000));
+    html += SC;
 
     // ── Storage ──────────────────────────────────────────────────────────
-    html += '<div class="section-header" style="margin-top:14px">Storage</div>';
+    html += SO('Storage');
     html += kv('sqlite path', esc(c.storage?.sqlite_path || '—'));
     html += kv('chroma path', esc(c.storage?.chroma_path || '—'));
     html += cfgToggle('log_conversations', 'Log conversations', c.storage?.log_conversations ?? true);
+    html += SC;
 
     // ── Decision LLM ─────────────────────────────────────────────────────
-    html += '<div class="section-header" style="margin-top:14px">Decision LLM</div>';
+    html += SO('Decision LLM');
     html += cfgToggle('decision_llm_enabled', 'Enabled', c.decision_llm?.enabled ?? false);
     html += kv('model', esc(c.decision_llm?.model || '—'));
     html += kv('timeout', `${c.decision_llm?.timeout || 5}s`);
     html += kv('max tokens', String(c.decision_llm?.max_tokens || 256));
+    html += SC;
 
     // ── Operator ─────────────────────────────────────────────────────────
-    html += '<div class="section-header" style="margin-top:14px">Operator</div>';
+    html += SO('Operator');
     html += cfgToggle('operator_enabled', 'Enabled (LLM-driven tool execution)', c.operator?.enabled ?? false);
     html += kv('model', esc(c.operator?.model || '—'));
     html += kv('max iterations', String(c.operator?.max_iterations || 10));
     html += kv('shell', badge(c.operator?.shell_enabled));
+    html += SC;
 
     // ── Tools ────────────────────────────────────────────────────────────
-    html += '<div class="section-header" style="margin-top:14px">Tools</div>';
+    html += SO('Tools');
     html += cfgToggle('tools_enabled', 'Tools master switch', c.tools?.enabled ?? false);
     const toolList = Object.keys(c.tools || {}).filter(k => k !== 'enabled');
     if (toolList.length) html += kv('registered', toolList.map(n=>`<span class="badge badge-ok">${esc(n)}</span>`).join(' '));
-    // Individual tool toggles (informational — toggling requires config.yaml edit for now)
     if (c.tools?.web_search)  html += kv('web_search',  badge(c.tools.web_search.enabled));
     if (c.tools?.web_scraper) html += kv('web_scraper', badge(c.tools.web_scraper.enabled));
     if (c.tools?.calculator)  html += kv('calculator',  badge(c.tools.calculator?.enabled));
     if (c.tools?.datetime)    html += kv('datetime',    badge(c.tools.datetime?.enabled));
     if (c.tools?.system_info) html += kv('system_info', badge(c.tools.system_info?.enabled));
     if (c.tools?.memory)      html += kv('memory',      badge(c.tools.memory?.enabled));
+    html += SC;
 
     // ── Feature Flags ────────────────────────────────────────────────────
-    html += '<div class="section-header" style="margin-top:14px">Feature Flags</div>';
-
-    // Cost tracking
+    html += SO('Feature Flags', true);
     html += cfgToggle('cost_tracking_enabled', 'Cost tracking', c.cost_tracking?.enabled ?? false);
     html += `<div id="sub-cost_tracking_enabled" style="display:${c.cost_tracking?.enabled ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
     html += cfgToggle('cost_track_openrouter', 'Track OpenRouter', c.cost_tracking?.track_openrouter ?? true);
     html += cfgToggle('cost_track_local',      'Track local (Ollama)', c.cost_tracking?.track_local ?? false);
     html += '</div>';
-
-    // Harness
     html += cfgToggle('harness_enabled', 'Harness', c.harness?.enabled ?? true);
-
-    // Conversation replay (no sub-options)
     html += cfgToggle('conversation_replay_enabled', 'Conversation replay', c.conversation_replay?.enabled ?? false);
-
-    // Auto-summarization
     html += cfgToggle('auto_summarization_enabled', 'Auto-summarization', c.auto_summarization?.enabled ?? false);
     html += `<div id="sub-auto_summarization_enabled" style="display:${c.auto_summarization?.enabled ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
-    html += cfgInput('auto_token_budget',    'Token budget (trigger)',  c.auto_summarization?.token_budget ?? 3000, 'number');
-    html += cfgInput('auto_summary_model',   'Summary model',           c.auto_summarization?.summary_model ?? '');
-    html += cfgInput('auto_keep_last',       'Keep last N messages',    c.auto_summarization?.keep_last ?? 4, 'number');
+    html += cfgInput('auto_token_budget',  'Token budget (trigger)', c.auto_summarization?.token_budget ?? 3000, 'number');
+    html += cfgInput('auto_summary_model', 'Summary model',          c.auto_summarization?.summary_model ?? '');
+    html += cfgInput('auto_keep_last',     'Keep last N messages',   c.auto_summarization?.keep_last ?? 4, 'number');
     html += '</div>';
+    html += SC;
 
     // ── Routing ──────────────────────────────────────────────────────────
-    html += '<div class="section-header" style="margin-top:14px">Routing (session overrides)</div>';
+    html += SO('Routing');
     html += cfgSelect('force_route', 'Force route', c.routing?.force_route || '',
                       ['', 'simple', 'complex', 'code', 'large', 'fast']);
     html += kv('session TTL', `${c.routing?.session_ttl_seconds || 1800}s`);
+    html += SC;
 
-    // ── Backends ─────────────────────────────────────────────────────────
+    // ── Backends + OpenRouter (unified wrapper when active) ───────────────
     const hasOrBackend = (c.backends || []).some(b => b.provider === 'openrouter');
-    const orActiveStyle = hasOrBackend && c.backends_enabled
-      ? 'margin-top:14px;border:1px solid var(--lavender);border-radius:4px;padding:4px 8px;box-shadow:0 0 6px var(--lavender)33'
-      : 'margin-top:14px';
-    html += `<div class="section-header" style="${orActiveStyle}">Multi-Backend${hasOrBackend && c.backends_enabled ? ' <span style="font-size:10px;color:var(--lavender);margin-left:6px">● ON</span>' : ''}</div>`;
+    const mbActive = c.backends_enabled;
+    const mbStyle = mbActive
+      ? 'border:1px solid var(--lavender);border-radius:4px;padding:0 8px 8px;box-shadow:0 0 6px var(--lavender)33'
+      : '';
+    html += `<details open class="cfg-section"${mbStyle ? ` style="${mbStyle}"` : ''}>`;
+    html += `<summary class="section-header">Multi-Backend${mbActive ? ' <span style="font-size:10px;color:var(--lavender);margin-left:6px">● ON</span>' : ''}</summary>`;
     html += '<div id="backends-section"></div>';
-
-    // ── OpenRouter Models ─────────────────────────────────────────────────
-    html += `<div class="section-header" style="${orActiveStyle}">OpenRouter Models${hasOrBackend && c.backends_enabled ? ' <span style="font-size:10px;color:var(--lavender);margin-left:6px">● ON</span>' : ''}</div>`;
+    html += `<div class="section-header" style="margin-top:10px">OpenRouter Models${hasOrBackend && mbActive ? ' <span style="font-size:10px;color:var(--lavender);margin-left:6px">● ON</span>' : ''}</div>`;
     if (!hasOrBackend) {
       html += `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">No OpenRouter backend configured. Add a backend with <code>provider: openrouter</code> to use this feature.</div>`;
     } else {
       html += `<div id="or-section"><div class="empty"><span class="spinner"></span> Loading…</div></div>`;
     }
+    html += SC;
 
     // ── Model Advertising ─────────────────────────────────────────────────
-    html += '<div class="section-header" style="margin-top:14px">Model Advertising</div>';
+    html += SO('Model Advertising');
     html += kv('mode', esc(c.model_advertising?.mode || '—'));
     html += kv('prefix', esc(c.model_advertising?.prefix || '—'));
+    html += SC;
 
     // ── Logging ──────────────────────────────────────────────────────────
-    html += '<div class="section-header" style="margin-top:14px">Logging</div>';
+    html += SO('Logging');
     html += cfgSelect('log_level', 'Log level', c.logging?.level || 'INFO',
                       ['DEBUG', 'INFO', 'WARNING', 'ERROR']);
     html += kv('log file', esc(c.logging?.file || '—'));
     html += kv('wiretap', esc(c.wiretap?.path || '—'));
+    html += SC;
 
     // ── Web UI ────────────────────────────────────────────────────────────
-    html += '<div class="section-header" style="margin-top:14px">Web UI</div>';
+    html += SO('Web UI', true);
     html += cfgSelect('web_ui_palette', 'Palette theme', c.web_ui?.palette || 'default',
                       ['default','phosphor','cobalt','sakura','slate']);
     html += cfgToggle('web_ui_vi_mode', 'Vi mode', c.web_ui?.vi_mode ?? false);
+    html += SC;
 
     // ── Voice / Audio ─────────────────────────────────────────────────────
-    html += '<div class="section-header" style="margin-top:14px">Voice / Audio</div>';
+    html += SO('Voice / Audio');
     html += cfgToggle('voice_enabled', 'Enable mic button / Push-to-talk (requires STT service)', c.web_ui?.voice_enabled ?? false);
     html += cfgInput('voice_hotkey', 'PTT hotkey (single key, e.g. v)', c.web_ui?.voice_hotkey || '');
-    html += cfgInput('stt_url', 'STT service URL', c.voice?.stt_url || '', 'text', 'e.g. http://localhost:9000  (blank = use backend URL)');
+    html += cfgInput('stt_url', 'STT service URL', c.voice?.stt_url || '');
     html += cfgToggle('tts_autoplay', 'Auto-play TTS after each assistant response', c.voice?.tts_autoplay ?? false);
     html += `<div id="sub-tts_autoplay" style="display:${c.voice?.tts_autoplay ? 'block' : 'none'};margin-left:16px;margin-top:4px;border-left:2px solid var(--bg-border);padding-left:10px">`;
-    html += cfgInput('tts_url',   'TTS service URL', c.voice?.tts_url || '', 'text', 'e.g. http://localhost:8880  (blank = use backend URL)');
-    html += cfgInput('tts_model', 'TTS model', c.voice?.tts_model || 'tts-1', 'text', 'tts-1 · kokoro · etc.');
+    html += cfgInput('tts_url',   'TTS service URL', c.voice?.tts_url || '');
+    html += cfgInput('tts_model', 'TTS model', c.voice?.tts_model || 'tts-1');
     const ttsVoiceOptions = ['alloy','echo','fable','onyx','nova','shimmer','af','af_bella','af_sarah','am_adam','af_sky'];
     html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">` +
       `<label style="width:140px;font-size:12px;color:var(--muted)">TTS voice</label>` +
@@ -3891,22 +3907,25 @@ async function loadConfig() {
       `<button class="action-btn" id="tts-stop-btn" style="display:none" onclick="stopTTS()">■ Stop</button>` +
       `</div>`;
     html += `</div>`;
+    html += SC;
 
-    // ── Session ───────────────────────────────────────────────────────────
-    html += '<div class="section-header" style="margin-top:14px">Session Overrides</div>';
+    // ── Session Overrides ─────────────────────────────────────────────────
+    html += SO('Session Overrides', true);
     html += cfgInput('system_prompt_prefix', 'System prompt prefix', c.runtime?.system_prompt_prefix || '');
+    html += SC;
 
     // ── System Context ────────────────────────────────────────────────────
-    html += '<div class="section-header" style="margin-top:14px">System Context</div>';
+    html += SO('System Context');
     html += cfgToggle('system_context_enabled', 'Inject system_context.md into every request', c.system_context?.enabled ?? false);
     html += `<div id="sub-system_context_enabled" style="display:${c.system_context?.enabled ? 'block' : 'none'};margin-left:16px;margin-top:6px">`;
     html += `<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Path: <code>${esc(c.system_context?.path || './system_context.md')}</code> — hot-reloaded on every request</div>`;
     html += `<textarea id="cfg-system-context-content" rows="6" style="width:100%;font-family:monospace;font-size:12px;background:var(--bg2);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:6px;resize:vertical;box-sizing:border-box" placeholder="You are a helpful assistant specialising in..."></textarea>`;
     html += `<div style="margin-top:4px;display:flex;gap:8px"><button class="action-btn" onclick="loadSystemContext()">↓ Load current</button><button class="action-btn" onclick="saveSystemContext()">↑ Save context</button></div>`;
     html += '</div>';
+    html += SC;
 
     // ── Generation Parameters ─────────────────────────────────────────────
-    html += '<div class="section-header" style="margin-top:14px">Generation Parameters</div>';
+    html += SO('Generation Parameters', true);
     html += `<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Override parameters injected into every proxied request. Leave blank to let the frontend decide. <strong>Force override</strong> overrides even frontend-set values.</div>`;
     html += cfgToggle('gen_force', 'Force override (override even frontend-set values)', c.generation?.force ?? false);
     const genNum = (k, label, val, step='any', min='', max='') =>
@@ -3923,11 +3942,13 @@ async function loadConfig() {
     html += genNum('gen_max_tokens',     'Max tokens',      c.generation?.max_tokens,     '1',    '1');
     html += genNum('gen_seed',           'Seed',            c.generation?.seed,           '1',    '0');
     html += `<div style="margin-top:6px"><button class="action-btn" onclick="resetGenParams()" style="background:var(--warn,#554422);color:var(--fg)">✕ Clear all generation params</button></div>`;
+    html += SC;
 
     // ── Model GPU/CPU Preferences ──────────────────────────────────────────
-    html += '<div class="section-header" style="margin-top:14px">Model GPU / CPU</div>';
+    html += SO('Model GPU / CPU', true);
     html += `<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Per-model GPU layer preference. Saved to runtime_config — hot-reloaded, no restart needed. Takes effect on next model load (use ↺ reload in chat pane to force).</div>`;
     html += `<div id="model-gpu-section"><div class="empty"><span class="spinner"></span> Loading…</div></div>`;
+    html += SC;
 
     document.getElementById('config-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
     el.innerHTML = html;
