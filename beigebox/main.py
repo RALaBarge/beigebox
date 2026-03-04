@@ -11,6 +11,7 @@ Now with:
   - Cost tracking for API backends (v0.6)
 """
 
+import asyncio
 import logging
 import os
 import time
