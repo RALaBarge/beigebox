@@ -10,13 +10,11 @@ flowchart LR
   BB["BeigeBox"]
   LM["Ollama (local)"]
   EP["OpenRouter / OpenAI / API"]
-  VS["ChromaDB (vectors)"]
-  DB["SQLite (conversations)"]
+  DB["SQLite + ChromaDB (embedded)"]
 
   FE --> BB
   BB --> LM
   BB --> EP
-  BB --> VS
   BB --> DB
 ```
 
@@ -31,14 +29,13 @@ cp env.example .env        # optional — set GPU, ports, API keys
 docker compose up -d
 ```
 
-This brings up four services:
+This brings up three services plus a one-shot model pull:
 
 | Service | Port | What it does |
 |---|---|---|
 | Ollama | `11434` | Local model inference |
-| **BeigeBox** | `1337` | Middleware proxy + API + web UI |
+| **BeigeBox** | `1337` | Middleware proxy + API + web UI + embedded vector store |
 | Open WebUI | `3000` | Chat frontend (talks to BeigeBox, not Ollama directly) |
-| ChromaDB | — | Vector storage (internal) |
 
 Open **http://localhost:1337** for BeigeBox's built-in web interface, or **http://localhost:3000** for Open WebUI.
 
@@ -50,7 +47,7 @@ The OpenAI-compatible API is at `http://localhost:1337/v1` — point any client 
 docker compose --profile voice up -d
 ```
 
-Adds Whisper (STT) and Kokoro (TTS) as sidecars. Enable in the Config tab or `runtime_config.yaml`.
+Adds Whisper (STT) on `:9000` and Kokoro (TTS) on `:8880` as sidecars. Enable in the Config tab or `runtime_config.yaml`.
 
 ### GPU acceleration
 
@@ -90,7 +87,7 @@ Three complementary cache layers, all in-process:
 - **Wiretap** — structured JSONL log of every request, response, routing decision, tool call, WASM transform, and timing breakdown
 - **TTFT tracking** — time to first token captured on every streaming response, stored in SQLite
 - **Latency percentiles** — P50/P90/P95/P99 per model surfaced in the Dashboard performance table and latency chart
-- **Improved tokens/sec** — uses `tokens / (latency - TTFT)` for generation throughput (excludes prompt processing time)
+- **Tokens/sec** — uses `tokens / (latency - TTFT)` for generation throughput (excludes prompt processing time)
 - **Cost tracking** — per-request, per-model, per-day spend for API backends (OpenRouter cost extraction built in)
 - **Backend health** — rolling P95 + degraded status per backend in `/api/v1/backends` and Dashboard
 
@@ -104,7 +101,7 @@ Three complementary cache layers, all in-process:
 ### Storage
 
 - **SQLite** — every conversation, message, cost, and latency metric persisted locally
-- **ChromaDB** — vector embeddings for semantic search and classification
+- **ChromaDB** — vector embeddings for semantic search and classification (embedded, no separate service)
 - **Conversation replay** — reconstruct any conversation with full routing context
 - **Conversation forking** — branch a conversation into a new thread via `z: fork`
 
@@ -150,7 +147,7 @@ Any key in `options` is passed to Ollama's model loader. Settings take effect on
 
 ![BeigeBox Harness](2600/screenshots/multichat.png)
 
-BeigeBox includes a built-in single-file web interface at `http://localhost:1337` with eight tabs:
+BeigeBox includes a built-in single-file web interface at `http://localhost:1337` with seven tabs:
 
 | Tab | What it does |
 |---|---|
@@ -160,7 +157,7 @@ BeigeBox includes a built-in single-file web interface at `http://localhost:1337
 | **Tap** | Live wiretap stream with role/direction filters |
 | **Operator** | Interactive agent with tool execution |
 | **Harness** | Parallel model comparison + orchestrated goal-driven mode + ensemble voting |
-| **Config** | Full config editor with hot-reload — every setting, feature flag, and generation parameter |
+| **Config** | Full config editor with collapsible sections, hot-reload — every setting, feature flag, and generation parameter |
 
 ### Per-pane chat settings
 
@@ -228,19 +225,19 @@ Two config files, by design:
 - **`config.yaml`** — permanent infrastructure settings (backends, storage paths, model names, security policies). Loaded once at startup.
 - **`runtime_config.yaml`** — session overrides (default model, temperature, voice toggle, vi mode). Hot-reloaded on every request via mtime check — no restart needed.
 
-Everything in both files is editable from the web UI Config tab.
+Everything in both files is editable from the web UI Config tab (collapsible sections, Save & Apply button).
 
 ### Key feature flags (all disabled by default)
 
 ```yaml
-decision_llm.enabled: false      # Multi-tier routing pipeline
-operator.enabled: false          # LLM-driven tool execution (review allowed_tools first)
+decision_llm.enabled: false       # Multi-tier routing pipeline
+operator.enabled: false           # LLM-driven tool execution (review allowed_tools first)
 auto_summarization.enabled: false # Context window management
-cost_tracking.enabled: false     # Per-request spend tracking
-backends_enabled: false          # Multi-backend routing with failover
-voice.enabled: false             # Push-to-talk STT/TTS
-wasm.enabled: false              # WASM post-processing transform modules
-semantic_cache.enabled: false    # Semantic response caching
+cost_tracking.enabled: false      # Per-request spend tracking
+backends_enabled: false           # Multi-backend routing with failover
+web_ui.voice_enabled: false       # Push-to-talk STT/TTS
+wasm.enabled: false               # WASM post-processing transform modules
+semantic_cache.enabled: false     # Semantic response caching
 ```
 
 ### API key authentication
@@ -355,7 +352,7 @@ beigebox/
 │   ├── openrouter.py       OpenRouter (with cost extraction)
 │   └── retry_wrapper.py    Retry logic with exponential backoff
 ├── storage/
-│   ├── sqlite_store.py     Conversation + metrics persistence (TTFT, P90/P99)
+│   ├── sqlite_store.py     Conversation + metrics persistence (TTFT, P50/P90/P99)
 │   ├── vector_store.py     Embedding + semantic search
 │   └── backends/           Vector backend abstraction (ChromaDB, extensible)
 ├── tools/
