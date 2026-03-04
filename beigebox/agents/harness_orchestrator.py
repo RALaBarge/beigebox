@@ -162,11 +162,11 @@ class HarnessOrchestrator:
             # ── 2. Dispatch ───────────────────────────────────────────────────
             yield _ev("dispatch", round=round_num, task_count=len(tasks))
 
-            results = await self._dispatch(tasks)
-
-            for r in results:
+            results = []
+            async for r in self._dispatch(tasks):
                 yield _ev("result", round=round_num, **r)
                 history.append({"round": round_num, **r})
+                results.append(r)
 
             # ── 3. Evaluate ───────────────────────────────────────────────────
             try:
@@ -293,33 +293,36 @@ class HarnessOrchestrator:
 
     # ── Dispatch ──────────────────────────────────────────────────────────────
 
-    async def _dispatch(self, tasks: list[dict]) -> list[dict]:
+    async def _dispatch(self, tasks: list[dict]) -> AsyncGenerator[dict, None]:
         """
-        Run all tasks with adaptive stagger based on target type.
+        Run all tasks concurrently, yielding each result as soon as it completes.
 
-        Operator tasks use higher stagger (1.0s) because they initialize ChromaDB,
-        which can cause lock contention when multiple tasks fire simultaneously.
-        Model tasks use lower stagger (0.4s) since Ollama queues them efficiently.
+        Operator tasks use higher stagger (1.0s) to avoid ChromaDB lock contention.
+        Model tasks use lower stagger (0.4s).
         """
         capped = tasks[:MAX_TASKS_PER_ROUND]
+        if not capped:
+            return
 
-        async def _staggered(i: int, task: dict) -> dict:
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def _run_and_enqueue(i: int, task: dict) -> None:
             target = task.get("target", "")
-            
-            # Determine stagger based on target type
-            if target == "operator":
-                stagger = self.operator_stagger_seconds
-            else:
-                stagger = self.model_stagger_seconds
-            
-            # Apply stagger
+            stagger = self.operator_stagger_seconds if target == "operator" else self.model_stagger_seconds
             if i > 0:
                 await asyncio.sleep(i * stagger)
-            
-            return await self._run_task(task)
+            result = await self._run_task(task)
+            await queue.put(result)
 
-        jobs = [_staggered(i, t) for i, t in enumerate(capped)]
-        return await asyncio.gather(*jobs, return_exceptions=False)
+        job_tasks = [asyncio.create_task(_run_and_enqueue(i, t)) for i, t in enumerate(capped)]
+
+        pending = len(capped)
+        while pending > 0:
+            result = await queue.get()
+            yield result
+            pending -= 1
+
+        await asyncio.gather(*job_tasks, return_exceptions=True)
 
     async def _run_task(self, task: dict) -> dict:
         """
