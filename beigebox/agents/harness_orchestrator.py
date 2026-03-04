@@ -146,6 +146,11 @@ class HarnessOrchestrator:
             tasks = plan_result.get("tasks", [])
             reasoning = plan_result.get("reasoning", "")
 
+            # Stamp each task with a unique id so the UI can give each its own pane
+            # even when the same target appears more than once in a round.
+            for i, t in enumerate(tasks):
+                t.setdefault("task_id", f"r{round_num}-t{i}")
+
             yield _ev("plan", round=round_num, reasoning=reasoning, tasks=tasks)
 
             if not tasks:
@@ -311,14 +316,15 @@ class HarnessOrchestrator:
     async def _run_task(self, task: dict) -> dict:
         """
         Run a single task with retry logic and exponential backoff.
-        
-        Retryable errors (timeout, connection, not_found, internal_error) 
+
+        Retryable errors (timeout, connection, not_found, internal_error)
         retry up to max_retries times with exponential backoff.
         Non-retryable errors (rate_limit, unknown) fail immediately.
         """
         target = task.get("target", "")
         prompt = task.get("prompt", "")
         rationale = task.get("rationale", "")
+        task_id = task.get("task_id", f"{target}_{uuid4().hex[:6]}")
         t0 = time.monotonic()
         
         for attempt in range(self.max_retries + 1):
@@ -334,6 +340,7 @@ class HarnessOrchestrator:
 
                 latency_ms = round((time.monotonic() - t0) * 1000, 1)
                 return {
+                    "task_id": task_id,
                     "target": target,
                     "prompt": prompt,
                     "rationale": rationale,
@@ -363,6 +370,7 @@ class HarnessOrchestrator:
                 # Final failure: non-retryable error or out of retries
                 latency_ms = round((time.monotonic() - t0) * 1000, 1)
                 return {
+                    "task_id": task_id,
                     "target": target,
                     "prompt": prompt,
                     "rationale": rationale,
@@ -375,6 +383,7 @@ class HarnessOrchestrator:
 
         # Should never reach here, but safety net
         return {
+            "task_id": task_id,
             "target": target,
             "prompt": prompt,
             "rationale": rationale,
@@ -388,12 +397,17 @@ class HarnessOrchestrator:
     async def _run_operator(self, query: str) -> str:
         """Route a task to the BeigeBox operator agent via its own endpoint."""
         port = self.cfg.get("server", {}).get("port", 8000)
+        api_key = self.cfg.get("auth", {}).get("api_key", "")
+        headers = {}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         # Use 127.0.0.1 explicitly — 'localhost' can fail inside Docker
         # depending on /etc/hosts configuration.
         async with httpx.AsyncClient(timeout=self.operator_timeout) as client:
             resp = await client.post(
                 f"http://127.0.0.1:{port}/api/v1/operator",
                 json={"query": query},
+                headers=headers,
             )
             resp.raise_for_status()
             data = resp.json()

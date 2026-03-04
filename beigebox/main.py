@@ -488,12 +488,8 @@ async def api_config():
             "track_openrouter": rt.get("cost_track_openrouter", cfg.get("cost_tracking", {}).get("track_openrouter", True)),
             "track_local": rt.get("cost_track_local", cfg.get("cost_tracking", {}).get("track_local", False)),
         },
-        "orchestrator": {
-            **cfg.get("orchestrator", {}),
-            "enabled": rt.get("orchestrator_enabled", cfg.get("orchestrator", {}).get("enabled", False)),
-            "max_parallel_tasks": rt.get("orchestrator_max_parallel", cfg.get("orchestrator", {}).get("max_parallel_tasks", 5)),
-            "task_timeout_seconds": rt.get("orchestrator_task_timeout", cfg.get("orchestrator", {}).get("task_timeout_seconds", 120)),
-            "total_timeout_seconds": rt.get("orchestrator_total_timeout", cfg.get("orchestrator", {}).get("total_timeout_seconds", 300)),
+        "harness": {
+            "enabled": rt.get("harness_enabled", cfg.get("harness", {}).get("enabled", True)),
         },
         "conversation_replay": {
             "enabled": rt.get("conversation_replay_enabled", cfg.get("conversation_replay", {}).get("enabled", False)),
@@ -578,7 +574,7 @@ async def api_config_save(request: Request):
         # Session
         system_prompt_prefix, tools_disabled
         # Feature flags (bool)
-        cost_tracking_enabled, orchestrator_enabled,
+        cost_tracking_enabled, harness_enabled,
         conversation_replay_enabled, auto_summarization_enabled
     """
     try:
@@ -613,10 +609,7 @@ async def api_config_save(request: Request):
         "cost_tracking_enabled":        "cost_tracking_enabled",
         "cost_track_openrouter":        "cost_track_openrouter",
         "cost_track_local":             "cost_track_local",
-        "orchestrator_enabled":         "orchestrator_enabled",
-        "orchestrator_max_parallel":    "orchestrator_max_parallel",
-        "orchestrator_task_timeout":    "orchestrator_task_timeout",
-        "orchestrator_total_timeout":   "orchestrator_total_timeout",
+        "harness_enabled":              "harness_enabled",
         "conversation_replay_enabled":  "conversation_replay_enabled",
         "auto_summarization_enabled":   "auto_summarization_enabled",
         "auto_token_budget":            "auto_token_budget",
@@ -1228,6 +1221,11 @@ async def api_harness_orchestrate(request: Request):
         {type:"finish",   answer, rounds, capped?}
         {type:"error",    message}
     """
+    cfg = get_config()
+    rt  = get_runtime_config()
+    if not rt.get("harness_enabled", cfg.get("harness", {}).get("enabled", True)):
+        return JSONResponse({"error": "Harness is disabled."}, status_code=403)
+
     try:
         body = await request.json()
     except Exception:
@@ -1329,9 +1327,13 @@ async def api_harness_orchestrate(request: Request):
 def get_harness_run(run_id: str):
     """
     Retrieve a stored harness orchestration run by ID.
-    
+
     Returns the full run record including all events for replay/analysis.
     """
+    cfg = get_config()
+    rt  = get_runtime_config()
+    if not rt.get("harness_enabled", cfg.get("harness", {}).get("enabled", True)):
+        return JSONResponse({"error": "Harness is disabled."}, status_code=403)
     try:
         from beigebox.storage.sqlite_store import SQLiteStore
         cfg = get_config()
@@ -1370,12 +1372,16 @@ def get_harness_run(run_id: str):
 def list_harness_runs(limit: int = 10):
     """
     List recent harness orchestration runs.
-    
+
     Query parameters:
         limit: int (default 10, max 100) — number of runs to return
-    
+
     Returns a list of recent runs with metadata (without full event logs).
     """
+    cfg = get_config()
+    rt  = get_runtime_config()
+    if not rt.get("harness_enabled", cfg.get("harness", {}).get("enabled", True)):
+        return JSONResponse({"error": "Harness is disabled."}, status_code=403)
     try:
         # Clamp limit
         limit = min(max(limit, 1), 100)

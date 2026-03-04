@@ -621,15 +621,6 @@
   #panel-harness {
     flex-direction: column;
   }
-  #harness-grid {
-    flex: 1;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    padding: 4px;
-    overflow: hidden;
-    align-content: flex-start;
-  }
   .harness-pane {
     flex: 1 1 calc(50% - 4px);
     min-width: 280px;
@@ -683,16 +674,39 @@
   .harness-pane-output::-webkit-scrollbar-thumb { background: var(--bg-border); }
   .harness-pane-output.thinking { color: var(--yellow); font-style: italic; }
 
-  #harness-target-list {
+  /* Round groups */
+  .round-group {
+    width: 100%;
+    border: 1px solid var(--bg-border);
+    border-radius: 3px;
+    margin-bottom: 6px;
+    overflow: hidden;
+  }
+  .round-group-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    background: var(--bg-deep);
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid var(--bg-border);
+  }
+  .round-group-header:hover { background: var(--bg-panel); }
+  .round-group-toggle { font-size: 9px; color: var(--fg-muted); width: 10px; }
+  .round-group.collapsed .round-group-toggle::before { content: '▶'; }
+  .round-group:not(.collapsed) .round-group-toggle::before { content: '▼'; }
+  .round-group-label { color: var(--yellow); font-size: 11px; font-weight: bold; flex: 1; letter-spacing: 0.05em; }
+  .round-group-count { color: var(--fg-muted); font-size: 10px; }
+  .round-group.collapsed .round-group-panes { display: none; }
+  .round-group-panes {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-    padding: 6px 12px;
-    background: var(--bg-panel);
-    border-bottom: 1px solid var(--bg-border);
-    flex-shrink: 0;
-    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    background: var(--bg);
   }
+
   .harness-target-chip {
     background: var(--bg-border);
     border: 1px solid var(--bg-border);
@@ -712,22 +726,6 @@
     line-height: 1;
   }
   .harness-target-chip .remove-chip:hover { color: var(--red); }
-
-  #harness-page-nav {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 12px;
-    background: var(--bg-panel);
-    border-top: 1px solid var(--bg-border);
-    flex-shrink: 0;
-  }
-  #harness-page-indicator {
-    color: var(--fg-muted);
-    font-size: 11px;
-    min-width: 80px;
-    text-align: center;
-  }
 
   /* ── Misc ────────────────────────────────────────────────────────────── */
   .empty { color: var(--fg-muted); padding: 20px; text-align: center; font-size: 12px; }
@@ -1295,31 +1293,13 @@
     <div class="toolbar">
       <span class="toolbar-label">Mode:</span>
       <div style="display:flex;gap:0;border:1px solid var(--bg-border);border-radius:2px;overflow:hidden;flex-shrink:0">
-        <button id="harness-mode-manual" onclick="setHarnessMode('manual')"
-          style="border-radius:0;border:none;padding:2px 10px;font-size:11px;background:var(--lavender);color:#000">Manual</button>
         <button id="harness-mode-orchestrated" onclick="setHarnessMode('orchestrated')"
-          style="border-radius:0;border:none;padding:2px 10px;font-size:11px;background:var(--bg-input);color:var(--fg-dim)">Orchestrated</button>
+          style="border-radius:0;border:none;padding:2px 10px;font-size:11px;background:var(--cyan);color:#000">Orchestrated</button>
         <button id="harness-mode-ensemble" onclick="setHarnessMode('ensemble')"
           style="border-radius:0;border:none;padding:2px 10px;font-size:11px;background:var(--bg-input);color:var(--fg-dim)">Ensemble</button>
       </div>
       <span class="toolbar-spacer"></span>
-      <span id="harness-manual-controls" style="display:flex;gap:6px;align-items:center">
-        <span class="toolbar-label">Add target:</span>
-        <select id="harness-add-select" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
-          <option value="">— pick agent/model —</option>
-          <option value="operator">operator</option>
-        </select>
-        <button onclick="harnessAddTarget()">＋ Add</button>
-        <span style="width:1px;background:var(--bg-border);height:18px;display:inline-block;margin:0 2px"></span>
-        <div id="harness-page-nav" style="border:none;padding:0">
-          <button onclick="harnessPagePrev()" id="harness-prev-btn" title="Previous page">◀</button>
-          <span id="harness-page-indicator">p1/1</span>
-          <button onclick="harnessPageNext()" id="harness-next-btn" title="Next page">▶</button>
-        </div>
-        <button onclick="harnessRun()" class="primary" id="harness-run-btn">▶ Run All</button>
-        <button onclick="harnessClear()">✕ Clear</button>
-      </span>
-      <span id="harness-orch-controls" style="display:none;gap:6px;align-items:center">
+      <span id="harness-orch-controls" style="display:flex;gap:6px;align-items:center">
         <span class="toolbar-label" style="color:var(--cyan)">Master model:</span>
         <select id="harness-orch-model" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
           <option value="">— use operator default —</option>
@@ -1338,11 +1318,6 @@
         <button onclick="harnessEnsembleRun()" class="primary" id="harness-ensemble-run-btn">▶ Run Ensemble</button>
         <button onclick="harnessEnsembleClear()">✕ Clear</button>
       </span>
-    </div>
-
-    <!-- Manual: target chips -->
-    <div id="harness-target-list">
-      <span style="color:var(--fg-muted);font-size:11px">No targets. Add models or agents above.</span>
     </div>
 
     <!-- Orchestrated: available target pool -->
@@ -1368,7 +1343,7 @@
     <div style="padding:6px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border);display:flex;gap:8px;flex-shrink:0">
       <textarea id="harness-prompt" rows="2"
         style="flex:1;resize:none;font-size:12px;padding:4px 8px"
-        onkeydown="if(event.ctrlKey&&event.key==='Enter'){harnessMode==='manual'?harnessRun():harnessMode==='orchestrated'?harnessOrchRun():harnessEnsembleRun()}"
+        onkeydown="if(event.ctrlKey&&event.key==='Enter'){harnessMode==='orchestrated'?harnessOrchRun():harnessEnsembleRun()}"
         placeholder="Enter goal or prompt… (Ctrl+Enter to run)"></textarea>
     </div>
 
@@ -1383,11 +1358,6 @@
       <div id="harness-orch-grid" style="flex:1;overflow-y:auto;padding:8px;display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start">
         <div class="empty">Worker results will appear here.</div>
       </div>
-    </div>
-
-    <!-- Manual: 2×2 pane grid -->
-    <div id="harness-grid">
-      <div class="empty">Add targets and enter a prompt to begin.</div>
     </div>
 
     <!-- Ensemble: results grid -->
@@ -1558,7 +1528,7 @@ function switchTab(name) {
   if (name === 'config')    loadConfig();
   if (name === 'chat')      { initChatPanes(); loadModels(); }
   if (name === 'operator')  { loadOpTargets(); }
-  if (name === 'harness')   { loadHarnessTargetOptions(); setHarnessMode(harnessMode); }
+  if (name === 'harness')   { loadModelsForPanes(); setHarnessMode(harnessMode); }
 }
 
 document.addEventListener('keydown', e => {
@@ -1568,9 +1538,6 @@ document.addEventListener('keydown', e => {
   // [ ] to page chat panes
   if (e.key === '[') chatPagePrev();
   if (e.key === ']') chatPageNext();
-  // { } to page harness
-  if (e.key === '{') harnessPagePrev();
-  if (e.key === '}') harnessPageNext();
 });
 
 // ── API helpers ─────────────────────────────────────────────────────────────
@@ -1643,11 +1610,8 @@ const TOOLTIPS = {
   cost_tracking_enabled:       'Track estimated token costs per request and accumulate per-model totals.',
   cost_track_openrouter:       'Include OpenRouter API requests in cost tracking.',
   cost_track_local:            'Include local Ollama requests in cost tracking (estimates only).',
-  // Orchestrator
-  orchestrator_enabled:        'Enable the parallel task orchestrator for multi-step agentic workflows.',
-  orchestrator_max_parallel:   'Maximum number of sub-tasks the orchestrator runs simultaneously.',
-  orchestrator_task_timeout:   'Seconds before an individual sub-task is abandoned.',
-  orchestrator_total_timeout:  'Hard wall-clock limit (seconds) for an entire orchestration run.',
+  // Harness
+  harness_enabled:             'Enable the Harness goal-directed multi-agent orchestrator.',
   // Conversation replay
   conversation_replay_enabled: 'Allow replaying past conversations with full context reconstruction from SQLite.',
   // Auto-summarization
@@ -2379,17 +2343,6 @@ async function loadModelsForPanes() {
       opt.value = 'model:' + id; opt.textContent = 'model: ' + id;
       if ('model:' + id === curOp) opt.selected = true;
       opSel.appendChild(opt);
-    });
-  }
-
-  // Also populate harness add-select
-  const hSel = document.getElementById('harness-add-select');
-  if (hSel) {
-    hSel.innerHTML = `<option value="">— pick agent/model —</option><option value="operator">operator</option>`;
-    models.forEach(id => {
-      const opt = document.createElement('option');
-      opt.value = 'model:' + id; opt.textContent = id;
-      hSel.appendChild(opt);
     });
   }
 
@@ -3215,236 +3168,37 @@ function clearOp() {
 }
 
 // ── 7. Harness — parallel agent runner ────────────────────────────────────────
-const HARNESS_PER_PAGE = 4;
-let harnessTargets = [];   // [{key, label}]  key = "operator" | "model:llama3.2:3b"
-let harnessPageIdx = 0;
-let harnessRunResults = {}; // key -> {text, status}
-
-function loadHarnessTargetOptions() {
-  loadModelsForPanes(); // reuses same function to populate harness-add-select
-}
-
-function harnessAddTarget() {
-  const sel = document.getElementById('harness-add-select');
-  const val = sel.value;
-  if (!val) return;
-  const label = val === 'operator' ? 'operator' : val.startsWith('model:') ? val.slice(6) : val;
-  // Avoid duplicates
-  if (harnessTargets.find(t => t.key === val)) return;
-  harnessTargets.push({ key: val, label });
-  sel.value = '';
-  renderHarnessTargetChips();
-  renderHarnessGrid();
-}
-
-function harnessRemoveTarget(key) {
-  harnessTargets = harnessTargets.filter(t => t.key !== key);
-  delete harnessRunResults[key];
-  // Clamp page
-  const maxPage = Math.max(0, Math.ceil(harnessTargets.length / HARNESS_PER_PAGE) - 1);
-  if (harnessPageIdx > maxPage) harnessPageIdx = maxPage;
-  renderHarnessTargetChips();
-  renderHarnessGrid();
-}
-
-function renderHarnessTargetChips() {
-  const el = document.getElementById('harness-target-list');
-  if (harnessTargets.length === 0) {
-    el.innerHTML = '<span style="color:var(--fg-muted);font-size:11px">No targets. Add models or agents above.</span>';
-    return;
-  }
-  el.innerHTML = harnessTargets.map(t => `
-    <div class="harness-target-chip">
-      <span>${esc(t.label)}</span>
-      <span class="remove-chip" onclick="harnessRemoveTarget('${t.key.replace(/'/g,"\\'")}')">✕</span>
-    </div>`).join('');
-}
-
-function renderHarnessGrid() {
-  const grid = document.getElementById('harness-grid');
-  if (harnessTargets.length === 0) {
-    grid.innerHTML = '<div class="empty">Add targets and enter a prompt to begin.</div>';
-    updateHarnessPageNav();
-    return;
-  }
-  const start = harnessPageIdx * HARNESS_PER_PAGE;
-  const visible = harnessTargets.slice(start, start + HARNESS_PER_PAGE);
-  grid.innerHTML = '';
-  visible.forEach(t => {
-    const res = harnessRunResults[t.key];
-    const status = res ? res.status : '';
-    const text = res ? res.text : '';
-    const statusHtml = status ? `<span class="harness-status ${status}">${status === 'pending' ? '⟳ running…' : status}</span>` : '';
-    const pane = document.createElement('div');
-    pane.className = 'harness-pane';
-    pane.id = `harness-pane-${t.key.replace(/[^a-z0-9]/gi,'_')}`;
-    pane.innerHTML = `
-      <div class="harness-pane-header">
-        <span class="target-label">${esc(t.label)}</span>
-        ${statusHtml}
-      </div>
-      <div class="harness-pane-output${status==='pending'?' thinking':''}">${esc(text) || '<span style="color:var(--fg-muted)">waiting…</span>'}</div>`;
-    grid.appendChild(pane);
-  });
-  updateHarnessPageNav();
-}
-
-function updateHarnessPageNav() {
-  const total = Math.max(1, Math.ceil(harnessTargets.length / HARNESS_PER_PAGE));
-  document.getElementById('harness-page-indicator').textContent = `p${harnessPageIdx+1}/${total}`;
-  document.getElementById('harness-prev-btn').disabled = harnessPageIdx === 0;
-  document.getElementById('harness-next-btn').disabled = harnessPageIdx >= total - 1;
-}
-
-function harnessPagePrev() {
-  if (harnessPageIdx > 0) { harnessPageIdx--; renderHarnessGrid(); }
-}
-function harnessPageNext() {
-  const maxPage = Math.max(0, Math.ceil(harnessTargets.length / HARNESS_PER_PAGE) - 1);
-  if (harnessPageIdx < maxPage) { harnessPageIdx++; renderHarnessGrid(); }
-}
-
-async function harnessRun() {
-  const prompt = document.getElementById('harness-prompt').value.trim();
-  if (!prompt) return;
-  if (harnessTargets.length === 0) return;
-
-  const btn = document.getElementById('harness-run-btn');
-  btn.disabled = true;
-
-  // Mark all as pending
-  harnessTargets.forEach(t => { harnessRunResults[t.key] = { text: '', status: 'pending' }; });
-  renderHarnessGrid();
-
-  // Fire all in parallel — each updates its own pane as it completes
-  await Promise.all(harnessTargets.map(t => harnessRunTarget(t, prompt)));
-
-  btn.disabled = false;
-}
-
-async function harnessRunTarget(target, prompt) {
-  const paneId = `harness-pane-${target.key.replace(/[^a-z0-9]/gi,'_')}`;
-
-  const updatePane = (text, status) => {
-    harnessRunResults[target.key] = { text, status };
-    // Only update DOM if pane is currently visible
-    const pane = document.getElementById(paneId);
-    if (pane) {
-      const out = pane.querySelector('.harness-pane-output');
-      const hdr = pane.querySelector('.harness-pane-header');
-      if (out) {
-        out.className = `harness-pane-output${status === 'pending' ? ' thinking' : ''}`;
-        out.textContent = text || (status === 'pending' ? 'running…' : '');
-      }
-      if (hdr) {
-        const existing = hdr.querySelector('.harness-status');
-        if (existing) existing.remove();
-        if (status) {
-          const sp = document.createElement('span');
-          sp.className = `harness-status ${status}`;
-          sp.textContent = status === 'pending' ? '⟳ running…' : status;
-          hdr.appendChild(sp);
-        }
-      }
-    }
-  };
-
-  try {
-    if (target.key === 'operator') {
-      updatePane('', 'pending');
-      const d = await api('/api/v1/operator', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: prompt }),
-      });
-      const answer = d.success ? d.answer : `Error: ${d.error}`;
-      updatePane(answer, d.success ? 'done' : 'error');
-    } else if (target.key.startsWith('model:')) {
-      const modelId = target.key.slice(6);
-      updatePane('', 'pending');
-      // Stream the response, updating pane incrementally
-      const resp = await fetch(BASE + '/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer beigebox' },
-        body: JSON.stringify({
-          model: modelId,
-          messages: [{ role: 'user', content: prompt }],
-          stream: true,
-        }),
-      });
-      if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let fullText = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value);
-        for (const line of chunk.split('\n')) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') break;
-          try {
-            const j = JSON.parse(data);
-            const delta = j.choices?.[0]?.delta?.content || '';
-            if (delta) {
-              fullText += delta;
-              updatePane(fullText, 'pending');
-            }
-          } catch {}
-        }
-      }
-      updatePane(fullText, 'done');
-    }
-  } catch(e) {
-    updatePane(`Error: ${e.message}`, 'error');
-  }
-}
-
-function harnessClear() {
-  harnessRunResults = {};
-  renderHarnessGrid();
-}
-
 // ── Harness mode switching ────────────────────────────────────────────────────
-let harnessMode = 'manual'; // 'manual' | 'orchestrated'
-let harnessOrchTargets = []; // targets the master can use: [{key, label}]
+let harnessMode = 'orchestrated';
+let harnessOrchTargets = []; // targets the master can use: [{id, key, label}]
+let harnessOrchTargetSeq = 0;
 
 function setHarnessMode(mode) {
   harnessMode = mode;
-  const isMan  = mode === 'manual';
   const isOrch = mode === 'orchestrated';
   const isEns  = mode === 'ensemble';
 
   // ── Mode button styles ──
-  const manBtn  = document.getElementById('harness-mode-manual');
   const orchBtn = document.getElementById('harness-mode-orchestrated');
   const ensBtn  = document.getElementById('harness-mode-ensemble');
-  if (manBtn)  { manBtn.style.background  = isMan  ? 'var(--lavender)' : 'var(--bg-input)'; manBtn.style.color  = isMan  ? '#000' : 'var(--fg-dim)'; }
-  if (orchBtn) { orchBtn.style.background = isOrch ? 'var(--cyan)'     : 'var(--bg-input)'; orchBtn.style.color = isOrch ? '#000' : 'var(--fg-dim)'; }
-  if (ensBtn)  { ensBtn.style.background  = isEns  ? 'var(--yellow)'   : 'var(--bg-input)'; ensBtn.style.color  = isEns  ? '#000' : 'var(--fg-dim)'; }
+  if (orchBtn) { orchBtn.style.background = isOrch ? 'var(--cyan)'   : 'var(--bg-input)'; orchBtn.style.color = isOrch ? '#000' : 'var(--fg-dim)'; }
+  if (ensBtn)  { ensBtn.style.background  = isEns  ? 'var(--yellow)' : 'var(--bg-input)'; ensBtn.style.color  = isEns  ? '#000' : 'var(--fg-dim)'; }
 
   // ── Toolbar control bars ──
-  const manControls = document.getElementById('harness-manual-controls');
   const orchControls = document.getElementById('harness-orch-controls');
   const ensControls  = document.getElementById('harness-ensemble-controls');
-  if (manControls)  manControls.style.display  = isMan  ? 'flex' : 'none';
-  if (orchControls) orchControls.style.display  = isOrch ? 'flex' : 'none';
-  if (ensControls)  ensControls.style.display   = isEns  ? 'flex' : 'none';
+  if (orchControls) orchControls.style.display = isOrch ? 'flex' : 'none';
+  if (ensControls)  ensControls.style.display  = isEns  ? 'flex' : 'none';
 
   // ── Target / model areas ──
-  const manTargets      = document.getElementById('harness-target-list');
-  const orchTargetArea  = document.getElementById('harness-orch-target-area');
-  const ensModelArea    = document.getElementById('harness-ensemble-model-area');
-  if (manTargets)     manTargets.style.display    = isMan  ? ''     : 'none';
+  const orchTargetArea = document.getElementById('harness-orch-target-area');
+  const ensModelArea   = document.getElementById('harness-ensemble-model-area');
   if (orchTargetArea) orchTargetArea.style.display = isOrch ? 'flex' : 'none';
   if (ensModelArea)   ensModelArea.style.display   = isEns  ? ''     : 'none';
 
   // ── Result grids ──
-  const manGrid   = document.getElementById('harness-grid');
   const orchLayout = document.getElementById('harness-orch-layout');
   const ensGrid    = document.getElementById('harness-ensemble-grid');
-  if (manGrid)    manGrid.style.display    = isMan  ? ''     : 'none';
   if (orchLayout) orchLayout.style.display = isOrch ? 'flex' : 'none';
   if (ensGrid)    ensGrid.style.display    = isEns  ? 'flex' : 'none';
 
@@ -3452,19 +3206,7 @@ function setHarnessMode(mode) {
   const ta = document.getElementById('harness-prompt');
   if (ta) ta.placeholder =
     isOrch ? 'Describe the goal… the orchestrator will plan, delegate, and iterate. (Ctrl+Enter to run)' :
-    isEns  ? 'Prompt to compare across all selected models… (Ctrl+Enter to run)' :
-             'Prompt to send to all targets… (Ctrl+Enter to run)';
-
-  // ── Seed orchestrated target pool on first switch ──
-  if (isOrch && harnessOrchTargets.length === 0) {
-    ['operator', ...harnessTargets.map(t => t.key)].forEach(key => {
-      if (!harnessOrchTargets.find(t => t.key === key)) {
-        const label = key === 'operator' ? 'operator' : key.startsWith('model:') ? key.slice(6) : key;
-        harnessOrchTargets.push({ key, label });
-      }
-    });
-    renderOrchTargetChips();
-  }
+             'Prompt to compare across all selected models… (Ctrl+Enter to run)';
 
   // ── Populate ensemble model checklist on first switch ──
   if (isEns) harnessEnsemblePopulateModels();
@@ -3476,15 +3218,14 @@ function harnessOrchAddTarget() {
   const sel = document.getElementById('harness-orch-add-select');
   const val = sel.value;
   if (!val) return;
-  if (harnessOrchTargets.find(t => t.key === val)) { sel.value = ''; return; }
   const label = val === 'operator' ? 'operator' : val.startsWith('model:') ? val.slice(6) : val;
-  harnessOrchTargets.push({ key: val, label });
+  harnessOrchTargets.push({ id: harnessOrchTargetSeq++, key: val, label });
   sel.value = '';
   renderOrchTargetChips();
 }
 
-function harnessOrchRemoveTarget(key) {
-  harnessOrchTargets = harnessOrchTargets.filter(t => t.key !== key);
+function harnessOrchRemoveTarget(id) {
+  harnessOrchTargets = harnessOrchTargets.filter(t => t.id !== id);
   renderOrchTargetChips();
 }
 
@@ -3494,7 +3235,7 @@ function renderOrchTargetChips() {
   el.innerHTML = harnessOrchTargets.map(t =>
     `<div class="harness-target-chip" style="font-size:11px;padding:1px 6px">
       <span>${esc(t.label)}</span>
-      <span class="remove-chip" onclick="harnessOrchRemoveTarget('${t.key.replace(/'/g,"\\'")}')">✕</span>
+      <span class="remove-chip" onclick="harnessOrchRemoveTarget(${t.id})">✕</span>
     </div>`
   ).join('') || '<span style="color:var(--fg-muted);font-size:11px">No targets set — master will use all available models.</span>';
 }
@@ -3511,6 +3252,11 @@ function harnessOrchClear() {
   if (grid) grid.innerHTML = '<div class="empty">Worker results will appear here.</div>';
   const btn = document.getElementById('harness-orch-run-btn');
   if (btn) { btn.disabled = false; btn.textContent = '▶ Run'; }
+}
+
+function toggleRoundGroup(round) {
+  const g = document.getElementById(`round-group-${round}`);
+  if (g) g.classList.toggle('collapsed');
 }
 
 async function harnessOrchRun() {
@@ -3534,34 +3280,61 @@ async function harnessOrchRun() {
   const modelOverride = document.getElementById('harness-orch-model')?.value || null;
   const maxRounds = parseInt(document.getElementById('harness-orch-rounds')?.value || '8');
 
-  // Track worker panes by target+round key
-  const workerPanes = {}; // "round-target" -> dom element
+  // Track worker panes by task_id (unique per task, even if same target+round)
+  const workerPanes = {};
+  // Track round group containers by round number
+  const roundGroups = {};
 
-  function getOrCreateWorkerPane(round, target, prompt, rationale) {
-    const paneKey = `r${round}-${target.replace(/[^a-z0-9]/gi,'_')}`;
-    if (workerPanes[paneKey]) return workerPanes[paneKey];
+  function getOrCreateRoundGroup(round) {
+    if (roundGroups[round]) return roundGroups[round];
+    const group = document.createElement('div');
+    group.className = 'round-group';
+    group.id = `round-group-${round}`;
+    group.innerHTML = `
+      <div class="round-group-header" onclick="toggleRoundGroup(${round})">
+        <span class="round-group-toggle"></span>
+        <span class="round-group-label">ROUND ${round}</span>
+        <span class="round-group-count" id="round-group-count-${round}">0 tasks</span>
+      </div>
+      <div class="round-group-panes" id="round-group-panes-${round}"></div>`;
+    orchGrid.appendChild(group);
+    roundGroups[round] = group;
+    return group;
+  }
+
+  function getOrCreateWorkerPane(taskId, round, target, prompt) {
+    if (workerPanes[taskId]) return workerPanes[taskId];
+    const safeId = taskId.replace(/[^a-z0-9]/gi, '_');
+    // Ensure the round group exists
+    getOrCreateRoundGroup(round);
+    const panesContainer = document.getElementById(`round-group-panes-${round}`);
+    // Update task count
+    const countEl = document.getElementById(`round-group-count-${round}`);
+    if (countEl) {
+      const n = panesContainer.children.length + 1;
+      countEl.textContent = `${n} task${n !== 1 ? 's' : ''}`;
+    }
     const el = document.createElement('div');
     el.className = 'harness-pane';
-    el.id = `orch-pane-${paneKey}`;
+    el.id = `orch-pane-${safeId}`;
     el.style.minWidth = '240px';
     el.style.flex = '1 1 240px';
     el.innerHTML = `
       <div class="harness-pane-header">
         <span class="target-label">${esc(target)}</span>
-        <span style="font-size:9px;color:var(--fg-muted)">round ${round}</span>
-        <span class="harness-status pending" id="orch-status-${paneKey}">⟳ running…</span>
+        <span class="harness-status pending" id="orch-status-${safeId}">⟳ running…</span>
       </div>
       <div style="font-size:10px;color:var(--fg-muted);padding:2px 0 6px;border-bottom:1px solid var(--bg-border);margin-bottom:4px">${esc(prompt.slice(0,120))}${prompt.length>120?'…':''}</div>
-      <div class="harness-pane-output thinking" id="orch-output-${paneKey}">waiting…</div>`;
-    orchGrid.appendChild(el);
-    workerPanes[paneKey] = el;
+      <div class="harness-pane-output thinking" id="orch-output-${safeId}">waiting…</div>`;
+    panesContainer.appendChild(el);
+    workerPanes[taskId] = el;
     return el;
   }
 
-  function updateWorkerPane(round, target, content, status) {
-    const paneKey = `r${round}-${target.replace(/[^a-z0-9]/gi,'_')}`;
-    const outputEl = document.getElementById(`orch-output-${paneKey}`);
-    const statusEl = document.getElementById(`orch-status-${paneKey}`);
+  function updateWorkerPane(taskId, content, status) {
+    const safeId = taskId.replace(/[^a-z0-9]/gi, '_');
+    const outputEl = document.getElementById(`orch-output-${safeId}`);
+    const statusEl = document.getElementById(`orch-status-${safeId}`);
     if (outputEl) {
       outputEl.className = `harness-pane-output${status === 'pending' ? ' thinking' : ''}`;
       outputEl.textContent = content;
@@ -3633,13 +3406,13 @@ async function harnessOrchRun() {
                 ${taskList}
               </div>`);
             // Pre-create worker panes
-            (ev.tasks || []).forEach(t => getOrCreateWorkerPane(ev.round, t.target, t.prompt, t.rationale||''));
+            (ev.tasks || []).forEach(t => getOrCreateWorkerPane(t.task_id || `r${ev.round}-${t.target}`, ev.round, t.target, t.prompt));
             break;
           }
 
           case 'result': {
             const statusClass = ev.status === 'done' ? 'done' : ev.status === 'error' ? 'error' : 'pending';
-            updateWorkerPane(ev.round, ev.target, ev.content, statusClass);
+            updateWorkerPane(ev.task_id, ev.content, statusClass);
             break;
           }
 
@@ -3898,13 +3671,8 @@ async function loadConfig() {
     html += cfgToggle('cost_track_local',      'Track local (Ollama)', c.cost_tracking?.track_local ?? false);
     html += '</div>';
 
-    // Orchestrator
-    html += cfgToggle('orchestrator_enabled', 'Orchestrator', c.orchestrator?.enabled ?? false);
-    html += `<div id="sub-orchestrator_enabled" style="display:${c.orchestrator?.enabled ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
-    html += cfgInput('orchestrator_max_parallel', 'Max parallel tasks', c.orchestrator?.max_parallel_tasks ?? 5, 'number');
-    html += cfgInput('orchestrator_task_timeout', 'Task timeout (s)',   c.orchestrator?.task_timeout_seconds ?? 120, 'number');
-    html += cfgInput('orchestrator_total_timeout','Total timeout (s)',  c.orchestrator?.total_timeout_seconds ?? 300, 'number');
-    html += '</div>';
+    // Harness
+    html += cfgToggle('harness_enabled', 'Harness', c.harness?.enabled ?? true);
 
     // Conversation replay (no sub-options)
     html += cfgToggle('conversation_replay_enabled', 'Conversation replay', c.conversation_replay?.enabled ?? false);
@@ -4020,7 +3788,7 @@ async function loadConfig() {
     const toggleIds = [
       'log_conversations','decision_llm_enabled','tools_enabled',
       'cost_tracking_enabled','cost_track_openrouter','cost_track_local',
-      'orchestrator_enabled','operator_enabled',
+      'harness_enabled','operator_enabled',
       'conversation_replay_enabled','auto_summarization_enabled',
       'web_ui_vi_mode','voice_enabled','tts_autoplay','system_context_enabled','gen_force',
     ];
@@ -4030,7 +3798,7 @@ async function loadConfig() {
       if (cb && lbl) cb.addEventListener('change', () => { lbl.textContent = cb.checked ? 'enabled' : 'disabled'; });
     });
     // Expand sub-options when parent feature flag is toggled
-    ['cost_tracking_enabled','orchestrator_enabled',
+    ['cost_tracking_enabled',
      'auto_summarization_enabled','system_context_enabled','tts_autoplay'].forEach(id => {
       const cb = document.getElementById(`cfg-${id}`);
       const sub = document.getElementById(`sub-${id}`);
@@ -4061,7 +3829,7 @@ async function saveConfig() {
   const bools = [
     'log_conversations','decision_llm_enabled','tools_enabled',
     'cost_tracking_enabled','cost_track_openrouter','cost_track_local',
-    'orchestrator_enabled','operator_enabled',
+    'harness_enabled','operator_enabled',
     'conversation_replay_enabled','auto_summarization_enabled',
     'web_ui_vi_mode','voice_enabled','tts_autoplay','system_context_enabled','gen_force',
   ];

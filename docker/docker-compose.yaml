@@ -40,6 +40,8 @@ services:
     volumes:
       - /mnt/storage/ollama:/root/.ollama
     restart: unless-stopped
+    environment:
+      OLLAMA_NUM_PARALLEL: "3"
     healthcheck:
       test: ["CMD", "ollama", "list"]
       interval: 30s
