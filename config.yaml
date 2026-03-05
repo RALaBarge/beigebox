@@ -278,6 +278,35 @@ tools:
       enabled: true
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Connections — authenticated API access (no tokens here, metadata only)
+#
+# Tokens stored encrypted at ~/.bb/connections.enc (AES-256-GCM).
+# Add tokens via CLI:
+#   python -m beigebox.connections add <name>        (prompts securely)
+#   python -m beigebox.connections add <name> --token-env ENV_VAR
+#   python -m beigebox.connections list
+#   python -m beigebox.connections test <name> --path /endpoint
+#
+# Key: BB_MASTER_KEY env var (64 hex chars) or auto-generated ~/.bb/.key (chmod 600)
+# ─────────────────────────────────────────────────────────────────────────────
+
+connections: {}
+  # Example — uncomment and add token via CLI:
+  # github:
+  #   type: bearer
+  #   base_url: https://api.github.com
+  #   allowed_paths:
+  #     - /user/**
+  #     - /repos/**
+  #     - /gists/**
+  # openrouter:
+  #   type: bearer
+  #   base_url: https://openrouter.ai/api/v1
+  #   allowed_paths:
+  #     - /models
+  #     - /chat/**
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Hooks (Custom Middleware)
 # ─────────────────────────────────────────────────────────────────────────────
 

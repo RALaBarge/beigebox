@@ -22,6 +22,7 @@ from beigebox.tools.ensemble import EnsembleTool
 from beigebox.tools.notifier import ToolNotifier
 from beigebox.tools.pdf_reader import PdfReaderTool
 from beigebox.tools.browserbox import BrowserboxTool
+from beigebox.tools.connection_tool import ConnectionTool
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,17 @@ class ToolRegistry:
                 timeout=bb_cfg.get("timeout", 10.0),
                 workspace_in=_ws_in,
             )
+
+        # --- Connections (encrypted credential store — auto-enabled if connections: configured) ---
+        conn_cfg = cfg.get("connections", {})
+        if conn_cfg:
+            try:
+                from beigebox.connections import ConnectionRegistry
+                conn_registry = ConnectionRegistry(conn_cfg)
+                self.tools["connection"] = ConnectionTool(conn_registry)
+                logger.info("Connection registry loaded: %s", list(conn_cfg.keys()))
+            except Exception as e:
+                logger.warning("Connection registry failed to load: %s", e)
 
         logger.info("Tool registry loaded: %s", list(self.tools.keys()))
 
