@@ -30,6 +30,27 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
     return meta, text[end + 4:].strip()
 
 
+def skills_fingerprint(skills_dir: str | Path) -> dict[str, float]:
+    """
+    Return a dict of {skill_md_path: mtime} for all valid skill directories.
+    Used for hot-reload detection — compare against a cached copy each call.
+    """
+    skills_path = Path(skills_dir)
+    if not skills_path.exists():
+        return {}
+    result = {}
+    for entry in skills_path.iterdir():
+        if not entry.is_dir():
+            continue
+        skill_md = entry / "SKILL.md"
+        if skill_md.exists():
+            try:
+                result[str(skill_md)] = skill_md.stat().st_mtime
+            except OSError:
+                pass
+    return result
+
+
 def load_skills(skills_dir: str | Path) -> list[dict]:
     """
     Scan skills_dir for valid skill directories.

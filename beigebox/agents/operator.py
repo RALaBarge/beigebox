@@ -26,7 +26,7 @@ from typing import Any
 import httpx
 
 from beigebox.config import get_config
-from beigebox.agents.skill_loader import load_skills, skills_to_xml
+from beigebox.agents.skill_loader import load_skills, skills_to_xml, skills_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +149,9 @@ class Operator:
             self.cfg.get("skills", {}).get("path")
             or str(_Path(__file__).parent.parent.parent / "skills")
         )
+        self._skills_dir = skills_path
         self._skills = load_skills(skills_path)
+        self._skills_fp = skills_fingerprint(skills_path)
 
         if self._skills:
             from beigebox.tools.skill_reader import SkillReaderTool
@@ -181,6 +183,46 @@ class Operator:
             self._model,
             list(tools.keys()),
             [s["name"] for s in self._skills],
+        )
+
+    # ------------------------------------------------------------------
+    # Skills hot-reload
+    # ------------------------------------------------------------------
+
+    def _reload_skills_if_changed(self) -> None:
+        """Re-scan skills dir and rebuild system prompt if any SKILL.md changed."""
+        fp = skills_fingerprint(self._skills_dir)
+        if fp == self._skills_fp:
+            return
+        logger.info("Skills changed — reloading")
+        self._skills_fp = fp
+        self._skills = load_skills(self._skills_dir)
+
+        # Re-register read_skill with updated list (or remove if no skills)
+        self._tools.pop("read_skill", None)
+        if self._skills:
+            from beigebox.tools.skill_reader import SkillReaderTool
+            self._tools["read_skill"] = SkillReaderTool(self._skills)
+
+        # Rebuild system prompt
+        skills_block = ""
+        if self._skills:
+            skills_xml = skills_to_xml(self._skills)
+            skills_block = (
+                f"\nAGENT SKILLS:\n"
+                f"You have access to skills that provide domain expertise and step-by-step\n"
+                f"instructions. Call read_skill with the skill name to load full instructions\n"
+                f"before following a skill.\n\n"
+                f"{skills_xml}\n"
+            )
+        if self._tools:
+            self._system = _SYSTEM.format(
+                tools_block=_build_tools_block(self._tools),
+                skills_block=skills_block,
+            )
+        logger.info(
+            "Skills reloaded: %s",
+            [s["name"] for s in self._skills] if self._skills else [],
         )
 
     # ------------------------------------------------------------------
@@ -233,6 +275,7 @@ class Operator:
     # ------------------------------------------------------------------
 
     def run(self, question: str) -> str:
+        self._reload_skills_if_changed()
         if not question.strip():
             return "No question provided."
 
