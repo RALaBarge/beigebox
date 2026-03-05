@@ -1,6 +1,6 @@
 """
-BrowserBox tool — gives the operator agent access to browser APIs
-(storage, fetch) via the local BrowserBox WebSocket relay.
+BrowserBox tool — gives the operator agent access to browser APIs via the
+local BrowserBox WebSocket relay.
 
 Requires:
   - ws_relay.py running on localhost:9009
@@ -12,13 +12,16 @@ Config (config.yaml):
       enabled: true
       ws_url: ws://localhost:9009
       timeout: 10
+      workspace_in: ./workspace/in   # for pdf.extract saves
 """
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import uuid
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -26,28 +29,39 @@ logger = logging.getLogger(__name__)
 
 class BrowserboxTool:
     description = (
-        "Access browser APIs: DOM, storage, and authenticated fetch. "
+        "Access browser APIs via the active Chrome tab. "
         "Input must be JSON: {\"tool\": \"namespace.method\", \"input\": \"...\"}. "
-        "Namespaces: "
-        "dom (query/query_all/get_text/get_html/get_url/get_title/click/fill/scroll/wait_for/snapshot), "
-        "storage (get/set/delete/list/get_cookie/list_cookies), "
-        "fetch (get/post/head). "
-        "dom tools operate on the active browser tab. "
-        "fetch calls carry the browser's real session cookies. "
-        "Start with dom.snapshot to orient yourself on a page. "
+        "Namespaces and methods:\n"
+        "  dom     — snapshot, query, query_all, get_text, get_html, get_url, get_title, "
+                     "click, fill, scroll, wait_for\n"
+        "  tabs    — list, get_current, open, close, switch, screenshot\n"
+        "  nav     — go, back, forward, reload\n"
+        "  clip    — read, write\n"
+        "  storage — get, set, delete, list, get_cookie, list_cookies\n"
+        "  fetch   — get, post, head  (carries real session cookies)\n"
+        "  network — start_capture, stop_capture, get_captured, clear\n"
+        "  inject  — js, css, css_remove\n"
+        "  pdf     — extract  (fetches current tab PDF → saves to workspace/in/)\n"
+        "Start with dom.snapshot to orient on the active page. "
+        "For SPA scraping: network.start_capture, interact, network.get_captured. "
         "Example: {\"tool\": \"dom.snapshot\", \"input\": \"\"}"
     )
 
-    def __init__(self, ws_url: str = "ws://localhost:9009", timeout: float = 10.0):
+    def __init__(
+        self,
+        ws_url: str = "ws://localhost:9009",
+        timeout: float = 10.0,
+        workspace_in: str | Path | None = None,
+    ):
         self._ws_url = ws_url
         self._timeout = timeout
+        self._workspace_in = Path(workspace_in) if workspace_in else None
 
     def run(self, input_str: str) -> str:
-        """Synchronous wrapper — runs the async call in a new event loop."""
         try:
             params = json.loads(input_str.strip())
         except json.JSONDecodeError:
-            return "Error: input must be JSON {\"tool\": \"ns.method\", \"input\": \"...\"}"
+            return 'Error: input must be JSON {"tool": "ns.method", "input": "..."}'
 
         tool = params.get("tool", "")
         inp  = params.get("input", "")
@@ -75,11 +89,8 @@ class BrowserboxTool:
                 open_timeout=self._timeout,
                 close_timeout=2,
             ) as ws:
-                # Announce as agent role
                 await ws.send(json.dumps({"role": "agent"}))
-                # Send the tool call
                 await ws.send(payload)
-                # Wait for the matching response
                 async for raw in ws:
                     msg = json.loads(raw)
                     if msg.get("id") != call_id:
@@ -89,8 +100,45 @@ class BrowserboxTool:
                     result = msg.get("result")
                     if result is None:
                         return "null"
+                    # Special handling: pdf.extract → save bytes to workspace/in/
+                    if tool == "pdf.extract":
+                        return self._save_pdf(result)
                     return str(result)
         except OSError as e:
             return f"Error: could not connect to BrowserBox relay at {self._ws_url} — {e}"
         except TimeoutError:
-            return f"Error: timed out waiting for response from BrowserBox"
+            return "Error: timed out waiting for response from BrowserBox"
+
+    def _save_pdf(self, result: str) -> str:
+        """Decode base64 PDF from pdf.extract, save to workspace/in/, return instructions."""
+        try:
+            data = json.loads(result)
+            filename  = data.get("filename", "document.pdf")
+            bytes_b64 = data.get("bytes_b64", "")
+            size      = data.get("size_bytes", 0)
+            url       = data.get("url", "")
+        except (json.JSONDecodeError, AttributeError) as e:
+            return f"Error: unexpected pdf.extract response: {e}"
+
+        if not bytes_b64:
+            return "Error: pdf.extract returned empty bytes"
+
+        if self._workspace_in:
+            dest = self._workspace_in / filename
+            try:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(base64.b64decode(bytes_b64))
+                return (
+                    f"PDF saved to workspace/in/{filename} ({size:,} bytes, from {url}). "
+                    f"Call pdf_reader with '{filename}' to extract content."
+                )
+            except Exception as e:
+                logger.error("pdf save failed: %s", e)
+                return f"Error saving PDF to workspace: {e}"
+        else:
+            # No workspace configured — return metadata only
+            return (
+                f"PDF fetched: {filename} ({size:,} bytes, from {url}). "
+                f"No workspace configured — enable tools.pdf_reader and set workspace path "
+                f"to save and read this file."
+            )

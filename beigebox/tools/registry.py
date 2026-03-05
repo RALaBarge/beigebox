@@ -122,9 +122,13 @@ class ToolRegistry:
         # --- BrowserBox (browser API relay — disabled by default) ---
         bb_cfg = tools_cfg.get("browserbox", {})
         if bb_cfg.get("enabled", False):
+            from pathlib import Path as _P
+            _app_root = _P(__file__).parent.parent.parent
+            _ws_in = _app_root / cfg.get("workspace", {}).get("path", "./workspace") / "in"
             self.tools["browserbox"] = BrowserboxTool(
                 ws_url=bb_cfg.get("ws_url", "ws://localhost:9009"),
                 timeout=bb_cfg.get("timeout", 10.0),
+                workspace_in=_ws_in,
             )
 
         logger.info("Tool registry loaded: %s", list(self.tools.keys()))
