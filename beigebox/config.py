@@ -29,7 +29,7 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "routing", "cost_tracking", "harness", "conversation_replay",
     "auto_summarization", "system_context", "generation", "models",
     "wasm", "web_ui", "voice", "wiretap", "semantic_cache", "classifier",
-    "model_advertising", "zcommands", "advanced", "runtime",
+    "model_advertising", "zcommands", "advanced", "runtime", "skills",
 }
 
 # ── Pydantic models for key sections ─────────────────────────────────────────

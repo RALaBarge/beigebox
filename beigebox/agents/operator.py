@@ -26,6 +26,7 @@ from typing import Any
 import httpx
 
 from beigebox.config import get_config
+from beigebox.agents.skill_loader import load_skills, skills_to_xml
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ RULES:
 
 AVAILABLE TOOLS:
 {tools_block}
-"""
+{skills_block}"""
 
 _NO_TOOLS_SYSTEM = """\
 You are BeigeBox Operator, an admin assistant for a local LLM proxy.
@@ -142,16 +143,44 @@ class Operator:
                 logger.info("Operator tool sandbox: blocked %s", sorted(blocked))
         self._tools = tools
 
+        # ── Agent Skills ──────────────────────────────────────────────────
+        from pathlib import Path as _Path
+        skills_path = (
+            self.cfg.get("skills", {}).get("path")
+            or str(_Path(__file__).parent.parent.parent / "skills")
+        )
+        self._skills = load_skills(skills_path)
+
+        if self._skills:
+            from beigebox.tools.skill_reader import SkillReaderTool
+            self._tools["read_skill"] = SkillReaderTool(self._skills)
+            logger.info("Skills available: %s", [s["name"] for s in self._skills])
+
         tools = self._tools
+        skills_block = ""
+        if self._skills:
+            skills_xml = skills_to_xml(self._skills)
+            skills_block = (
+                f"\nAGENT SKILLS:\n"
+                f"You have access to skills that provide domain expertise and step-by-step\n"
+                f"instructions. Call read_skill with the skill name to load full instructions\n"
+                f"before following a skill.\n\n"
+                f"{skills_xml}\n"
+            )
+
         if tools:
-            self._system = _SYSTEM.format(tools_block=_build_tools_block(tools))
+            self._system = _SYSTEM.format(
+                tools_block=_build_tools_block(tools),
+                skills_block=skills_block,
+            )
         else:
             self._system = _NO_TOOLS_SYSTEM
 
         logger.info(
-            "Operator ready (model=%s, tools=%s)",
+            "Operator ready (model=%s, tools=%s, skills=%s)",
             self._model,
             list(tools.keys()),
+            [s["name"] for s in self._skills],
         )
 
     # ------------------------------------------------------------------
