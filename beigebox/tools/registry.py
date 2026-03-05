@@ -20,6 +20,7 @@ from beigebox.tools.system_info import SystemInfoTool
 from beigebox.tools.memory import MemoryTool
 from beigebox.tools.ensemble import EnsembleTool
 from beigebox.tools.notifier import ToolNotifier
+from beigebox.tools.pdf_reader import PdfReaderTool
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,14 @@ class ToolRegistry:
                 max_results=mem_cfg.get("max_results", 3),
                 min_score=mem_cfg.get("min_score", 0.3),
             )
+
+        # --- PDF Reader (pdf_oxide — disabled by default, requires pip install pdf_oxide) ---
+        pdf_cfg = tools_cfg.get("pdf_reader", {})
+        if pdf_cfg.get("enabled", False):
+            from pathlib import Path as _pdf_path
+            app_root = _pdf_path(__file__).parent.parent.parent
+            ws_in = app_root / cfg.get("workspace", {}).get("path", "./workspace") / "in"
+            self.tools["pdf_reader"] = PdfReaderTool(workspace_in=ws_in)
 
         # --- Ensemble (multi-model voting — disabled by default) ---
         ens_cfg = tools_cfg.get("ensemble", {})
