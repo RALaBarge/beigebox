@@ -4,6 +4,8 @@
 
 1. pdf-oxide-wasi — WASM/WASI binary wrapper for pdf_oxide
 2. BrowserBox — browser API middleware Chrome extension
+3. agentauth — standalone credential management package (split from beigebox)
+4. OAuth2 support in agentauth (Google, GitHub, Linear, Notion)
 
 ---
 
@@ -180,3 +182,81 @@ Remaining browser API surface, prioritized:
 **Sensitive (needs thought):**
 - `identity.*` — OAuth token retrieval via chrome.identity
 - `downloads.*`
+
+All adapters were completed this session (tabs, nav, clip, network, inject, pdf).
+Repo pushed: https://github.com/RALaBarge/browserbox
+
+---
+
+## agentauth
+
+### Context
+
+BeigeBox had a `connections.py` module that handled credentialed HTTP calls for
+the operator tool. Ryan asked to "split it" — extract into its own standalone
+package so others can use it independently.
+
+### What we built
+
+Standalone pip package at https://github.com/RALaBarge/agentauth
+
+- `agentauth/registry.py` — ConnectionRegistry, TIER_* constants, keychain token
+  resolution (gnome-keyring → env var fallback), path allowlists, call()
+- `agentauth/cli.py` — `agentauth add/remove/test/list/setup/auth/deauth`
+- `agentauth/oauth.py` — full OAuth2 authorization_code flow with local callback
+  server, auto-refresh on expiry, tokens stored as JSON in keychain
+
+### Key decisions
+
+**Why OS keychain and not env vars?**
+Ryan was explicit: "I don't want it in env, I want it secure as possible so
+others have it set up right." OS keychain (python-keyring + secretstorage) means
+tokens are encrypted at rest, scoped to the OS user, and survive reboots without
+being visible in shell history or `.env` files. Env vars remain the headless fallback.
+
+**Why not custom crypto?**
+An earlier draft used AES-256-GCM with a key file at `~/.bb/.key`. Ryan flagged
+this: "never roll your own crypto, you know?" The key was adjacent to the
+encrypted data — effectively theater. OS keychain solves this correctly.
+
+**Tier system**
+Four tiers defined — enforcement is the framework's responsibility, not agentauth's.
+agentauth exposes `registry.tier(name)` so the framework can gate calls.
+
+| Tier | Constant | Meaning |
+|------|----------|---------|
+| 1 | TIER_READ | Free for agents |
+| 2 | TIER_WRITE | Low blast radius, reversible |
+| 3 | TIER_SEND | External sends — require human confirmation |
+| 4 | TIER_NEVER | Not for agents at all |
+
+**Token isolation**
+Agents call connections by name. Token injection happens inside registry.call().
+The agent never sees a raw token — only the response body.
+
+### OAuth2 flow
+
+`agentauth auth google_calendar` opens a browser consent screen, spins up a
+local callback HTTP server on a random port, catches the redirect, exchanges
+the authorization code for tokens, and stores the refresh token in keychain.
+Access tokens auto-refresh 60s before expiry.
+
+Supported providers: google, github, linear, notion.
+Any standard OAuth2 authorization_code provider works via custom auth_url/token_url.
+
+Predefined minimum-scope configs documented in README for:
+google_calendar (readonly), google_gmail (readonly), google_drive (drive.file only)
+
+### BeigeBox integration
+
+`beigebox/connections.py` → thin shim re-exporting from agentauth.registry
+`beigebox/tools/registry.py` → imports ConnectionRegistry from agentauth directly
+`requirements.txt` → agentauth>=0.1.0
+
+### pdf-oxide upstream issue
+
+Filed issue #214 on yfedoseev/pdf_oxide offering the WASI wrapper:
+https://github.com/yfedoseev/pdf_oxide/issues/214
+
+Noted nightly requirement (ceil_char_boundary) as the main blocker for
+upstreaming as a first-class CI target.
