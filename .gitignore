@@ -25,3 +25,6 @@ chroma/
 .venv/
 venv/
 env/
+
+# Website source (separate deployment)
+html_beigebox/

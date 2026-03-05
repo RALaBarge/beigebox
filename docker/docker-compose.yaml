@@ -85,7 +85,11 @@ services:
     volumes:
       - beigebox_data:/app/data
       - ../hooks:/app/hooks:ro
-      - ../workspace:/app/workspace:rw
+      - ../workspace/out:/app/workspace/out:rw
+      - type: tmpfs
+        target: /app/workspace/in
+        tmpfs:
+          size: 536870912   # 512 MB — files never touch disk, auto-cleared on stop
     environment:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GOOGLE_CSE_ID=${GOOGLE_CSE_ID:-}

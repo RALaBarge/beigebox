@@ -4,6 +4,7 @@ Retry wrapper for backends with exponential backoff.
 Wraps any backend to add retry logic for transient errors:
 - 429: Rate limited
 - 5xx: Server errors (except 501 Not Implemented — permanent)
+- Stall: stream produces no tokens for stream_stall_timeout_seconds (config: advanced.stream_stall_timeout_seconds)
 
 Non-retried errors (permanent):
 - 400: Bad request
@@ -27,6 +28,25 @@ import httpx
 from beigebox.backends.base import BaseBackend, BackendResponse
 
 logger = logging.getLogger(__name__)
+
+
+class StreamStallError(Exception):
+    """Raised when a streaming backend produces no data within the stall timeout."""
+
+
+async def _stall_guarded(aiter, timeout_secs: float):
+    """
+    Yield items from an async iterator.
+    Raises StreamStallError if no item arrives within timeout_secs.
+    """
+    while True:
+        try:
+            item = await asyncio.wait_for(aiter.__anext__(), timeout=timeout_secs)
+        except StopAsyncIteration:
+            return
+        except asyncio.TimeoutError:
+            raise StreamStallError(f"Stream stalled: no data for {timeout_secs:.0f}s")
+        yield item
 
 
 class RetryableBackendWrapper:
@@ -146,15 +166,29 @@ class RetryableBackendWrapper:
         after exhaustion the last exception is re-raised so the router
         can still fall through rather than leaking error text inline.
         """
+        from beigebox.config import get_config as _get_config
+        stall_secs: float = _get_config().get("advanced", {}).get(
+            "stream_stall_timeout_seconds", 30.0
+        )
+
         model = body.get("model", "")
         last_exc: Exception | None = None
         retry_after_hint: float | None = None
 
         for attempt in range(self.max_retries + 1):
             try:
-                async for line in self.backend.forward_stream(body):
+                async for line in _stall_guarded(
+                    self.backend.forward_stream(body), stall_secs
+                ):
                     yield line
                 return  # stream completed successfully
+            except StreamStallError as e:
+                last_exc = e
+                retry_after_hint = None
+                logger.warning(
+                    "Backend '%s' stream stall for '%s' (%s), retry %d/%d",
+                    self.name, model, e, attempt + 1, self.max_retries,
+                )
             except httpx.HTTPStatusError as e:
                 status = e.response.status_code
                 if not self._is_retryable(status):

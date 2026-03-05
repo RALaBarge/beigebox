@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from typing import Any
 
 import httpx
@@ -157,20 +158,32 @@ class Operator:
     # LLM call
     # ------------------------------------------------------------------
 
-    def _chat(self, messages: list[dict]) -> str:
-        """Send messages to Ollama and return the assistant content string."""
-        with httpx.Client(timeout=self._timeout) as client:
-            resp = client.post(
-                f"{self._backend_url}/v1/chat/completions",
-                json={
-                    "model": self._model,
-                    "messages": messages,
-                    "temperature": 0,
-                    "stream": False,
-                },
-            )
-            resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
+    def _chat(self, messages: list[dict], _attempt: int = 0) -> str:
+        """Send messages to Ollama and return the assistant content string.
+        Retries up to 2 times with exponential backoff on transient errors."""
+        try:
+            with httpx.Client(timeout=self._timeout) as client:
+                resp = client.post(
+                    f"{self._backend_url}/v1/chat/completions",
+                    json={
+                        "model": self._model,
+                        "messages": messages,
+                        "temperature": 0,
+                        "stream": False,
+                    },
+                )
+                resp.raise_for_status()
+                return resp.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            if _attempt < 2:
+                delay = 1.5 ** (_attempt + 1)
+                logger.warning(
+                    "Operator _chat attempt %d failed (%s), retrying in %.1fs",
+                    _attempt + 1, e, delay,
+                )
+                time.sleep(delay)
+                return self._chat(messages, _attempt + 1)
+            raise
 
     # ------------------------------------------------------------------
     # Tool execution
@@ -200,6 +213,18 @@ class Operator:
         ]
 
         for iteration in range(self._max_iter):
+            # Two iterations from the limit — nudge the model to wrap up rather
+            # than burning the last step on another tool call with no answer.
+            if iteration == self._max_iter - 2:
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "You are approaching the maximum number of steps. "
+                        "Please synthesise what you have found so far and provide "
+                        'a final {"thought": "...", "answer": "..."} response now.'
+                    ),
+                })
+
             try:
                 raw = self._chat(messages)
             except Exception as e:

@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -1704,6 +1704,51 @@ async def openrouter_pinned_save(request: Request):
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
     ok = update_runtime_config("openrouter_pinned_models", pinned)
     return JSONResponse({"ok": ok, "pinned": pinned})
+
+
+@app.get("/api/v1/openrouter/balance")
+async def openrouter_balance():
+    """Fetch remaining credit balance from OpenRouter account API."""
+    if not backend_router:
+        return JSONResponse({"error": "backends not enabled"}, status_code=400)
+    or_backend = backend_router.get_openrouter_backend()
+    if not or_backend:
+        return JSONResponse({"error": "no OpenRouter backend configured"}, status_code=404)
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://openrouter.ai/api/v1/auth/key",
+                headers={"Authorization": f"Bearer {or_backend.api_key}"},
+            )
+            resp.raise_for_status()
+            return JSONResponse(resp.json())
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@app.post("/api/v1/workspace/upload")
+async def api_workspace_upload(file: UploadFile):
+    """Upload a file to workspace/in/. Guards against path traversal."""
+    filename = Path(file.filename or "upload").name
+    if not filename or ".." in filename:
+        return JSONResponse({"ok": False, "error": "Invalid filename"}, status_code=400)
+
+    cfg = get_config()
+    ws_path_raw = cfg.get("workspace", {}).get("path", "./workspace")
+    app_root = Path(__file__).parent.parent
+    in_dir = (app_root / ws_path_raw / "in").resolve()
+    in_dir.mkdir(parents=True, exist_ok=True)
+
+    target = (in_dir / filename).resolve()
+    if not str(target).startswith(str(in_dir) + os.sep):
+        return JSONResponse({"ok": False, "error": "Invalid path"}, status_code=400)
+
+    try:
+        content = await file.read()
+        target.write_bytes(content)
+        return JSONResponse({"ok": True, "name": filename, "size": len(content)})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 @app.post("/api/v1/web-ui/toggle-vi-mode")

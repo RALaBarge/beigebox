@@ -410,7 +410,8 @@
   #vi-toggle {
     position: fixed;
     bottom: 10px;
-    left: 14px;
+    left: 50%;
+    transform: translateX(-50%);
     width: 24px;
     height: 24px;
     border-radius: 50%;
@@ -1714,7 +1715,7 @@ async function loadDashboard() {
   const el = document.getElementById('dash-body');
   el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
   try {
-    const [status, stats, backends, info, costs, perf, routing] = await Promise.allSettled([
+    const [status, stats, backends, info, costs, perf, routing, orBal] = await Promise.allSettled([
       api('/api/v1/status'),
       api('/api/v1/stats'),
       api('/api/v1/backends'),
@@ -1722,6 +1723,7 @@ async function loadDashboard() {
       api('/api/v1/costs?days=30'),
       api('/api/v1/model-performance?days=30'),
       api('/api/v1/routing-stats'),
+      api('/api/v1/openrouter/balance'),
     ]);
 
     let html = '';
@@ -1802,8 +1804,14 @@ async function loadDashboard() {
         p += `</div></div>`;
         return p;
       };
+      html += `<input type="file" id="ws-file-input" multiple style="display:none" onchange="uploadWorkspaceFiles(this.files)">`;
       html += `<div style="display:flex;gap:12px;align-items:flex-start">`;
-      html += renderWsPanel(ws.in,  'IN (read-only)',          false);
+      html += `<div style="flex:1;min-width:0" ondragover="event.preventDefault();event.dataTransfer.dropEffect='copy';this.querySelector('.ws-in-box').style.borderColor='var(--lavender)'" ondragleave="this.querySelector('.ws-in-box').style.borderColor='var(--bg-border)'" ondrop="event.preventDefault();this.querySelector('.ws-in-box').style.borderColor='var(--bg-border)';uploadWorkspaceFiles(event.dataTransfer.files)">
+        <div style="font-size:11px;color:var(--fg-muted);margin-bottom:4px">IN · <span style="color:var(--lavender);cursor:pointer" onclick="document.getElementById('ws-file-input').click()">drop or click to upload</span></div>
+        <div class="ws-in-box" style="border:1px solid var(--bg-border);border-radius:2px;padding:4px 6px;min-height:40px;font-size:11px;transition:border-color 0.15s">
+          ${ws.in.length ? ws.in.map(f => `<div style="display:flex;align-items:center;gap:6px;padding:1px 0"><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</span><span style="color:var(--fg-muted);flex-shrink:0">${fmtB(f.size)}</span></div>`).join('') : '<div style="color:var(--fg-muted);font-style:italic">(empty — tmpfs, cleared on restart)</div>'}
+        </div>
+      </div>`;
       html += renderWsPanel(ws.out, 'OUT (writable by agents)', true);
       html += `</div>`;
       // Totals row
@@ -1863,6 +1871,20 @@ async function loadDashboard() {
       html += '</div>';
     }
 
+    // ── OpenRouter balance ──
+    const bal = orBal.status === 'fulfilled' ? orBal.value : null;
+    if (bal && !bal.error) {
+      const remaining = bal.limit_remaining != null ? '$' + Number(bal.limit_remaining).toFixed(4) : '—';
+      const limit     = bal.limit != null ? ' / $' + Number(bal.limit).toFixed(2) : '';
+      const used      = bal.usage != null ? '$' + Number(bal.usage).toFixed(4) + ' used' : '';
+      html += '<div class="section-header">OpenRouter Balance</div>';
+      html += '<div class="card-grid">';
+      html += card('Remaining', remaining + limit, 'credit balance');
+      if (used) html += card('Used', used, 'this key');
+      if (bal.label) html += card('Key', esc(bal.label), 'key label');
+      html += '</div>';
+    }
+
     // ── Cost tracking ──
     const c30 = costs.status === 'fulfilled' ? costs.value : null;
     html += '<div class="section-header">Cost Tracking · 30 days</div>';
@@ -1905,7 +1927,7 @@ async function loadDashboard() {
         const tpscls = tps > 50 ? 'color:var(--green)' : tps > 15 ? 'color:var(--cyan)' : tps > 0 ? 'color:var(--yellow)' : 'color:var(--fg-muted)';
         const ttft = m.avg_ttft_ms != null ? m.avg_ttft_ms + ' ms' : '—';
         html += `<tr style="border-bottom:1px solid var(--bg-border)">
-          <td style="padding:3px 8px;color:var(--fg)">${esc(name)}</td>
+          <td style="padding:3px 8px;color:var(--fg)">${esc(name)}${name.includes('/')?`<a href="https://openrouter.ai/${name.split('/').map(encodeURIComponent).join('/')}" target="_blank" rel="noopener" style="color:var(--lavender);text-decoration:none;font-size:10px;opacity:0.7;margin-left:5px" title="View on OpenRouter">π</a>`:''}</td>
           <td style="padding:3px 8px;color:var(--cyan);text-align:center">${m.requests}</td>
           <td style="padding:3px 8px;color:var(--fg-dim);text-align:center">${m.avg_latency_ms}</td>
           <td style="padding:3px 8px;color:var(--fg-dim);text-align:center">${m.p50_latency_ms}</td>
@@ -4447,6 +4469,7 @@ function renderOrModelList(filter) {
               onclick="toggleOrPin(this.dataset.mid);renderOrModelList(document.getElementById('or-search')?.value||'')">
       <input type="checkbox" data-mid="${esc(id)}" ${checked} onclick="event.stopPropagation();toggleOrPin(this.dataset.mid);renderOrModelList(document.getElementById('or-search')?.value||'')" style="cursor:pointer">
       <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(id)}">${esc(name)}</span>
+      <a href="https://openrouter.ai/${id.split('/').map(encodeURIComponent).join('/')}" target="_blank" rel="noopener" style="color:var(--lavender);text-decoration:none;font-size:11px;opacity:0.75;flex-shrink:0" title="View on OpenRouter">π</a>
       <span style="color:var(--muted);min-width:36px;text-align:right">${esc(String(ctx))}</span>
       <span style="color:var(--muted);min-width:80px;text-align:right;font-size:11px">${pricing}</span>
     </div>`;
@@ -4514,6 +4537,25 @@ async function rebuildCentroids() {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Rebuild'; }
   }
+}
+
+async function uploadWorkspaceFiles(files) {
+  if (!files || !files.length) return;
+  const results = [];
+  for (const file of files) {
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const resp = await fetch('/api/v1/workspace/upload', { method: 'POST', body: fd });
+      const d = await resp.json();
+      results.push(d.ok ? `✓ ${file.name}` : `✗ ${file.name}: ${d.error}`);
+    } catch(e) {
+      results.push(`✗ ${file.name}: ${e.message}`);
+    }
+  }
+  loadDashboard();
+  const failed = results.filter(r => r.startsWith('✗'));
+  if (failed.length) alert('Upload issues:\n' + failed.join('\n'));
 }
 
 async function deleteWorkspaceOut(filename) {

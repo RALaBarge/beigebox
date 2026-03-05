@@ -278,7 +278,7 @@ backends:
 - **Non-root container** — runs as `appuser` (UID 1000)
 - **No network in sandbox** — bwrap `--unshare-all` isolates shell commands from the network
 - **Blocked patterns** — belt-and-suspenders regex blocking on top of the allowlist
-- **Agent workspace** — `workspace/in/` is read-only inside the sandbox (you drop files), `workspace/out/` is writable (agents leave results); both are host bind-mounts accessible without entering the container
+- **Agent workspace** — `workspace/in/` is a tmpfs (RAM-only, never touches disk, auto-cleared on container stop); `workspace/out/` is a bind-mount for persistent agent results. Upload files to `workspace/in/` via the dashboard drag-and-drop zone or `POST /api/v1/workspace/upload`
 
 ---
 
@@ -312,7 +312,9 @@ POST /api/v1/harness/orchestrate        Goal-driven orchestration (SSE stream)
 GET  /api/v1/conversation/{id}/replay   Full conversation reconstruction
 POST /api/v1/conversation/{id}/fork     Branch a conversation
 GET  /api/v1/workspace                  List workspace/in and workspace/out files
+POST /api/v1/workspace/upload           Upload a file to workspace/in (multipart)
 DELETE /api/v1/workspace/out/{file}     Delete a file from workspace/out
+GET  /api/v1/openrouter/balance         Remaining credit balance for configured OR key
 POST /api/v1/build-centroids            Rebuild embedding classifier centroids
 ```
 

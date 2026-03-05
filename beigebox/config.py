@@ -3,14 +3,112 @@ Config loader for beigebox.
 Reads config.yaml once at startup. All other modules import from here.
 runtime_config.yaml is hot-reloaded on every call to get_runtime_config()
 via mtime check — no restart needed for session overrides.
+
+On load, config is validated against a Pydantic schema. Unknown top-level
+keys (likely typos) and type mismatches on known fields are logged as
+warnings. Validation never blocks startup — warnings only.
 """
 
+import logging
 import os
 import re
 import time
 import yaml
 from pathlib import Path
+from typing import Optional
 from dotenv import load_dotenv
+
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+_vlog = logging.getLogger(__name__)
+
+# ── Known top-level config keys ──────────────────────────────────────────────
+_KNOWN_TOP_LEVEL_KEYS = {
+    "server", "backend", "backends", "backends_enabled", "embedding",
+    "storage", "logging", "auth", "decision_llm", "operator", "tools",
+    "routing", "cost_tracking", "harness", "conversation_replay",
+    "auto_summarization", "system_context", "generation", "models",
+    "wasm", "web_ui", "voice", "wiretap", "semantic_cache", "classifier",
+    "model_advertising", "zcommands", "advanced", "runtime",
+}
+
+# ── Pydantic models for key sections ─────────────────────────────────────────
+# extra='allow' so unknown sub-keys never break anything.
+# Type annotations catch wrong types (e.g. enabled: "yes" instead of true).
+
+class _ServerCfg(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    host: str = "0.0.0.0"
+    port: int = 8000
+
+class _BackendCfg(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    url: str = ""
+    default_model: str = ""
+    timeout: float = 120
+
+class _DecisionLLMCfg(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    enabled: bool = False
+    model: str = ""
+    timeout: float = 5
+    max_tokens: int = 256
+
+class _OperatorCfg(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    enabled: bool = False
+    max_iterations: int = 8
+    timeout: float = 60
+
+class _GenerationCfg(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    force: bool = False
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+    top_k: Optional[int] = None
+    num_ctx: Optional[int] = None
+    repeat_penalty: Optional[float] = None
+    max_tokens: Optional[int] = None
+    seed: Optional[int] = None
+
+class _CostTrackingCfg(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    enabled: bool = False
+    track_openrouter: bool = True
+    track_local: bool = False
+
+class _AutoSumCfg(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    enabled: bool = False
+    token_budget: int = 3000
+    keep_last: int = 4
+
+class _BeigeBoxConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    backends_enabled: bool = False
+    server: _ServerCfg = _ServerCfg()
+    backend: _BackendCfg = _BackendCfg()
+    decision_llm: _DecisionLLMCfg = _DecisionLLMCfg()
+    operator: _OperatorCfg = _OperatorCfg()
+    generation: _GenerationCfg = _GenerationCfg()
+    cost_tracking: _CostTrackingCfg = _CostTrackingCfg()
+    auto_summarization: _AutoSumCfg = _AutoSumCfg()
+
+
+def _validate_config(cfg: dict) -> None:
+    """Warn on unknown top-level keys and type mismatches in known sections."""
+    unknown = set(cfg.keys()) - _KNOWN_TOP_LEVEL_KEYS
+    if unknown:
+        _vlog.warning(
+            "config.yaml: unrecognised top-level key(s) — possible typo: %s",
+            sorted(unknown),
+        )
+    try:
+        _BeigeBoxConfig.model_validate(cfg)
+    except ValidationError as e:
+        for err in e.errors():
+            loc = " → ".join(str(x) for x in err["loc"])
+            _vlog.warning("config.yaml: %s: %s", loc, err["msg"])
 
 load_dotenv()
 
@@ -58,6 +156,7 @@ def load_config(path: Path | None = None) -> dict:
         raw = yaml.safe_load(f)
 
     _config = _walk_and_resolve(raw)
+    _validate_config(_config)
     return _config
 
 
