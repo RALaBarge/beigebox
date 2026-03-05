@@ -1368,6 +1368,63 @@ async def api_harness_orchestrate(request: Request):
     )
 
 
+@app.post("/api/v1/harness/wiggam")
+async def api_harness_wiggam(request: Request):
+    """
+    Wiggam planning phase — multi-agent consensus decomposition.
+
+    Body:
+        goal            str        — high-level goal to decompose
+        wiggam_model    str (opt)  — model for the planner
+        officer_models  list[str]  — critic models (default: [wiggam_model])
+        max_rounds      int (opt)  — max debate rounds (default: 5)
+
+    Returns: text/event-stream of JSON events.
+    """
+    cfg = get_config()
+    rt  = get_runtime_config()
+    if not rt.get("harness_enabled", cfg.get("harness", {}).get("enabled", True)):
+        return JSONResponse({"error": "Harness is disabled."}, status_code=403)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    goal            = (body.get("goal") or "").strip()
+    wiggam_model    = body.get("wiggam_model") or None
+    officer_models  = body.get("officer_models") or None
+    max_rounds      = int(body.get("max_rounds", 5))
+
+    if not goal:
+        return JSONResponse({"error": "goal required"}, status_code=400)
+
+    from beigebox.agents.wiggam_planner import WiggamPlanner
+    import json as _json
+
+    planner = WiggamPlanner(
+        goal=goal,
+        wiggam_model=wiggam_model,
+        officer_models=officer_models,
+        max_rounds=max_rounds,
+        backend_router=backend_router,
+    )
+
+    async def _event_stream():
+        try:
+            async for event in planner.run():
+                yield f"data: {_json.dumps(event)}\n\n"
+        except Exception as e:
+            yield f"data: {_json.dumps({'type':'error','message':str(e)})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.post("/api/v1/harness/ralph")
 async def api_harness_ralph(request: Request):
     """

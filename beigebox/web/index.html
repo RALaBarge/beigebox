@@ -1360,6 +1360,37 @@
         <input id="harness-ralph-work-dir" type="text" placeholder="(cwd)"
           style="width:180px;height:24px;font-size:11px;padding:2px 6px;background:var(--bg-input);border:1px solid var(--bg-border);color:var(--fg);border-radius:2px">
       </div>
+
+      <!-- Wiggam planning sub-section -->
+      <div style="display:flex;gap:8px;align-items:center;border-top:1px solid var(--bg-border);padding-top:4px;margin-top:2px">
+        <span style="font-size:11px;color:var(--yellow);width:80px;flex-shrink:0">🚔 Wiggam</span>
+        <span style="font-size:11px;color:var(--fg-muted)">Officers:</span>
+        <div id="harness-wiggam-officer-list" style="display:flex;gap:4px;flex-wrap:wrap;flex:1;min-height:22px;align-items:center">
+          <span style="font-size:10px;color:var(--fg-muted)">(uses Wiggam model if none selected)</span>
+        </div>
+        <select id="harness-wiggam-add-officer" style="height:22px;font-size:11px;padding:1px 4px;min-width:130px">
+          <option value="">＋ add officer</option>
+        </select>
+        <button onclick="wiggamAddOfficer()" style="padding:2px 8px;font-size:11px">＋</button>
+        <span class="toolbar-label" style="color:var(--fg-muted)">rounds:</span>
+        <input id="harness-wiggam-rounds" type="number" value="3" min="1" max="8"
+          style="width:36px;height:22px;font-size:11px;padding:2px 4px;background:var(--bg-input);border:1px solid var(--bg-border);color:var(--fg);border-radius:2px">
+        <button onclick="harnessWiggamPlan()" id="harness-wiggam-btn"
+          style="padding:2px 10px;font-size:11px;background:var(--yellow);color:#000;border:none;border-radius:2px;cursor:pointer">🚔 Plan</button>
+      </div>
+    </div>
+
+    <!-- Wiggam planning output panel (shown during/after planning) -->
+    <div id="harness-wiggam-panel" style="display:none;flex-shrink:0;max-height:50%;overflow-y:auto;border-bottom:2px solid var(--yellow);background:var(--bg-deep)">
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid var(--bg-border)">
+        <span style="font-size:10px;color:var(--yellow);text-transform:uppercase;letter-spacing:1px">🚔 Wiggam Planning Room</span>
+        <span id="harness-wiggam-status" style="font-size:10px;color:var(--fg-muted)"></span>
+        <span style="flex:1"></span>
+        <button id="harness-wiggam-approve-btn" style="display:none;padding:2px 10px;font-size:11px;background:var(--green);color:#000;border:none;border-radius:2px;cursor:pointer"
+          onclick="wiggamApproveAndRun()">✓ Approve &amp; Run Ralph</button>
+        <button onclick="document.getElementById('harness-wiggam-panel').style.display='none'" style="font-size:11px;padding:2px 6px">✕</button>
+      </div>
+      <div id="harness-wiggam-body" style="padding:8px 14px;font-size:12px;line-height:1.6"></div>
     </div>
 
     <!-- Orchestrated: available target pool -->
@@ -2471,6 +2502,17 @@ async function loadModelsForPanes() {
       opt.value = id; opt.textContent = id;
       if (id === cur) opt.selected = true;
       ensJudgeSel.appendChild(opt);
+    });
+  }
+
+  // Wiggam officer add-select
+  const wiggamOfficerSel = document.getElementById('harness-wiggam-add-officer');
+  if (wiggamOfficerSel) {
+    wiggamOfficerSel.innerHTML = '<option value="">＋ add officer</option>';
+    models.forEach(id => {
+      const opt = document.createElement('option');
+      opt.value = id; opt.textContent = id;
+      wiggamOfficerSel.appendChild(opt);
     });
   }
 
@@ -3893,6 +3935,210 @@ async function harnessRalphRun() {
     runBtn.disabled = false; runBtn.style.display = ''; stopBtn.style.display = 'none';
     _ralphAbort = null;
   }
+}
+
+// ── 7d. Wiggam Planner ────────────────────────────────────────────────────────
+
+let _wiggamOfficers = [];   // [{id, model}]
+let _wiggamOfficerSeq = 0;
+let _wiggamApprovedSpec = null;   // {spec_md, test_cmd} set when plan approved
+let _wiggamAbort = null;
+
+function wiggamAddOfficer() {
+  const sel = document.getElementById('harness-wiggam-add-officer');
+  const model = sel.value;
+  if (!model) return;
+  const id = _wiggamOfficerSeq++;
+  _wiggamOfficers.push({ id, model });
+  sel.value = '';
+  renderWiggamOfficers();
+}
+
+function wiggamRemoveOfficer(id) {
+  _wiggamOfficers = _wiggamOfficers.filter(o => o.id !== id);
+  renderWiggamOfficers();
+}
+
+function renderWiggamOfficers() {
+  const el = document.getElementById('harness-wiggam-officer-list');
+  if (!el) return;
+  if (!_wiggamOfficers.length) {
+    el.innerHTML = '<span style="font-size:10px;color:var(--fg-muted)">(uses Wiggam model if none selected)</span>';
+    return;
+  }
+  el.innerHTML = _wiggamOfficers.map(o =>
+    `<div class="harness-target-chip" style="font-size:10px;padding:1px 5px">
+      <span>${esc(o.model)}</span>
+      <span class="remove-chip" onclick="wiggamRemoveOfficer(${o.id})">✕</span>
+    </div>`
+  ).join('');
+}
+
+async function harnessWiggamPlan() {
+  // Goal comes from the inline spec textarea or a description
+  const goal = (document.getElementById('harness-ralph-spec-inline')?.value || '').trim()
+    || (document.getElementById('harness-ralph-spec-path')?.value || '').trim();
+  if (!goal) {
+    alert('Paste your goal / high-level description in the spec textarea first.');
+    return;
+  }
+
+  const wiggamModel = document.getElementById('harness-ralph-model')?.value || null;
+  const officerModels = _wiggamOfficers.map(o => o.model);
+  const maxRounds = parseInt(document.getElementById('harness-wiggam-rounds')?.value || '3');
+
+  const panel = document.getElementById('harness-wiggam-panel');
+  const body  = document.getElementById('harness-wiggam-body');
+  const status = document.getElementById('harness-wiggam-status');
+  const approveBtn = document.getElementById('harness-wiggam-approve-btn');
+  const planBtn = document.getElementById('harness-wiggam-btn');
+
+  panel.style.display = 'flex';
+  panel.style.flexDirection = 'column';
+  body.innerHTML = '';
+  approveBtn.style.display = 'none';
+  status.textContent = 'Wiggam is thinking…';
+  planBtn.disabled = true;
+  _wiggamApprovedSpec = null;
+
+  let lastFinish = null;
+
+  function appendW(html) {
+    body.innerHTML += html;
+    body.scrollTop = body.scrollHeight;
+  }
+
+  _wiggamAbort = new AbortController();
+
+  try {
+    const resp = await fetch(BASE + '/api/v1/harness/wiggam', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        goal,
+        wiggam_model:   wiggamModel || null,
+        officer_models: officerModels.length ? officerModels : null,
+        max_rounds:     maxRounds,
+      }),
+      signal: _wiggamAbort.signal,
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      appendW(`<div class="error-box">Error: ${esc(err.error || resp.statusText)}</div>`);
+      planBtn.disabled = false;
+      return;
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6).trim();
+        if (raw === '[DONE]') break;
+        let ev;
+        try { ev = JSON.parse(raw); } catch { continue; }
+
+        switch (ev.type) {
+          case 'start':
+            appendW(`<div style="color:var(--yellow);font-size:11px;margin-bottom:6px">
+              🚔 Wiggam: <em>${esc(wiggamModel || 'default')}</em>
+              · Officers: ${(officerModels.length ? officerModels : ['same']).map(esc).join(', ')}
+              · Max rounds: ${maxRounds}
+            </div>`);
+            break;
+
+          case 'wiggam_plan': {
+            const taskRows = (ev.tasks || []).map(t =>
+              `<tr>
+                <td style="padding:2px 6px;color:var(--lavender);white-space:nowrap">${esc(t.task_id)}</td>
+                <td style="padding:2px 6px">${esc(t.title)}</td>
+                <td style="padding:2px 6px;color:var(--fg-muted);font-size:10px">${esc(t.acceptance_criterion||'')}</td>
+              </tr>`).join('');
+            appendW(`
+              <div style="margin-top:8px;border-top:1px solid var(--bg-border);padding-top:6px">
+                <span style="color:var(--yellow);font-size:10px">ROUND ${ev.round} — WIGGAM'S PLAN</span>
+                <div style="font-size:11px;color:var(--fg-dim);margin:3px 0;font-style:italic">${esc(ev.reasoning||'')}</div>
+                <table style="width:100%;border-collapse:collapse;font-size:11px;margin:4px 0">${taskRows}</table>
+                <div style="font-size:10px;color:var(--fg-muted)">Test cmd: <code>${esc(ev.test_cmd||'(none)')}</code></div>
+              </div>`);
+            status.textContent = `Round ${ev.round} — officers deliberating…`;
+            break;
+          }
+
+          case 'officer_vote': {
+            const failing = (ev.votes||[]).filter(v => !v.simple_enough);
+            const icon = failing.length === 0 ? '✓' : '✗';
+            const color = failing.length === 0 ? 'var(--green)' : 'var(--red)';
+            appendW(`
+              <div style="margin:3px 0 3px 12px;font-size:11px">
+                <span style="color:${color}">${icon}</span>
+                <span style="color:var(--fg-muted)">${esc(ev.officer_model)}: </span>
+                <em style="font-size:10px">${esc(ev.overall_feedback||'')}</em>
+                ${failing.map(v => `<div style="margin-left:12px;font-size:10px;color:var(--red)">✗ ${esc(v.task_id)}: ${esc(v.reason||'')}</div>`).join('')}
+              </div>`);
+            break;
+          }
+
+          case 'consensus': {
+            const color = ev.passed ? 'var(--green)' : 'var(--yellow)';
+            const label = ev.passed
+              ? `✓ Consensus — all ${ev.task_count} tasks approved`
+              : `✗ No consensus — ${ev.failing_tasks.length} task(s) need breaking down: ${ev.failing_tasks.join(', ')}`;
+            appendW(`<div style="margin:4px 0;padding:3px 8px;border-left:3px solid ${color};font-size:11px;color:${color}">${label}</div>`);
+            break;
+          }
+
+          case 'finish':
+            lastFinish = ev;
+            const finColor = ev.consensus ? 'var(--green)' : 'var(--yellow)';
+            const finLabel = ev.consensus
+              ? `✓ Plan agreed in ${ev.rounds} round(s)`
+              : `⚠ Round cap — plan is best effort (${ev.rounds} rounds)`;
+            appendW(`
+              <div style="margin-top:10px;border-top:2px solid ${finColor};padding-top:8px">
+                <span style="color:${finColor};font-size:11px">${finLabel}</span>
+                <div style="margin-top:6px;padding:6px 8px;background:var(--bg-panel);border-radius:3px;font-size:11px;font-family:monospace;white-space:pre-wrap;max-height:180px;overflow-y:auto">${esc(ev.spec_md||'')}</div>
+              </div>`);
+            status.textContent = ev.consensus ? '✓ Done' : '⚠ Capped';
+            _wiggamApprovedSpec = { spec_md: ev.spec_md, test_cmd: ev.test_cmd };
+            approveBtn.style.display = '';
+            break;
+
+          case 'error':
+            appendW(`<div class="error-box" style="margin-top:6px">${esc(ev.message)}</div>`);
+            break;
+        }
+      }
+    }
+  } catch(e) {
+    if (e.name !== 'AbortError') appendW(`<div class="error-box">${esc(e.message)}</div>`);
+  } finally {
+    planBtn.disabled = false;
+    _wiggamAbort = null;
+  }
+}
+
+function wiggamApproveAndRun() {
+  if (!_wiggamApprovedSpec) return;
+  // Populate the Ralph inline spec + test command, then run
+  const specEl = document.getElementById('harness-ralph-spec-inline');
+  const testEl = document.getElementById('harness-ralph-test-cmd');
+  if (specEl) specEl.value = _wiggamApprovedSpec.spec_md;
+  if (testEl && _wiggamApprovedSpec.test_cmd) testEl.value = _wiggamApprovedSpec.test_cmd;
+  // Hide planning panel
+  document.getElementById('harness-wiggam-panel').style.display = 'none';
+  // Fire Ralph
+  harnessRalphRun();
 }
 
 // ── 7b. Ensemble Voting (Harness mode) ────────────────────────────────────────
