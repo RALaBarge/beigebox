@@ -298,6 +298,39 @@ The operator's `connection` tool lets the agent call any configured connection. 
 
 ---
 
+## BrowserBox (browser API)
+
+BeigeBox's operator agent can control a live Chrome browser via [BrowserBox](https://github.com/RALaBarge/browserbox) — a Chrome extension + WebSocket relay that exposes browser APIs as tools.
+
+With BrowserBox enabled, the operator can navigate pages, read DOM content, click elements, capture screenshots, intercept network traffic, run JavaScript, and fetch authenticated PDFs — all against the real browser session.
+
+**Setup:**
+
+```bash
+# 1. Start the relay (in the browserbox repo)
+pip install websockets
+python ws_relay.py          # ws://localhost:9009  +  http://localhost:9010/tools
+
+# 2. Load the Chrome extension (chrome://extensions → Load unpacked → browserbox/)
+```
+
+**Enable in `config.yaml`:**
+
+```yaml
+tools:
+  enabled: true
+  browserbox:
+    enabled: true
+    ws_url: ws://localhost:9009
+    timeout: 10
+```
+
+The operator calls it with JSON: `{"tool": "namespace.method", "input": {...}}`. Start with `dom.snapshot` to orient on the active page. `pdf.extract` results are automatically saved to `workspace/in/` so the `pdf_reader` tool can process them.
+
+Available namespaces: `dom`, `tabs`, `nav`, `fetch`, `storage`, `clip`, `network`, `inject`, `pdf` (40 tools total). Full schema: `GET http://localhost:9010/tools`.
+
+---
+
 ## Security
 
 - **Operator sandboxing** — disabled by default; when enabled, tool access is restricted via `operator.allowed_tools` config
