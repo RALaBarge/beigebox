@@ -21,6 +21,7 @@ from beigebox.tools.memory import MemoryTool
 from beigebox.tools.ensemble import EnsembleTool
 from beigebox.tools.notifier import ToolNotifier
 from beigebox.tools.pdf_reader import PdfReaderTool
+from beigebox.tools.browserbox import BrowserboxTool
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,14 @@ class ToolRegistry:
             self.tools["ensemble"] = EnsembleTool(
                 judge_model=ens_cfg.get("judge_model") or default_judge,
                 max_models=ens_cfg.get("max_models", 6),
+            )
+
+        # --- BrowserBox (browser API relay — disabled by default) ---
+        bb_cfg = tools_cfg.get("browserbox", {})
+        if bb_cfg.get("enabled", False):
+            self.tools["browserbox"] = BrowserboxTool(
+                ws_url=bb_cfg.get("ws_url", "ws://localhost:9009"),
+                timeout=bb_cfg.get("timeout", 10.0),
             )
 
         logger.info("Tool registry loaded: %s", list(self.tools.keys()))
