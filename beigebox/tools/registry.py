@@ -132,11 +132,11 @@ class ToolRegistry:
                 workspace_in=_ws_in,
             )
 
-        # --- Connections (encrypted credential store — auto-enabled if connections: configured) ---
+        # --- Connections (agentauth — auto-enabled if connections: configured) ---
         conn_cfg = cfg.get("connections", {})
         if conn_cfg:
             try:
-                from beigebox.connections import ConnectionRegistry
+                from agentauth import ConnectionRegistry
                 conn_registry = ConnectionRegistry(conn_cfg)
                 self.tools["connection"] = ConnectionTool(conn_registry)
                 logger.info("Connection registry loaded: %s", list(conn_cfg.keys()))

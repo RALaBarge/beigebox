@@ -19,9 +19,8 @@ beautifulsoup4>=4.12.0
 requests>=2.31.0
 lxml>=5.0
 
-# Credentials (OS keychain — secretstorage needed on Linux for gnome-keyring/KWallet)
-keyring>=25.0
-secretstorage>=3.3
+# Credentials (agentauth — OS keychain credential management for agent frameworks)
+agentauth>=0.1.0
 
 # WASM runtime
 wasmtime
