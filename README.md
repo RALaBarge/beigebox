@@ -23,11 +23,15 @@ flowchart LR
 ## Quick Start
 
 ```bash
-git clone https://github.com/ralabarge/beigebox.git
+git clone --recursive https://github.com/ralabarge/beigebox.git
 cd beigebox/docker
 cp env.example .env        # optional — set GPU, ports, API keys
 docker compose up -d
 ```
+
+The `--recursive` flag initializes the community skill submodules (187 skills across
+Anthropic's official collection and K-Dense's scientific library). Skip it if you
+don't need them. If you already cloned without it: `git submodule update --init --recursive`.
 
 This brings up three services plus a one-shot model pull:
 
