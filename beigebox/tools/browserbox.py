@@ -26,12 +26,16 @@ logger = logging.getLogger(__name__)
 
 class BrowserboxTool:
     description = (
-        "Access browser APIs: storage and authenticated fetch. "
+        "Access browser APIs: DOM, storage, and authenticated fetch. "
         "Input must be JSON: {\"tool\": \"namespace.method\", \"input\": \"...\"}. "
-        "Available namespaces: storage (get/set/delete/list/get_cookie/list_cookies), "
+        "Namespaces: "
+        "dom (query/query_all/get_text/get_html/get_url/get_title/click/fill/scroll/wait_for/snapshot), "
+        "storage (get/set/delete/list/get_cookie/list_cookies), "
         "fetch (get/post/head). "
+        "dom tools operate on the active browser tab. "
         "fetch calls carry the browser's real session cookies. "
-        "Example: {\"tool\": \"fetch.get\", \"input\": \"https://example.com\"}"
+        "Start with dom.snapshot to orient yourself on a page. "
+        "Example: {\"tool\": \"dom.snapshot\", \"input\": \"\"}"
     )
 
     def __init__(self, ws_url: str = "ws://localhost:9009", timeout: float = 10.0):
