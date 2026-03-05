@@ -273,6 +273,31 @@ backends:
 
 ---
 
+## Credentials (agentauth)
+
+BeigeBox uses [agentauth](https://github.com/RALaBarge/agentauth) for authenticated API calls from the operator. Tokens live in the OS native keychain — agents call connections by name and never see raw credentials.
+
+```bash
+pip install agentauth
+agentauth add github        # stores in keychain, prompts with hidden input
+```
+
+```yaml
+# config.yaml
+connections:
+  github:
+    type: bearer
+    base_url: https://api.github.com
+    tier: 1                 # 1=read, 2=write, 3=send (needs human confirmation)
+    allowed_paths:
+      - /user/**
+      - /repos/**
+```
+
+The operator's `connection` tool lets the agent call any configured connection. Token injection and path allowlist enforcement happen internally. See [agentauth](https://github.com/RALaBarge/agentauth) for the full CLI reference, tier system, and predefined connection configs.
+
+---
+
 ## Security
 
 - **Operator sandboxing** — disabled by default; when enabled, tool access is restricted via `operator.allowed_tools` config
@@ -371,6 +396,8 @@ beigebox/
 │   ├── google_search.py    Google Custom Search
 │   ├── web_scraper.py      Page content extraction
 │   ├── ensemble.py         Ensemble tool for operator
+│   ├── browserbox.py       BrowserBox browser API relay tool
+│   ├── connection_tool.py  Credentialed API calls via agentauth
 │   ├── notifier.py         Webhook notifications
 │   └── plugin_loader.py    Auto-discovery from plugins/
 └── web/
