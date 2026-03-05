@@ -1308,6 +1308,8 @@
           style="border-radius:0;border:none;padding:2px 10px;font-size:11px;background:var(--cyan);color:#000">Orchestrated</button>
         <button id="harness-mode-ensemble" onclick="setHarnessMode('ensemble')"
           style="border-radius:0;border:none;padding:2px 10px;font-size:11px;background:var(--bg-input);color:var(--fg-dim)">Ensemble</button>
+        <button id="harness-mode-ralph" onclick="setHarnessMode('ralph')"
+          style="border-radius:0;border:none;padding:2px 10px;font-size:11px;background:var(--bg-input);color:var(--fg-dim)">⚡ Ralph</button>
       </div>
       <span class="toolbar-spacer"></span>
       <span id="harness-orch-controls" style="display:flex;gap:6px;align-items:center">
@@ -1329,6 +1331,35 @@
         <button onclick="harnessEnsembleRun()" class="primary" id="harness-ensemble-run-btn">▶ Run Ensemble</button>
         <button onclick="harnessEnsembleClear()">✕ Clear</button>
       </span>
+      <span id="harness-ralph-controls" style="display:none;gap:6px;align-items:center">
+        <span class="toolbar-label" style="color:var(--green)">Model:</span>
+        <select id="harness-ralph-model" style="height:26px;font-size:12px;padding:2px 6px;min-width:140px">
+          <option value="">— operator default —</option>
+        </select>
+        <span class="toolbar-label" style="color:var(--fg-muted)">max iter:</span>
+        <input id="harness-ralph-max-iter" type="number" value="20" min="1" max="100"
+          style="width:48px;height:26px;font-size:12px;padding:2px 4px;background:var(--bg-input);border:1px solid var(--bg-border);color:var(--fg);border-radius:2px">
+        <button onclick="harnessRalphRun()" class="primary" id="harness-ralph-run-btn" style="background:var(--green);color:#000">⚡ Run</button>
+        <button onclick="harnessRalphStop()" id="harness-ralph-stop-btn" style="display:none">◼ Stop</button>
+        <button onclick="harnessRalphClear()">✕ Clear</button>
+      </span>
+    </div>
+
+    <!-- Ralph: spec + test config (shown only in ralph mode) -->
+    <div id="harness-ralph-config" style="display:none;padding:6px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border);display:none;flex-direction:column;gap:4px">
+      <div style="display:flex;gap:8px;align-items:center">
+        <span style="font-size:11px;color:var(--green);width:80px;flex-shrink:0">PROMPT.md</span>
+        <input id="harness-ralph-spec-path" type="text" placeholder="/path/to/PROMPT.md  (leave blank to use textarea below)"
+          style="flex:1;height:24px;font-size:11px;padding:2px 6px;background:var(--bg-input);border:1px solid var(--bg-border);color:var(--fg);border-radius:2px">
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span style="font-size:11px;color:var(--fg-muted);width:80px;flex-shrink:0">Test cmd</span>
+        <input id="harness-ralph-test-cmd" type="text" placeholder="pytest tests/ -x  or  npm test  or  make test"
+          style="flex:1;height:24px;font-size:11px;padding:2px 6px;background:var(--bg-input);border:1px solid var(--bg-border);color:var(--fg);border-radius:2px">
+        <span style="font-size:11px;color:var(--fg-muted);width:60px;flex-shrink:0">Work dir</span>
+        <input id="harness-ralph-work-dir" type="text" placeholder="(cwd)"
+          style="width:180px;height:24px;font-size:11px;padding:2px 6px;background:var(--bg-input);border:1px solid var(--bg-border);color:var(--fg);border-radius:2px">
+      </div>
     </div>
 
     <!-- Orchestrated: available target pool -->
@@ -1350,12 +1381,19 @@
       </div>
     </div>
 
-    <!-- Prompt input (shared) -->
-    <div style="padding:6px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border);display:flex;gap:8px;flex-shrink:0">
+    <!-- Prompt input (shared — hidden in ralph mode) -->
+    <div id="harness-prompt-area" style="padding:6px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border);display:flex;gap:8px;flex-shrink:0">
       <textarea id="harness-prompt" rows="2"
         style="flex:1;resize:none;font-size:12px;padding:4px 8px"
-        onkeydown="if(event.ctrlKey&&event.key==='Enter'){harnessMode==='orchestrated'?harnessOrchRun():harnessEnsembleRun()}"
+        onkeydown="if(event.ctrlKey&&event.key==='Enter'){harnessMode==='orchestrated'?harnessOrchRun():harnessMode==='ensemble'?harnessEnsembleRun():harnessRalphRun()}"
         placeholder="Enter goal or prompt… (Ctrl+Enter to run)"></textarea>
+    </div>
+
+    <!-- Ralph: inline spec textarea (shown when no spec_path) -->
+    <div id="harness-ralph-spec-area" style="display:none;padding:6px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border);flex-shrink:0">
+      <textarea id="harness-ralph-spec-inline" rows="5"
+        style="width:100%;resize:vertical;font-size:11px;padding:4px 8px;font-family:monospace;box-sizing:border-box"
+        placeholder="Paste spec / PROMPT.md contents here (or set path above)…"></textarea>
     </div>
 
     <!-- Orchestrated layout: master pane + worker grid -->
@@ -1374,6 +1412,19 @@
     <!-- Ensemble: results grid -->
     <div id="harness-ensemble-grid" style="display:none;flex:1;overflow-y:auto;padding:8px;display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start">
       <div class="empty">Select models, enter a prompt, and run ensemble.</div>
+    </div>
+
+    <!-- Ralph: iteration log + agent panes -->
+    <div id="harness-ralph-layout" style="display:none;flex:1;overflow:hidden;flex-direction:column;min-height:0">
+      <div id="harness-ralph-log-pane" style="flex-shrink:0;max-height:40%;overflow-y:auto;border-bottom:2px solid var(--green);padding:8px 14px;background:var(--bg-deep)">
+        <div style="font-size:10px;color:var(--green);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">⚡ Ralph Loop</div>
+        <div id="harness-ralph-log-body" style="font-size:12px;line-height:1.6;color:var(--fg)">
+          <span style="color:var(--fg-muted)">Configure spec and test command, then run.</span>
+        </div>
+      </div>
+      <div id="harness-ralph-grid" style="flex:1;overflow-y:auto;padding:8px;display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start">
+        <div class="empty">Iteration agent output will appear here.</div>
+      </div>
     </div>
   </div>
 
@@ -2423,6 +2474,19 @@ async function loadModelsForPanes() {
     });
   }
 
+  // Ralph model select
+  const ralphModelSel = document.getElementById('harness-ralph-model');
+  if (ralphModelSel) {
+    const cur = ralphModelSel.value;
+    ralphModelSel.innerHTML = `<option value="">— operator default —</option>`;
+    models.forEach(id => {
+      const opt = document.createElement('option');
+      opt.value = id; opt.textContent = id;
+      if (id === cur) opt.selected = true;
+      ralphModelSel.appendChild(opt);
+    });
+  }
+
   // Refresh ensemble checklist if it's currently visible
   if (harnessMode === 'ensemble') harnessEnsemblePopulateModels();
 }
@@ -3255,41 +3319,56 @@ let harnessOrchTargetSeq = 0;
 
 function setHarnessMode(mode) {
   harnessMode = mode;
-  const isOrch = mode === 'orchestrated';
-  const isEns  = mode === 'ensemble';
+  const isOrch  = mode === 'orchestrated';
+  const isEns   = mode === 'ensemble';
+  const isRalph = mode === 'ralph';
 
   // ── Mode button styles ──
-  const orchBtn = document.getElementById('harness-mode-orchestrated');
-  const ensBtn  = document.getElementById('harness-mode-ensemble');
-  if (orchBtn) { orchBtn.style.background = isOrch ? 'var(--cyan)'   : 'var(--bg-input)'; orchBtn.style.color = isOrch ? '#000' : 'var(--fg-dim)'; }
-  if (ensBtn)  { ensBtn.style.background  = isEns  ? 'var(--yellow)' : 'var(--bg-input)'; ensBtn.style.color  = isEns  ? '#000' : 'var(--fg-dim)'; }
+  const orchBtn  = document.getElementById('harness-mode-orchestrated');
+  const ensBtn   = document.getElementById('harness-mode-ensemble');
+  const ralphBtn = document.getElementById('harness-mode-ralph');
+  if (orchBtn)  { orchBtn.style.background  = isOrch  ? 'var(--cyan)'   : 'var(--bg-input)'; orchBtn.style.color  = isOrch  ? '#000' : 'var(--fg-dim)'; }
+  if (ensBtn)   { ensBtn.style.background   = isEns   ? 'var(--yellow)' : 'var(--bg-input)'; ensBtn.style.color   = isEns   ? '#000' : 'var(--fg-dim)'; }
+  if (ralphBtn) { ralphBtn.style.background = isRalph ? 'var(--green)'  : 'var(--bg-input)'; ralphBtn.style.color = isRalph ? '#000' : 'var(--fg-dim)'; }
 
   // ── Toolbar control bars ──
-  const orchControls = document.getElementById('harness-orch-controls');
-  const ensControls  = document.getElementById('harness-ensemble-controls');
-  if (orchControls) orchControls.style.display = isOrch ? 'flex' : 'none';
-  if (ensControls)  ensControls.style.display  = isEns  ? 'flex' : 'none';
+  const orchControls  = document.getElementById('harness-orch-controls');
+  const ensControls   = document.getElementById('harness-ensemble-controls');
+  const ralphControls = document.getElementById('harness-ralph-controls');
+  if (orchControls)  orchControls.style.display  = isOrch  ? 'flex' : 'none';
+  if (ensControls)   ensControls.style.display   = isEns   ? 'flex' : 'none';
+  if (ralphControls) ralphControls.style.display = isRalph ? 'flex' : 'none';
 
-  // ── Target / model areas ──
-  const orchTargetArea = document.getElementById('harness-orch-target-area');
-  const ensModelArea   = document.getElementById('harness-ensemble-model-area');
-  if (orchTargetArea) orchTargetArea.style.display = isOrch ? 'flex' : 'none';
-  if (ensModelArea)   ensModelArea.style.display   = isEns  ? ''     : 'none';
+  // ── Sub-areas ──
+  const orchTargetArea  = document.getElementById('harness-orch-target-area');
+  const ensModelArea    = document.getElementById('harness-ensemble-model-area');
+  const ralphConfig     = document.getElementById('harness-ralph-config');
+  const ralphSpecArea   = document.getElementById('harness-ralph-spec-area');
+  const promptArea      = document.getElementById('harness-prompt-area');
+  if (orchTargetArea) orchTargetArea.style.display = isOrch  ? 'flex' : 'none';
+  if (ensModelArea)   ensModelArea.style.display   = isEns   ? ''     : 'none';
+  if (ralphConfig)    ralphConfig.style.display    = isRalph ? 'flex' : 'none';
+  if (ralphSpecArea)  ralphSpecArea.style.display  = isRalph ? 'flex' : 'none';
+  if (promptArea)     promptArea.style.display     = isRalph ? 'none' : 'flex';
 
-  // ── Result grids ──
-  const orchLayout = document.getElementById('harness-orch-layout');
-  const ensGrid    = document.getElementById('harness-ensemble-grid');
-  if (orchLayout) orchLayout.style.display = isOrch ? 'flex' : 'none';
-  if (ensGrid)    ensGrid.style.display    = isEns  ? 'flex' : 'none';
+  // ── Result layouts ──
+  const orchLayout    = document.getElementById('harness-orch-layout');
+  const ensGrid       = document.getElementById('harness-ensemble-grid');
+  const ralphLayout   = document.getElementById('harness-ralph-layout');
+  if (orchLayout)  orchLayout.style.display  = isOrch  ? 'flex' : 'none';
+  if (ensGrid)     ensGrid.style.display     = isEns   ? 'flex' : 'none';
+  if (ralphLayout) ralphLayout.style.display = isRalph ? 'flex' : 'none';
 
   // ── Prompt placeholder ──
   const ta = document.getElementById('harness-prompt');
   if (ta) ta.placeholder =
-    isOrch ? 'Describe the goal… the orchestrator will plan, delegate, and iterate. (Ctrl+Enter to run)' :
-             'Prompt to compare across all selected models… (Ctrl+Enter to run)';
+    isOrch  ? 'Describe the goal… the orchestrator will plan, delegate, and iterate. (Ctrl+Enter to run)' :
+    isRalph ? '' :
+              'Prompt to compare across all selected models… (Ctrl+Enter to run)';
 
-  // ── Populate ensemble model checklist on first switch ──
-  if (isEns) harnessEnsemblePopulateModels();
+  // ── Populate ensemble model checklist / ralph model select on first switch ──
+  if (isEns)   harnessEnsemblePopulateModels();
+  if (isRalph) harnessRalphPopulateModel();
 }
 
 // ── Orchestrated target pool ──────────────────────────────────────────────────
@@ -3615,6 +3694,204 @@ async function harnessOrchRun() {
     }
     document.getElementById('orch-inject-bar')?.remove();
     btn.disabled = false; btn.textContent = '▶ Run';
+  }
+}
+
+// ── 7c. Ralph — autonomous spec-driven loop ───────────────────────────────────
+
+let _ralphAbort = null;
+
+function harnessRalphPopulateModel() {
+  const sel = document.getElementById('harness-ralph-model');
+  if (!sel || sel.options.length > 1) return;
+  (window._cachedModels || []).forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.id; opt.textContent = m.id;
+    sel.appendChild(opt);
+  });
+}
+
+function harnessRalphClear() {
+  if (_ralphAbort) { _ralphAbort.abort(); _ralphAbort = null; }
+  const log = document.getElementById('harness-ralph-log-body');
+  if (log) log.innerHTML = '<span style="color:var(--fg-muted)">Configure spec and test command, then run.</span>';
+  const grid = document.getElementById('harness-ralph-grid');
+  if (grid) grid.innerHTML = '<div class="empty">Iteration agent output will appear here.</div>';
+  const runBtn  = document.getElementById('harness-ralph-run-btn');
+  const stopBtn = document.getElementById('harness-ralph-stop-btn');
+  if (runBtn)  { runBtn.disabled = false; runBtn.style.display = ''; }
+  if (stopBtn) stopBtn.style.display = 'none';
+}
+
+function harnessRalphStop() {
+  if (_ralphAbort) { _ralphAbort.abort(); _ralphAbort = null; }
+  const runBtn  = document.getElementById('harness-ralph-run-btn');
+  const stopBtn = document.getElementById('harness-ralph-stop-btn');
+  if (runBtn)  { runBtn.disabled = false; runBtn.style.display = ''; }
+  if (stopBtn) stopBtn.style.display = 'none';
+  const log = document.getElementById('harness-ralph-log-body');
+  if (log) log.innerHTML += `<div style="color:var(--yellow);margin-top:4px">◼ Stopped by user.</div>`;
+}
+
+async function harnessRalphRun() {
+  const specPath   = (document.getElementById('harness-ralph-spec-path')?.value || '').trim();
+  const specInline = (document.getElementById('harness-ralph-spec-inline')?.value || '').trim();
+  const testCmd    = (document.getElementById('harness-ralph-test-cmd')?.value || '').trim();
+  const workDir    = (document.getElementById('harness-ralph-work-dir')?.value || '').trim();
+  const maxIter    = parseInt(document.getElementById('harness-ralph-max-iter')?.value || '20');
+  const model      = document.getElementById('harness-ralph-model')?.value || null;
+
+  if (!specPath && !specInline) {
+    alert('Set a PROMPT.md path or paste a spec in the textarea.');
+    return;
+  }
+
+  const logBody = document.getElementById('harness-ralph-log-body');
+  const grid    = document.getElementById('harness-ralph-grid');
+  const runBtn  = document.getElementById('harness-ralph-run-btn');
+  const stopBtn = document.getElementById('harness-ralph-stop-btn');
+
+  logBody.innerHTML = `<div style="color:var(--green);font-size:11px">⚡ Ralph starting — max ${maxIter} iterations</div>
+    <div style="font-size:11px;color:var(--fg-muted)">Spec: ${esc(specPath || '(inline)')}  ·  Test: ${esc(testCmd || '(none)')}</div>`;
+  grid.innerHTML = '';
+  runBtn.disabled = true; runBtn.style.display = 'none';
+  stopBtn.style.display = '';
+
+  _ralphAbort = new AbortController();
+
+  // Per-iteration pane helpers
+  const iterPanes = {};
+  function getOrCreateIterPane(iter) {
+    if (iterPanes[iter]) return iterPanes[iter];
+    const el = document.createElement('div');
+    el.className = 'harness-pane';
+    el.style.cssText = 'min-width:300px;flex:1 1 300px';
+    el.innerHTML = `
+      <div class="harness-pane-header">
+        <span class="target-label">Iteration ${iter}</span>
+        <span class="harness-status pending" id="ralph-pane-status-${iter}">⟳ running…</span>
+      </div>
+      <div class="harness-pane-output thinking" id="ralph-pane-out-${iter}">waiting…</div>`;
+    grid.appendChild(el);
+    iterPanes[iter] = el;
+    return el;
+  }
+
+  function appendLog(html) {
+    logBody.innerHTML += html;
+    logBody.scrollTop = logBody.scrollHeight;
+  }
+
+  try {
+    const resp = await fetch(BASE + '/api/v1/harness/ralph', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        spec_path:      specPath || null,
+        spec_inline:    specInline || null,
+        test_cmd:       testCmd,
+        working_dir:    workDir || null,
+        max_iterations: maxIter,
+        model:          model || null,
+      }),
+      signal: _ralphAbort.signal,
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      appendLog(`<div class="error-box">Error: ${esc(err.error || resp.statusText)}</div>`);
+      runBtn.disabled = false; runBtn.style.display = ''; stopBtn.style.display = 'none';
+      return;
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let currentIter = 0;
+    let currentOutput = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6).trim();
+        if (raw === '[DONE]') break;
+        let ev;
+        try { ev = JSON.parse(raw); } catch { continue; }
+
+        switch (ev.type) {
+          case 'iteration_start':
+            currentIter = ev.iteration;
+            currentOutput = '';
+            getOrCreateIterPane(currentIter);
+            appendLog(`<div style="margin-top:6px;color:var(--green);font-size:11px">▶ Iteration ${ev.iteration} / ${maxIter}</div>`);
+            break;
+
+          case 'agent_chunk': {
+            currentOutput += ev.chunk;
+            const outEl = document.getElementById(`ralph-pane-out-${ev.iteration}`);
+            if (outEl) { outEl.className = 'harness-pane-output thinking'; outEl.textContent = currentOutput; outEl.scrollTop = outEl.scrollHeight; }
+            break;
+          }
+
+          case 'agent_done': {
+            const outEl = document.getElementById(`ralph-pane-out-${ev.iteration}`);
+            const stEl  = document.getElementById(`ralph-pane-status-${ev.iteration}`);
+            if (outEl) { outEl.className = 'harness-pane-output'; outEl.textContent = ev.response; }
+            if (stEl)  { stEl.className = 'harness-status'; stEl.textContent = `${ev.latency_ms}ms`; }
+            break;
+          }
+
+          case 'test_run':
+            appendLog(`<div style="font-size:11px;color:var(--fg-muted);margin-left:8px">  → running tests…</div>`);
+            break;
+
+          case 'test_result': {
+            const icon  = ev.passed ? '✓' : '✗';
+            const color = ev.passed ? 'var(--green)' : 'var(--red)';
+            const label = ev.passed ? 'PASS' : `FAIL (exit ${ev.exit_code})`;
+            appendLog(`<div style="margin-left:8px;color:${color};font-size:11px">${icon} Tests: ${label}</div>`);
+            if (!ev.passed && (ev.stdout || ev.stderr)) {
+              const out = (ev.stderr || ev.stdout || '').slice(-400);
+              appendLog(`<div style="margin:2px 8px 4px;padding:4px 6px;background:var(--bg-deep);font-size:10px;font-family:monospace;white-space:pre-wrap;color:var(--red)">${esc(out)}</div>`);
+            }
+            const stEl = document.getElementById(`ralph-pane-status-${ev.iteration}`);
+            if (stEl) { stEl.className = `harness-status ${ev.passed ? 'done' : 'error'}`; stEl.textContent = ev.passed ? '✓ pass' : '✗ fail'; }
+            break;
+          }
+
+          case 'injected':
+            appendLog(`<div style="padding:2px 8px;border-left:2px solid var(--green);font-size:11px;color:var(--green)">↗ Sign applied: ${esc(ev.message)}</div>`);
+            break;
+
+          case 'finish': {
+            const passedColor = ev.passed ? 'var(--green)' : 'var(--yellow)';
+            const passedLabel = ev.passed ? '✓ Tests passed' : '✗ Cap reached without passing';
+            appendLog(`<div style="margin-top:10px;border-top:2px solid ${passedColor};padding-top:8px;color:${passedColor};font-size:11px">${passedLabel} · ${ev.iterations} iteration${ev.iterations !== 1 ? 's' : ''}</div>`);
+            runBtn.disabled = false; runBtn.style.display = ''; stopBtn.style.display = 'none';
+            _ralphAbort = null;
+            break;
+          }
+
+          case 'error':
+            appendLog(`<div class="error-box" style="margin-top:6px">${esc(ev.message)}</div>`);
+            runBtn.disabled = false; runBtn.style.display = ''; stopBtn.style.display = 'none';
+            _ralphAbort = null;
+            break;
+        }
+      }
+    }
+  } catch(e) {
+    if (e.name !== 'AbortError') {
+      appendLog(`<div class="error-box">${esc(e.message)}</div>`);
+    }
+    runBtn.disabled = false; runBtn.style.display = ''; stopBtn.style.display = 'none';
+    _ralphAbort = null;
   }
 }
 

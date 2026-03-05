@@ -1368,6 +1368,75 @@ async def api_harness_orchestrate(request: Request):
     )
 
 
+@app.post("/api/v1/harness/ralph")
+async def api_harness_ralph(request: Request):
+    """
+    Ralph mode — autonomous spec-driven development loop.
+
+    Body:
+        spec_path      str (opt)  — path to PROMPT.md (reloaded each iteration)
+        spec_inline    str (opt)  — inline spec text (used if spec_path not set)
+        test_cmd       str        — shell command to run after each iteration (exit 0 = pass)
+        working_dir    str (opt)  — working directory for test_cmd (default: cwd)
+        max_iterations int (opt)  — max loop iterations (default: 20)
+        model          str (opt)  — model override
+
+    Returns: text/event-stream of JSON events.
+    """
+    cfg = get_config()
+    rt  = get_runtime_config()
+    if not rt.get("harness_enabled", cfg.get("harness", {}).get("enabled", True)):
+        return JSONResponse({"error": "Harness is disabled."}, status_code=403)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    spec_path      = body.get("spec_path") or None
+    spec_inline    = body.get("spec_inline") or None
+    test_cmd       = body.get("test_cmd", "").strip()
+    working_dir    = body.get("working_dir") or None
+    max_iterations = int(body.get("max_iterations", 20))
+    model_override = body.get("model") or None
+
+    if not spec_path and not spec_inline:
+        return JSONResponse({"error": "spec_path or spec_inline required"}, status_code=400)
+
+    from beigebox.agents.ralph_orchestrator import RalphOrchestrator
+    import json as _json
+
+    inj_queue: asyncio.Queue = asyncio.Queue()
+    ralph = RalphOrchestrator(
+        spec_path=spec_path,
+        spec_inline=spec_inline,
+        test_cmd=test_cmd,
+        working_dir=working_dir,
+        max_iterations=max_iterations,
+        model=model_override,
+        backend_router=backend_router,
+        injection_queue=inj_queue,
+    )
+
+    async def _event_stream():
+        run_id = ralph.run_id
+        _harness_injection_queues[run_id] = inj_queue
+        try:
+            async for event in ralph.run():
+                yield f"data: {_json.dumps(event)}\n\n"
+        except Exception as e:
+            yield f"data: {_json.dumps({'type':'error','message':str(e)})}\n\n"
+        finally:
+            _harness_injection_queues.pop(run_id, None)
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.post("/api/v1/harness/{run_id}/inject")
 async def api_harness_inject(run_id: str, request: Request):
     """Inject a steering message into an active orchestration run."""
