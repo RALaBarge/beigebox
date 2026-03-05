@@ -1,22 +1,28 @@
 """
-BeigeBox Connections — encrypted credential store + HTTP dispatch.
+BeigeBox Connections — OS keychain credential store + authenticated HTTP dispatch.
 
-Tokens are encrypted at rest with AES-256-GCM. The agent never sees a raw
-token — it calls a connection by name, the registry injects Authorization
-headers internally, and only the response body is returned.
+Tokens are stored in the OS native keychain via python-keyring:
+  - Linux:   gnome-keyring / KWallet (SecretService DBus API)
+  - macOS:   Keychain
+  - Windows: Windows Credential Manager
 
-Key storage (in priority order):
-  1. BB_MASTER_KEY env var — 64 hex chars (32 bytes)
-  2. ~/.bb/.key file       — auto-generated on first use, chmod 600
+The agent never sees a raw token — it calls a connection by name, the registry
+injects Authorization headers internally, and only the response body is returned.
 
-Credentials file: ~/.bb/connections.enc (AES-256-GCM encrypted JSON)
+Fallback for headless/server deployments:
+  Set BB_<NAME>_TOKEN env vars — keyring is tried first, env vars second.
 
-CLI usage:
+Requires:
+  pip install keyring secretstorage   # Linux
+  pip install keyring                 # macOS / Windows (keyring bundled)
+
+CLI:
   python -m beigebox.connections list
-  python -m beigebox.connections add <name> --token <value>
-  python -m beigebox.connections add <name> --token-env <ENV_VAR>
+  python -m beigebox.connections add <name>          # prompts securely
+  python -m beigebox.connections add <name> --env    # reads BB_<NAME>_TOKEN from env
   python -m beigebox.connections remove <name>
-  python -m beigebox.connections test <name>
+  python -m beigebox.connections test <name> --path /endpoint
+  python -m beigebox.connections setup               # print setup instructions
 """
 from __future__ import annotations
 
@@ -24,94 +30,66 @@ import fnmatch
 import json
 import logging
 import os
-import stat
-from pathlib import Path
 from typing import Any
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
-_BB_DIR   = Path.home() / ".bb"
-_KEY_FILE = _BB_DIR / ".key"
-_CRED_FILE = _BB_DIR / "connections.enc"
+_KEYRING_SERVICE = "beigebox"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Key management
+# Token resolution — keyring first, env var fallback
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _load_or_create_key() -> bytes:
-    """Return 32-byte AES key. Never raises — creates key file on first use."""
-    # 1. Env var
-    env_key = os.environ.get("BB_MASTER_KEY", "")
-    if env_key:
-        try:
-            key = bytes.fromhex(env_key)
-            if len(key) == 32:
-                return key
-        except ValueError:
-            pass
-        raise ValueError("BB_MASTER_KEY must be 64 hex characters (32 bytes)")
+def _get_token(name: str) -> str | None:
+    # 1. OS keychain
+    try:
+        import keyring
+        token = keyring.get_password(_KEYRING_SERVICE, name)
+        if token:
+            return token
+    except Exception as e:
+        logger.debug("keyring unavailable: %s", e)
 
-    # 2. Key file
-    _BB_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if _KEY_FILE.exists():
-        key = bytes.fromhex(_KEY_FILE.read_text().strip())
-        if len(key) != 32:
-            raise ValueError(f"Key file {_KEY_FILE} is corrupt (expected 32 bytes)")
-        return key
-
-    # 3. Generate new key
-    from cryptography.hazmat.primitives import hashes  # noqa: F401 — just to check import
-    import secrets
-    key = secrets.token_bytes(32)
-    _KEY_FILE.write_text(key.hex())
-    _KEY_FILE.chmod(0o600)
-    logger.info("Generated new master key at %s", _KEY_FILE)
-    return key
+    # 2. Env var fallback (headless/server deployments)
+    return os.environ.get(f"BB_{name.upper()}_TOKEN")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Encrypted store
-# ─────────────────────────────────────────────────────────────────────────────
+def _set_token(name: str, token: str) -> None:
+    try:
+        import keyring
+        keyring.set_password(_KEYRING_SERVICE, name, token)
+        logger.info("Stored token for '%s' in OS keychain", name)
+        return
+    except Exception as e:
+        raise RuntimeError(
+            f"Could not store token in OS keychain: {e}\n"
+            f"On Linux, install: pip install secretstorage\n"
+            f"On headless systems, set BB_{name.upper()}_TOKEN env var instead."
+        ) from e
 
-class ConnectionStore:
-    """
-    Loads and saves the encrypted credentials file.
-    Format on disk: 12-byte nonce || 16-byte tag || ciphertext (AES-256-GCM).
-    In memory: plain dict {"github": {"token": "..."}, ...}
-    """
 
-    def __init__(self):
-        self._key = _load_or_create_key()
+def _delete_token(name: str) -> None:
+    try:
+        import keyring
+        keyring.delete_password(_KEYRING_SERVICE, name)
+    except Exception as e:
+        raise RuntimeError(f"Could not remove token from keychain: {e}") from e
 
-    def load(self) -> dict[str, dict]:
-        if not _CRED_FILE.exists():
-            return {}
-        raw = _CRED_FILE.read_bytes()
-        try:
-            return json.loads(self._decrypt(raw))
-        except Exception as e:
-            raise RuntimeError(f"Failed to decrypt {_CRED_FILE}: {e}") from e
 
-    def save(self, data: dict[str, dict]) -> None:
-        _BB_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-        encrypted = self._encrypt(json.dumps(data).encode())
-        _CRED_FILE.write_bytes(encrypted)
-        _CRED_FILE.chmod(0o600)
-
-    def _encrypt(self, plaintext: bytes) -> bytes:
-        import os as _os
-        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-        nonce = _os.urandom(12)
-        ct    = AESGCM(self._key).encrypt(nonce, plaintext, None)
-        return nonce + ct   # tag is appended by AESGCM (last 16 bytes of ct)
-
-    def _decrypt(self, data: bytes) -> bytes:
-        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-        nonce, ct = data[:12], data[12:]
-        return AESGCM(self._key).decrypt(nonce, ct, None)
+def _token_source(name: str) -> str:
+    """Return human-readable description of where the token is coming from."""
+    try:
+        import keyring
+        if keyring.get_password(_KEYRING_SERVICE, name):
+            return "keychain"
+    except Exception:
+        pass
+    if os.environ.get(f"BB_{name.upper()}_TOKEN"):
+        return "env var"
+    return "MISSING"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -120,10 +98,9 @@ class ConnectionStore:
 
 class ConnectionRegistry:
     """
-    Resolves named connections from config + encrypted store, makes credentialed
-    HTTP calls. The agent calls connection.call — it never receives a token.
+    Resolves named connections from config, makes credentialed HTTP calls.
 
-    Config structure (config.yaml, no secrets):
+    Config structure (config.yaml — no secrets, metadata only):
       connections:
         github:
           type: bearer
@@ -131,34 +108,19 @@ class ConnectionRegistry:
           allowed_paths:
             - /user/**
             - /repos/**
-        my_service:
+        openrouter:
           type: bearer
-          base_url: https://api.myservice.com
+          base_url: https://openrouter.ai/api/v1
           allowed_paths:
-            - /v1/**
+            - /models
+            - /chat/**
     """
 
     def __init__(self, cfg: dict):
-        self._cfg   = cfg         # connection metadata from config.yaml
-        self._store = ConnectionStore()
+        self._cfg = cfg
 
-    def list_connections(self) -> list[str]:
-        creds = self._store.load()
-        return sorted(set(list(self._cfg.keys()) + list(creds.keys())))
-
-    def add_token(self, name: str, token: str) -> None:
-        """Add or update a token for a named connection."""
-        creds = self._store.load()
-        creds[name] = {"token": token}
-        self._store.save(creds)
-        logger.info("Stored token for connection: %s", name)
-
-    def remove(self, name: str) -> None:
-        creds = self._store.load()
-        if name not in creds:
-            raise KeyError(f"No credentials stored for: {name}")
-        del creds[name]
-        self._store.save(creds)
+    def list_connections(self) -> list[tuple[str, str]]:
+        return [(name, _token_source(name)) for name in sorted(self._cfg.keys())]
 
     def call(
         self,
@@ -171,51 +133,44 @@ class ConnectionRegistry:
     ) -> dict:
         """
         Make a credentialed HTTP request. Returns {"status": int, "body": str}.
-        Raises on unknown connection, disallowed path, or missing credentials.
+        Raises on unknown connection, disallowed path, or missing token.
+        Token is injected internally — never returned or logged.
         """
         conn_cfg = self._cfg.get(name)
         if conn_cfg is None:
             raise ValueError(
                 f"Unknown connection '{name}'. "
-                f"Add it to config.yaml connections: section first. "
-                f"Known: {list(self._cfg.keys())}"
+                f"Add it to config.yaml connections: section. "
+                f"Known: {sorted(self._cfg.keys())}"
             )
 
         # Enforce path allowlist
         allowed = conn_cfg.get("allowed_paths", ["/**"])
         if not any(fnmatch.fnmatch(path, pat) for pat in allowed):
             raise PermissionError(
-                f"Path '{path}' is not in the allowlist for connection '{name}'. "
-                f"Allowed: {allowed}"
+                f"Path '{path}' not in the allowlist for '{name}'. "
+                f"Allowed patterns: {allowed}"
             )
 
-        # Resolve token
-        creds = self._store.load()
-        conn_creds = creds.get(name)
-        if not conn_creds or not conn_creds.get("token"):
+        # Resolve token — never logged
+        token = _get_token(name)
+        if not token:
             raise RuntimeError(
-                f"No token stored for connection '{name}'. "
-                f"Run: python -m beigebox.connections add {name} --token <value>"
+                f"No token found for connection '{name}'. "
+                f"Run: python -m beigebox.connections add {name}"
             )
-        token = conn_creds["token"]
 
-        base_url = conn_cfg.get("base_url", "").rstrip("/")
-        url      = base_url + path
-        method   = method.upper()
-
+        base_url    = conn_cfg.get("base_url", "").rstrip("/")
+        url         = base_url + path
         req_headers = {"Authorization": f"Bearer {token}"}
         if headers:
             req_headers.update(headers)
 
-        logger.info(
-            "connection.call: %s %s %s (path=%s)",
-            name, method, url.split("?")[0], path
-        )
+        logger.info("connection.call: %s %s %s", name, method.upper(), path)
 
         with httpx.Client(timeout=timeout) as client:
-            resp = client.request(method, url, headers=req_headers, json=body)
+            resp = client.request(method.upper(), url, headers=req_headers, json=body)
 
-        # Log without token
         logger.info(
             "connection.call response: %s %s → %d (%d bytes)",
             name, path, resp.status_code, len(resp.content)
@@ -225,7 +180,7 @@ class ConnectionRegistry:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Module-level singleton (lazy)
+# Module-level singleton
 # ─────────────────────────────────────────────────────────────────────────────
 
 _registry: ConnectionRegistry | None = None
@@ -242,33 +197,37 @@ def get_registry(cfg: dict | None = None) -> ConnectionRegistry:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CLI — python -m beigebox.connections
+# CLI
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _cli():
-    import argparse, getpass, sys
+    import argparse
+    import getpass
+    import sys
 
     parser = argparse.ArgumentParser(
         prog="python -m beigebox.connections",
-        description="Manage BeigeBox encrypted connection credentials",
+        description="Manage BeigeBox API connection credentials",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("list", help="List all connections")
+    sub.add_parser("list", help="List connections and token status")
 
-    p_add = sub.add_parser("add", help="Add or update a connection token")
+    p_add = sub.add_parser("add", help="Store a token in the OS keychain")
     p_add.add_argument("name", help="Connection name (must match config.yaml)")
-    grp = p_add.add_mutually_exclusive_group()
-    grp.add_argument("--token", help="Token value (use --prompt to avoid shell history)")
-    grp.add_argument("--token-env", metavar="ENV", help="Read token from environment variable")
-    grp.add_argument("--prompt", action="store_true", help="Prompt for token securely")
+    p_add.add_argument(
+        "--env", action="store_true",
+        help="Read token from BB_<NAME>_TOKEN env var instead of prompting"
+    )
 
-    p_rm = sub.add_parser("remove", help="Remove a stored token")
+    p_rm = sub.add_parser("remove", help="Remove a token from the OS keychain")
     p_rm.add_argument("name")
 
     p_test = sub.add_parser("test", help="Test a connection with a GET request")
     p_test.add_argument("name")
     p_test.add_argument("--path", default="/", help="Path to test (default: /)")
+
+    sub.add_parser("setup", help="Print setup instructions")
 
     args = parser.parse_args()
 
@@ -277,38 +236,36 @@ def _cli():
     reg = ConnectionRegistry(cfg)
 
     if args.cmd == "list":
-        names = reg.list_connections()
-        if not names:
-            print("No connections configured.")
+        connections = reg.list_connections()
+        if not connections:
+            print("No connections configured in config.yaml.")
         else:
-            store = ConnectionStore()
-            creds = store.load()
-            print(f"{'NAME':<20} {'CONFIG':<8} {'TOKEN'}")
-            for n in names:
-                has_cfg   = "yes" if n in cfg   else "no"
-                has_token = "stored" if n in creds and creds[n].get("token") else "MISSING"
-                print(f"{n:<20} {has_cfg:<8} {has_token}")
+            print(f"{'NAME':<20} {'TOKEN SOURCE'}")
+            print("─" * 35)
+            for name, source in connections:
+                print(f"{name:<20} {source}")
 
     elif args.cmd == "add":
-        if args.token:
-            token = args.token
-        elif args.token_env:
-            token = os.environ.get(args.token_env)
+        if args.env:
+            env_var = f"BB_{args.name.upper()}_TOKEN"
+            token = os.environ.get(env_var)
             if not token:
-                print(f"Error: env var {args.token_env} is not set", file=sys.stderr)
+                print(f"Error: {env_var} is not set", file=sys.stderr)
                 sys.exit(1)
-        elif args.prompt:
-            token = getpass.getpass(f"Token for '{args.name}': ")
         else:
-            token = getpass.getpass(f"Token for '{args.name}': ")
-        reg.add_token(args.name, token)
-        print(f"Token stored for: {args.name}")
+            token = getpass.getpass(f"Token for '{args.name}' (input hidden): ")
+        try:
+            _set_token(args.name, token)
+            print(f"Token stored in OS keychain for: {args.name}")
+        except RuntimeError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
 
     elif args.cmd == "remove":
         try:
-            reg.remove(args.name)
-            print(f"Removed: {args.name}")
-        except KeyError as e:
+            _delete_token(args.name)
+            print(f"Removed keychain token for: {args.name}")
+        except RuntimeError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
 
@@ -320,6 +277,39 @@ def _cli():
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
+
+    elif args.cmd == "setup":
+        print("""
+BeigeBox Connections Setup
+──────────────────────────
+Tokens are stored in your OS native keychain (gnome-keyring on Linux,
+Keychain on macOS, Credential Manager on Windows). Nothing is written
+to disk in plaintext.
+
+1. Install keyring support:
+   Linux:          pip install keyring secretstorage
+   macOS/Windows:  pip install keyring
+
+2. Add a connection to config.yaml (no tokens here — metadata only):
+   connections:
+     github:
+       type: bearer
+       base_url: https://api.github.com
+       allowed_paths:
+         - /user/**
+         - /repos/**
+
+3. Store the token securely (prompts with hidden input):
+   python -m beigebox.connections add github
+
+4. Verify:
+   python -m beigebox.connections list
+   python -m beigebox.connections test github --path /user
+
+Headless/server deployments (no keychain available):
+   Set BB_<NAME>_TOKEN environment variables — keyring is tried first,
+   env vars are the fallback.
+""")
 
 
 if __name__ == "__main__":
