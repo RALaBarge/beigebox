@@ -85,15 +85,16 @@ def load_skills(skills_dir: str | Path) -> list[dict]:
 
 
 def skills_to_xml(skills: list[dict]) -> str:
-    """Generate <available_skills> XML block for injection into the system prompt."""
+    """
+    Generate a compact skills list for injection into the system prompt.
+    Only includes names — call read_skill(name) to get full instructions.
+    Keeps the token footprint small so it doesn't crowd out the context window.
+    """
     if not skills:
         return ""
-    lines = ["<available_skills>"]
-    for s in skills:
-        lines.append("  <skill>")
-        lines.append(f"    <name>{s['name']}</name>")
-        lines.append(f"    <description>{s['description']}</description>")
-        lines.append(f"    <location>{s['path']}</location>")
-        lines.append("  </skill>")
-    lines.append("</available_skills>")
-    return "\n".join(lines)
+    names = ", ".join(s["name"] for s in skills)
+    return (
+        f"<available_skills count=\"{len(skills)}\">\n"
+        f"{names}\n"
+        f"</available_skills>"
+    )

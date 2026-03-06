@@ -241,6 +241,7 @@ class Operator:
                         "messages": messages,
                         "temperature": 0,
                         "stream": False,
+                        "options": {"num_ctx": 8192},
                     },
                 )
                 resp.raise_for_status()

@@ -10,8 +10,11 @@ A plugin file must contain exactly one class that ends in "Tool" and has a
 callable .run(self, input: str) -> str method.
 
 Optionally it may define:
-    PLUGIN_NAME   = "my_tool"   # registry key (defaults to snake_case class name)
-    PLUGIN_CONFIG = "my_tool"   # key under tools: in config.yaml (defaults to PLUGIN_NAME)
+    PLUGIN_NAME      = "my_tool"              # registry key (defaults to snake_case class name)
+    PLUGIN_CONFIG    = "my_tool"              # key under tools: in config.yaml (defaults to PLUGIN_NAME)
+    PLUGIN_Z_ALIASES = {"roll": "my_tool"}    # z-command aliases → tool name
+                                              # defaults to {PLUGIN_NAME: PLUGIN_NAME}
+                                              # set to {} to suppress auto-registration
 
 Plugin file example
 -------------------
@@ -135,6 +138,22 @@ def load_plugins(plugins_dir: str | Path, tools_cfg: dict) -> dict[str, object]:
             logger.info("Plugin loaded: '%s' ← %s (%s)", plugin_name, py_file.name, cls.__name__)
         except Exception as e:
             logger.error("Plugin: failed to instantiate %s from %s: %s", cls.__name__, py_file.name, e)
+            continue
+
+        # Auto-register z-command aliases so `z: <plugin_name>` works out of the box.
+        # Plugins can override with PLUGIN_Z_ALIASES = {"alias": "tool_name", ...}.
+        # Set PLUGIN_Z_ALIASES = {} to suppress auto-registration.
+        try:
+            from beigebox.agents.zcommand import TOOL_DIRECTIVES
+            z_aliases: dict[str, str] = getattr(
+                module, "PLUGIN_Z_ALIASES", {plugin_name: plugin_name}
+            )
+            for alias, tool in z_aliases.items():
+                if alias not in TOOL_DIRECTIVES:
+                    TOOL_DIRECTIVES[alias] = tool
+                    logger.debug("Plugin z-alias: 'z: %s' → %s", alias, tool)
+        except Exception:
+            pass
 
     if registered:
         logger.info("Plugin loader: registered %d plugin(s): %s", len(registered), list(registered.keys()))

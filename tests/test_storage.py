@@ -209,3 +209,46 @@ def test_export_multiple_conversations(store):
     assert len(store.export_alpaca()) == 3
     assert len(store.export_sharegpt()) == 3
 
+
+# ── get_model_performance / requests_by_day ───────────────────────────────────
+
+def test_model_performance_has_requests_by_day_key(store):
+    """Return value always contains requests_by_day dict."""
+    result = store.get_model_performance()
+    assert "requests_by_day" in result
+    assert isinstance(result["requests_by_day"], dict)
+
+
+def test_model_performance_requests_by_day_counts(store):
+    """requests_by_day counts assistant messages grouped by date."""
+    store.store_message(Message(conversation_id="c1", role="user", content="q", model="m"))
+    store.store_message(Message(conversation_id="c1", role="assistant", content="a", model="m"),
+                        latency_ms=100)
+    store.store_message(Message(conversation_id="c1", role="user", content="q2", model="m"))
+    store.store_message(Message(conversation_id="c1", role="assistant", content="a2", model="m"),
+                        latency_ms=200)
+    result = store.get_model_performance()
+    # Two assistant messages — summed under today's date
+    total = sum(result["requests_by_day"].values())
+    assert total == 2
+
+
+def test_model_performance_requests_by_day_excludes_user_messages(store):
+    """Only assistant messages are counted, not user messages."""
+    store.store_message(Message(conversation_id="c1", role="user", content="q", model="m"))
+    result = store.get_model_performance()
+    assert sum(result["requests_by_day"].values()) == 0
+
+
+def test_model_performance_requests_by_day_empty_store(store):
+    """Empty store returns empty dict for requests_by_day."""
+    result = store.get_model_performance()
+    assert result["requests_by_day"] == {}
+
+
+def test_model_performance_has_by_model_and_days_queried(store):
+    """Existing keys are not broken by the requests_by_day addition."""
+    result = store.get_model_performance()
+    assert "by_model" in result
+    assert "days_queried" in result
+

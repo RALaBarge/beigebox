@@ -201,6 +201,15 @@ def _run(cmd: str, gpu: bool = False) -> str:
         cmd:  Shell command string. Must pass the allowlist.
         gpu:  If True, use the GPU bwrap profile (binds host /dev).
     """
+    # Gate: honour operator.shell.enabled config flag
+    try:
+        from beigebox.config import get_config as _gc
+        if not _gc().get("operator", {}).get("shell", {}).get("enabled", True):
+            _audit_log(cmd, "shell_disabled_by_config", False)
+            return ""
+    except Exception:
+        pass
+
     is_allowed, reason = _is_command_allowed(cmd)
     if not is_allowed:
         _audit_log(cmd, reason, False)

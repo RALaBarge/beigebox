@@ -222,6 +222,19 @@ class SQLiteStore:
                     for r in detail_rows
                 ]
 
+            # Requests per day (all models combined)
+            req_day_rows = conn.execute(
+                f"""SELECT DATE(timestamp) as day, COUNT(*) as requests
+                   FROM messages
+                   WHERE role = 'assistant'
+                     AND latency_ms IS NOT NULL
+                     {ts_clause}
+                   GROUP BY DATE(timestamp)
+                   ORDER BY day""",
+                (ts_filter,),
+            ).fetchall()
+            requests_by_day = {r["day"]: r["requests"] for r in req_day_rows}
+
         def _pct(vals: list[float], p: float) -> float:
             if not vals:
                 return 0.0
@@ -258,7 +271,7 @@ class SQLiteStore:
                 "total_cost_usd":     round(row["total_cost"] or 0, 6),
             }
 
-        return {"by_model": by_model, "days_queried": days}
+        return {"by_model": by_model, "days_queried": days, "requests_by_day": requests_by_day}
 
     def fork_conversation(
         self,

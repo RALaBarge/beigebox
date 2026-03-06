@@ -36,7 +36,27 @@ from beigebox.config import get_config
 logger = logging.getLogger(__name__)
 
 _PKG_DIR = os.path.dirname(__file__)
-_CENTROID_DIR = os.path.join(_PKG_DIR, "centroids")
+_CENTROID_DIR_DEFAULT = os.path.join(_PKG_DIR, "centroids")
+
+
+def _get_centroid_dir() -> str:
+    """
+    Return the centroid directory, preferring the data volume path in Docker.
+    Falls back to the package directory for bare-metal installs.
+    """
+    try:
+        cfg = get_config()
+        data_path = cfg.get("storage", {}).get("path") or cfg.get("storage", {}).get("sqlite_path", "")
+        if data_path:
+            data_dir = os.path.dirname(os.path.abspath(data_path))
+            centroid_dir = os.path.join(data_dir, "centroids")
+            return centroid_dir
+    except Exception:
+        pass
+    return _CENTROID_DIR_DEFAULT
+
+
+_CENTROID_DIR = _get_centroid_dir()
 
 
 @dataclass
@@ -340,11 +360,9 @@ class EmbeddingClassifier:
             np.save(path, centroid)
             logger.info("Centroid saved: %s (dim=%d)", path, len(centroid))
 
-        # Keep backward-compat binary centroids
-        self._simple_centroid = self._centroids.get("simple") or \
-            np.load(os.path.join(_CENTROID_DIR, "simple_centroid.npy"))
-        self._complex_centroid = self._centroids.get("complex") or \
-            np.load(os.path.join(_CENTROID_DIR, "complex_centroid.npy"))
+        # Keep backward-compat aliases
+        self._simple_centroid = self._centroids.get("simple")
+        self._complex_centroid = self._centroids.get("complex")
 
         return True
 

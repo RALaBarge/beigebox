@@ -8,6 +8,7 @@ modified) bytes to stdout.
 ABI: WASI stdio
   - transform_response: input is JSON-encoded response dict, output is JSON
   - transform_text:     input is UTF-8 text, output is UTF-8 text
+  - transform_input:    input is raw bytes (e.g. PDF), output is UTF-8 text
   - Timeout: if a module exceeds timeout_ms the original content passes through
 
 Any failure (load error, exec error, bad output, timeout) is silently swallowed —
@@ -20,6 +21,8 @@ import logging
 import os
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
+
+from beigebox.config import get_runtime_config
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +180,8 @@ class WasmRuntime:
             return data
 
         input_bytes = json.dumps(data).encode()
-        timeout_s = self._timeout_ms / 1000.0
+        timeout_ms = get_runtime_config().get("wasm_timeout_ms", self._timeout_ms)
+        timeout_s = timeout_ms / 1000.0
 
         try:
             loop = asyncio.get_event_loop()
@@ -196,7 +200,7 @@ class WasmRuntime:
         except asyncio.TimeoutError:
             logger.warning(
                 "WASM module '%s' timed out after %dms — passing through",
-                effective, self._timeout_ms,
+                effective, timeout_ms,
             )
             return data
         except (json.JSONDecodeError, ValueError) as e:
@@ -211,6 +215,53 @@ class WasmRuntime:
             )
             return data
 
+    async def transform_input(self, module_name: str, raw_bytes: bytes) -> str:
+        """
+        Pre-process raw input bytes through a WASM module (e.g. PDF → markdown).
+
+        raw_bytes → module stdin.
+        Module stdout decoded as UTF-8 → returned string.
+        Returns empty string on timeout, decode error, or any failure.
+        """
+        effective = self._effective_module(module_name)
+        if not self._enabled or not effective:
+            return ""
+
+        timeout_ms = get_runtime_config().get("wasm_timeout_ms", self._timeout_ms)
+        timeout_s = timeout_ms / 1000.0
+
+        try:
+            loop = asyncio.get_event_loop()
+            output_bytes = await asyncio.wait_for(
+                loop.run_in_executor(
+                    self._executor, self._run_wasm_sync, effective, raw_bytes
+                ),
+                timeout=timeout_s,
+            )
+            result = output_bytes.decode("utf-8")
+            logger.debug(
+                "WASM '%s' transform_input: %d bytes in → %d chars out",
+                effective, len(raw_bytes), len(result),
+            )
+            return result
+        except asyncio.TimeoutError:
+            logger.warning(
+                "WASM module '%s' timed out after %dms — returning empty",
+                effective, timeout_ms,
+            )
+            return ""
+        except UnicodeDecodeError as e:
+            logger.warning(
+                "WASM module '%s' output is not valid UTF-8: %s — returning empty",
+                effective, e,
+            )
+            return ""
+        except Exception as e:
+            logger.warning(
+                "WASM transform_input failed (%s): %s — returning empty", effective, e
+            )
+            return ""
+
     async def transform_text(self, module_name: str, text: str) -> str:
         """
         Transform a text string through a WASM module.
@@ -224,7 +275,8 @@ class WasmRuntime:
             return text
 
         input_bytes = text.encode("utf-8")
-        timeout_s = self._timeout_ms / 1000.0
+        timeout_ms = get_runtime_config().get("wasm_timeout_ms", self._timeout_ms)
+        timeout_s = timeout_ms / 1000.0
 
         try:
             loop = asyncio.get_event_loop()
@@ -243,7 +295,7 @@ class WasmRuntime:
         except asyncio.TimeoutError:
             logger.warning(
                 "WASM module '%s' timed out after %dms — passing through",
-                effective, self._timeout_ms,
+                effective, timeout_ms,
             )
             return text
         except UnicodeDecodeError as e:
@@ -258,6 +310,47 @@ class WasmRuntime:
             )
             return text
 
+    def enable(self, cfg: dict) -> bool:
+        """
+        Lazy-initialize engine and load modules from cfg.
+        Safe to call even if already enabled — re-reads modules from disk.
+        Returns True if engine is available after the call.
+        """
+        if self._engine is None:
+            self._cfg = cfg.get("wasm", {})
+            self._timeout_ms = self._cfg.get("timeout_ms", 500)
+            self._modules_cfg = self._cfg.get("modules", {})
+            self._default_module = self._cfg.get("default_module", "")
+            self._init_engine()
+        if self._engine:
+            self._load_modules()
+            self._enabled = True
+        logger.info("WasmRuntime: enabled=%s modules=%s", self._enabled, list(self._loaded.keys()))
+        return self._enabled
+
+    def disable(self) -> None:
+        """Disable WASM transforms without unloading modules."""
+        self._enabled = False
+        logger.info("WasmRuntime: disabled")
+
+    def reload(self) -> list[str]:
+        """
+        Reload all modules from disk, re-reading config for updated paths/enabled flags.
+        Safe to call at runtime — existing loaded dict is replaced atomically.
+        Returns list of successfully loaded module names.
+        """
+        from beigebox.config import get_config
+        fresh = get_config()
+        self._cfg = fresh.get("wasm", {})
+        self._modules_cfg = self._cfg.get("modules", {})
+        self._default_module = self._cfg.get("default_module", "")
+        self._loaded.clear()
+        if self._engine:
+            self._load_modules()
+        loaded = list(self._loaded.keys())
+        logger.info("WasmRuntime: reloaded — modules: %s", loaded)
+        return loaded
+
     def list_modules(self) -> list[str]:
         """Return names of all successfully loaded modules."""
         return list(self._loaded.keys())
@@ -265,3 +358,11 @@ class WasmRuntime:
     @property
     def enabled(self) -> bool:
         return self._enabled
+
+    @property
+    def default_module(self) -> str:
+        return self._default_module
+
+    @default_module.setter
+    def default_module(self, value: str) -> None:
+        self._default_module = value

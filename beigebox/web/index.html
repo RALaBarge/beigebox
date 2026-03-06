@@ -557,6 +557,24 @@
   }
   .chat-pane-messages::-webkit-scrollbar { width: 4px; }
   .chat-pane-messages::-webkit-scrollbar-thumb { background: var(--bg-border); }
+  .chat-pane-messages.drag-over { outline: 2px dashed var(--accent); outline-offset: -4px; background: rgba(255,255,255,0.03); }
+
+  /* ── Attachment pills ───────────────────────────────────────────────── */
+  .pane-attachments {
+    display: flex; flex-wrap: wrap; gap: 4px;
+    padding: 4px 8px; min-height: 0;
+    border-top: 1px solid var(--bg-border);
+  }
+  .pane-attachments:empty { display: none; }
+  .attach-pill {
+    display: flex; align-items: center; gap: 4px;
+    background: var(--bg-border); border-radius: 4px;
+    padding: 2px 6px; font-size: 11px; color: var(--fg-muted);
+    max-width: 180px; overflow: hidden;
+  }
+  .attach-pill .pill-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .attach-pill .pill-rm { cursor: pointer; opacity: 0.6; flex-shrink: 0; }
+  .attach-pill .pill-rm:hover { opacity: 1; color: var(--fg); }
 
   /* ── Pane settings drawer ────────────────────────────────────────────── */
   .pane-settings-drawer {
@@ -1714,6 +1732,15 @@ const TOOLTIPS = {
   auto_keep_last:              'Number of most-recent messages preserved verbatim after summarization.',
   // Routing
   force_route:                 'Pin every session to a specific routing bucket, overriding the decision LLM.',
+  force_decision:              'Skip session cache and embedding classifier — always run the decision LLM on every request.',
+  border_threshold:            'Embedding classifier confidence gap below which a request is considered borderline and escalated to the decision LLM. Lower = more escalations. (default ~0.04)',
+  agentic_threshold:           'Minimum score from the keyword agentic-intent scorer to treat a message as agentic (0.0–1.0). (default 0.5)',
+  backends_enabled:            'Enable/disable multi-backend routing. When off, all requests go directly to the primary backend URL.',
+  // Decision LLM tuning
+  decision_llm_timeout:        'Override the decision LLM HTTP timeout in seconds. Lower = faster fallback on slow models.',
+  // WASM
+  wasm_enabled:                'Enable/disable the WASM post-processing pipeline. Lazy-initialises the engine on first enable.',
+  wasm_timeout_ms:             'Abort a WASM module call and pass the response through unmodified if it exceeds this (ms).',
   // Logging
   log_level:                   'Verbosity of server-side logs: DEBUG → INFO → WARNING → ERROR.',
   // Web UI
@@ -1996,6 +2023,7 @@ async function loadDashboard() {
     if (!perfData || !perfData.enabled || !Object.keys(perfData.by_model || {}).length) {
       html += '<div class="cost-disabled">No latency data yet — recorded on non-streaming requests via the multi-backend router.</div>';
     } else {
+      html += '<div class="chart-wrap"><div class="chart-title">Requests by Day</div><canvas class="bb-chart" id="chart-req-day" height="90"></canvas></div>';
       html += '<div class="chart-wrap"><div class="chart-title">Avg Latency by Model (ms)</div><canvas class="bb-chart" id="chart-latency" height="' + Math.max(60, Object.keys(perfData.by_model).length * 28) + '"></canvas></div>';
       html += '<div class="chart-wrap"><div class="chart-title">Tokens / sec by Model</div><canvas class="bb-chart" id="chart-tps" height="' + Math.max(60, Object.keys(perfData.by_model).length * 28) + '"></canvas></div>';
       // Stats table
@@ -2034,12 +2062,75 @@ async function loadDashboard() {
       renderModelChart(c30.by_model || {});
     }
     if (perfData?.enabled && Object.keys(perfData.by_model || {}).length) {
+      renderReqDayChart(perfData.requests_by_day || {});
       renderLatencyChart(perfData.by_model || {});
       renderTpsChart(perfData.by_model || {});
     }
   } catch(e) {
     el.innerHTML = `<div class="error-box">Failed to load dashboard: ${esc(e.message)}</div>`;
   }
+}
+
+// ── Requests/day chart ───────────────────────────────────────────────────────
+
+function renderReqDayChart(byDay) {
+  const canvas = document.getElementById('chart-req-day');
+  if (!canvas) return;
+
+  const today = new Date();
+  const labels = [], values = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(today.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    labels.push(key.slice(5));
+    values.push(byDay[key] || 0);
+  }
+
+  const maxVal = Math.max(...values, 1);
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.offsetWidth || canvas.parentElement.offsetWidth || 600;
+  const H = parseInt(canvas.getAttribute('height')) || 90;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.height = H + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const PAD_L = 40, PAD_R = 8, PAD_T = 8, PAD_B = 22;
+  const chartW = W - PAD_L - PAD_R;
+  const chartH = H - PAD_T - PAD_B;
+  const barW   = Math.max(2, chartW / labels.length - 2);
+  const gap    = chartW / labels.length;
+
+  const styles = getComputedStyle(document.documentElement);
+  const borderClr = styles.getPropertyValue('--bg-border').trim() || '#2E2E2E';
+  const mutedClr  = styles.getPropertyValue('--fg-muted').trim() || '#4C5460';
+  const accentClr = styles.getPropertyValue('--cyan').trim() || '#89DCEB';
+
+  ctx.strokeStyle = borderClr; ctx.lineWidth = 1;
+  for (let g = 0; g <= 4; g++) {
+    const y = PAD_T + chartH - (g / 4) * chartH;
+    ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(PAD_L + chartW, y); ctx.stroke();
+    if (g > 0) {
+      ctx.fillStyle = mutedClr; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+      ctx.fillText(Math.round(maxVal * g / 4), PAD_L - 4, y + 3);
+    }
+  }
+
+  labels.forEach((label, i) => {
+    const v    = values[i];
+    const barH = (v / maxVal) * chartH;
+    const x    = PAD_L + i * gap + (gap - barW) / 2;
+    const y    = PAD_T + chartH - barH;
+    ctx.fillStyle = v > 0 ? accentClr : borderClr;
+    ctx.fillRect(x, y, barW, barH);
+    if (i % 5 === 0 || i === labels.length - 1) {
+      ctx.fillStyle = mutedClr; ctx.font = '8px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(label, x + barW / 2, H - PAD_B + 12);
+    }
+  });
 }
 
 // ── Cost chart renderers ──────────────────────────────────────────────────────
@@ -2405,13 +2496,24 @@ function renderChatPanes() {
         <button onclick="clearPane(${pane.id})" title="Clear this pane">✕</button>
       </div>
       ${renderPaneSettingsDrawer(pane)}
-      <div class="chat-pane-messages" id="pane-msgs-${pane.id}"></div>`;
+      <div class="chat-pane-messages" id="pane-msgs-${pane.id}"
+        ondragover="paneDragOver(event, ${pane.id})"
+        ondragleave="paneDragLeave(event, ${pane.id})"
+        ondrop="paneDrop(event, ${pane.id})"></div>
+      <div class="pane-attachments" id="pane-attach-${pane.id}"></div>`;
 
     container.appendChild(div);
 
     // Re-render history
     const msgArea = div.querySelector(`#pane-msgs-${pane.id}`);
-    pane.history.forEach(m => appendMsgToPane(pane.id, m.role, m.content, m.model || '', msgArea));
+    pane.history.forEach(m => {
+      // Use _display label for multimodal messages (content is an array)
+      const displayText = m._display || (Array.isArray(m.content)
+        ? m.content.filter(p => p.type === 'text').map(p => p.text).join('\n')
+        : m.content);
+      appendMsgToPane(pane.id, m.role, displayText, m.model || '', msgArea);
+    });
+    renderAttachmentPills(pane.id);
     // Restore in-flight stream as a live partial bubble
     if (pane._streaming) {
       const sd = document.createElement('div');
@@ -2651,6 +2753,94 @@ async function loadModels() {
   await loadModelsForPanes();
 }
 
+// ── Attachment / drag-drop ────────────────────────────────────────────────
+
+function paneDragOver(e, paneId) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+  document.getElementById(`pane-msgs-${paneId}`)?.classList.add('drag-over');
+}
+
+function paneDragLeave(e, paneId) {
+  document.getElementById(`pane-msgs-${paneId}`)?.classList.remove('drag-over');
+}
+
+async function paneDrop(e, paneId) {
+  e.preventDefault();
+  document.getElementById(`pane-msgs-${paneId}`)?.classList.remove('drag-over');
+  const files = Array.from(e.dataTransfer.files);
+  if (!files.length) return;
+  await handlePaneDrop(paneId, files);
+}
+
+async function handlePaneDrop(paneId, files) {
+  const pane = chatPanes.find(p => p.id === paneId);
+  if (!pane) return;
+  if (!pane._attachments) pane._attachments = [];
+
+  const area = document.getElementById(`pane-msgs-${paneId}`);
+  const statusId = `attach-status-${paneId}-${Date.now()}`;
+  area?.insertAdjacentHTML('beforeend',
+    `<div class="typing-indicator" id="${statusId}"><span></span><span></span><span></span></div>`);
+
+  for (const file of files) {
+    const ext = file.name.split('.').pop().toLowerCase();
+
+    if (ext === 'pdf') {
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        const resp = await fetch(BASE + '/api/v1/transform/pdf', { method: 'POST', body: fd });
+        const d = await resp.json();
+        if (d.ok && d.text) {
+          pane._attachments.push({ type: 'pdf', name: file.name, text: d.text, chars: d.chars });
+        } else {
+          appendMsgToPane(paneId, 'assistant', `PDF extract failed: ${d.error || 'unknown'}`, 'system', area);
+        }
+      } catch (err) {
+        appendMsgToPane(paneId, 'assistant', `PDF upload error: ${err.message}`, 'system', area);
+      }
+
+    } else if (['png','jpg','jpeg','gif','webp'].includes(ext)) {
+      const b64 = await new Promise((res, rej) => {
+        const fr = new FileReader();
+        fr.onload = () => res(fr.result);
+        fr.onerror = rej;
+        fr.readAsDataURL(file);
+      });
+      pane._attachments.push({ type: 'image', name: file.name, dataUrl: b64 });
+
+    } else {
+      // Plain text / code / markdown — read as text
+      const text = await file.text();
+      pane._attachments.push({ type: 'text', name: file.name, text });
+    }
+  }
+
+  document.getElementById(statusId)?.remove();
+  renderAttachmentPills(paneId);
+}
+
+function renderAttachmentPills(paneId) {
+  const pane = chatPanes.find(p => p.id === paneId);
+  const el = document.getElementById(`pane-attach-${paneId}`);
+  if (!el) return;
+  const atts = pane?._attachments || [];
+  el.innerHTML = atts.map((a, i) => `
+    <div class="attach-pill" title="${esc(a.name)}">
+      <span>${a.type === 'image' ? '🖼' : a.type === 'pdf' ? '📄' : '📎'}</span>
+      <span class="pill-name">${esc(a.name)}</span>
+      ${a.chars ? `<span style="opacity:0.5">${(a.chars/1000).toFixed(1)}k</span>` : ''}
+      <span class="pill-rm" onclick="removePaneAttachment(${paneId},${i})" title="Remove">✕</span>
+    </div>`).join('');
+}
+
+function removePaneAttachment(paneId, idx) {
+  const pane = chatPanes.find(p => p.id === paneId);
+  if (pane?._attachments) pane._attachments.splice(idx, 1);
+  renderAttachmentPills(paneId);
+}
+
 function autoResize(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 120) + 'px';
@@ -2697,9 +2887,40 @@ async function sendToPane(pane, text, forceOp) {
   const area = document.getElementById(`pane-msgs-${pane.id}`);
   if (!area) return;
 
-  // Add user message
-  pane.history.push({ role: 'user', content: text });
-  appendMsgToPane(pane.id, 'user', text, '', area);
+  // Collect and clear attachments before building the message
+  const attachments = pane._attachments || [];
+  pane._attachments = [];
+
+  // Build user content — plain text or multimodal array
+  let userContent;
+  if (attachments.length === 0) {
+    userContent = text;
+  } else {
+    // Start with text parts from PDFs/files, then the user message, then images
+    const parts = [];
+    for (const a of attachments) {
+      if (a.type === 'pdf' || a.type === 'text') {
+        parts.push({ type: 'text', text: `[${a.name}]\n${a.text}` });
+      }
+    }
+    parts.push({ type: 'text', text });
+    for (const a of attachments) {
+      if (a.type === 'image') {
+        parts.push({ type: 'image_url', image_url: { url: a.dataUrl } });
+      }
+    }
+    userContent = parts;
+  }
+
+  // Display label for history (always text for chat bubble readability)
+  const displayLabel = attachments.length
+    ? `[${attachments.map(a => a.name).join(', ')}]\n${text}`
+    : text;
+
+  // Add user message to history (store text content for replay; multimodal stored separately)
+  pane.history.push({ role: 'user', content: userContent, _display: displayLabel });
+  appendMsgToPane(pane.id, 'user', displayLabel, '', area);
+  renderAttachmentPills(pane.id);
 
   // Typing indicator
   const typingId = `typing-${pane.id}-${Date.now()}`;
@@ -2713,7 +2934,7 @@ async function sendToPane(pane, text, forceOp) {
       const d = await api('/api/v1/operator', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: text }),
+        body: JSON.stringify({ query: typeof userContent === 'string' ? userContent : text }),
       });
       document.getElementById(typingId)?.remove();
       const answer = d.success ? d.answer : `Error: ${d.error}`;
@@ -2725,7 +2946,8 @@ async function sendToPane(pane, text, forceOp) {
       const wc = pane.config || _defaultPaneConfig();
 
       // Build message list — inject per-pane system prompt if set
-      let msgs = pane.history.filter(m => m.role !== 'assistant' || m.content);
+      let msgs = pane.history.filter(m => m.role !== 'assistant' || m.content)
+        .map(m => ({ role: m.role, content: m.content }));  // strip _display
       if (wc.system_prompt) {
         msgs = [{ role: 'system', content: wc.system_prompt },
                 ...msgs.filter(m => m.role !== 'system')];
@@ -3092,6 +3314,7 @@ async function searchConvos() {
         <span class="conv-preview">${matchBadge}<span style="color:${roleColor};font-size:10px">${esc(r.role||'')}</span> ${esc((r.excerpt || '').slice(0,120))}</span>
         <span class="conv-meta">${fmtTs(r.timestamp)} · ${esc(r.model||'')}</span>
         <span class="conv-score">${esc(score)}</span>
+        <button onclick="event.stopPropagation();forkConversation('${esc(r.conversation_id||'')}')" title="Fork this conversation" style="font-size:9px;padding:1px 6px;flex-shrink:0;margin-left:4px">⑂</button>
       </div>`;
     });
     el.innerHTML = html;
@@ -4318,65 +4541,25 @@ async function loadConfig() {
     const SO = (name, open=false) => `<details${open?' open':''} class="cfg-section"><summary class="section-header">${name}</summary>`;
     const SC = '</details>';
 
-    // ── Backend ──────────────────────────────────────────────────────────
-    html += SO('Backend', true);
-    html += kv('backend url', esc(c.backend?.url || '—'));
-    html += kv('embedding model', esc(c.embedding?.model || '—'));
-    html += kv('embedding url', esc(c.embedding?.backend_url || '—'));
+    // ── Routing & Intelligence ────────────────────────────────────────────
+    html += SO('Routing & Intelligence', true);
     html += cfgInput('default_model', 'Default model', c.backend?.default_model || '');
-    html += kv('timeout', `${c.backend?.timeout || 120}s`);
+    html += `<hr style="border:none;border-top:1px solid var(--bg-border);margin:8px 0">`;
+    html += cfgToggle('decision_llm_enabled', 'Decision LLM (judge)', c.decision_llm?.enabled ?? false);
+    html += kv('judge model', esc(c.decision_llm?.model || '—'));
+    html += cfgInput('decision_llm_timeout', 'Judge timeout (s)', c.decision_llm?.timeout ?? 5, 'number');
+    html += cfgToggle('force_decision', 'Force judge every request', c.routing?.force_decision ?? false);
+    html += `<hr style="border:none;border-top:1px solid var(--bg-border);margin:8px 0">`;
+    html += cfgSelect('force_route', 'Force route', c.routing?.force_route || '',
+                      ['', 'simple', 'complex', 'code', 'large', 'fast']);
+    html += cfgInput('border_threshold',  'Classifier border threshold', c.routing?.border_threshold  ?? '', 'number');
+    html += cfgInput('agentic_threshold', 'Agentic scorer threshold',    c.routing?.agentic_threshold ?? '', 'number');
+    html += kv('session TTL', `${c.routing?.session_ttl_seconds || 1800}s`);
     html += SC;
 
-    // ── Server ───────────────────────────────────────────────────────────
-    html += SO('Server');
-    html += kv('host', esc(c.server?.host || '0.0.0.0'));
-    html += kv('port', String(c.server?.port || 8000));
-    html += SC;
-
-    // ── Storage ──────────────────────────────────────────────────────────
-    html += SO('Storage');
-    html += kv('sqlite path', esc(c.storage?.sqlite_path || '—'));
-    html += kv('chroma path', esc(c.storage?.chroma_path || '—'));
-    html += cfgToggle('log_conversations', 'Log conversations', c.storage?.log_conversations ?? true);
-    html += SC;
-
-    // ── Decision LLM ─────────────────────────────────────────────────────
-    html += SO('Decision LLM');
-    html += cfgToggle('decision_llm_enabled', 'Enabled', c.decision_llm?.enabled ?? false);
-    html += kv('model', esc(c.decision_llm?.model || '—'));
-    html += kv('timeout', `${c.decision_llm?.timeout || 5}s`);
-    html += kv('max tokens', String(c.decision_llm?.max_tokens || 256));
-    html += SC;
-
-    // ── Operator ─────────────────────────────────────────────────────────
-    html += SO('Operator');
-    html += cfgToggle('operator_enabled', 'Enabled (LLM-driven tool execution)', c.operator?.enabled ?? false);
-    html += kv('model', esc(c.operator?.model || '—'));
-    html += kv('max iterations', String(c.operator?.max_iterations || 10));
-    html += kv('shell', badge(c.operator?.shell_enabled));
-    html += SC;
-
-    // ── Tools ────────────────────────────────────────────────────────────
-    html += SO('Tools');
-    html += cfgToggle('tools_enabled', 'Tools master switch', c.tools?.enabled ?? false);
-    const toolList = Object.keys(c.tools || {}).filter(k => k !== 'enabled');
-    if (toolList.length) html += kv('registered', toolList.map(n=>`<span class="badge badge-ok">${esc(n)}</span>`).join(' '));
-    if (c.tools?.web_search)  html += kv('web_search',  badge(c.tools.web_search.enabled));
-    if (c.tools?.web_scraper) html += kv('web_scraper', badge(c.tools.web_scraper.enabled));
-    if (c.tools?.calculator)  html += kv('calculator',  badge(c.tools.calculator?.enabled));
-    if (c.tools?.datetime)    html += kv('datetime',    badge(c.tools.datetime?.enabled));
-    if (c.tools?.system_info) html += kv('system_info', badge(c.tools.system_info?.enabled));
-    if (c.tools?.memory)      html += kv('memory',      badge(c.tools.memory?.enabled));
-    html += SC;
-
-    // ── Feature Flags ────────────────────────────────────────────────────
-    html += SO('Feature Flags', true);
-    html += cfgToggle('cost_tracking_enabled', 'Cost tracking', c.cost_tracking?.enabled ?? false);
-    html += `<div id="sub-cost_tracking_enabled" style="display:${c.cost_tracking?.enabled ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
-    html += cfgToggle('cost_track_openrouter', 'Track OpenRouter', c.cost_tracking?.track_openrouter ?? true);
-    html += cfgToggle('cost_track_local',      'Track local (Ollama)', c.cost_tracking?.track_local ?? false);
-    html += '</div>';
-    html += cfgToggle('harness_enabled', 'Harness', c.harness?.enabled ?? true);
+    // ── Features ─────────────────────────────────────────────────────────
+    html += SO('Features', true);
+    html += cfgToggle('harness_enabled', 'Harness orchestrator', c.harness?.enabled ?? true);
     html += cfgToggle('conversation_replay_enabled', 'Conversation replay', c.conversation_replay?.enabled ?? false);
     html += cfgToggle('auto_summarization_enabled', 'Auto-summarization', c.auto_summarization?.enabled ?? false);
     html += `<div id="sub-auto_summarization_enabled" style="display:${c.auto_summarization?.enabled ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
@@ -4384,59 +4567,101 @@ async function loadConfig() {
     html += cfgInput('auto_summary_model', 'Summary model',          c.auto_summarization?.summary_model ?? '');
     html += cfgInput('auto_keep_last',     'Keep last N messages',   c.auto_summarization?.keep_last ?? 4, 'number');
     html += '</div>';
+    html += cfgToggle('operator_enabled', 'Operator (LLM-driven tools)', c.operator?.enabled ?? false);
+    html += kv('operator model', esc(c.operator?.model || '—'));
+    html += kv('max iterations', String(c.operator?.max_iterations || 10));
+    html += kv('shell', badge(c.operator?.shell_enabled));
+    html += cfgToggle('tools_enabled', 'Tools master switch', c.tools?.enabled ?? false);
+    const toolList = Object.keys(c.tools || {}).filter(k => !['enabled','webhook_url'].includes(k));
+    if (toolList.length) {
+      const toolBadges = toolList.map(n => {
+        const on = c.tools[n]?.enabled !== false;
+        return `<span class="badge ${on ? 'badge-ok' : ''}" style="opacity:${on ? 1 : 0.45}">${esc(n)}</span>`;
+      }).join(' ');
+      html += kv('tools', toolBadges);
+    }
     html += SC;
 
-    // ── Routing ──────────────────────────────────────────────────────────
-    html += SO('Routing');
-    html += cfgSelect('force_route', 'Force route', c.routing?.force_route || '',
-                      ['', 'simple', 'complex', 'code', 'large', 'fast']);
-    html += kv('session TTL', `${c.routing?.session_ttl_seconds || 1800}s`);
+    // ── Session ───────────────────────────────────────────────────────────
+    html += SO('Session', true);
+    html += cfgInput('system_prompt_prefix', 'System prompt prefix', c.runtime?.system_prompt_prefix || '');
+    html += cfgToggle('system_context_enabled', 'Inject system_context.md into every request', c.system_context?.enabled ?? false);
+    html += `<div id="sub-system_context_enabled" style="display:${c.system_context?.enabled ? 'block' : 'none'};margin-left:16px;margin-top:6px">`;
+    html += `<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Path: <code>${esc(c.system_context?.path || './system_context.md')}</code> — hot-reloaded on every request</div>`;
+    html += `<textarea id="cfg-system-context-content" rows="6" style="width:100%;font-family:monospace;font-size:12px;background:var(--bg2);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:6px;resize:vertical;box-sizing:border-box" placeholder="You are a helpful assistant specialising in..."></textarea>`;
+    html += `<div style="margin-top:4px;display:flex;gap:8px"><button class="action-btn" onclick="loadSystemContext()">↓ Load current</button><button class="action-btn" onclick="saveSystemContext()">↑ Save context</button></div>`;
+    html += '</div>';
     html += SC;
 
-    // ── Backends + OpenRouter (unified wrapper when active) ───────────────
+    // ── Generation Parameters ─────────────────────────────────────────────
+    html += SO('Generation Parameters');
+    html += `<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Override parameters injected into every proxied request. Leave blank to let the frontend decide.</div>`;
+    html += cfgToggle('gen_force', 'Force override (override even frontend-set values)', c.generation?.force ?? false);
+    const genNum = (k, label, val, step='any', min='', max='') =>
+      `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">` +
+      `<label style="width:140px;font-size:12px;color:var(--muted)">${label}</label>` +
+      `<input id="cfg-${k}" type="number" step="${step}" ${min !== '' ? `min="${min}"` : ''} ${max !== '' ? `max="${max}"` : ''}` +
+      ` value="${val ?? ''}" placeholder="unset" style="width:90px;background:var(--bg2);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px">` +
+      `</div>`;
+    html += genNum('gen_temperature',    'Temperature',     c.generation?.temperature,    '0.01', '0', '2');
+    html += genNum('gen_top_p',          'Top P',           c.generation?.top_p,          '0.01', '0', '1');
+    html += genNum('gen_top_k',          'Top K',           c.generation?.top_k,          '1',    '0');
+    html += genNum('gen_num_ctx',        'Context window',  c.generation?.num_ctx,        '128',  '512');
+    html += genNum('gen_repeat_penalty', 'Repeat penalty',  c.generation?.repeat_penalty, '0.01', '0');
+    html += genNum('gen_max_tokens',     'Max tokens',      c.generation?.max_tokens,     '1',    '1');
+    html += genNum('gen_seed',           'Seed',            c.generation?.seed,           '1',    '0');
+    html += `<div style="margin-top:6px"><button class="action-btn" onclick="resetGenParams()" style="background:var(--warn,#554422);color:var(--fg)">✕ Clear all generation params</button></div>`;
+    html += `<hr style="border:none;border-top:1px solid var(--bg-border);margin:10px 0 8px">`;
+    html += `<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Per-model GPU layer preference — hot-reloaded, no restart. Takes effect on next model load (use ↺ reload in chat pane to force).</div>`;
+    html += `<div id="model-gpu-section"><div class="empty"><span class="spinner"></span> Loading…</div></div>`;
+    html += SC;
+
+    // ── WASM Transforms ───────────────────────────────────────────────────
+    html += SO('WASM Transforms');
+    html += `<div id="wasm-cfg-section"><div class="empty"><span class="spinner"></span> Loading…</div></div>`;
+    html += SC;
+
+    // ── Backends ──────────────────────────────────────────────────────────
     const hasOrBackend = (c.backends || []).some(b => b.provider === 'openrouter');
     const mbActive = c.backends_enabled;
     const mbStyle = mbActive
       ? 'border:1px solid var(--lavender);border-radius:4px;padding:0 8px 8px;box-shadow:0 0 6px var(--lavender)33'
       : '';
-    html += `<details open class="cfg-section"${mbStyle ? ` style="${mbStyle}"` : ''}>`;
-    html += `<summary class="section-header">Multi-Backend${mbActive ? ' <span style="font-size:10px;color:var(--lavender);margin-left:6px">● ON</span>' : ''}</summary>`;
+    html += `<details class="cfg-section"${mbStyle ? ` style="${mbStyle}"` : ''}>`;
+    html += `<summary class="section-header">Backends${mbActive ? ' <span style="font-size:10px;color:var(--lavender);margin-left:6px">● active</span>' : ''}</summary>`;
+    html += cfgToggle('backends_enabled', 'Multi-backend routing', mbActive);
     html += '<div id="backends-section"></div>';
     html += `<div class="section-header" style="margin-top:10px">OpenRouter Models${hasOrBackend && mbActive ? ' <span style="font-size:10px;color:var(--lavender);margin-left:6px">● ON</span>' : ''}</div>`;
     if (!hasOrBackend) {
-      html += `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">No OpenRouter backend configured. Add a backend with <code>provider: openrouter</code> to use this feature.</div>`;
+      html += `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">No OpenRouter backend configured. Add a backend with <code>provider: openrouter</code> to enable.</div>`;
     } else {
       html += `<div id="or-section"><div class="empty"><span class="spinner"></span> Loading…</div></div>`;
     }
     html += SC;
 
-    // ── Model Advertising ─────────────────────────────────────────────────
-    html += SO('Model Advertising');
-    html += kv('mode', esc(c.model_advertising?.mode || '—'));
-    html += kv('prefix', esc(c.model_advertising?.prefix || '—'));
-    html += SC;
-
-    // ── Logging ──────────────────────────────────────────────────────────
-    html += SO('Logging');
+    // ── Observability ─────────────────────────────────────────────────────
+    html += SO('Observability');
+    html += cfgToggle('log_conversations', 'Log conversations to SQLite', c.storage?.log_conversations ?? true);
     html += cfgSelect('log_level', 'Log level', c.logging?.level || 'INFO',
                       ['DEBUG', 'INFO', 'WARNING', 'ERROR']);
     html += kv('log file', esc(c.logging?.file || '—'));
     html += kv('wiretap', esc(c.wiretap?.path || '—'));
+    html += cfgToggle('cost_tracking_enabled', 'Cost tracking', c.cost_tracking?.enabled ?? false);
+    html += `<div id="sub-cost_tracking_enabled" style="display:${c.cost_tracking?.enabled ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
+    html += cfgToggle('cost_track_openrouter', 'Track OpenRouter', c.cost_tracking?.track_openrouter ?? true);
+    html += cfgToggle('cost_track_local',      'Track local (Ollama)', c.cost_tracking?.track_local ?? false);
+    html += '</div>';
     html += SC;
 
-    // ── Web UI ────────────────────────────────────────────────────────────
-    html += SO('Web UI', true);
+    // ── Interface ─────────────────────────────────────────────────────────
+    html += SO('Interface');
     html += cfgSelect('web_ui_palette', 'Palette theme', c.web_ui?.palette || 'default',
                       ['default','phosphor','cobalt','sakura','slate']);
     html += cfgToggle('web_ui_vi_mode', 'Vi mode', c.web_ui?.vi_mode ?? false);
-    html += SC;
-
-    // ── Voice / Audio ─────────────────────────────────────────────────────
-    html += SO('Voice / Audio');
-    html += cfgToggle('voice_enabled', 'Enable mic button / Push-to-talk (requires STT service)', c.web_ui?.voice_enabled ?? false);
+    html += cfgToggle('voice_enabled', 'Push-to-talk (requires STT service)', c.web_ui?.voice_enabled ?? false);
     html += cfgInput('voice_hotkey', 'PTT hotkey (single key, e.g. v)', c.web_ui?.voice_hotkey || '');
     html += cfgInput('stt_url', 'STT service URL', c.voice?.stt_url || '');
-    html += cfgToggle('tts_autoplay', 'Auto-play TTS after each assistant response', c.voice?.tts_autoplay ?? false);
+    html += cfgToggle('tts_autoplay', 'Auto-play TTS after responses', c.voice?.tts_autoplay ?? false);
     html += `<div id="sub-tts_autoplay" style="display:${c.voice?.tts_autoplay ? 'block' : 'none'};margin-left:16px;margin-top:4px;border-left:2px solid var(--bg-border);padding-left:10px">`;
     html += cfgInput('tts_url',   'TTS service URL', c.voice?.tts_url || '');
     html += cfgInput('tts_model', 'TTS model', c.voice?.tts_model || 'tts-1');
@@ -4454,56 +4679,28 @@ async function loadConfig() {
     html += `</div>`;
     html += SC;
 
-    // ── Session Overrides ─────────────────────────────────────────────────
-    html += SO('Session Overrides', true);
-    html += cfgInput('system_prompt_prefix', 'System prompt prefix', c.runtime?.system_prompt_prefix || '');
-    html += SC;
-
-    // ── System Context ────────────────────────────────────────────────────
-    html += SO('System Context');
-    html += cfgToggle('system_context_enabled', 'Inject system_context.md into every request', c.system_context?.enabled ?? false);
-    html += `<div id="sub-system_context_enabled" style="display:${c.system_context?.enabled ? 'block' : 'none'};margin-left:16px;margin-top:6px">`;
-    html += `<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Path: <code>${esc(c.system_context?.path || './system_context.md')}</code> — hot-reloaded on every request</div>`;
-    html += `<textarea id="cfg-system-context-content" rows="6" style="width:100%;font-family:monospace;font-size:12px;background:var(--bg2);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:6px;resize:vertical;box-sizing:border-box" placeholder="You are a helpful assistant specialising in..."></textarea>`;
-    html += `<div style="margin-top:4px;display:flex;gap:8px"><button class="action-btn" onclick="loadSystemContext()">↓ Load current</button><button class="action-btn" onclick="saveSystemContext()">↑ Save context</button></div>`;
-    html += '</div>';
-    html += SC;
-
-    // ── Generation Parameters ─────────────────────────────────────────────
-    html += SO('Generation Parameters', true);
-    html += `<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Override parameters injected into every proxied request. Leave blank to let the frontend decide. <strong>Force override</strong> overrides even frontend-set values.</div>`;
-    html += cfgToggle('gen_force', 'Force override (override even frontend-set values)', c.generation?.force ?? false);
-    const genNum = (k, label, val, step='any', min='', max='') =>
-      `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">` +
-      `<label style="width:140px;font-size:12px;color:var(--muted)">${label}</label>` +
-      `<input id="cfg-${k}" type="number" step="${step}" ${min !== '' ? `min="${min}"` : ''} ${max !== '' ? `max="${max}"` : ''}` +
-      ` value="${val ?? ''}" placeholder="unset" style="width:90px;background:var(--bg2);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px">` +
-      `</div>`;
-    html += genNum('gen_temperature',    'Temperature',     c.generation?.temperature,    '0.01', '0', '2');
-    html += genNum('gen_top_p',          'Top P',           c.generation?.top_p,          '0.01', '0', '1');
-    html += genNum('gen_top_k',          'Top K',           c.generation?.top_k,          '1',    '0');
-    html += genNum('gen_num_ctx',        'Context window',  c.generation?.num_ctx,        '128',  '512');
-    html += genNum('gen_repeat_penalty', 'Repeat penalty',  c.generation?.repeat_penalty, '0.01', '0');
-    html += genNum('gen_max_tokens',     'Max tokens',      c.generation?.max_tokens,     '1',    '1');
-    html += genNum('gen_seed',           'Seed',            c.generation?.seed,           '1',    '0');
-    html += `<div style="margin-top:6px"><button class="action-btn" onclick="resetGenParams()" style="background:var(--warn,#554422);color:var(--fg)">✕ Clear all generation params</button></div>`;
-    html += SC;
-
-    // ── Model GPU/CPU Preferences ──────────────────────────────────────────
-    html += SO('Model GPU / CPU', true);
-    html += `<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Per-model GPU layer preference. Saved to runtime_config — hot-reloaded, no restart needed. Takes effect on next model load (use ↺ reload in chat pane to force).</div>`;
-    html += `<div id="model-gpu-section"><div class="empty"><span class="spinner"></span> Loading…</div></div>`;
+    // ── System (read-only info) ───────────────────────────────────────────
+    html += SO('System');
+    html += `<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Read-only — change these values in config.yaml (requires restart).</div>`;
+    html += kv('backend url', esc(c.backend?.url || '—'));
+    html += kv('backend timeout', `${c.backend?.timeout || 120}s`);
+    html += kv('embedding model', esc(c.embedding?.model || '—'));
+    html += kv('embedding url', esc(c.embedding?.backend_url || '—'));
+    html += kv('host:port', `${c.server?.host || '0.0.0.0'}:${c.server?.port || 8000}`);
+    html += kv('sqlite path', esc(c.storage?.sqlite_path || '—'));
+    html += kv('chroma path', esc(c.storage?.chroma_path || '—'));
+    if (c.model_advertising?.mode && c.model_advertising.mode !== 'hidden') {
+      html += kv('model advertising', esc(c.model_advertising.mode));
+    }
     html += SC;
 
     document.getElementById('config-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
     el.innerHTML = html;
 
-    // Initialize editable backends section
     if (document.getElementById('backends-section')) initBackendsSection(c);
-    // Load OR section if placeholder was rendered
     if (document.getElementById('or-section')) loadOrSection();
-    // Load model GPU preferences section
     loadModelGpuSection();
+    loadWasmCfgSection();
 
     // Wire toggle labels + expand/collapse sub-options
     const toggleIds = [
@@ -4512,6 +4709,7 @@ async function loadConfig() {
       'harness_enabled','operator_enabled',
       'conversation_replay_enabled','auto_summarization_enabled',
       'web_ui_vi_mode','voice_enabled','tts_autoplay','system_context_enabled','gen_force',
+      'force_decision','wasm_enabled',
     ];
     toggleIds.forEach(id => {
       const cb = document.getElementById(`cfg-${id}`);
@@ -4553,11 +4751,13 @@ async function saveConfig() {
     'harness_enabled','operator_enabled',
     'conversation_replay_enabled','auto_summarization_enabled',
     'web_ui_vi_mode','voice_enabled','tts_autoplay','system_context_enabled','gen_force',
+    'force_decision','wasm_enabled','backends_enabled',
   ];
   const strings = [
     'default_model','force_route','log_level','web_ui_palette',
     'voice_hotkey','system_prompt_prefix','auto_summary_model',
     'stt_url','tts_url','tts_model','tts_voice',
+    'wasm_default_module',
   ];
   const numbers = [
     'orchestrator_max_parallel','orchestrator_task_timeout','orchestrator_total_timeout',
@@ -4565,6 +4765,8 @@ async function saveConfig() {
     'gen_temperature','gen_top_p','gen_top_k','gen_num_ctx',
     'gen_repeat_penalty','gen_max_tokens','gen_seed',
     'tts_speed',
+    'decision_llm_timeout','wasm_timeout_ms',
+    'border_threshold','agentic_threshold',
   ];
   bools.forEach(k => { const v = getChecked(k); if (v !== null) payload[k] = v; });
   strings.forEach(k => { const v = getVal(k); if (v !== null) payload[k] = v; });
@@ -4651,6 +4853,104 @@ async function resetGenParams() {
     await api('/api/v1/generation-params/reset', { method: 'POST' });
     if (status) status.textContent = '✓ Generation params cleared';
     setTimeout(() => { loadConfig(); if (status) status.textContent = ''; }, 1000);
+  } catch(e) {
+    if (status) status.textContent = `✗ ${esc(e.message)}`;
+  }
+}
+
+// ── WASM Transforms ───────────────────────────────────────────────────────
+
+async function loadWasmCfgSection() {
+  const el = document.getElementById('wasm-cfg-section');
+  if (!el) return;
+  try {
+    const c = await api('/api/v1/config');
+    const w = c.wasm || {};
+    const loaded = w.modules || [];
+    const cfgModules = w.modules_cfg || {};
+    const enabled = w.enabled;
+    const defaultMod = w.default_module || '';
+
+    let html = '';
+
+    // Enable toggle + reload row
+    const statusColor = enabled && loaded.length > 0 ? 'var(--green)' : 'var(--fg-dim)';
+    const statusText  = loaded.length === 0 ? (enabled ? 'enabled · no modules loaded' : 'disabled')
+                      : `${loaded.length} module${loaded.length > 1 ? 's' : ''} loaded`;
+    html += `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px" title="Toggle WASM transforms on/off (hot-reload, no restart)">
+        <input id="cfg-wasm_enabled" type="checkbox" ${enabled ? 'checked' : ''}
+          style="width:14px;height:14px;cursor:pointer">
+        <span id="cfg-wasm_enabled-lbl" style="color:var(--fg-dim)">${enabled ? 'enabled' : 'disabled'}</span>
+      </label>
+      <span style="color:${statusColor};font-size:11px">${esc(statusText)}</span>
+      <button class="action-btn" onclick="reloadWasmModules()" title="Reload modules from disk without restart" style="font-size:11px;padding:2px 10px">↺ Reload</button>
+      <span id="wasm-reload-status" style="font-size:11px;color:var(--fg-dim)"></span>
+    </div>`;
+
+    // Loaded modules list
+    if (loaded.length > 0) {
+      html += `<div style="font-size:11px;color:var(--fg-dim);margin-bottom:6px">Loaded:</div>`;
+      html += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">`;
+      for (const name of loaded) {
+        const desc = cfgModules[name]?.description || '';
+        html += `<span title="${esc(desc)}" style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:2px 8px;font-size:11px;color:var(--cyan)">${esc(name)}</span>`;
+      }
+      html += `</div>`;
+    }
+
+    // All configured modules (including unloaded)
+    const allMods = Object.keys(cfgModules);
+    if (allMods.length > 0) {
+      html += `<div style="font-size:11px;color:var(--fg-dim);margin-bottom:6px">Configured in config.yaml:</div>`;
+      html += `<table style="font-size:11px;border-collapse:collapse;width:100%;margin-bottom:12px">`;
+      for (const name of allMods) {
+        const m = cfgModules[name];
+        const isLoaded = loaded.includes(name);
+        const dot = isLoaded
+          ? `<span style="color:var(--green)">●</span>`
+          : `<span style="color:var(--fg-dim)">○</span>`;
+        html += `<tr style="border-bottom:1px solid var(--bg-border)">
+          <td style="padding:4px 8px 4px 0;width:16px">${dot}</td>
+          <td style="padding:4px 8px 4px 0;color:var(--cyan);white-space:nowrap">${esc(name)}</td>
+          <td style="padding:4px 8px;color:var(--fg-dim)">${esc(m.description || '')}</td>
+          <td style="padding:4px 0;color:var(--muted);white-space:nowrap">${m.enabled ? '' : '<span style="color:var(--yellow)">disabled</span>'}</td>
+        </tr>`;
+      }
+      html += `</table>`;
+    }
+
+    // Default module + timeout (runtime-configurable)
+    html += `<div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+      <label style="font-size:12px;color:var(--fg-dim);min-width:110px" data-tip="wasm_default_module">Default module</label>
+      <input id="cfg-wasm_default_module" type="text" value="${esc(defaultMod)}"
+        placeholder="none" list="wasm-mod-list"
+        style="width:180px;background:var(--bg2);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px">
+      <datalist id="wasm-mod-list">${loaded.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+      <span style="font-size:10px;color:var(--muted)">always-on transform (overrides per-route)</span>
+    </div>`;
+    html += `<div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+      <label style="font-size:12px;color:var(--fg-dim);min-width:110px" data-tip="wasm_timeout_ms">Timeout (ms)</label>
+      <input id="cfg-wasm_timeout_ms" type="number" value="${esc(String(w.timeout_ms ?? 500))}" min="50" step="50"
+        style="width:90px;background:var(--bg2);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px">
+      <span style="font-size:10px;color:var(--muted)">abort module if it exceeds this (pass-through)</span>
+    </div>`;
+
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div style="font-size:11px;color:var(--red)">Failed to load WASM config: ${esc(e.message)}</div>`;
+  }
+}
+
+async function reloadWasmModules() {
+  const status = document.getElementById('wasm-reload-status');
+  if (status) status.textContent = 'reloading…';
+  try {
+    const d = await api('/api/v1/wasm/reload', { method: 'POST' });
+    if (status) status.textContent = d.modules?.length
+      ? `✓ loaded: ${d.modules.join(', ')}`
+      : '✓ reloaded (no modules enabled)';
+    loadWasmCfgSection();
   } catch(e) {
     if (status) status.textContent = `✗ ${esc(e.message)}`;
   }

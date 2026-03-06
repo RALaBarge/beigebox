@@ -87,6 +87,7 @@ services:
       - ../hooks:/app/hooks:ro
       - ../2600/skills:/app/2600/skills:ro
       - ../workspace/out:/app/workspace/out:rw
+      - ../wasm_modules:/app/wasm_modules:ro
       - type: tmpfs
         target: /app/workspace/in
         tmpfs:

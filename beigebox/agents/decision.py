@@ -224,18 +224,21 @@ class DecisionAgent:
             wasm_module=wasm_module,
         )
 
-    async def decide(self, user_message: str) -> Decision:
+    async def decide(self, user_message: str, timeout: int | None = None) -> Decision:
         """
         Analyze a user message and return a routing Decision.
 
         This calls the decision LLM with a tight prompt and parses the
         JSON response. If anything goes wrong, returns the default.
+
+        timeout: optional override (seconds) — takes precedence over self.timeout.
         """
         if not self.enabled:
             return Decision(model=self.default_model, fallback=True)
 
+        effective_timeout = timeout if timeout is not None else self.timeout
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=effective_timeout) as client:
                 resp = await client.post(
                     f"{self.backend_url}/v1/chat/completions",
                     json={
@@ -266,7 +269,7 @@ class DecisionAgent:
             return decision
 
         except httpx.TimeoutException:
-            logger.warning("Decision LLM timed out after %ds, using default", self.timeout)
+            logger.warning("Decision LLM timed out after %ds, using default", effective_timeout)
             return Decision(model=self.default_model, fallback=True)
         except json.JSONDecodeError as e:
             logger.warning("Decision LLM returned invalid JSON: %s", e)

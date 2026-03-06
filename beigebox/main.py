@@ -465,7 +465,7 @@ async def api_config():
         "decision_llm": {
             "enabled":     rt.get("decision_llm_enabled", decision_agent.enabled if decision_agent else False),
             "model":       decision_agent.model if decision_agent else cfg.get("decision_llm", {}).get("model", ""),
-            "timeout":     cfg.get("decision_llm", {}).get("timeout", 5),
+            "timeout":     rt.get("decision_llm_timeout") or cfg.get("decision_llm", {}).get("timeout", 5),
             "max_tokens":  cfg.get("decision_llm", {}).get("max_tokens", 256),
         },
         # ── Operator ─────────────────────────────────────────────────
@@ -509,6 +509,7 @@ async def api_config():
         "routing": {
             "session_ttl_seconds": cfg.get("routing", {}).get("session_ttl_seconds", 1800),
             "force_route":         rt.get("force_route", ""),
+            "force_decision":      rt.get("force_decision", False),
             "border_threshold":    rt.get("border_threshold"),
             "agentic_threshold":   rt.get("agentic_threshold"),
         },
@@ -546,6 +547,21 @@ async def api_config():
         "system_context": {
             "enabled": rt.get("system_context_enabled", cfg.get("system_context", {}).get("enabled", False)),
             "path":    cfg.get("system_context", {}).get("path", "./system_context.md"),
+        },
+        # ── WASM ──────────────────────────────────────────────────────────────
+        "wasm": {
+            "enabled":        rt.get("wasm_enabled", proxy.wasm_runtime.enabled if proxy else cfg.get("wasm", {}).get("enabled", False)),
+            "timeout_ms":     rt.get("wasm_timeout_ms", cfg.get("wasm", {}).get("timeout_ms", 500)),
+            "modules":        proxy.wasm_runtime.list_modules() if proxy else [],
+            "default_module": rt.get("wasm_default_module") or (proxy.wasm_runtime.default_module if proxy else cfg.get("wasm", {}).get("default_module", "")),
+            "modules_cfg": {
+                name: {
+                    "description": mcfg.get("description", ""),
+                    "enabled":     mcfg.get("enabled", True),
+                    "path":        mcfg.get("path", ""),
+                }
+                for name, mcfg in cfg.get("wasm", {}).get("modules", {}).items()
+            },
         },
         # ── Generation Parameters ─────────────────────────────────────
         "generation": {
@@ -640,6 +656,16 @@ async def api_config_save(request: Request):
         "tts_voice":                    "tts_voice",
         "tts_speed":                    "tts_speed",
         "tts_autoplay":                 "tts_autoplay",
+        # WASM
+        "wasm_default_module":          "wasm_default_module",
+        "wasm_enabled":                 "wasm_enabled",
+        "wasm_timeout_ms":              "wasm_timeout_ms",
+        # Decision LLM tuning
+        "decision_llm_timeout":         "decision_llm_timeout",
+        # Routing
+        "force_decision":               "force_decision",
+        # Multi-backend
+        "backends_enabled":             "backends_enabled",
     }
 
     for key, rt_key in allowed.items():
@@ -662,9 +688,32 @@ async def api_config_save(request: Request):
     if "log_conversations" in updated and proxy:
         proxy.log_enabled = rt.get("log_conversations", proxy.log_enabled)
 
+    if "wasm_default_module" in updated and proxy:
+        proxy.wasm_runtime.default_module = rt.get("wasm_default_module", "")
+
+    if "wasm_enabled" in updated and proxy:
+        new_wasm_enabled = rt.get("wasm_enabled")
+        if new_wasm_enabled is True:
+            proxy.wasm_runtime.enable(get_config())
+        elif new_wasm_enabled is False:
+            proxy.wasm_runtime.disable()
+
     if errors:
         return JSONResponse({"saved": updated, "errors": errors}, status_code=207)
     return JSONResponse({"saved": updated, "ok": True})
+
+
+@app.post("/api/v1/wasm/reload")
+async def api_wasm_reload():
+    """
+    Reload WASM modules from disk without restarting BeigeBox.
+    Re-reads config.yaml for updated paths and enabled flags.
+    Returns the list of successfully loaded module names.
+    """
+    if not proxy:
+        return JSONResponse({"error": "proxy not initialized"}, status_code=503)
+    loaded = proxy.wasm_runtime.reload()
+    return JSONResponse({"ok": True, "modules": loaded})
 
 
 @app.get("/api/v1/system-context")
@@ -1321,7 +1370,7 @@ async def api_harness_orchestrate(request: Request):
                 try:
                     from beigebox.storage.sqlite_store import SQLiteStore
                     cfg = get_config()
-                    store = SQLiteStore(cfg["storage"]["db_path"])
+                    store = SQLiteStore(cfg["storage"].get("sqlite_path") or cfg["storage"].get("path", "./data/beigebox.db"))
                     
                     total_latency = round((time.time() - start_ts) * 1000)
                     final_answer = ""
@@ -1525,7 +1574,7 @@ def get_harness_run(run_id: str):
     try:
         from beigebox.storage.sqlite_store import SQLiteStore
         cfg = get_config()
-        store = SQLiteStore(cfg["storage"]["db_path"])
+        store = SQLiteStore(cfg["storage"].get("sqlite_path") or cfg["storage"].get("path", "./data/beigebox.db"))
         
         run = store.get_harness_run(run_id)
         if not run:
@@ -1576,7 +1625,7 @@ def list_harness_runs(limit: int = 10):
         
         from beigebox.storage.sqlite_store import SQLiteStore
         cfg = get_config()
-        store = SQLiteStore(cfg["storage"]["db_path"])
+        store = SQLiteStore(cfg["storage"].get("sqlite_path") or cfg["storage"].get("path", "./data/beigebox.db"))
         
         runs = store.list_harness_runs(limit=limit)
         
@@ -1875,6 +1924,32 @@ async def api_workspace_upload(file: UploadFile):
         return JSONResponse({"ok": True, "name": filename, "size": len(content)})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/v1/transform/pdf")
+async def api_transform_pdf(file: UploadFile):
+    """
+    Accept a PDF upload and return its text/markdown content via the pdf_oxide
+    WASM module.  Falls back to a plain error if WASM is unavailable.
+
+    Response: {"ok": true, "text": "...", "chars": N, "filename": "..."}
+    """
+    if not proxy:
+        return JSONResponse({"ok": False, "error": "proxy not initialized"}, status_code=503)
+
+    filename = Path(file.filename or "upload.pdf").name
+    raw = await file.read()
+    if not raw:
+        return JSONResponse({"ok": False, "error": "empty file"}, status_code=400)
+
+    text = await proxy.wasm_runtime.transform_input("pdf_oxide", raw)
+    if not text:
+        return JSONResponse(
+            {"ok": False, "error": "pdf_oxide WASM module not loaded or returned empty"},
+            status_code=422,
+        )
+
+    return JSONResponse({"ok": True, "text": text, "chars": len(text), "filename": filename})
 
 
 @app.post("/api/v1/web-ui/toggle-vi-mode")

@@ -140,6 +140,7 @@ def client(tmp_path):
         "operator": {"model": "llama3.2"},
         "backends_enabled": False,
         "cost_tracking": {"enabled": False},
+        "wasm": {"enabled": False, "modules": {}},
     }
 
     rt_path = tmp_path / "runtime_config.yaml"
@@ -167,21 +168,33 @@ def client(tmp_path):
     mock_ec = MagicMock()
     mock_ec.ready = True  # skip auto-build centroids background task
 
+    mock_wasm = MagicMock()
+    mock_wasm.enabled = False
+    mock_wasm.list_modules.return_value = []
+    mock_wasm.default_module = ""
+    mock_proxy = MagicMock()
+    mock_proxy.wasm_runtime = mock_wasm
+
     with patch("beigebox.main.SQLiteStore"), \
          patch("beigebox.main.VectorStore"), \
          patch("beigebox.main.ToolRegistry") as MockTR, \
          patch("beigebox.main.DecisionAgent", mock_da), \
          patch("beigebox.main.HookManager") as MockHM, \
          patch("beigebox.main.get_embedding_classifier", return_value=mock_ec), \
-         patch("beigebox.main.Proxy"), \
+         patch("beigebox.main.Proxy", return_value=mock_proxy), \
          patch("beigebox.main._preload_embedding_model", mock_preload):
 
         MockTR.return_value.list_tools.return_value = []
         MockHM.return_value.list_hooks.return_value = []
 
+        import beigebox.main as main_mod
+        main_mod.proxy = mock_proxy
+
         from beigebox.main import app
         with TestClient(app, raise_server_exceptions=False) as c:
             yield c, rt_path
+
+        main_mod.proxy = None
 
     cfg_mod._config = orig_config
     cfg_mod._RUNTIME_CONFIG_PATH = orig_rt_path
@@ -341,3 +354,53 @@ class TestWebFileServing:
         # Should have dynamic injection logic
         assert "injectViMode" in content
         assert "createElement('script')" in content or 'createElement("script")' in content
+
+    def test_index_html_has_fork_button(self):
+        """Conversation search results must include the ⑂ fork button."""
+        html_path = Path(__file__).parent.parent / "beigebox" / "web" / "index.html"
+        if not html_path.exists():
+            pytest.skip("index.html not found")
+        content = html_path.read_text()
+        assert "forkConversation" in content
+        assert "⑂" in content
+
+    def test_index_html_fork_button_stops_propagation(self):
+        """Fork button must call stopPropagation to avoid triggering replay."""
+        html_path = Path(__file__).parent.parent / "beigebox" / "web" / "index.html"
+        if not html_path.exists():
+            pytest.skip("index.html not found")
+        content = html_path.read_text()
+        assert "stopPropagation" in content
+
+    def test_index_html_has_requests_by_day_chart(self):
+        """Dashboard must include the requests/day chart canvas."""
+        html_path = Path(__file__).parent.parent / "beigebox" / "web" / "index.html"
+        if not html_path.exists():
+            pytest.skip("index.html not found")
+        content = html_path.read_text()
+        assert "chart-req-day" in content
+
+    def test_index_html_has_render_req_day_chart(self):
+        """renderReqDayChart function must exist in index.html."""
+        html_path = Path(__file__).parent.parent / "beigebox" / "web" / "index.html"
+        if not html_path.exists():
+            pytest.skip("index.html not found")
+        content = html_path.read_text()
+        assert "renderReqDayChart" in content
+
+    def test_index_html_has_wasm_section(self):
+        """Config tab must include the WASM Transforms section."""
+        html_path = Path(__file__).parent.parent / "beigebox" / "web" / "index.html"
+        if not html_path.exists():
+            pytest.skip("index.html not found")
+        content = html_path.read_text()
+        assert "loadWasmCfgSection" in content
+        assert "reloadWasmModules" in content
+
+    def test_index_html_wasm_reload_button(self):
+        """WASM config section must include a Reload button."""
+        html_path = Path(__file__).parent.parent / "beigebox" / "web" / "index.html"
+        if not html_path.exists():
+            pytest.skip("index.html not found")
+        content = html_path.read_text()
+        assert "wasm/reload" in content or "reloadWasmModules" in content
