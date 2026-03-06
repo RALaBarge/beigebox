@@ -256,7 +256,9 @@ class Proxy:
         user_msg = self._get_latest_user_message(body)
         if not user_msg:
             return None
-        decision = await self.decision_agent.decide(user_msg)
+        rt = get_runtime_config()
+        timeout_override = rt.get("decision_llm_timeout")
+        decision = await self.decision_agent.decide(user_msg, timeout=timeout_override)
         # Log the decision to wiretap
         if not decision.fallback:
             self.wire.log(
@@ -360,18 +362,22 @@ class Proxy:
           4. Decision LLM (slow path) — only for borderline cases
         Returns (modified body, decision or None).
         """
-        # 0. Session cache — sticky model within a conversation
-        cached_model = self._get_session_model(conversation_id)
-        if cached_model:
-            body["model"] = cached_model
-            self.wire.log(
-                direction="internal",
-                role="decision",
-                content=f"session cache hit: model={cached_model}",
-                model="session-cache",
-                conversation_id=conversation_id,
-            )
-            return body, None
+        rt = get_runtime_config()
+        force_decision = rt.get("force_decision", False)
+
+        # 0. Session cache — sticky model within a conversation (skipped when force_decision)
+        if not force_decision:
+            cached_model = self._get_session_model(conversation_id)
+            if cached_model:
+                body["model"] = cached_model
+                self.wire.log(
+                    direction="internal",
+                    role="decision",
+                    content=f"session cache hit: model={cached_model}",
+                    model="session-cache",
+                    conversation_id=conversation_id,
+                )
+                return body, None
 
         # 1. Z-command takes absolute priority
         if zcmd.active and (zcmd.route or zcmd.model):
@@ -395,8 +401,8 @@ class Proxy:
                     conversation_id="",
                 )
 
-        # 2. Try embedding classifier first (fast path)
-        if self.embedding_classifier and self.embedding_classifier.ready:
+        # 2. Try embedding classifier first (fast path) — skipped when force_decision
+        if not force_decision and self.embedding_classifier and self.embedding_classifier.ready:
             user_msg = self._get_latest_user_message(body)
             if user_msg:
                 emb_result = self.embedding_classifier.classify(user_msg)

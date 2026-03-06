@@ -50,6 +50,10 @@ tools:
     enabled: true
     max_results: 3
     min_score: 0.3
+  browserbox:
+    enabled: true
+    ws_url: ws://host.docker.internal:9009   # relay running on host
+    timeout: 10
   ensemble:
     enabled: false
     judge_model: ""
@@ -85,6 +89,7 @@ operator:
   enabled: true                           # CAUTION: enables LLM-driven tool execution. Review allowed_tools before enabling.
   model: "llama3.2:3b"                   # Defaults to backend.default_model
   max_iterations: 10
+  timeout: 300                            # 5 min — large models (8B+ fp16) need time to load on first inference
   allowed_tools: []                       # Empty = all registered tools. Restrict: ["system_info", "memory", "calculator", "datetime"]
   shell:
     enabled: true
@@ -181,6 +186,37 @@ system_context:
 #   repeat_penalty: ~
 #   max_tokens: ~
 #   seed: ~
+
+# --- WASM Transform Pipeline ---
+wasm:
+  enabled: true
+  timeout_ms: 5000          # PDF parsing can be slow — give it 5s
+  default_module: ""        # No global default; modules selected per-request
+  modules:
+    pdf_oxide:
+      enabled: true
+      path: "/app/wasm_modules/pdf_oxide/pdf-oxide-wasi.wasm"
+      description: "Extract text/markdown from PDF files (pdf_oxide 0.3)"
+    passthrough:
+      enabled: false
+      path: "/app/wasm_modules/passthrough/target/wasm32-wasip1/release/passthrough.wasm"
+      description: "Identity transform — for testing"
+    json_extractor:
+      enabled: false
+      path: "/app/wasm_modules/json_extractor/target/wasm32-wasip1/release/json_extractor.wasm"
+      description: "Extract JSON objects from freeform text"
+    markdown_stripper:
+      enabled: false
+      path: "/app/wasm_modules/markdown_stripper/target/wasm32-wasip1/release/markdown_stripper.wasm"
+      description: "Strip markdown formatting to plain text"
+    opener_strip:
+      enabled: false
+      path: "/app/wasm_modules/opener_strip/target/wasm32-wasip1/release/opener_strip.wasm"
+      description: "Strip verbose opening phrases from responses"
+    pii_redactor:
+      enabled: false
+      path: "/app/wasm_modules/pii_redactor/target/wasm32-wasip1/release/pii_redactor.wasm"
+      description: "Redact PII (emails, phone numbers, SSNs) from text"
 
 # --- Voice (Push-to-talk + TTS autoplay) ---
 voice:

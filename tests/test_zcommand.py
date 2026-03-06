@@ -77,3 +77,36 @@ class TestZCommandParsing:
         assert cmd.active
         assert "system_info" in cmd.tools
         assert cmd.message == ""
+
+
+# ── z: fork parsing ───────────────────────────────────────────────────────────
+
+class TestZForkParsing:
+    def test_fork_sets_is_fork(self):
+        cmd = parse_z_command("z: fork")
+        assert cmd.active
+        assert cmd.is_fork is True
+
+    def test_fork_is_not_route(self):
+        cmd = parse_z_command("z: fork")
+        assert cmd.route == ""
+        assert cmd.tools == []
+
+    def test_fork_trailing_message(self):
+        """Any text after 'fork' becomes the message."""
+        cmd = parse_z_command("z: fork start fresh on the auth refactor")
+        assert cmd.is_fork is True
+        assert "fresh" in cmd.message
+
+    def test_fork_raw_directives(self):
+        cmd = parse_z_command("z: fork")
+        assert cmd.raw_directives == "fork"
+
+    def test_non_fork_does_not_set_is_fork(self):
+        cmd = parse_z_command("z: simple hello")
+        assert cmd.is_fork is False
+
+    def test_no_z_prefix_is_not_fork(self):
+        cmd = parse_z_command("fork this idea please")
+        assert cmd.is_fork is False
+        assert cmd.active is False

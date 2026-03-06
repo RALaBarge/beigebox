@@ -375,22 +375,33 @@ zcommands:
 
 wasm:
   enabled: false
-  modules_dir: "./wasm_modules"      # informational; actual path is per-module below
   modules:
+    pdf_oxide:
+      path: "./wasm_modules/pdf_oxide/pdf-oxide-wasi.wasm"
+      enabled: true
+      description: "Extract text/markdown from PDF files (pdf_oxide 0.3)"
     passthrough:
-      path: "./wasm_modules/passthrough.wasm"
+      path: "./wasm_modules/passthrough/target/wasm32-wasip1/release/passthrough.wasm"
       enabled: false
       description: "Identity transform — passes response through unmodified (reference impl)"
     opener_strip:
-      path: "./wasm_modules/opener_strip.wasm"
+      path: "./wasm_modules/opener_strip/target/wasm32-wasip1/release/opener_strip.wasm"
       enabled: false
       description: "Strip sycophantic opener phrases (Certainly!, Of course!, etc.)"
-    # pii_redactor:
-    #   path: "./wasm_modules/pii_redactor.wasm"
-    #   enabled: false
-    #   description: "Strip PII from responses"
+    pii_redactor:
+      path: "./wasm_modules/pii_redactor/target/wasm32-wasip1/release/pii_redactor.wasm"
+      enabled: false
+      description: "Redact PII (emails, phones, SSNs, credit cards) from responses"
+    json_extractor:
+      path: "./wasm_modules/json_extractor/target/wasm32-wasip1/release/json_extractor.wasm"
+      enabled: false
+      description: "Extract first valid JSON block from mixed prose+JSON responses"
+    markdown_stripper:
+      path: "./wasm_modules/markdown_stripper/target/wasm32-wasip1/release/markdown_stripper.wasm"
+      enabled: false
+      description: "Strip Markdown formatting for plain-text / TTS output"
   default_module: ""                 # Optional: always run this module regardless of routing
-  timeout_ms: 500                    # Abort and pass through if module exceeds this
+  timeout_ms: 5000                   # PDF parsing can be slow — give it 5s
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Logging Configuration
