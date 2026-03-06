@@ -50,6 +50,10 @@ tools:
     enabled: true
     max_results: 3
     min_score: 0.3
+  browserbox:
+    enabled: true
+    ws_url: ws://host.docker.internal:9009   # relay running on host
+    timeout: 10
   ensemble:
     enabled: false
     judge_model: ""
@@ -85,6 +89,7 @@ operator:
   enabled: true                           # CAUTION: enables LLM-driven tool execution. Review allowed_tools before enabling.
   model: "llama3.2:3b"                   # Defaults to backend.default_model
   max_iterations: 10
+  timeout: 300                            # 5 min — large models (8B+ fp16) need time to load on first inference
   allowed_tools: []                       # Empty = all registered tools. Restrict: ["system_info", "memory", "calculator", "datetime"]
   shell:
     enabled: true

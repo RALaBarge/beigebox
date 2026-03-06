@@ -281,7 +281,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
 app = FastAPI(
     title="BeigeBox",
     description="Tap the line. Control the carrier.",
-    version="1.0.0",
+    version="1.0.1",
     lifespan=lifespan,
 )
 
@@ -373,7 +373,7 @@ async def health():
     """Health check."""
     return JSONResponse({
         "status": "ok",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "decision_llm": decision_agent.enabled if decision_agent else False,
     })
 
@@ -387,7 +387,7 @@ async def api_info():
     """System info — what features are available."""
     cfg = get_config()
     return JSONResponse({
-        "version": "1.0.0",
+        "version": "1.0.1",
         "name": "BeigeBox",
         "description": "Transparent Pythonic LLM Proxy",
         "server": {
@@ -460,6 +460,7 @@ async def api_config():
             "datetime":     cfg.get("tools", {}).get("datetime", {}),
             "system_info":  cfg.get("tools", {}).get("system_info", {}),
             "memory":       cfg.get("tools", {}).get("memory", {}),
+            "browserbox":   cfg.get("tools", {}).get("browserbox", {}),
         },
         # ── Decision LLM ─────────────────────────────────────────────
         "decision_llm": {
@@ -666,6 +667,10 @@ async def api_config_save(request: Request):
         "force_decision":               "force_decision",
         # Multi-backend
         "backends_enabled":             "backends_enabled",
+        # BrowserBox
+        "browserbox_enabled":           "browserbox_enabled",
+        "browserbox_ws_url":            "browserbox_ws_url",
+        "browserbox_timeout":           "browserbox_timeout",
     }
 
     for key, rt_key in allowed.items():
@@ -1672,6 +1677,7 @@ async def api_operator(request: Request):
         question = body.get("query", "").strip()
         if not question:
             return JSONResponse({"error": "query required"}, status_code=400)
+        model_override = body.get("model", "").strip() or None
         
         from beigebox.storage.vector_store import VectorStore
         from beigebox.storage.backends import make_backend as _mk
@@ -1693,8 +1699,9 @@ async def api_operator(request: Request):
             vs = None
         
         try:
-            op = Operator(vector_store=vs)
-            answer = op.run(question)
+            op = Operator(vector_store=vs, model_override=model_override)
+            loop = asyncio.get_event_loop()
+            answer = await loop.run_in_executor(None, op.run, question)
             return JSONResponse({
                 "success": True,
                 "query": question,
@@ -1884,11 +1891,11 @@ async def openrouter_pinned_save(request: Request):
 @app.get("/api/v1/openrouter/balance")
 async def openrouter_balance():
     """Fetch remaining credit balance from OpenRouter account API."""
-    if not backend_router:
-        return JSONResponse({"error": "backends not enabled"}, status_code=400)
-    or_backend = backend_router.get_openrouter_backend()
+    or_backend = backend_router.get_openrouter_backend() if backend_router else None
     if not or_backend:
-        return JSONResponse({"error": "no OpenRouter backend configured"}, status_code=404)
+        return JSONResponse({"balance": None, "error": "no OpenRouter backend configured"}, status_code=404)
+    if not or_backend.api_key:
+        return JSONResponse({"balance": None, "error": "no API key"}, status_code=404)
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(

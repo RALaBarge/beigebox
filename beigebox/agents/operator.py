@@ -77,9 +77,11 @@ def _build_tools_block(registry_tools: dict) -> str:
 def _extract_json(text: str) -> dict | None:
     """
     Extract the first JSON object from model output.
-    Handles markdown fences and leading/trailing prose.
+    Handles markdown fences, leading/trailing prose, and Qwen3 <think> blocks.
     """
     text = text.strip()
+    # Strip Qwen3 / deepseek-r1 style thinking blocks
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
     # Strip markdown fences
     text = re.sub(r"```(?:json)?", "", text).strip()
 
@@ -89,13 +91,21 @@ def _extract_json(text: str) -> dict | None:
     except json.JSONDecodeError:
         pass
 
-    # Find the first {...} block
-    match = re.search(r"\{[^{}]*\}", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            pass
+    # Find the outermost {...} block (handles nested braces)
+    depth = 0
+    start = None
+    for i, ch in enumerate(text):
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and start is not None:
+                try:
+                    return json.loads(text[start:i + 1])
+                except json.JSONDecodeError:
+                    start = None  # keep scanning for the next candidate
 
     return None
 
@@ -116,14 +126,15 @@ class Operator:
       5. If parse fails -> retry once with a correction prompt, then give up
     """
 
-    def __init__(self, vector_store=None):
+    def __init__(self, vector_store=None, model_override: str | None = None):
         from beigebox.tools.registry import ToolRegistry
 
         self.cfg = get_config()
         self.vector_store = vector_store
         self._registry = ToolRegistry(vector_store=vector_store)
         self._model = (
-            self.cfg.get("operator", {}).get("model")
+            model_override
+            or self.cfg.get("operator", {}).get("model")
             or self.cfg.get("backend", {}).get("default_model", "")
         )
         self._backend_url = (
@@ -131,7 +142,7 @@ class Operator:
             or self.cfg.get("backend", {}).get("url", "http://localhost:11434")
         ).rstrip("/")
         self._max_iter = self.cfg.get("operator", {}).get("max_iterations", 8)
-        self._timeout = self.cfg.get("operator", {}).get("timeout", 60)
+        self._timeout = self.cfg.get("operator", {}).get("timeout", 300)
 
         # Tool sandboxing: restrict which tools the LLM agent can call
         allowed_tools = self.cfg.get("operator", {}).get("allowed_tools", [])
@@ -234,6 +245,12 @@ class Operator:
         Retries up to 2 times with exponential backoff on transient errors."""
         try:
             with httpx.Client(timeout=self._timeout) as client:
+                # Disable thinking mode for models that support it (Qwen3, DeepSeek-R1, etc.)
+                # Thinking tokens bloat the context and break JSON-only output parsing.
+                _is_thinker = any(t in self._model.lower() for t in ("qwen3", "r1", "deepseek-r"))
+                opts: dict = {"num_ctx": 8192}
+                if _is_thinker:
+                    opts["think"] = False
                 resp = client.post(
                     f"{self._backend_url}/v1/chat/completions",
                     json={
@@ -241,7 +258,7 @@ class Operator:
                         "messages": messages,
                         "temperature": 0,
                         "stream": False,
-                        "options": {"num_ctx": 8192},
+                        "options": opts,
                     },
                 )
                 resp.raise_for_status()
