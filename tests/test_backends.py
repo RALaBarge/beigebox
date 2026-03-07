@@ -184,14 +184,36 @@ async def test_router_forward_tries_priority_order():
 
 @pytest.mark.asyncio
 async def test_router_forward_fallback_on_failure():
-    """Router falls back to next backend when primary fails."""
+    """Router does not send plain model ids to OpenRouter unless explicitly allowed."""
     config = [
         {"name": "local", "url": "http://ollama", "provider": "ollama", "priority": 1},
         {"name": "or", "url": "http://or", "provider": "openrouter", "priority": 2, "api_key": "sk-x"},
     ]
     router = MultiBackendRouter(config)
 
-    # First backend fails, second succeeds
+    fail_resp = BackendResponse(ok=False, error="timeout", backend_name="local")
+    success_resp = BackendResponse(ok=True, data={"choices": [{"message": {"content": "from or"}}]},
+                                   backend_name="or", cost_usd=0.001)
+    router.backends[0].forward = AsyncMock(return_value=fail_resp)
+    router.backends[1].forward = AsyncMock(return_value=success_resp)
+
+    # Patch global config check so this test is not affected by runtime_config.yaml state
+    with patch.object(router, "_global_allow_openrouter_for_plain_models", return_value=False):
+        result = await router.forward({"model": "llama3.2", "messages": []})
+    assert not result.ok
+    assert result.status_code == 503
+    router.backends[1].forward.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_router_can_opt_in_openrouter_for_plain_model_ids():
+    """Router can allow plain model ids to fall through to OpenRouter when enabled."""
+    config = [
+        {"name": "local", "url": "http://ollama", "provider": "ollama", "priority": 1},
+        {"name": "or", "url": "http://or", "provider": "openrouter", "priority": 2, "api_key": "sk-x", "allow_unqualified_models": True},
+    ]
+    router = MultiBackendRouter(config)
+
     fail_resp = BackendResponse(ok=False, error="timeout", backend_name="local")
     success_resp = BackendResponse(ok=True, data={"choices": [{"message": {"content": "from or"}}]},
                                    backend_name="or", cost_usd=0.001)

@@ -15,7 +15,13 @@ import logging
 import threading
 from pathlib import Path
 
-import chromadb
+try:
+    import chromadb
+except ImportError as _chroma_err:
+    raise ImportError(
+        "chromadb is required for vector storage but is not installed. "
+        "Install it with: pip install chromadb"
+    ) from _chroma_err
 
 from .base import VectorBackend
 

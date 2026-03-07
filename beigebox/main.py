@@ -27,7 +27,13 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
-from beigebox.config import get_config, get_runtime_config, update_runtime_config, get_effective_backends_config
+from beigebox.config import (
+    get_config,
+    get_runtime_config,
+    update_runtime_config,
+    get_effective_backends_config,
+    get_storage_paths,
+)
 from beigebox.proxy import Proxy
 from beigebox.storage.sqlite_store import SQLiteStore
 from beigebox.storage.vector_store import VectorStore
@@ -108,11 +114,12 @@ async def lifespan(app: FastAPI):
     logger = logging.getLogger(__name__)
 
     # Storage
-    sqlite_store = SQLiteStore(cfg["storage"]["sqlite_path"])
+    sqlite_path, vector_store_path = get_storage_paths(cfg)
+    sqlite_store = SQLiteStore(sqlite_path)
     _storage_cfg  = cfg["storage"]
     _embed_cfg    = cfg["embedding"]
     _backend_type = _storage_cfg.get("vector_backend", "chromadb")
-    _backend_path = _storage_cfg.get("chroma_path") or _storage_cfg.get("vector_store_path", "./data/chroma")
+    _backend_path = vector_store_path
     from beigebox.storage.backends import make_backend as _make_backend
     vector_store = VectorStore(
         embedding_model=_embed_cfg["model"],
@@ -176,7 +183,7 @@ async def lifespan(app: FastAPI):
         cfg["server"]["port"],
         cfg["backend"]["url"],
     )
-    logger.info("Storage: SQLite=%s, Chroma=%s", cfg["storage"]["sqlite_path"], cfg["storage"]["chroma_path"])
+    logger.info("Storage: SQLite=%s, Vector=%s", sqlite_path, vector_store_path)
     logger.info("Tools: %s", tool_registry.list_tools())
     logger.info("Hooks: %s", hook_manager.list_hooks())
     logger.info("Decision LLM: %s", "enabled" if decision_agent.enabled else "disabled")
@@ -447,8 +454,8 @@ async def api_config():
         },
         # ── Storage ──────────────────────────────────────────────────
         "storage": {
-            "sqlite_path":        cfg.get("storage", {}).get("sqlite_path", ""),
-            "chroma_path":        cfg.get("storage", {}).get("chroma_path", ""),
+            "path":               get_storage_paths(cfg)[0],
+            "vector_store_path":  get_storage_paths(cfg)[1],
             "log_conversations":  rt.get("log_conversations", cfg.get("storage", {}).get("log_conversations", True)),
         },
         # ── Tools ────────────────────────────────────────────────────
@@ -513,6 +520,7 @@ async def api_config():
             "force_decision":      rt.get("force_decision", False),
             "border_threshold":    rt.get("border_threshold"),
             "agentic_threshold":   rt.get("agentic_threshold"),
+            "allow_openrouter_for_plain_models": rt.get("allow_openrouter_for_plain_models", cfg.get("routing", {}).get("allow_openrouter_for_plain_models", False)),
         },
         # ── Logging ───────────────────────────────────────────────────
         "logging": {
@@ -665,6 +673,7 @@ async def api_config_save(request: Request):
         "decision_llm_timeout":         "decision_llm_timeout",
         # Routing
         "force_decision":               "force_decision",
+        "allow_openrouter_for_plain_models": "allow_openrouter_for_plain_models",
         # Multi-backend
         "backends_enabled":             "backends_enabled",
         # BrowserBox
@@ -1375,8 +1384,9 @@ async def api_harness_orchestrate(request: Request):
                 try:
                     from beigebox.storage.sqlite_store import SQLiteStore
                     cfg = get_config()
-                    store = SQLiteStore(cfg["storage"].get("sqlite_path") or cfg["storage"].get("path", "./data/beigebox.db"))
-                    
+                    _sq_path, _ = get_storage_paths(cfg)
+                    store = SQLiteStore(_sq_path)
+
                     total_latency = round((time.time() - start_ts) * 1000)
                     final_answer = ""
                     total_rounds = 0
@@ -1579,8 +1589,9 @@ def get_harness_run(run_id: str):
     try:
         from beigebox.storage.sqlite_store import SQLiteStore
         cfg = get_config()
-        store = SQLiteStore(cfg["storage"].get("sqlite_path") or cfg["storage"].get("path", "./data/beigebox.db"))
-        
+        _sq_path, _ = get_storage_paths(cfg)
+        store = SQLiteStore(_sq_path)
+
         run = store.get_harness_run(run_id)
         if not run:
             return JSONResponse(
@@ -1630,8 +1641,9 @@ def list_harness_runs(limit: int = 10):
         
         from beigebox.storage.sqlite_store import SQLiteStore
         cfg = get_config()
-        store = SQLiteStore(cfg["storage"].get("sqlite_path") or cfg["storage"].get("path", "./data/beigebox.db"))
-        
+        _sq_path, _ = get_storage_paths(cfg)
+        store = SQLiteStore(_sq_path)
+
         runs = store.list_harness_runs(limit=limit)
         
         return {
@@ -1692,7 +1704,7 @@ async def api_operator(request: Request):
                 embedding_url=_ec.get("backend_url") or cfg["backend"]["url"],
                 backend=_mk(
                     _sc.get("vector_backend", "chromadb"),
-                    path=_sc.get("chroma_path") or _sc.get("vector_store_path", "./data/chroma"),
+                    path=get_storage_paths(cfg)[1],
                 ),
             )
         except Exception:

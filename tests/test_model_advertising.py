@@ -8,6 +8,8 @@ from beigebox.proxy import Proxy
 from beigebox.storage.sqlite_store import SQLiteStore
 from beigebox.storage.vector_store import VectorStore
 
+pytest.importorskip("chromadb", reason="chromadb not installed — skipping model advertising tests")
+
 
 @pytest.fixture
 def mock_proxy(tmp_path):

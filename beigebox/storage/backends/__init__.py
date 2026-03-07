@@ -22,8 +22,14 @@ def _register():
     global _REGISTRY
     if _REGISTRY:
         return
-    from .chroma import ChromaBackend
-    _REGISTRY["chromadb"] = ChromaBackend
+    try:
+        from .chroma import ChromaBackend
+        _REGISTRY["chromadb"] = ChromaBackend
+    except ImportError:
+        raise ImportError(
+            "chromadb is required for the default vector backend but is not installed. "
+            "Install it with: pip install chromadb"
+        )
 
 
 def make_backend(backend_type: str, **kwargs) -> VectorBackend:
