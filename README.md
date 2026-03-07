@@ -90,7 +90,7 @@ Three complementary cache layers, all in-process:
 
 ### Observability
 
-- **Wiretap** — structured JSONL log of every request, response, routing decision, tool call, WASM transform, and timing breakdown
+- **Wiretap** — structured JSONL log of every request, response, routing decision, tool call, WASM transform, timing breakdown, and all passthrough routes; filterable by role (`user`, `assistant`, `system`, `decision`, `tool`, `proxy`, `wasm`) and direction in the Tap tab
 - **TTFT tracking** — time to first token captured on every streaming response, stored in SQLite
 - **Latency percentiles** — P50/P90/P95/P99 per model surfaced in the Dashboard performance table and latency chart
 - **Tokens/sec** — uses `tokens / (latency - TTFT)` for generation throughput (excludes prompt processing time)
@@ -103,7 +103,7 @@ Three complementary cache layers, all in-process:
 - **Orchestrated mode** — goal-driven agent loop: plan → dispatch tasks to models/operator → evaluate → iterate
 - **Ensemble voting** — parallel responses judged by an LLM arbiter; always streams tokens as they arrive; built-in question bank (25 curated benchmark questions across math, logic, coding, reasoning, and knowledge) with category filter and random picker; **Challenge round** button asks all models to verify their answer, reruns the judge, and shows whether winners are consistent — useful for comparing quantised vs full-precision models
 - **Group Chat** — turn-by-turn multi-agent conversation: an LLM moderator picks who speaks next from a configurable roster of models/operator agents; inject thoughts mid-conversation to steer the discussion
-- **Council mode** — "council then commander": operator proposes a specialist council (name, model, task) for any query; user reviews and edits council members via dropdowns before engaging; specialists run in parallel, operator synthesises results into a final answer
+- **Council mode** — "council then commander": operator proposes a specialist council (name, model, task) for any query; select which models the council may use from a checklist (leave all unchecked to allow any); user reviews and edits council members via dropdowns before engaging; specialists run in parallel, operator synthesises results into a final answer
 - **Operator agent** — JSON tool-loop agent with sandboxed shell, web search, memory recall, calculator, and plugin tools; streaming mode shows tool calls and results as they happen; maintains multi-turn conversation history
 
 ### Storage
