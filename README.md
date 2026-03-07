@@ -275,6 +275,24 @@ backends:
     latency_p95_threshold_ms: 3000   # deprioritise if rolling P95 exceeds 3s
 ```
 
+### OpenRouter plain model IDs
+
+By default, plain model IDs (no `/`) are not sent to OpenRouter backends. To allow it:
+
+```yaml
+# Per-backend (config.yaml):
+backends:
+  - name: openrouter
+    allow_unqualified_models: true
+
+# Or globally (runtime_config.yaml, hot-reloaded):
+runtime:
+  allow_openrouter_for_plain_models: true
+```
+
+Useful when you want to route e.g. `llama3.2` to OpenRouter without prefixing it as `meta-llama/llama-3.2`.
+Slug-prefixed IDs (`meta-llama/llama-3.2`) always route to OpenRouter regardless of this flag.
+
 ---
 
 ## Credentials (agentauth)
@@ -542,7 +560,8 @@ beigebox/
     └── vi.js               Optional vi-mode keybindings
 
 plugins/
-└── zip_inspector.py        Inspect .zip files from workspace/in/
+├── zip_inspector.py        Inspect .zip files from workspace/in/, saves report to workspace/out/
+└── doc_parser.py           Parse PDF/DOCX/PPTX/images → Markdown, ingest to ChromaDB, save to workspace/out/
 
 workspace/
 ├── in/                     Drop files here — agents see /workspace/in (read-only)
