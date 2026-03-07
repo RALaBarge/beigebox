@@ -195,11 +195,12 @@ def cmd_ring(args):
 
 def cmd_sweep(args):
     """Semantic search over stored conversations."""
-    from beigebox.config import get_config
+    from beigebox.config import get_config, get_storage_paths
     from beigebox.storage.vector_store import VectorStore
     from beigebox.storage.backends import make_backend
 
     cfg = get_config()
+    _, vector_store_path = get_storage_paths(cfg)
     _sc = cfg["storage"]
     _ec = cfg["embedding"]
     store = VectorStore(
@@ -207,7 +208,7 @@ def cmd_sweep(args):
         embedding_url=_ec.get("backend_url") or cfg["backend"]["url"],
         backend=make_backend(
             _sc.get("vector_backend", "chromadb"),
-            path=_sc.get("chroma_path") or _sc.get("vector_store_path", "./data/chroma"),
+            path=vector_store_path,
         ),
     )
 
@@ -244,10 +245,12 @@ def cmd_dump(args):
     from beigebox.storage.sqlite_store import SQLiteStore
 
     cfg = get_config()
-    store = SQLiteStore(cfg["storage"]["sqlite_path"])
+    from beigebox.config import get_storage_paths
+    sqlite_path, _ = get_storage_paths(cfg)
+    store = SQLiteStore(sqlite_path)
     stats = store.get_stats()
 
-    print(f"  📼 Database: {cfg['storage']['sqlite_path']}")
+    print(f"  📼 Database: {sqlite_path}")
     print(f"  💬 Conversations: {stats['conversations']} | Messages: {stats['messages']}")
 
     data = store.export_all_json()
@@ -261,22 +264,23 @@ def cmd_dump(args):
 
 def cmd_flash(args):
     """Show stats at a glance."""
-    from beigebox.config import get_config
+    from beigebox.config import get_config, get_storage_paths
     from beigebox.storage.sqlite_store import SQLiteStore
 
     cfg = get_config()
+    sqlite_path, vector_path = get_storage_paths(cfg)
 
     print(BANNER)
     print("  Configuration")
     print(f"  ├─ Backend:   {cfg['backend']['url']}")
     print(f"  ├─ Model:     {cfg['backend']['default_model']}")
     print(f"  ├─ Embedder:  {cfg['embedding']['model']}")
-    print(f"  ├─ SQLite:    {cfg['storage']['sqlite_path']}")
-    print(f"  ├─ ChromaDB:  {cfg['storage']['chroma_path']}")
+    print(f"  ├─ SQLite:    {sqlite_path}")
+    print(f"  ├─ ChromaDB:  {vector_path}")
     print(f"  └─ Logging:   {cfg['storage'].get('log_conversations', True)}")
 
     try:
-        store = SQLiteStore(cfg["storage"]["sqlite_path"])
+        store = SQLiteStore(sqlite_path)
         stats = store.get_stats()
         tokens = stats.get("tokens", {})
         models = stats.get("models", {})
@@ -337,7 +341,7 @@ def cmd_flash(args):
     days = getattr(args, "days", 30)
     try:
         from beigebox.costs import CostTracker
-        cost_store = SQLiteStore(cfg["storage"]["sqlite_path"])
+        cost_store = SQLiteStore(sqlite_path)
         tracker = CostTracker(cost_store)
         costs = tracker.get_stats(days=days)
         total = costs.get("total", 0)
@@ -366,7 +370,7 @@ def cmd_flash(args):
 
     # Model performance — latency percentiles per model (v0.8+)
     try:
-        perf_store = SQLiteStore(cfg["storage"]["sqlite_path"])
+        perf_store = SQLiteStore(sqlite_path)
         perf = perf_store.get_model_performance(days=days)
         by_model_perf = perf.get("by_model", {})
         if by_model_perf:
@@ -402,13 +406,14 @@ def cmd_operator(args):
     """
     Launch the BeigeBox Operator agent — interactive REPL or single query.
     """
-    from beigebox.config import get_config
+    from beigebox.config import get_config, get_storage_paths
     from beigebox.storage.vector_store import VectorStore
     from beigebox.storage.backends import make_backend
     from beigebox.agents.operator import Operator
     print(BANNER)
     print("  Operator online. Type 'exit' or Ctrl-C to disconnect.\n")
     cfg = get_config()
+    _, vector_path = get_storage_paths(cfg)
     # Stand up the vector store for semantic search
     try:
         _sc = cfg["storage"]
@@ -418,7 +423,7 @@ def cmd_operator(args):
             embedding_url=_ec.get("backend_url") or cfg["backend"]["url"],
             backend=make_backend(
                 _sc.get("vector_backend", "chromadb"),
-                path=_sc.get("chroma_path") or _sc.get("vector_store_path", "./data/chroma"),
+                path=vector_path,
             ),
         )
     except Exception as e:

@@ -43,6 +43,8 @@ from beigebox.agents.embedding_classifier import get_embedding_classifier
 from beigebox.hooks import HookManager
 from beigebox.backends.router import MultiBackendRouter
 from beigebox.costs import CostTracker
+from beigebox.auth import MultiKeyAuthRegistry
+from beigebox.mcp_server import McpServer
 
 
 logger = logging.getLogger(__name__)
@@ -60,6 +62,8 @@ backend_router: MultiBackendRouter | None = None
 cost_tracker: CostTracker | None = None
 _harness_injection_queues: dict[str, asyncio.Queue] = {}
 embedding_classifier = None
+auth_registry: MultiKeyAuthRegistry | None = None
+mcp_server: McpServer | None = None
 
 
 def _setup_logging(cfg: dict):
@@ -107,7 +111,7 @@ async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     global proxy, tool_registry, sqlite_store, vector_store
     global decision_agent, hook_manager, backend_router, cost_tracker
-    global embedding_classifier
+    global embedding_classifier, auth_registry, mcp_server
 
     cfg = get_config()
     _setup_logging(cfg)
@@ -165,6 +169,13 @@ async def lifespan(app: FastAPI):
         logger.info("Cost tracking: enabled")
     else:
         logger.info("Cost tracking: disabled")
+
+    # Auth registry (multi-key, agentauth-backed)
+    auth_registry = MultiKeyAuthRegistry(cfg.get("auth", {}))
+
+    # MCP server
+    mcp_server = McpServer(tool_registry)
+    logger.info("MCP server: enabled (POST /mcp)")
 
     # Proxy (with decision agent, hooks, embedding classifier, tools, and router)
     proxy = Proxy(
@@ -234,30 +245,34 @@ _AUTH_EXEMPT = frozenset(["/", "/ui", "/beigebox/health", "/api/v1/status"])
 
 class ApiKeyMiddleware(BaseHTTPMiddleware):
     """
-    Simple single-key API key guard.
+    Multi-key API guard backed by agentauth keychain storage.
 
-    Reads auth.api_key from config on every request so the key can be
-    changed in config.yaml without a restart.  Empty string = disabled.
+    Reads from the global auth_registry (built at startup from config auth.keys).
+    Falls back to the legacy single auth.api_key for backwards compatibility.
+    Auth disabled when no keys are configured.
 
-    Accepts the key via:
-      Authorization: Bearer <key>
-      api-key: <key>          (OpenAI-style header)
-      ?api_key=<key>          (query param fallback)
+    Per-key enforcement:
+      - Endpoint ACL (allowed_endpoints glob patterns)
+      - Model ACL  (allowed_models glob patterns — checked in chat endpoint)
+      - Rate limit (allowed_models rate_limit_rpm rolling 60-second window)
+
+    Accepts the token via:
+      Authorization: Bearer <token>
+      api-key: <token>          (OpenAI-style header)
+      ?api_key=<token>          (query param fallback)
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        cfg = get_config()
-        api_key = cfg.get("auth", {}).get("api_key", "")
-        if not api_key:
+        global auth_registry
+
+        if auth_registry is None or not auth_registry.is_enabled():
             return await call_next(request)
 
-        if request.url.path in _AUTH_EXEMPT:
+        path = request.url.path
+        if path in _AUTH_EXEMPT or path.startswith("/web/"):
             return await call_next(request)
 
-        # Static assets (/web/...) are also exempt
-        if request.url.path.startswith("/web/"):
-            return await call_next(request)
-
+        # Extract token
         auth_header = request.headers.get("authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header[7:].strip()
@@ -267,19 +282,51 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                 or request.query_params.get("api_key", "")
             )
 
-        if token == api_key:
-            return await call_next(request)
+        meta = auth_registry.validate(token)
+        if meta is None:
+            return JSONResponse(
+                {
+                    "error": {
+                        "message": (
+                            "Invalid API key. Provide it via "
+                            "Authorization: Bearer <key>, api-key header, or ?api_key= query param."
+                        ),
+                        "type": "invalid_request_error",
+                        "code": "invalid_api_key",
+                    }
+                },
+                status_code=401,
+            )
 
-        return JSONResponse(
-            {
-                "error": {
-                    "message": "Invalid API key. Provide it via Authorization: Bearer <key>, api-key header, or ?api_key= query param.",
-                    "type": "invalid_request_error",
-                    "code": "invalid_api_key",
-                }
-            },
-            status_code=401,
-        )
+        # Rate limit
+        if not auth_registry.check_rate_limit(meta):
+            return JSONResponse(
+                {
+                    "error": {
+                        "message": f"Rate limit exceeded for key '{meta.name}' ({meta.rate_limit_rpm} rpm).",
+                        "type": "rate_limit_error",
+                        "code": "rate_limit_exceeded",
+                    }
+                },
+                status_code=429,
+            )
+
+        # Endpoint ACL
+        if not auth_registry.check_endpoint(meta, path):
+            return JSONResponse(
+                {
+                    "error": {
+                        "message": f"Endpoint '{path}' not permitted for key '{meta.name}'.",
+                        "type": "invalid_request_error",
+                        "code": "endpoint_not_allowed",
+                    }
+                },
+                status_code=403,
+            )
+
+        # Store key metadata in request state so downstream endpoints can check model ACL
+        request.state.auth_key = meta
+        return await call_next(request)
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +353,22 @@ async def chat_completions(request: Request):
     intercepts for logging/embedding, forwards to backend.
     """
     body = await request.json()
+
+    # Model ACL — check here where the body is already parsed
+    model = body.get("model", "")
+    _auth_key = getattr(request.state, "auth_key", None)
+    if _auth_key is not None and model and auth_registry and not auth_registry.check_model(_auth_key, model):
+        return JSONResponse(
+            {
+                "error": {
+                    "message": f"Model '{model}' not permitted for key '{_auth_key.name}'.",
+                    "type": "invalid_request_error",
+                    "code": "model_not_allowed",
+                }
+            },
+            status_code=403,
+        )
+
     stream = body.get("stream", False)
 
     if stream:
@@ -361,6 +424,36 @@ async def search_conversations(q: str, n: int = 5, role: str | None = None):
         return JSONResponse({"error": "Vector store not initialized"}, status_code=503)
     results = vector_store.search(q, n_results=n, role_filter=role)
     return JSONResponse({"query": q, "results": results})
+
+
+@app.post("/mcp")
+async def mcp_endpoint(request: Request):
+    """
+    MCP (Model Context Protocol) server — Streamable HTTP transport.
+    Accepts JSON-RPC 2.0 requests and dispatches to BeigeBox's tool registry.
+
+    Supported methods: initialize, tools/list, tools/call
+    Auth: governed by the same ApiKeyMiddleware as all other endpoints.
+    """
+    global mcp_server
+    if mcp_server is None:
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": None, "error": {"code": -32603, "message": "MCP server not initialised"}},
+            status_code=503,
+        )
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
+            status_code=400,
+        )
+    result = mcp_server.handle(body)
+    if result is None:
+        # Notification — no response body
+        from starlette.responses import Response as _Response
+        return _Response(status_code=202)
+    return JSONResponse(result)
 
 
 @app.get("/api/v1/search")

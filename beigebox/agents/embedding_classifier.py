@@ -45,8 +45,9 @@ def _get_centroid_dir() -> str:
     Falls back to the package directory for bare-metal installs.
     """
     try:
+        from beigebox.config import get_storage_paths
         cfg = get_config()
-        data_path = cfg.get("storage", {}).get("path") or cfg.get("storage", {}).get("sqlite_path", "")
+        data_path = get_storage_paths(cfg)[0]
         if data_path:
             data_dir = os.path.dirname(os.path.abspath(data_path))
             centroid_dir = os.path.join(data_dir, "centroids")

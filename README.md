@@ -331,12 +331,67 @@ Available namespaces: `dom`, `tabs`, `nav`, `fetch`, `storage`, `clip`, `network
 
 ---
 
+## Multi-key auth
+
+BeigeBox supports named API keys with per-key model ACLs, endpoint ACLs, and rate limits. Tokens live in the OS native keychain via [agentauth](https://github.com/RALaBarge/agentauth) — never in config files.
+
+```yaml
+# config.yaml
+auth:
+  api_key: ""          # legacy single key — still works
+  keys:
+    - name: openwebui
+      allowed_models: ["*"]
+      allowed_endpoints: ["*"]
+    - name: ci-runner
+      allowed_models: ["llama3.2", "qwen3:*"]
+      allowed_endpoints: ["/v1/chat/completions", "/v1/models"]
+      rate_limit_rpm: 60
+    - name: mcp-client
+      allowed_models: ["*"]
+      allowed_endpoints: ["/mcp", "/v1/models"]
+```
+
+Store tokens:
+
+```bash
+agentauth add openwebui        # prompts for token, stores in OS keychain
+export BB_CI_RUNNER_TOKEN=...  # env var alternative for headless/Docker
+```
+
+Accepted via `Authorization: Bearer <token>`, `api-key` header, or `?api_key=` query param. Web UI and health check endpoints are always exempt.
+
+---
+
+## MCP server
+
+BeigeBox exposes its full tool registry as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server via `POST /mcp`. Any MCP client — Claude Desktop, Claude Code, or custom agents — can discover and call BeigeBox tools directly.
+
+**Claude Desktop** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "beigebox": {
+      "url": "http://localhost:1337/mcp",
+      "headers": {"Authorization": "Bearer YOUR_KEY"}
+    }
+  }
+}
+```
+
+Supported MCP methods: `initialize`, `tools/list`, `tools/call`.
+
+All tools registered in BeigeBox's tool registry (web search, calculator, memory recall, BrowserBox, connections, plugins, etc.) are automatically available as MCP tools. No additional configuration required — enable the tools you want in `config.yaml` and they appear in `tools/list`.
+
+---
+
 ## Security
 
 - **Operator sandboxing** — disabled by default; when enabled, tool access is restricted via `operator.allowed_tools` config
 - **Shell hardening** — Python allowlist → bwrap namespace sandbox → busybox wrapper fallback → audit logging (four layers)
 - **Prompt injection hooks** — configurable detection with scoring and blocking
-- **API key auth** — single-key middleware, exempt paths for web UI and health checks
+- **Multi-key API auth** — per-key model ACLs, endpoint ACLs, and rate limits; tokens stored in OS keychain via agentauth, never in config files
 - **Non-root container** — runs as `appuser` (UID 1000)
 - **No network in sandbox** — bwrap `--unshare-all` isolates shell commands from the network
 - **Blocked patterns** — belt-and-suspenders regex blocking on top of the allowlist
@@ -378,6 +433,7 @@ POST /api/v1/workspace/upload           Upload a file to workspace/in (multipart
 DELETE /api/v1/workspace/out/{file}     Delete a file from workspace/out
 GET  /api/v1/openrouter/balance         Remaining credit balance for configured OR key
 POST /api/v1/build-centroids            Rebuild embedding classifier centroids
+POST /mcp                               MCP server (Model Context Protocol, Streamable HTTP)
 ```
 
 Ollama-native endpoints (`/api/tags`, `/api/chat`, `/api/generate`, etc.) are forwarded transparently. A catch-all route forwards anything not explicitly handled — BeigeBox stays invisible.
@@ -390,6 +446,8 @@ Ollama-native endpoints (`/api/tags`, `/api/chat`, `/api/generate`, etc.) are fo
 beigebox/
 ├── main.py                 FastAPI app — all endpoints
 ├── proxy.py                Core proxy — routing, streaming, hooks, WASM, caching, logging
+├── auth.py                 Multi-key auth registry (agentauth-backed, per-key ACLs + rate limits)
+├── mcp_server.py           MCP server (Streamable HTTP, exposes tool registry as MCP tools)
 ├── cache.py                SemanticCache, EmbeddingCache, ToolResultCache
 ├── config.py               Config loader with hot-reload
 ├── cli.py                  CLI entry point
