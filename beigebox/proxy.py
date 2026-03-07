@@ -31,6 +31,13 @@ from beigebox.hooks import HookManager
 from beigebox.wiretap import WireLog
 from beigebox.wasm_runtime import WasmRuntime
 from beigebox.agents.agentic_scorer import score_agentic_intent
+from beigebox.agents.routing_rules import (
+    evaluate_routing_rules,
+    BB_FORCE_BACKEND,
+    BB_SKIP_SEMANTIC_CACHE,
+    BB_RULE_TAG,
+    BB_FORCED_TOOLS,
+)
 from beigebox.backends.openrouter import _COST_SENTINEL_PREFIX
 from beigebox.cache import SemanticCache, ToolResultCache
 logger = logging.getLogger(__name__)
@@ -385,6 +392,37 @@ class Proxy:
             # Z-command overrides are not cached — user is being explicit
             return body, None
 
+        # 1.75. Routing rules — hot-reloaded from runtime_config.routing_rules
+        #       Evaluated after z-commands (user intent takes priority) and before
+        #       the ML stack.  A matching rule with pass_through=false skips the
+        #       classifier and decision LLM entirely.
+        rules = rt.get("routing_rules", [])
+        if rules:
+            body, matched_rules, skip_sc, pass_through = evaluate_routing_rules(
+                rules, body, routes=self.routes,
+            )
+            if matched_rules:
+                rule_tag = body.pop(BB_RULE_TAG, None)
+                self.wire.log(
+                    direction="internal",
+                    role="decision",
+                    content=(
+                        f"routing_rules: matched {matched_rules} → "
+                        f"model={body.get('model', self.default_model)}"
+                        + (f" backend={body.get(BB_FORCE_BACKEND, '')}" if BB_FORCE_BACKEND in body else "")
+                        + (f" tag={rule_tag}" if rule_tag else "")
+                        + (" [pass_through]" if pass_through else "")
+                    ),
+                    model="routing-rules",
+                    conversation_id=conversation_id,
+                )
+                if rule_tag:
+                    body[BB_RULE_TAG] = rule_tag  # restore for wiretap downstream
+                if not pass_through:
+                    if not skip_sc:
+                        self._set_session_model(conversation_id, body.get("model", self.default_model))
+                    return body, None
+
         # 1.5. Agentic pre-filter — near-zero cost, runs before embedding classifier
         #      High agentic score means the user wants tool use — log it and let
         #      the embedding classifier / decision LLM decide the route, but the
@@ -737,11 +775,26 @@ class Proxy:
             if tool_results:
                 body = self._inject_tool_context(body, tool_results)
 
-        # Hybrid routing: session cache → z-command → embedding classifier → decision LLM
+        # Hybrid routing: session cache → z-command → routing rules → embedding classifier → decision LLM
         _t_route = _time.monotonic()
         body, decision = await self._hybrid_route(body, zcmd, conversation_id)
         model = body.get("model", model)  # Update model after routing
         _stages["routing"] = (_time.monotonic() - _t_route) * 1000
+
+        # Run tools forced by routing rules
+        _rule_tools = body.pop(BB_FORCED_TOOLS, None)
+        if _rule_tools and self.tool_registry:
+            _user_msg = self._get_latest_user_message(body)
+            _rule_tool_results = []
+            for _tool_name in _rule_tools:
+                _result = self.tool_registry.run_tool(_tool_name, _user_msg)
+                if _result:
+                    _rule_tool_results.append(f"[{_tool_name}]: {_result}")
+            if _rule_tool_results:
+                body = self._inject_tool_context(body, "\n".join(_rule_tool_results))
+
+        # Strip any remaining internal BB keys that routing rules may have written
+        body.pop(BB_SKIP_SEMANTIC_CACHE, None)
 
         # Auto-summarize if conversation exceeds token budget
         try:
@@ -905,6 +958,18 @@ class Proxy:
         model = body.get("model", model)
         _stages["routing"] = (_time.monotonic() - _t_route) * 1000
 
+        # Run tools forced by routing rules (after routing so model is resolved)
+        _rule_tools = body.pop(BB_FORCED_TOOLS, None)
+        if _rule_tools and self.tool_registry:
+            _user_msg = self._get_latest_user_message(body)
+            _rule_tool_results = []
+            for _tool_name in _rule_tools:
+                _result = self.tool_registry.run_tool(_tool_name, _user_msg)
+                if _result:
+                    _rule_tool_results.append(f"[{_tool_name}]: {_result}")
+            if _rule_tool_results:
+                body = self._inject_tool_context(body, "\n".join(_rule_tool_results))
+
         # Auto-summarize if conversation exceeds token budget
         try:
             from beigebox.summarizer import maybe_summarize
@@ -935,7 +1000,8 @@ class Proxy:
 
         # Semantic cache lookup (before logging or backend call)
         user_message = self._get_latest_user_message(body)
-        if not is_synthetic:
+        _skip_sem_cache = body.pop(BB_SKIP_SEMANTIC_CACHE, False)
+        if not is_synthetic and not _skip_sem_cache:
             cache_hit = await self.semantic_cache.lookup(user_message)
             if cache_hit is not None:
                 cached_text, cached_model = cache_hit
