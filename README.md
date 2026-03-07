@@ -102,6 +102,7 @@ Three complementary cache layers, all in-process:
 - **Orchestrated mode** — goal-driven agent loop: plan → dispatch tasks to models/operator → evaluate → iterate
 - **Ensemble voting** — parallel responses judged by an LLM arbiter, returns the best with reasoning
 - **Group Chat** — turn-by-turn multi-agent conversation: an LLM moderator picks who speaks next from a configurable roster of models/operator agents; inject thoughts mid-conversation to steer the discussion
+- **Council mode** — "council then commander": operator proposes a specialist council (name, model, task) for any query; user reviews and edits council members via dropdowns before engaging; specialists run in parallel, operator synthesises results into a final answer
 - **Operator agent** — JSON tool-loop agent with sandboxed shell, web search, memory recall, calculator, and plugin tools
 
 ### Storage
@@ -468,6 +469,8 @@ POST /api/v1/operator                   Run the operator agent
 POST /api/v1/ensemble                   Multi-model ensemble with LLM judge
 POST /api/v1/harness/orchestrate        Goal-driven orchestration (SSE stream)
 POST /api/v1/harness/group-chat         Turn-by-turn multi-agent group conversation (SSE stream)
+POST /api/v1/council/propose            Council mode phase 1: operator proposes specialist council
+POST /api/v1/council/{run_id}/engage    Council mode phase 2: dispatch council + stream results (SSE)
 POST /api/v1/harness/{run_id}/inject    Inject a steering thought into a running orchestration or group chat
 GET  /api/v1/conversation/{id}/replay   Full conversation reconstruction
 POST /api/v1/conversation/{id}/fork     Branch a conversation

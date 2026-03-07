@@ -1823,6 +1823,109 @@ async def api_operator(request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Council — "council then commander" pattern
+# ---------------------------------------------------------------------------
+
+# In-memory session store: run_id → {query, operator_model, backend_url}
+_council_sessions: dict[str, dict] = {}
+
+
+@app.post("/api/v1/council/propose")
+async def api_council_propose(request: Request):
+    """
+    Phase 1: operator proposes a specialist council for the query.
+
+    Body: {"query": "...", "model": "optional override"}
+    Returns: {"run_id": "...", "council": [{name, model, task}, ...]}
+    """
+    import uuid as _uuid
+    from beigebox.agents.council import propose as _council_propose
+
+    cfg = get_config()
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    query = body.get("query", "").strip()
+    if not query:
+        return JSONResponse({"error": "query required"}, status_code=400)
+
+    operator_model = (
+        body.get("model", "").strip()
+        or cfg.get("operator", {}).get("model")
+        or cfg.get("backend", {}).get("default_model", "")
+    )
+    backend_url = cfg.get("backend", {}).get("url", "http://localhost:11434")
+
+    try:
+        council = await _council_propose(query, backend_url, operator_model)
+    except Exception as e:
+        logger.error("council propose error: %s", e)
+        return JSONResponse({"error": str(e)}, status_code=503)
+
+    run_id = str(_uuid.uuid4())[:8]
+    _council_sessions[run_id] = {
+        "query":          query,
+        "operator_model": operator_model,
+        "backend_url":    backend_url,
+    }
+
+    return JSONResponse({"run_id": run_id, "council": council})
+
+
+@app.post("/api/v1/council/{run_id}/engage")
+async def api_council_engage(run_id: str, request: Request):
+    """
+    Phase 2: dispatch the (possibly user-edited) council and stream results.
+
+    Body: {"council": [{name, model, task}, ...]}
+    Returns: SSE stream of events:
+      {type:"dispatch", count:N}
+      {type:"member_start", name, model}
+      {type:"member_done", name, model, result}
+      {type:"member_error", name, error}
+      {type:"synthesizing"}
+      {type:"synthesis", result}
+      {type:"error", message}
+      {type:"done"}
+    """
+    import json as _json
+    from beigebox.agents.council import execute as _council_execute
+    from starlette.responses import StreamingResponse as _SR
+
+    session = _council_sessions.get(run_id)
+    if not session:
+        return JSONResponse({"error": "unknown run_id — propose first"}, status_code=404)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    council = body.get("council", [])
+    if not council:
+        return JSONResponse({"error": "council required"}, status_code=400)
+
+    query          = session["query"]
+    operator_model = session["operator_model"]
+    backend_url    = session["backend_url"]
+
+    async def _stream():
+        yield f"data: {_json.dumps({'type': 'dispatch', 'count': len(council)})}\n\n"
+        try:
+            async for event in _council_execute(query, council, backend_url, operator_model):
+                yield f"data: {_json.dumps(event)}\n\n"
+        except Exception as e:
+            yield f"data: {_json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        finally:
+            _council_sessions.pop(run_id, None)
+        yield f"data: {_json.dumps({'type': 'done'})}\n\n"
+
+    return _SR(_stream(), media_type="text/event-stream")
+
+
+# ---------------------------------------------------------------------------
 # Ensemble Voting (v1.0+)
 # ---------------------------------------------------------------------------
 
