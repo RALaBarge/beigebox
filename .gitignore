@@ -28,3 +28,8 @@ env/
 
 # Website source (separate deployment)
 html_beigebox/
+
+# Rust/WASM build artifacts
+wasm_modules/*/target/
+
+CLAUDE.md
