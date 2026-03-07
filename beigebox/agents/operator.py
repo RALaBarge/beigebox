@@ -298,15 +298,15 @@ class Operator:
     # Main loop
     # ------------------------------------------------------------------
 
-    def run(self, question: str) -> str:
+    def run(self, question: str, history: list[dict] | None = None) -> str:
         self._reload_skills_if_changed()
         if not question.strip():
             return "No question provided."
 
-        messages = [
-            {"role": "system", "content": self._system},
-            {"role": "user", "content": question},
-        ]
+        messages = [{"role": "system", "content": self._system}]
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": question})
 
         for iteration in range(self._max_iter):
             # Two iterations from the limit — nudge the model to wrap up rather
@@ -377,3 +377,99 @@ class Operator:
                 return content
 
         return "Operator reached max iterations without a final answer. Try rephrasing your question."
+
+    async def run_stream(self, question: str, history: list[dict] | None = None):
+        """
+        Async generator yielding operator progress events.
+
+        Event shapes:
+          {"type": "tool_call",   "tool": str, "input": str, "thought": str}
+          {"type": "tool_result", "tool": str, "result": str}
+          {"type": "answer",      "content": str}
+          {"type": "error",       "message": str}
+        """
+        import asyncio as _asyncio
+        loop = _asyncio.get_running_loop()
+
+        self._reload_skills_if_changed()
+        if not question.strip():
+            yield {"type": "error", "message": "No question provided."}
+            return
+
+        messages = [{"role": "system", "content": self._system}]
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": question})
+
+        for iteration in range(self._max_iter):
+            if iteration == self._max_iter - 2:
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "You are approaching the maximum number of steps. "
+                        "Please synthesise what you have found so far and provide "
+                        'a final {"thought": "...", "answer": "..."} response now.'
+                    ),
+                })
+
+            try:
+                raw = await loop.run_in_executor(None, self._chat, messages)
+            except Exception as e:
+                logger.error("Operator LLM call failed: %s", e)
+                yield {"type": "error", "message": f"LLM unavailable: {e}"}
+                return
+
+            logger.debug("Operator stream iter %d raw: %s", iteration, raw[:200])
+
+            parsed = _extract_json(raw)
+
+            if parsed is None:
+                if iteration == 0:
+                    messages.append({"role": "assistant", "content": raw})
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "Your response was not valid JSON. "
+                            "You must respond with ONLY a JSON object. "
+                            'Either {"thought": "...", "tool": "...", "input": "..."} '
+                            'or {"thought": "...", "answer": "..."}. '
+                            "No markdown, no extra text."
+                        ),
+                    })
+                    continue
+                else:
+                    logger.warning("Operator stream: could not parse JSON after nudge, returning raw")
+                    yield {"type": "answer", "content": raw.strip()}
+                    return
+
+            if "answer" in parsed:
+                yield {"type": "answer", "content": str(parsed["answer"])}
+                return
+
+            if "tool" in parsed:
+                tool_name = parsed.get("tool", "")
+                tool_input = str(parsed.get("input", ""))
+                thought = parsed.get("thought", "")
+
+                logger.info("Operator stream tool call: %s(%r) — %s", tool_name, tool_input, thought)
+
+                yield {"type": "tool_call", "tool": tool_name, "input": tool_input, "thought": thought}
+
+                observation = await loop.run_in_executor(None, self._run_tool, tool_name, tool_input)
+
+                yield {"type": "tool_result", "tool": tool_name, "result": observation}
+
+                messages.append({"role": "assistant", "content": raw})
+                messages.append({
+                    "role": "user",
+                    "content": f"Tool result for {tool_name}:\n{observation}",
+                })
+                continue
+
+            # JSON present but neither 'answer' nor 'tool'
+            content = parsed.get("thought", "") or str(parsed)
+            if content:
+                yield {"type": "answer", "content": content}
+                return
+
+        yield {"type": "error", "message": "Operator reached max iterations without a final answer. Try rephrasing your question."}

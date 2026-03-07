@@ -383,11 +383,13 @@
   }
   #op-log::-webkit-scrollbar { width: 4px; }
   #op-log::-webkit-scrollbar-thumb { background: var(--bg-border); }
-  .op-query   { color: var(--cyan);    margin-bottom: 4px; }
-  .op-answer  { color: var(--fg);      white-space: pre-wrap; word-break: break-word; margin-bottom: 12px; }
-  .op-error   { color: var(--red);     margin-bottom: 12px; }
-  .op-pending { color: var(--yellow);  font-style: italic; }
-  .op-sep { border-top: 1px solid var(--bg-border); margin: 8px 0; }
+  .op-query       { color: var(--cyan);    margin-bottom: 4px; }
+  .op-answer      { color: var(--fg);      white-space: pre-wrap; word-break: break-word; margin-bottom: 12px; }
+  .op-error       { color: var(--red);     margin-bottom: 12px; }
+  .op-pending     { color: var(--yellow);  font-style: italic; }
+  .op-sep         { border-top: 1px solid var(--bg-border); margin: 8px 0; }
+  .op-tool-call   { color: var(--yellow);  font-size: 11px; margin: 3px 0; font-style: italic; }
+  .op-tool-result { color: var(--green);   font-size: 11px; margin: 3px 0 6px; }
   #op-input-area {
     padding: 10px 16px; background: var(--bg-panel);
     border-top: 1px solid var(--bg-border);
@@ -3025,11 +3027,12 @@ async function sendToPane(pane, text, forceOp) {
 
   try {
     if (isOp) {
-      // Route to operator
+      // Route to operator — pass pane history so operator has conversation context
+      const opHistory = (pane.history || []).slice(0, -1); // exclude the just-appended user msg
       const d = await api('/api/v1/operator', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: typeof userContent === 'string' ? userContent : text }),
+        body: JSON.stringify({ query: typeof userContent === 'string' ? userContent : text, history: opHistory }),
       });
       document.getElementById(typingId)?.remove();
       const answer = d.success ? d.answer : `Error: ${d.error}`;
@@ -3606,6 +3609,9 @@ function loadOpTargets() {
   loadModelsForPanes();
 }
 
+// Operator conversation history — maintained across messages, cleared with Clear button
+let _opHistory = [];
+
 async function runOp() {
   const input = document.getElementById('op-input');
   const query = input.value.trim();
@@ -3621,36 +3627,95 @@ async function runOp() {
   const isModel = target.startsWith('model:');
   const targetLabel = isModel ? target.slice(6) : 'operator';
 
+  // Container for this turn's streamed output
+  const streamId = 'op-stream-' + Date.now();
   log.insertAdjacentHTML('beforeend',
-    `<div class="op-query">▶ [${esc(targetLabel)}] ${esc(query)}</div>
-     <div class="op-pending" id="op-pending">⟳ thinking…</div>`);
+    `<div class="op-query">▶ [${esc(targetLabel)}] ${esc(query)}</div>` +
+    `<div id="${streamId}"><div class="op-pending">⟳ thinking…</div></div>`);
   log.scrollTop = log.scrollHeight;
 
+  const streamEl = document.getElementById(streamId);
+  let finalAnswer = null;
+  let lastToolCallId = null;
+
   try {
-    {
-      // Always route through the operator tool loop; pass model override if one is selected
-      const modelId = isModel ? target.slice(6) : null;
-      const reqBody = { query };
-      if (modelId) reqBody.model = modelId;
-      const d = await api('/api/v1/operator', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(reqBody),
-      });
-      document.getElementById('op-pending')?.remove();
-      if (d.success) {
-        log.insertAdjacentHTML('beforeend',
-          `<div class="op-answer">${esc(d.answer)}</div><div class="op-sep"></div>`);
-        speakText(d.answer);
-      } else {
-        log.insertAdjacentHTML('beforeend',
-          `<div class="op-error">✗ ${esc(d.error || 'unknown error')}</div><div class="op-sep"></div>`);
+    const modelId = isModel ? target.slice(6) : null;
+    const reqBody = { query, history: _opHistory };
+    if (modelId) reqBody.model = modelId;
+
+    const resp = await fetch('/api/v1/operator/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(window._bbApiKey ? {'Authorization': `Bearer ${window._bbApiKey}`} : {}) },
+      body: JSON.stringify(reqBody),
+    });
+
+    // Clear the "thinking…" spinner once the stream starts
+    streamEl.innerHTML = '';
+
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      streamEl.insertAdjacentHTML('beforeend',
+        `<div class="op-error">✗ ${esc(d.error || resp.statusText)}</div>`);
+    } else {
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let evt;
+          try { evt = JSON.parse(line.slice(6)); } catch { continue; }
+
+          if (evt.type === 'tool_call') {
+            const tid = 'op-tc-' + Math.random().toString(36).slice(2);
+            lastToolCallId = tid;
+            const inputSnippet = evt.input.length > 120 ? evt.input.slice(0, 120) + '…' : evt.input;
+            streamEl.insertAdjacentHTML('beforeend',
+              `<div class="op-tool-call" id="${tid}">⟳ <strong>${esc(evt.tool)}</strong>: ${esc(inputSnippet)}</div>`);
+          } else if (evt.type === 'tool_result') {
+            if (lastToolCallId) {
+              const el = document.getElementById(lastToolCallId);
+              if (el) {
+                el.className = 'op-tool-result';
+                const resultSnippet = evt.result.length > 200 ? evt.result.slice(0, 200) + '…' : evt.result;
+                el.innerHTML = `✓ <strong>${esc(evt.tool)}</strong>: ${esc(resultSnippet)}`;
+              }
+              lastToolCallId = null;
+            }
+          } else if (evt.type === 'answer') {
+            finalAnswer = evt.content;
+            streamEl.insertAdjacentHTML('beforeend',
+              `<div class="op-answer">${esc(evt.content)}</div>`);
+            speakText(evt.content);
+          } else if (evt.type === 'error') {
+            streamEl.insertAdjacentHTML('beforeend',
+              `<div class="op-error">✗ ${esc(evt.message)}</div>`);
+          }
+
+          log.scrollTop = log.scrollHeight;
+        }
       }
     }
   } catch(e) {
-    document.getElementById('op-pending')?.remove();
-    log.insertAdjacentHTML('beforeend',
-      `<div class="op-error">✗ ${esc(e.message)}</div><div class="op-sep"></div>`);
+    streamEl.innerHTML = '';
+    streamEl.insertAdjacentHTML('beforeend',
+      `<div class="op-error">✗ ${esc(e.message)}</div>`);
+  }
+
+  streamEl.insertAdjacentHTML('beforeend', `<div class="op-sep"></div>`);
+
+  // Update conversation history for context on the next message
+  if (finalAnswer !== null) {
+    _opHistory.push({role: 'user', content: query});
+    _opHistory.push({role: 'assistant', content: finalAnswer});
+    // Cap at 20 messages (10 turns) to stay within context limits
+    if (_opHistory.length > 20) _opHistory = _opHistory.slice(-20);
   }
 
   btn.disabled = false;
@@ -3660,10 +3725,12 @@ async function runOp() {
 
 function clearOp() {
   document.getElementById('op-log').innerHTML = '';
+  _opHistory = [];
 }
 
 function opClear() {
   document.getElementById('op-log').innerHTML = '';
+  _opHistory = [];
   councilClear();
 }
 

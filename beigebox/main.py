@@ -1787,7 +1787,8 @@ async def api_operator(request: Request):
         if not question:
             return JSONResponse({"error": "query required"}, status_code=400)
         model_override = body.get("model", "").strip() or None
-        
+        history = body.get("history") or None
+
         from beigebox.storage.vector_store import VectorStore
         from beigebox.storage.backends import make_backend as _mk
         from beigebox.agents.operator import Operator
@@ -1806,11 +1807,11 @@ async def api_operator(request: Request):
             )
         except Exception:
             vs = None
-        
+
         try:
             op = Operator(vector_store=vs, model_override=model_override)
             loop = asyncio.get_event_loop()
-            answer = await loop.run_in_executor(None, op.run, question)
+            answer = await loop.run_in_executor(None, op.run, question, history)
             return JSONResponse({
                 "success": True,
                 "query": question,
@@ -1824,6 +1825,76 @@ async def api_operator(request: Request):
             }, status_code=503)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.post("/api/v1/operator/stream")
+async def api_operator_stream(request: Request):
+    """
+    Run the operator agent with streaming progress events (SSE).
+
+    Body: {"query": "...", "history": [{role, content}, ...], "model": "..."}
+
+    SSE events:
+      {"type": "tool_call",   "tool": str, "input": str, "thought": str}
+      {"type": "tool_result", "tool": str, "result": str}
+      {"type": "answer",      "content": str}
+      {"type": "error",       "message": str}
+    """
+    cfg = get_config()
+    rt = get_runtime_config()
+    op_enabled = rt.get("operator_enabled", cfg.get("operator", {}).get("enabled", False))
+    if not op_enabled:
+        return JSONResponse(
+            {"error": "Operator is disabled. Set operator.enabled: true in config.yaml to enable LLM-driven tool execution."},
+            status_code=403,
+        )
+
+    try:
+        body = await request.json()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+    question = body.get("query", "").strip()
+    if not question:
+        return JSONResponse({"error": "query required"}, status_code=400)
+
+    history = body.get("history") or None
+    model_override = body.get("model", "").strip() or None
+
+    async def event_stream():
+        import json as _json
+        try:
+            from beigebox.storage.vector_store import VectorStore
+            from beigebox.storage.backends import make_backend as _mk2
+            from beigebox.agents.operator import Operator
+
+            cfg2 = get_config()
+            try:
+                _sc = cfg2["storage"]
+                _ec = cfg2["embedding"]
+                vs = VectorStore(
+                    embedding_model=_ec["model"],
+                    embedding_url=_ec.get("backend_url") or cfg2["backend"]["url"],
+                    backend=_mk2(
+                        _sc.get("vector_backend", "chromadb"),
+                        path=get_storage_paths(cfg2)[1],
+                    ),
+                )
+            except Exception:
+                vs = None
+
+            op = Operator(vector_store=vs, model_override=model_override)
+            async for event in op.run_stream(question, history):
+                yield f"data: {_json.dumps(event)}\n\n"
+        except Exception as e:
+            import json as _json2
+            yield f"data: {_json2.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ---------------------------------------------------------------------------
