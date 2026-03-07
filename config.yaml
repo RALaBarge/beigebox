@@ -52,7 +52,10 @@ backends:
   #   backoff_max: 10.0
 
   # Tertiary: OpenRouter API fallback (optional)
-  # Uncomment and add API key if you want API fallback
+  # Uncomment and add API key if you want API fallback.
+  # By default BeigeBox will NOT send plain model ids like "llama3.2" here.
+  # It only uses OpenRouter automatically for provider/model ids like
+  # "openai/gpt-4o-mini" unless you turn on the runtime toggle below.
   # - provider: openrouter
   #   name: openrouter-fallback
   #   url: https://openrouter.io/api/v1
@@ -264,6 +267,14 @@ tools:
     ws_url: ws://localhost:9009
     timeout: 10   # seconds
 
+  # ── Memory (conversation recall + RAG) ────────────────────────────────────
+  memory:
+    enabled: true
+    max_results: 3
+    min_score: 0.3
+    query_preprocess: false        # Extract keywords via LLM before ChromaDB lookup
+    query_preprocess_model: "llama3.2:3b"  # Fast model for keyword extraction
+
   # ── Plugin system ─────────────────────────────────────────────────────────
   # Drop any .py file with a *Tool class into ./plugins/ and it auto-registers.
   # Set enabled: true here and per-plugin to activate.
@@ -276,6 +287,12 @@ tools:
     #   enabled: false
     zip_inspector:
       enabled: true
+    doc_parser:
+      enabled: true
+      ocr_model: ""        # e.g. "llava:7b" or "qwen2-vl:7b" for vision-model OCR
+      max_ref_tokens: 4000 # token budget for returned excerpt (~4 chars/token)
+      chunk_size: 800      # chars per ChromaDB chunk
+      chunk_overlap: 80    # overlap between adjacent chunks
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Connections — authenticated API access (no tokens here, metadata only)
