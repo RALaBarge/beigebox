@@ -68,9 +68,10 @@ Because all LLM traffic passes through BeigeBox, it can observe, route, modify, 
 Multi-tier routing pipeline that picks the right model per request:
 
 1. **Z-commands** — user overrides inline (`z: complex`, `z: code`, `z: llama3:8b`)
-2. **Agentic scorer** — zero-cost keyword pre-filter for tool-heavy queries
-3. **Embedding classifier** — fast cosine-distance classification (~50ms) handles clear cases
-4. **Decision LLM** — small local model judges borderline cases
+2. **Routing rules** — admin-configured rules in `runtime_config.yaml`, hot-reloaded per request (see [Routing rules](#routing-rules))
+3. **Agentic scorer** — zero-cost keyword pre-filter for tool-heavy queries
+4. **Embedding classifier** — fast cosine-distance classification (~50ms) handles clear cases
+5. **Decision LLM** — small local model judges borderline cases
 
 Session-sticky routing keeps a conversation on the same model once classified. Multi-backend failover routes through Ollama, OpenRouter, or any OpenAI-compatible endpoint with priority-based fallback.
 
@@ -274,6 +275,92 @@ backends:
   - name: ollama-local
     latency_p95_threshold_ms: 3000   # deprioritise if rolling P95 exceeds 3s
 ```
+
+### Routing rules
+
+Rules defined in `runtime_config.yaml` under `routing_rules`. Hot-reloaded on every request — edit the file and the next request picks up the change immediately. Rules fire after z-commands and before the embedding classifier.
+
+Each rule has a `match` block (all conditions must be true) and an `action` block. The first matching rule wins unless `continue: true` is set. `priority` controls evaluation order (lower = first, default 50).
+
+**Match conditions:**
+
+| Field | Type | Matches when… |
+|---|---|---|
+| `message` | regex | latest user message matches (case-insensitive) |
+| `message_contains` | string | latest user message contains substring |
+| `model` | glob | requested model matches (e.g. `qwen3:*`, `gpt-4*`) |
+| `auth_key` | string | API key name matches exactly |
+| `has_tools` | bool | request includes / excludes a `tools` array |
+| `message_count` | `{min: N, max: N}` | conversation has N messages |
+| `conversation_id` | regex | conversation ID field matches |
+
+**Actions:**
+
+| Key | Effect |
+|---|---|
+| `model` | Override the model |
+| `backend` | Force a specific named backend (bypasses latency-aware selection) |
+| `route` | Resolve a named route alias from `decision_llm.routes` |
+| `tools` | Force-run tool list, inject results as context before the LLM call |
+| `pass_through` | Apply other actions but still run classifier / decision LLM for model selection |
+| `temperature`, `top_p`, `top_k`, `num_ctx`, `max_tokens`, `repeat_penalty`, `seed` | Override generation params |
+| `system_prompt` | Prepend text to the system message |
+| `inject_file` | Read a file from disk and prepend to system message — re-read every request, so edits take effect immediately |
+| `inject_context` | Inline text prepended to system message |
+| `skip_session_cache` | Don't sticky this routing decision for the conversation |
+| `skip_semantic_cache` | Bypass semantic cache lookup for this request |
+| `tag` | Label added to the wiretap entry (`routing_rule_tag`) |
+
+```yaml
+# runtime_config.yaml — takes effect immediately, no restart
+runtime:
+  routing_rules:
+
+    # Inject a project README into every request — still let the classifier pick the model
+    - name: "always have project context"
+      match:
+        auth_key: "dev"
+      action:
+        inject_file: "/home/user/project/README.md"
+        pass_through: true
+
+    # Route code requests to a larger model with tighter sampling
+    - name: "code → big model"
+      priority: 10
+      match:
+        message: "^(fix|debug|refactor|implement)"
+      action:
+        model: "qwen3:14b"
+        temperature: 0.1
+        num_ctx: 32768
+        tag: "code"
+
+    # Per-key model restriction with fresh responses
+    - name: "ci runner — fast model only"
+      match:
+        auth_key: "ci-runner"
+      action:
+        model: "llama3.2:3b"
+        skip_semantic_cache: true
+        skip_session_cache: true
+
+    # Multiple rules can layer with continue: true
+    - name: "add context to all dev requests"
+      match:
+        auth_key: "dev"
+      action:
+        inject_context: "You are working on a Python FastAPI project."
+      continue: true                    # keep evaluating subsequent rules
+
+    - name: "also route dev code requests to big model"
+      match:
+        auth_key: "dev"
+        message: "fix|refactor"
+      action:
+        model: "qwen3:14b"
+```
+
+The full schema with every accepted key and inline documentation is in `beigebox/agents/routing_rules.py`.
 
 ### OpenRouter plain model IDs
 
