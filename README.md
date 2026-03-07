@@ -85,6 +85,7 @@ Three complementary cache layers, all in-process:
 - **Semantic cache** — caches full assistant responses keyed by cosine similarity of the user query (nomic-embed-text). When a new message is sufficiently similar to a cached one, the cached response is returned immediately without touching the backend. Configurable similarity threshold, TTL, and max entries.
 - **Embedding cache** — deduplicates identical embedding calls within a session. Both the classifier and semantic cache need to embed the same message — this avoids redundant round-trips to Ollama.
 - **Tool result cache** — short-TTL cache for deterministic tool calls (web search, calculator, datetime). Keyed by SHA-256 of tool name + query.
+- **RAG query preprocessing** — optional fast LLM pass before ChromaDB lookup extracts keywords and entities from the raw query, improving recall for vague or conversational memory searches. Enable via `tools.memory.query_preprocess` in config.
 
 ### Observability
 
@@ -100,6 +101,7 @@ Three complementary cache layers, all in-process:
 - **Harness** — send the same prompt to N models in parallel, compare results side by side
 - **Orchestrated mode** — goal-driven agent loop: plan → dispatch tasks to models/operator → evaluate → iterate
 - **Ensemble voting** — parallel responses judged by an LLM arbiter, returns the best with reasoning
+- **Group Chat** — turn-by-turn multi-agent conversation: an LLM moderator picks who speaks next from a configurable roster of models/operator agents; inject thoughts mid-conversation to steer the discussion
 - **Operator agent** — JSON tool-loop agent with sandboxed shell, web search, memory recall, calculator, and plugin tools
 
 ### Storage
@@ -123,6 +125,7 @@ Three complementary cache layers, all in-process:
 - **Pre/post hooks** — Python scripts that intercept requests and responses (prompt injection detection, RAG context injection, synthetic request filtering)
 - **Plugin system** — drop a `*Tool` class in `plugins/` and it auto-registers into the tool registry
 - **Zip inspector** — built-in plugin that reads `.zip` files from `workspace/in/`, returns file tree and UTF-8 text previews
+- **Document parser** — built-in plugin (`doc_parser`) converts PDF, DOCX, PPTX, XLSX, HTML, images, and more to Markdown via MarkItDown; OCR via Tesseract or any Ollama vision model; chunks ingested into ChromaDB for `z: memory` recall
 - **System context injection** — hot-reloaded `system_context.md` prepended to every request
 
 ### Per-model options
@@ -160,7 +163,7 @@ BeigeBox includes a built-in single-file web interface at `http://localhost:1337
 | **Conversations** | Semantic search, replay, fork, export |
 | **Tap** | Live wiretap stream with role/direction filters |
 | **Operator** | Interactive agent with tool execution |
-| **Harness** | Parallel model comparison + orchestrated goal-driven mode + ensemble voting |
+| **Harness** | Parallel model comparison + orchestrated goal-driven mode + ensemble voting + group chat |
 | **Config** | Full config editor with collapsible sections, hot-reload — every setting, feature flag, and generation parameter |
 
 ### Per-pane chat settings
@@ -298,6 +301,44 @@ The operator's `connection` tool lets the agent call any configured connection. 
 
 ---
 
+## Group Chat
+
+Turn-by-turn multi-agent conversation where an LLM moderator decides who speaks next. Unlike the parallel Harness, agents see each other's responses and can build on them.
+
+Configure a roster of speakers — each with a name, a description of their role or personality, and a target (any model ID or `"operator"`). The moderator LLM reads the shared transcript each turn and picks who speaks next, stopping when the discussion reaches a natural conclusion or the turn limit is hit.
+
+**Inject thoughts mid-run** — while a conversation is in progress, type into the inject bar and press Enter. The moderator factors your note in before selecting the next speaker and acknowledges it in the transcript.
+
+**API:**
+
+```
+POST /api/v1/harness/group-chat
+
+{
+  "topic":    "What are the trade-offs between RAG and fine-tuning?",
+  "speakers": [
+    {"name": "Advocate",  "description": "Argues strongly for RAG-based approaches", "target": "llama3.2:3b"},
+    {"name": "Skeptic",   "description": "Challenges RAG limitations, prefers fine-tuning", "target": "qwen3:8b"},
+    {"name": "Moderator", "description": "Synthesises and finds common ground", "target": "operator"}
+  ],
+  "model":     "llama3.2:3b",
+  "max_turns": 12
+}
+```
+
+Returns `text/event-stream` events: `start`, `moderator`, `turn`, `injected`, `finish`, `error`.
+
+Inject a thought into a running session:
+
+```
+POST /api/v1/harness/{run_id}/inject
+{"message": "focus on latency trade-offs specifically"}
+```
+
+The inject endpoint is shared with the Orchestrated and Ralph modes.
+
+---
+
 ## BrowserBox (browser API)
 
 BeigeBox's operator agent can control a live Chrome browser via [BrowserBox](https://github.com/RALaBarge/browserbox) — a Chrome extension + WebSocket relay that exposes browser APIs as tools.
@@ -426,6 +467,8 @@ GET  /api/v1/routing-stats              Session cache hit rate
 POST /api/v1/operator                   Run the operator agent
 POST /api/v1/ensemble                   Multi-model ensemble with LLM judge
 POST /api/v1/harness/orchestrate        Goal-driven orchestration (SSE stream)
+POST /api/v1/harness/group-chat         Turn-by-turn multi-agent group conversation (SSE stream)
+POST /api/v1/harness/{run_id}/inject    Inject a steering thought into a running orchestration or group chat
 GET  /api/v1/conversation/{id}/replay   Full conversation reconstruction
 POST /api/v1/conversation/{id}/fork     Branch a conversation
 GET  /api/v1/workspace                  List workspace/in and workspace/out files

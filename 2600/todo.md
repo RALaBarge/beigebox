@@ -6,28 +6,19 @@
 
 _Nothing queued — see backlog below._
 
+## Recently shipped
+
+- **doc_parser plugin** (`plugins/doc_parser.py`) — MarkItDown-based document parser.
+  Supports PDF, DOCX, PPTX, XLSX, HTML, MD, TXT, CSV, JSON, XML, images, ZIP.
+  OCR: Tesseract (auto-detected) or vision LLM via `ocr_model` config key.
+  Chunks ingested into ChromaDB for z: memory recall.
+  z-aliases: `parse`, `doc`, `ingest`. Config under `tools.plugins.doc_parser`.
+
 ---
 
 ## Backlog
 
-- **Operator shell sandbox (next tier)** — bwrap is now the hard wall for
-  `system_info`. The operator agent itself (free-form LLM-driven shell via
-  `agents/operator.py`) still runs unsandboxed. Extend the bwrap wrapper
-  to cover operator shell calls, or gate operator shell behind a separate
-  config flag with a loud warning.
-
-- **Model performance dashboard — requests/day chart** — tokens/sec and
-  cache hit rate are now in the dashboard. A requests-per-day bar chart
-  (same shape as the spend-by-day chart) would round out the picture.
-  Data is already in SQLite.
-
-- **Conversation forking — web UI affordance** — `z: fork` works via
-  z-command. Could surface a fork button on conversation cards in the
-  Conversations tab for discoverability.
-
-- **Plugin z-command directives** — plugins register into the tool registry
-  but have no z-command shorthand (e.g. `z: dice`). Consider auto-generating
-  TOOL_DIRECTIVES entries from PLUGIN_NAME at load time.
+_Empty — all backlog items resolved._
 
 ---
 

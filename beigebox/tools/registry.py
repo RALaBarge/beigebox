@@ -99,6 +99,9 @@ class ToolRegistry:
                 vector_store=vector_store,
                 max_results=mem_cfg.get("max_results", 3),
                 min_score=mem_cfg.get("min_score", 0.3),
+                query_preprocess=mem_cfg.get("query_preprocess", False),
+                query_preprocess_model=mem_cfg.get("query_preprocess_model", ""),
+                backend_url=cfg.get("backend", {}).get("url", "http://localhost:11434"),
             )
 
         # --- PDF Reader (pdf_oxide — disabled by default, requires pip install pdf_oxide) ---
