@@ -1932,9 +1932,12 @@ async def api_council_propose(request: Request):
         or cfg.get("backend", {}).get("default_model", "")
     )
     backend_url = cfg.get("backend", {}).get("url", "http://localhost:11434")
+    allowed_models = body.get("allowed_models") or None
+    if allowed_models and not isinstance(allowed_models, list):
+        allowed_models = None
 
     try:
-        council = await _council_propose(query, backend_url, operator_model)
+        council = await _council_propose(query, backend_url, operator_model, allowed_models=allowed_models)
     except Exception as e:
         logger.error("council propose error: %s", e)
         return JSONResponse({"error": str(e)}, status_code=503)
@@ -2410,15 +2413,27 @@ async def _wire_and_forward(request: Request, route_label: str, override_base_ur
         )
 
     async def _stream():
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            async with client.stream(
-                request.method,
-                target,
-                headers=headers,
-                content=body,
-            ) as resp:
-                async for chunk in resp.aiter_bytes():
-                    yield chunk
+        resp_status = None
+        total_bytes = 0
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                async with client.stream(
+                    request.method,
+                    target,
+                    headers=headers,
+                    content=body,
+                ) as resp:
+                    resp_status = resp.status_code
+                    async for chunk in resp.aiter_bytes():
+                        total_bytes += len(chunk)
+                        yield chunk
+        finally:
+            if proxy and proxy.wire:
+                proxy.wire.log(
+                    direction="outbound",
+                    role="proxy",
+                    content=f"[{request.method}] {route_label} ← HTTP {resp_status} ({total_bytes} bytes)",
+                )
 
     return StreamingResponse(_stream(), media_type="application/octet-stream")
 

@@ -1377,6 +1377,8 @@
         <option value="system">system</option>
         <option value="decision">decision</option>
         <option value="tool">tool</option>
+        <option value="proxy">proxy</option>
+        <option value="wasm">wasm</option>
       </select>
       <span class="toolbar-label" style="margin-left:8px">Direction:</span>
       <select id="tap-dir" onchange="loadTap()" style="width:110px">
@@ -1424,6 +1426,14 @@
       </span>
       <span class="toolbar-spacer"></span>
       <button onclick="opClear()">✕ Clear</button>
+    </div>
+
+    <!-- Council: allowed model pool (shown only in council mode) -->
+    <div id="council-model-pool" style="display:none;padding:6px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border)">
+      <div style="font-size:11px;color:var(--fg-muted);margin-bottom:4px">Models the council may use <span style="color:var(--fg-dim)">(leave all unchecked to allow any)</span>:</div>
+      <div id="council-model-list" style="display:flex;flex-wrap:wrap;gap:6px;max-height:70px;overflow-y:auto">
+        <span style="color:var(--fg-muted);font-size:11px">Loading models…</span>
+      </div>
     </div>
 
     <!-- Agent mode -->
@@ -2837,6 +2847,8 @@ async function loadModelsForPanes() {
 
   // Refresh ensemble checklist if it's currently visible
   if (harnessMode === 'ensemble') harnessEnsemblePopulateModels();
+  // Refresh council model pool if council mode is active
+  if (_opMode === 'council') councilPopulateModels();
 }
 
 // Track which pane drawers are open across re-renders
@@ -3593,10 +3605,12 @@ const TAP_ROLE_COLOR = {
   system:    'var(--fg-muted)',
   decision:  'var(--lavender)',
   tool:      'var(--green)',
+  proxy:     'var(--fg-dim)',
+  wasm:      'var(--peach)',
   error:     'var(--red)',
 };
 const TAP_DIR_ARROW = { inbound: '──▶', outbound: '◀──', internal: '─●─' };
-const TAP_ROLE_ICON = { user:'▶', assistant:'◀', system:'●', decision:'⚖', tool:'⚡', error:'✗' };
+const TAP_ROLE_ICON = { user:'▶', assistant:'◀', system:'●', decision:'⚖', tool:'⚡', proxy:'⇄', wasm:'⬡', error:'✗' };
 
 const TIMING_COLORS = { fast: '#a5d6a7', medium: '#fff176', slow: '#ffcc80', crit: '#ef9a9a' };
 
@@ -3860,12 +3874,39 @@ function setOpMode(mode) {
   document.getElementById('op-council-controls').style.display = isCouncil ? 'flex' : 'none';
   document.getElementById('op-agent-area').style.display       = isAgent   ? 'flex' : 'none';
   document.getElementById('op-council-area').style.display     = isCouncil ? 'flex' : 'none';
+  const poolEl = document.getElementById('council-model-pool');
+  if (poolEl) poolEl.style.display = isCouncil ? '' : 'none';
+  if (isCouncil) councilPopulateModels();
 }
 
 // ── Council mode ──────────────────────────────────────────────────────────────
-let _councilRunId   = null;
-let _councilRunning = false;
-let _availModels    = [];   // populated when models are loaded
+let _councilRunId      = null;
+let _councilRunning    = false;
+let _availModels       = [];   // populated when models are loaded
+let councilAllowedModels = new Set();
+
+function councilPopulateModels() {
+  const listEl = document.getElementById('council-model-list');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+  (allModels || []).forEach(m => {
+    const chip = document.createElement('label');
+    chip.style.cssText = 'display:flex;align-items:center;gap:4px;padding:2px 8px;border:1px solid var(--bg-border);border-radius:3px;cursor:pointer;font-size:11px;background:var(--bg-input);white-space:nowrap';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = m.id;
+    cb.checked = councilAllowedModels.has(m.id);
+    cb.onchange = () => {
+      if (cb.checked) councilAllowedModels.add(m.id);
+      else councilAllowedModels.delete(m.id);
+      chip.style.borderColor = cb.checked ? 'var(--lavender)' : 'var(--bg-border)';
+    };
+    if (cb.checked) chip.style.borderColor = 'var(--lavender)';
+    chip.appendChild(cb);
+    chip.appendChild(document.createTextNode(' ' + m.id));
+    listEl.appendChild(chip);
+  });
+}
 
 function councilClear() {
   document.getElementById('council-proposal-area').innerHTML = '';
@@ -3892,6 +3933,7 @@ async function councilPropose() {
   try {
     const body = { query };
     if (model) body.model = model;
+    if (councilAllowedModels.size > 0) body.allowed_models = [...councilAllowedModels];
     const d = await api('/api/v1/council/propose', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3912,8 +3954,11 @@ async function councilPropose() {
 }
 
 function _renderCouncilCards(area, council) {
-  // Build model options HTML from available models
-  const modelOpts = _availModels.map(m =>
+  // Build model options HTML — restrict to allowed pool if any are selected
+  const modelsToShow = councilAllowedModels.size > 0
+    ? _availModels.filter(m => councilAllowedModels.has(m))
+    : _availModels;
+  const modelOpts = modelsToShow.map(m =>
     `<option value="${esc(m)}">${esc(m)}</option>`
   ).join('');
 

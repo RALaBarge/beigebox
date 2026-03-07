@@ -153,12 +153,18 @@ async def propose(
     query: str,
     backend_url: str,
     operator_model: str,
+    allowed_models: list[str] | None = None,
 ) -> list[dict]:
     """
     Ask the operator to propose a council for the given query.
     Returns a list of {name, model, task} dicts.
+
+    allowed_models: if provided, restrict the operator to only these model IDs.
     """
-    models = await _fetch_models(backend_url)
+    if allowed_models:
+        models = allowed_models
+    else:
+        models = await _fetch_models(backend_url)
     models_block = "\n".join(f"  - {m}" for m in models) if models else "  (unavailable)"
 
     system = _PROPOSAL_SYSTEM.format(models=models_block)
