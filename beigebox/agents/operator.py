@@ -51,6 +51,12 @@ RULES:
 - If a tool returns an error, try a different approach or explain the limitation in your answer.
 - Never make up tool results.
 
+WORKSPACE:
+- Input files: /workspace/in/ (read-only) — files the user has provided for you to read.
+- Output files: /workspace/out/ — write any files you produce here using the shell tool.
+  Example: {{"tool": "system_info", "input": "echo 'result' > /workspace/out/report.txt"}}
+  Always tell the user the filename when you write to workspace/out/.
+
 AVAILABLE TOOLS:
 {tools_block}
 {skills_block}"""

@@ -30,6 +30,7 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "auto_summarization", "system_context", "generation", "models",
     "wasm", "web_ui", "voice", "wiretap", "semantic_cache", "classifier",
     "model_advertising", "zcommands", "advanced", "runtime", "skills",
+    "workspace", "hooks", "connections",
 }
 
 # ── Pydantic models for key sections ─────────────────────────────────────────
@@ -197,6 +198,34 @@ def get_runtime_config() -> dict:
     return _runtime_config
 
 
+def get_storage_paths(cfg: dict | None = None) -> tuple[str, str]:
+    """
+    Return normalized storage paths as (sqlite_path, vector_store_path).
+
+    Preferred keys:
+      - storage.path
+      - storage.vector_store_path
+
+    Legacy compatibility keys still accepted:
+      - storage.sqlite_path
+      - storage.chroma_path
+    """
+    cfg = cfg or get_config()
+    storage_cfg = cfg.get("storage", {})
+
+    sqlite_path = (
+        storage_cfg.get("path")
+        or storage_cfg.get("sqlite_path")
+        or "./data/beigebox.db"
+    )
+    vector_store_path = (
+        storage_cfg.get("vector_store_path")
+        or storage_cfg.get("chroma_path")
+        or "./data/chroma"
+    )
+
+    return sqlite_path, vector_store_path
+
 def get_effective_backends_config() -> tuple[bool, list[dict]]:
     """
     Return (backends_enabled, backends_list) merging runtime config onto static config.
@@ -238,7 +267,9 @@ def get_effective_backends_config() -> tuple[bool, list[dict]]:
 def update_runtime_config(key: str, value) -> bool:
     """
     Write a single key into the runtime: block of runtime_config.yaml.
-    Thread-safe via file read-modify-write. Returns True on success.
+    Returns True on success.
+
+    Passing value=None removes the key from the runtime block.
     """
     try:
         if _RUNTIME_CONFIG_PATH.exists():
@@ -250,12 +281,16 @@ def update_runtime_config(key: str, value) -> bool:
         if "runtime" not in data or not isinstance(data["runtime"], dict):
             data["runtime"] = {}
 
-        data["runtime"][key] = value
+        if value is None:
+            data["runtime"].pop(key, None)
+        else:
+            data["runtime"][key] = value
 
+        if not _RUNTIME_CONFIG_PATH.parent.exists():
+            return False
         with open(_RUNTIME_CONFIG_PATH, "w") as f:
-            yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+            yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
-        # Bust the mtime cache so next get_runtime_config() picks it up
         global _runtime_mtime
         _runtime_mtime = 0.0
         return True

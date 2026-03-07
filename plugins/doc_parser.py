@@ -43,8 +43,9 @@ PLUGIN_Z_ALIASES = {
     "ingest": "doc_parser",
 }
 
-_APP_ROOT     = Path(__file__).parent.parent
-_WORKSPACE_IN = _APP_ROOT / "workspace" / "in"
+_APP_ROOT      = Path(__file__).parent.parent
+_WORKSPACE_IN  = _APP_ROOT / "workspace" / "in"
+_WORKSPACE_OUT = _APP_ROOT / "workspace" / "out"
 
 _CHARS_PER_TOKEN = 4   # rough approximation for budget guard
 
@@ -258,13 +259,26 @@ class DocParserTool:
             text      = text[:max_chars]
             truncated = True
 
+        # Save full parsed markdown to workspace/out/
+        out_path = _WORKSPACE_OUT / f"{file_path.stem}_parsed.md"
+        saved_to = None
+        try:
+            _WORKSPACE_OUT.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(text if not truncated else text, encoding="utf-8")
+            saved_to = out_path
+            logger.info("doc_parser: saved parsed output to %s", out_path)
+        except Exception as e:
+            logger.debug("doc_parser: could not save to workspace/out: %s", e)
+
         header = f"# {file_path.name}\n"
         if n_ingested:
             header += f"*({n_ingested} chunks ingested into memory — searchable via z: memory)*\n"
+        if saved_to:
+            header += f"*Full parsed text saved to workspace/out/{saved_to.name}*\n"
         header += "\n"
 
         footer = ""
         if truncated:
-            footer = f"\n\n*… truncated at ~{max_tokens} tokens. Full document ingested into memory.*"
+            footer = f"\n\n*… truncated at ~{max_tokens} tokens. Full document saved to workspace/out/{out_path.name}*"
 
         return header + text + footer

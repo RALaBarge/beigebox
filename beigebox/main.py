@@ -1912,10 +1912,25 @@ async def api_council_engage(run_id: str, request: Request):
     backend_url    = session["backend_url"]
 
     async def _stream():
+        from pathlib import Path as _Path
+        _ws_out = _Path(__file__).parent.parent / "workspace" / "out"
+
         yield f"data: {_json.dumps({'type': 'dispatch', 'count': len(council)})}\n\n"
         try:
             async for event in _council_execute(query, council, backend_url, operator_model):
                 yield f"data: {_json.dumps(event)}\n\n"
+                if event.get("type") == "synthesis":
+                    try:
+                        _ws_out.mkdir(parents=True, exist_ok=True)
+                        out_file = _ws_out / f"council_{run_id}.md"
+                        parts = [f"# Council Synthesis\n\n**Query:** {query}\n\n## Specialists\n\n"]
+                        for m in council:
+                            parts.append(f"- **{m['name']}** ({m['model']}): {m['task']}\n")
+                        parts.append(f"\n---\n\n{event['result']}")
+                        out_file.write_text("".join(parts), encoding="utf-8")
+                        yield f"data: {_json.dumps({'type': 'saved', 'path': f'workspace/out/council_{run_id}.md'})}\n\n"
+                    except Exception:
+                        pass
         except Exception as e:
             yield f"data: {_json.dumps({'type': 'error', 'message': str(e)})}\n\n"
         finally:
