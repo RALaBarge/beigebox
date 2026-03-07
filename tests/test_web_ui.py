@@ -86,7 +86,8 @@ class TestUpdateRuntimeConfig:
     def test_returns_false_on_unwritable_path(self, tmp_path):
         from beigebox import config as cfg_mod
         orig_path = cfg_mod._RUNTIME_CONFIG_PATH
-        cfg_mod._RUNTIME_CONFIG_PATH = Path("/nonexistent/path/runtime_config.yaml")
+        missing_parent = tmp_path / "does-not-exist"
+        cfg_mod._RUNTIME_CONFIG_PATH = missing_parent / "runtime_config.yaml"
 
         try:
             result = cfg_mod.update_runtime_config("web_ui_vi_mode", True)

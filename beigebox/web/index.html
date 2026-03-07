@@ -3848,6 +3848,9 @@ async function councilEngage() {
             el.insertAdjacentHTML('beforeend',
               `<div>${esc(evt.result)}</div>`);
           }
+        } else if (evt.type === 'saved') {
+          results.insertAdjacentHTML('beforeend',
+            `<div style="font-size:10px;color:var(--fg-muted);margin-top:4px">💾 ${esc(evt.path)}</div>`);
         } else if (evt.type === 'error') {
           results.insertAdjacentHTML('beforeend',
             `<div class="op-error">✗ ${esc(evt.message)}</div>`);

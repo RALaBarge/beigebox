@@ -23,9 +23,10 @@ from pathlib import Path
 
 PLUGIN_NAME = "zip_inspector"
 
-# Resolve workspace/in path relative to the project root
-_APP_ROOT = Path(__file__).parent.parent
-_WORKSPACE_IN = _APP_ROOT / "workspace" / "in"
+# Resolve workspace paths relative to the project root
+_APP_ROOT      = Path(__file__).parent.parent
+_WORKSPACE_IN  = _APP_ROOT / "workspace" / "in"
+_WORKSPACE_OUT = _APP_ROOT / "workspace" / "out"
 
 # Output caps
 _MAX_PREVIEW_CHARS = 2000   # per file preview
@@ -125,7 +126,18 @@ class ZipInspectorTool:
                     output_parts.append("")
                     output_parts.extend(previews)
 
-                return "\n".join(output_parts)
+                report = "\n".join(output_parts)
+
+                # Save inspection report to workspace/out/
+                out_name = f"{zip_path.stem}_inspection.txt"
+                try:
+                    _WORKSPACE_OUT.mkdir(parents=True, exist_ok=True)
+                    (_WORKSPACE_OUT / out_name).write_text(report, encoding="utf-8")
+                    report += f"\n\n[Report saved to workspace/out/{out_name}]"
+                except Exception:
+                    pass
+
+                return report
 
         except zipfile.BadZipFile as e:
             return f"Could not read zip: {e}"

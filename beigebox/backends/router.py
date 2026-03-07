@@ -26,6 +26,7 @@ from beigebox.backends.base import BaseBackend, BackendResponse
 from beigebox.backends.ollama import OllamaBackend
 from beigebox.backends.openrouter import OpenRouterBackend
 from beigebox.backends.openai_compat import OpenAICompatibleBackend
+from beigebox.config import get_config, get_runtime_config
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,7 @@ class MultiBackendRouter:
         self.backends: list[BaseBackend] = []
         self._thresholds: dict[str, float] = {}  # backend name → ms threshold (0=off)
         self._weights: dict[str, float] = {}     # backend name → traffic split weight (0=off)
+        self._allow_unqualified_models: dict[str, bool] = {}  # backend opt-in for plain model ids
         self._tracker = LatencyTracker()
 
         for cfg in backends_config:
@@ -124,6 +126,7 @@ class MultiBackendRouter:
                         "Backend '%s': A/B split weight=%.1f",
                         wrapped.name, weight,
                     )
+                self._allow_unqualified_models[wrapped.name] = bool(cfg.get("allow_unqualified_models", False))
 
         self.backends.sort(key=lambda b: b.priority)
         names = [f"{b.name}(p{b.priority})" for b in self.backends]
@@ -156,6 +159,27 @@ class MultiBackendRouter:
 
         return cls(**kwargs)
 
+    def _unwrap(self, backend: BaseBackend) -> BaseBackend:
+        return getattr(backend, "backend", backend)
+
+    def _is_openrouter(self, backend: BaseBackend) -> bool:
+        return isinstance(self._unwrap(backend), OpenRouterBackend)
+
+    def _global_allow_openrouter_for_plain_models(self) -> bool:
+        rt = get_runtime_config()
+        cfg = get_config()
+        return bool(
+            rt.get(
+                "allow_openrouter_for_plain_models",
+                cfg.get("routing", {}).get("allow_openrouter_for_plain_models", False),
+            )
+        )
+
+    def _can_attempt_model(self, backend: BaseBackend, model: str) -> bool:
+        if "/" not in model and self._is_openrouter(backend):
+            return self._allow_unqualified_models.get(backend.name, False) or self._global_allow_openrouter_for_plain_models()
+        return backend.supports_model(model)
+
     def get_backend(self, name: str) -> BaseBackend | None:
         """Get a specific backend by name."""
         for b in self.backends:
@@ -166,7 +190,7 @@ class MultiBackendRouter:
     def get_openrouter_backend(self):
         """Return first OpenRouterBackend (unwrapped from RetryableBackendWrapper), or None."""
         for b in self.backends:
-            inner = getattr(b, "backend", b)
+            inner = self._unwrap(b)
             if isinstance(inner, OpenRouterBackend):
                 return inner
         return None
@@ -179,7 +203,7 @@ class MultiBackendRouter:
         fast: list[BaseBackend] = []
         degraded: list[BaseBackend] = []
         for backend in self.backends:
-            if not backend.supports_model(model):
+            if not self._can_attempt_model(backend, model):
                 continue
             threshold = self._thresholds.get(backend.name, 0)
             if self._tracker.is_degraded(backend.name, threshold):
@@ -319,7 +343,7 @@ class MultiBackendRouter:
             p95 = self._tracker.p95(backend.name)
             count = self._tracker.sample_count(backend.name)
             # Unwrap RetryableBackendWrapper to get the real provider name
-            inner = getattr(backend, "backend", backend)
+            inner = self._unwrap(backend)
             provider = type(inner).__name__.replace("Backend", "").lower()
             stats.append({
                 "name": backend.name,
@@ -331,6 +355,7 @@ class MultiBackendRouter:
                 "latency_threshold_ms": threshold,
                 "degraded": self._tracker.is_degraded(backend.name, threshold),
                 "traffic_split": self._weights.get(backend.name, 0.0),
+                "allow_unqualified_models": (self._allow_unqualified_models.get(backend.name, False) or self._global_allow_openrouter_for_plain_models()),
             })
         return stats
 
