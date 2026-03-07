@@ -68,11 +68,32 @@ class BrowserboxTool:
         if not tool:
             return "Error: missing 'tool' field"
 
+        inp_snippet = str(inp)[:80] + ("…" if len(str(inp)) > 80 else "")
+        logger.info("browserbox: calling %s (relay=%s, input=%.80s)", tool, self._ws_url, inp_snippet)
+
         try:
-            return asyncio.run(self._call(tool, inp))
+            result = asyncio.run(self._call(tool, inp))
         except Exception as e:
-            logger.error("browserbox call failed: %s", e)
+            logger.error("browserbox: unexpected exception calling %s — %s: %s", tool, type(e).__name__, e)
             return f"Error: {e}"
+
+        # Classify and log the outcome
+        if result.startswith("Error: could not connect"):
+            logger.warning("browserbox: relay unreachable at %s — is ws_relay.py running?", self._ws_url)
+        elif result.startswith("Error: timed out"):
+            logger.warning("browserbox: %s timed out after %.0fs", tool, self._timeout)
+        elif "browser not connected" in result:
+            logger.warning(
+                "browserbox: relay is up but extension is not connected — "
+                "open Chrome, load the BrowserBox extension, and check the popup"
+            )
+        elif result.startswith("Error:"):
+            logger.warning("browserbox: %s returned error: %s", tool, result)
+        else:
+            snippet = result[:120] + ("…" if len(result) > 120 else "")
+            logger.info("browserbox: %s OK → %s", tool, snippet)
+
+        return result
 
     async def _call(self, tool: str, input_value: Any) -> str:
         try:
@@ -83,6 +104,7 @@ class BrowserboxTool:
         call_id = str(uuid.uuid4())
         payload = json.dumps({"id": call_id, "tool": tool, "input": input_value})
 
+        logger.debug("browserbox: connecting to %s (call_id=%s)", self._ws_url, call_id)
         try:
             async with websockets.connect(
                 self._ws_url,
@@ -91,11 +113,13 @@ class BrowserboxTool:
             ) as ws:
                 await ws.send(json.dumps({"role": "agent"}))
                 await ws.send(payload)
+                logger.debug("browserbox: sent %s, waiting for response…", tool)
                 async for raw in ws:
                     msg = json.loads(raw)
                     if msg.get("id") != call_id:
                         continue
                     if "error" in msg:
+                        logger.debug("browserbox: relay returned error for %s: %s", tool, msg["error"])
                         return f"Error: {msg['error']}"
                     result = msg.get("result")
                     if result is None:
@@ -105,8 +129,10 @@ class BrowserboxTool:
                         return self._save_pdf(result)
                     return str(result)
         except OSError as e:
+            logger.debug("browserbox: OSError connecting to %s — %s", self._ws_url, e)
             return f"Error: could not connect to BrowserBox relay at {self._ws_url} — {e}"
         except TimeoutError:
+            logger.debug("browserbox: timeout waiting for response from %s", self._ws_url)
             return "Error: timed out waiting for response from BrowserBox"
 
     def _save_pdf(self, result: str) -> str:
