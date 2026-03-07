@@ -488,6 +488,64 @@
   }
   #vi-toggle:hover .tooltip { display: block; }
 
+  /* ── Network Probe modal ─────────────────────────────────────────────── */
+  #probe-modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6); z-index: 200;
+    align-items: center; justify-content: center;
+  }
+  #probe-modal-overlay.open { display: flex; }
+  #probe-modal {
+    background: var(--bg-panel); border: 1px solid var(--bg-border);
+    border-radius: 4px; width: 640px; max-width: 95vw; max-height: 85vh;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  #probe-modal-header {
+    display: flex; align-items: center; padding: 10px 14px;
+    border-bottom: 1px solid var(--bg-border); flex-shrink: 0; gap: 8px;
+  }
+  #probe-modal-header h2 { font-size: 13px; font-weight: 600; color: var(--cyan); flex: 1; }
+  #probe-modal-body { padding: 12px 14px; overflow-y: auto; flex: 1; }
+  #probe-modal-body label { font-size: 11px; color: var(--fg-muted); display: block; margin-bottom: 3px; }
+  #probe-url-row { display: flex; gap: 6px; margin-bottom: 8px; }
+  #probe-method {
+    background: var(--bg-input); border: 1px solid var(--bg-border);
+    color: var(--fg); padding: 4px 6px; border-radius: 3px; font-size: 12px;
+    font-family: inherit; width: 90px; flex-shrink: 0;
+  }
+  #probe-url {
+    flex: 1; background: var(--bg-input); border: 1px solid var(--bg-border);
+    color: var(--fg); padding: 4px 8px; border-radius: 3px; font-size: 12px;
+    font-family: inherit;
+  }
+  #probe-presets { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+  .probe-preset-btn {
+    background: var(--bg-input); border: 1px solid var(--bg-border);
+    color: var(--fg-dim); padding: 2px 8px; border-radius: 2px;
+    cursor: pointer; font-size: 10px; font-family: inherit;
+  }
+  .probe-preset-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+  #probe-headers, #probe-body-input {
+    width: 100%; background: var(--bg-input); border: 1px solid var(--bg-border);
+    color: var(--fg); padding: 6px 8px; border-radius: 3px; font-size: 11px;
+    font-family: 'Fira Code', monospace; resize: vertical;
+  }
+  #probe-send-row { display: flex; gap: 8px; align-items: center; margin: 10px 0 8px; }
+  #probe-timeout { width: 60px; }
+  #probe-result-area {
+    border-top: 1px solid var(--bg-border); padding-top: 10px; margin-top: 4px;
+  }
+  #probe-status-line { display: flex; gap: 10px; align-items: baseline; margin-bottom: 6px; }
+  .probe-ok   { color: var(--green); font-size: 15px; font-weight: 700; }
+  .probe-warn { color: var(--yellow); font-size: 15px; font-weight: 700; }
+  .probe-err  { color: var(--red); font-size: 15px; font-weight: 700; }
+  #probe-body-out {
+    background: var(--bg); border: 1px solid var(--bg-border); border-radius: 3px;
+    padding: 8px; font-size: 11px; font-family: 'Fira Code', monospace;
+    white-space: pre-wrap; word-break: break-all; max-height: 260px;
+    overflow-y: auto; color: var(--fg);
+  }
+
   /* ── Cost charts ─────────────────────────────────────────────────────── */
   .chart-wrap {
     background: var(--bg-panel);
@@ -1573,6 +1631,7 @@
       <button onclick="loadConfig()">↺ Refresh</button>
       <span class="toolbar-spacer"></span>
       <span class="last-updated" id="config-updated"></span>
+      <button onclick="openProbe()" title="Network Probe — fire HTTP requests from server context" style="margin-left:8px;border-color:var(--cyan);color:var(--cyan)">⚡ Probe</button>
     </div>
     <div class="scroll-area" id="config-body">
       <div class="empty">Loading…</div>
@@ -1584,6 +1643,54 @@
 
 <!-- Config tab tooltip -->
 <div id="cfg-tooltip"></div>
+
+<!-- ── Network Probe modal ──────────────────────────────────────────────── -->
+<div id="probe-modal-overlay" onclick="if(event.target===this)closeProbe()">
+  <div id="probe-modal">
+    <div id="probe-modal-header">
+      <h2>⚡ Network Probe</h2>
+      <button onclick="closeProbe()" style="background:none;border:none;color:var(--fg-muted);cursor:pointer;font-size:16px;line-height:1">✕</button>
+    </div>
+    <div id="probe-modal-body">
+      <!-- Method + URL -->
+      <div id="probe-url-row">
+        <select id="probe-method">
+          <option>GET</option><option>POST</option><option>PUT</option>
+          <option>PATCH</option><option>DELETE</option><option>HEAD</option>
+        </select>
+        <input id="probe-url" type="text" placeholder="http://localhost:11434/api/version" onkeydown="if(event.key==='Enter')sendProbe()">
+      </div>
+      <!-- Presets -->
+      <div id="probe-presets">
+        <button class="probe-preset-btn" onclick="probePreset('GET','http://localhost:11434/api/version')">Ollama version</button>
+        <button class="probe-preset-btn" onclick="probePreset('GET','http://localhost:11434/api/tags')">Ollama models</button>
+        <button class="probe-preset-btn" onclick="probePreset('GET','/beigebox/health')">BB health</button>
+        <button class="probe-preset-btn" onclick="probePreset('GET','/api/v1/status')">BB status</button>
+        <button class="probe-preset-btn" onclick="probePreset('GET','/api/v1/backends')">BB backends</button>
+        <button class="probe-preset-btn" onclick="probePreset('GET','http://localhost:9010/ping')">Relay ping</button>
+        <button class="probe-preset-btn" onclick="probePreset('GET','http://localhost:9010/status')">Relay status</button>
+      </div>
+      <!-- Headers -->
+      <label>Headers <span style="color:var(--bg-border)">(one per line: Key: Value — or JSON object)</span></label>
+      <textarea id="probe-headers" rows="2" placeholder="Content-Type: application/json"></textarea>
+      <!-- Body -->
+      <label style="margin-top:8px">Body <span style="color:var(--bg-border)">(POST / PUT / PATCH)</span></label>
+      <textarea id="probe-body-input" rows="3" placeholder='{"key": "value"}'></textarea>
+      <!-- Send row -->
+      <div id="probe-send-row">
+        <button class="primary" onclick="sendProbe()" id="probe-send-btn">Send</button>
+        <span style="color:var(--fg-muted);font-size:11px">timeout</span>
+        <input id="probe-timeout" class="probe-preset-btn" type="number" value="10" min="1" max="120" style="width:54px;text-align:center">
+        <span style="color:var(--fg-muted);font-size:11px">s</span>
+      </div>
+      <!-- Result -->
+      <div id="probe-result-area" style="display:none">
+        <div id="probe-status-line"></div>
+        <div id="probe-body-out"></div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- ── Vi mode toggle ───────────────────────────────────────────────────── -->
 <div id="vi-toggle" onclick="toggleViMode()" title="">
@@ -5165,6 +5272,97 @@ function cfgSelect(id, label, value, options) {
     <select id="cfg-${id}" style="height:26px;padding:2px 6px;font-size:12px;min-width:160px">${opts}</select>
   </div>`;
 }
+
+// ── Network Probe ────────────────────────────────────────────────────────────
+
+function openProbe() {
+  document.getElementById('probe-modal-overlay').classList.add('open');
+  document.getElementById('probe-url').focus();
+}
+
+function closeProbe() {
+  document.getElementById('probe-modal-overlay').classList.remove('open');
+}
+
+function probePreset(method, url) {
+  document.getElementById('probe-method').value = method;
+  document.getElementById('probe-url').value = url;
+  document.getElementById('probe-headers').value = '';
+  document.getElementById('probe-body-input').value = '';
+  document.getElementById('probe-url').focus();
+}
+
+async function sendProbe() {
+  const url = document.getElementById('probe-url').value.trim();
+  if (!url) return;
+
+  const method  = document.getElementById('probe-method').value;
+  const timeout = parseFloat(document.getElementById('probe-timeout').value) || 10;
+  const btn     = document.getElementById('probe-send-btn');
+  btn.disabled  = true;
+  btn.textContent = '⟳';
+
+  // Parse headers — accept JSON object or "Key: Value" lines
+  let headers = {};
+  const hraw = document.getElementById('probe-headers').value.trim();
+  if (hraw) {
+    try { headers = JSON.parse(hraw); }
+    catch {
+      for (const line of hraw.split('\n')) {
+        const c = line.indexOf(':');
+        if (c > 0) headers[line.slice(0, c).trim()] = line.slice(c + 1).trim();
+      }
+    }
+  }
+
+  const body = document.getElementById('probe-body-input').value || null;
+
+  const resultArea = document.getElementById('probe-result-area');
+  const statusLine = document.getElementById('probe-status-line');
+  const bodyOut    = document.getElementById('probe-body-out');
+  resultArea.style.display = 'block';
+  statusLine.innerHTML = '<span style="color:var(--fg-muted);font-size:12px">sending…</span>';
+  bodyOut.textContent = '';
+
+  try {
+    const resp = await fetch('/api/v1/probe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(window._bbApiKey ? {'Authorization': `Bearer ${window._bbApiKey}`} : {}) },
+      body: JSON.stringify({ method, url, headers, body, timeout }),
+    });
+    const d = await resp.json();
+
+    if (d.error) {
+      statusLine.innerHTML =
+        `<span class="probe-err">✗ Error</span>` +
+        `<span style="color:var(--fg-muted);font-size:11px">${esc(d.error)}</span>` +
+        (d.latency_ms != null ? `<span style="color:var(--fg-muted);font-size:10px;margin-left:auto">${d.latency_ms}ms</span>` : '');
+      bodyOut.textContent = '';
+    } else {
+      const cls = d.status < 300 ? 'probe-ok' : d.status < 500 ? 'probe-warn' : 'probe-err';
+      statusLine.innerHTML =
+        `<span class="${cls}">${d.status}</span>` +
+        `<span style="color:var(--fg-muted);font-size:12px">${esc(d.reason || '')}</span>` +
+        `<span style="color:var(--fg-muted);font-size:10px;margin-left:auto">${d.latency_ms}ms</span>`;
+      // Pretty-print JSON if possible
+      let text = d.body;
+      try { text = JSON.stringify(JSON.parse(d.body), null, 2); } catch {}
+      bodyOut.textContent = text;
+    }
+  } catch (e) {
+    statusLine.innerHTML = `<span class="probe-err">✗ ${esc(e.message)}</span>`;
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Send';
+}
+
+// Close probe modal on Escape
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeProbe();
+});
+
+// ── Config tab ───────────────────────────────────────────────────────────────
 
 async function loadConfig() {
   const el = document.getElementById('config-body');

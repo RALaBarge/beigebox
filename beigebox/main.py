@@ -2069,6 +2069,70 @@ async def api_ensemble(request: Request):
 # ---------------------------------------------------------------------------
 # Web UI settings
 # ---------------------------------------------------------------------------
+# Network probe — server-side HTTP request (reaches internal Docker services)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/probe")
+async def api_probe(request: Request):
+    """
+    Fire an HTTP request from BeigeBox's network context and return the result.
+    Useful for reaching internal services (Ollama, relay, etc.) from inside Docker.
+
+    Body: {
+        "method":  "GET",
+        "url":     "http://localhost:11434/api/version",
+        "headers": {"key": "value"},   // optional
+        "body":    "...",              // optional, for POST/PUT/PATCH
+        "timeout": 10                  // optional, seconds (default 10)
+    }
+    Returns: {status, reason, latency_ms, headers, body}
+         or: {error, latency_ms}
+    """
+    import time as _time
+    try:
+        body = await request.json()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+    method = body.get("method", "GET").upper()
+    url = body.get("url", "").strip()
+    if not url:
+        return JSONResponse({"error": "url required"}, status_code=400)
+
+    req_headers = body.get("headers") or {}
+    req_body = body.get("body") or None
+    timeout = float(body.get("timeout", 10))
+
+    t0 = _time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            resp = await client.request(
+                method,
+                url,
+                headers=req_headers,
+                content=req_body.encode() if isinstance(req_body, str) else req_body,
+            )
+        latency_ms = int((_time.monotonic() - t0) * 1000)
+        try:
+            text = resp.text[:65536]
+        except Exception:
+            text = resp.content[:65536].decode(errors="replace")
+        return JSONResponse({
+            "status": resp.status_code,
+            "reason": resp.reason_phrase,
+            "latency_ms": latency_ms,
+            "headers": dict(resp.headers),
+            "body": text,
+        })
+    except httpx.ConnectError as e:
+        return JSONResponse({"error": f"Connection refused: {e}", "latency_ms": int((_time.monotonic() - t0) * 1000)})
+    except httpx.TimeoutException:
+        return JSONResponse({"error": f"Timed out after {timeout}s", "latency_ms": int((_time.monotonic() - t0) * 1000)})
+    except Exception as e:
+        return JSONResponse({"error": str(e), "latency_ms": int((_time.monotonic() - t0) * 1000)})
+
+
+# ---------------------------------------------------------------------------
 
 @app.post("/api/v1/build-centroids")
 async def api_build_centroids():
