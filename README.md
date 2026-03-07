@@ -101,7 +101,7 @@ Three complementary cache layers, all in-process:
 
 - **Harness** — send the same prompt to N models in parallel, compare results side by side
 - **Orchestrated mode** — goal-driven agent loop: plan → dispatch tasks to models/operator → evaluate → iterate
-- **Ensemble voting** — parallel responses judged by an LLM arbiter, returns the best with reasoning
+- **Ensemble voting** — parallel responses judged by an LLM arbiter; always streams tokens as they arrive; built-in question bank (25 curated benchmark questions across math, logic, coding, reasoning, and knowledge) with category filter and random picker; **Challenge round** button asks all models to verify their answer, reruns the judge, and shows whether winners are consistent — useful for comparing quantised vs full-precision models
 - **Group Chat** — turn-by-turn multi-agent conversation: an LLM moderator picks who speaks next from a configurable roster of models/operator agents; inject thoughts mid-conversation to steer the discussion
 - **Council mode** — "council then commander": operator proposes a specialist council (name, model, task) for any query; user reviews and edits council members via dropdowns before engaging; specialists run in parallel, operator synthesises results into a final answer
 - **Operator agent** — JSON tool-loop agent with sandboxed shell, web search, memory recall, calculator, and plugin tools
@@ -456,7 +456,10 @@ With BrowserBox enabled, the operator can navigate pages, read DOM content, clic
 ```bash
 # 1. Start the relay (in the browserbox repo)
 pip install websockets
-python ws_relay.py          # ws://localhost:9009  +  http://localhost:9010/tools
+python ws_relay.py                    # ws://localhost:9009  +  http://localhost:9010/tools
+
+# Docker: relay must bind to 0.0.0.0 so the container can reach it
+python ws_relay.py --host 0.0.0.0
 
 # 2. Load the Chrome extension (chrome://extensions → Load unpacked → browserbox/)
 ```
@@ -468,9 +471,12 @@ tools:
   enabled: true
   browserbox:
     enabled: true
-    ws_url: ws://localhost:9009
+    ws_url: ws://localhost:9009       # bare metal / dev
+    # ws_url: ws://host.docker.internal:9009   # Docker — relay must use --host 0.0.0.0
     timeout: 10
 ```
+
+When running BeigeBox in Docker, the `ws_url` must use `host.docker.internal` instead of `localhost`. Set `BROWSERBOX_WS_URL=ws://host.docker.internal:9009` in your `.env` file — docker-compose passes it through automatically.
 
 The operator calls it with JSON: `{"tool": "namespace.method", "input": {...}}`. Start with `dom.snapshot` to orient on the active page. `pdf.extract` results are automatically saved to `workspace/in/` so the `pdf_reader` tool can process them.
 

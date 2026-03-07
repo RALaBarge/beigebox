@@ -92,10 +92,13 @@ services:
         tmpfs:
           size: 536870912   # 512 MB — files never touch disk, auto-cleared on stop
           mode: 01777       # world-writable + sticky — appuser can write, no cross-user reads
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GOOGLE_CSE_ID=${GOOGLE_CSE_ID:-}
       - OLLAMA_HOST=${OLLAMA_HOST:-ollama}
+      - BROWSERBOX_WS_URL=${BROWSERBOX_WS_URL:-ws://host.docker.internal:9009}
     depends_on:
       ollama:
         condition: service_started

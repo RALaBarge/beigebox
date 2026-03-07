@@ -125,11 +125,15 @@ _runtime_mtime: float = 0.0
 
 
 def _resolve_env_vars(value: str) -> str:
-    """Replace ${ENV_VAR} patterns with actual environment variable values."""
+    """Replace ${ENV_VAR} and ${ENV_VAR:-default} patterns with environment variable values."""
     def replacer(match):
         var_name = match.group(1)
-        return os.environ.get(var_name, "")
-    return re.sub(r"\$\{(\w+)\}", replacer, value)
+        default  = match.group(2)  # None if no ':-default' suffix
+        val = os.environ.get(var_name)
+        if val is not None:
+            return val
+        return default if default is not None else ""
+    return re.sub(r"\$\{(\w+)(?::-(.*?))?\}", replacer, value)
 
 
 def _walk_and_resolve(obj):

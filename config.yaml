@@ -262,9 +262,10 @@ tools:
   # ── BrowserBox (browser API relay) ────────────────────────────────────────
   # Requires: ws_relay.py running + BrowserBox Chrome extension connected.
   # pip install websockets
+  # Docker: run relay with --host 0.0.0.0 and set BROWSERBOX_WS_URL=ws://host.docker.internal:9009
   browserbox:
     enabled: false
-    ws_url: ws://localhost:9009
+    ws_url: ${BROWSERBOX_WS_URL:-ws://localhost:9009}
     timeout: 10   # seconds
 
   # ── Memory (conversation recall + RAG) ────────────────────────────────────

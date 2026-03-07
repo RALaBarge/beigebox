@@ -1115,6 +1115,13 @@
       font-weight: 500;
     }
     
+    /* Question bank */
+    .qbcat {
+      padding: 1px 8px; font-size: 10px; border-radius: 2px; cursor: pointer;
+      background: var(--bg-input); color: var(--fg-dim); border: 1px solid var(--bg-border);
+    }
+    .qbcat.active-cat { background: var(--yellow); color: #000; border-color: var(--yellow); }
+
     /* Ensemble: single column cards */
     #ensemble-panel { padding: 8px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
     .ensemble-result {
@@ -1411,6 +1418,7 @@
           <option value="">— use operator default —</option>
         </select>
         <button onclick="harnessEnsembleRun()" class="primary" id="harness-ensemble-run-btn">▶ Run Ensemble</button>
+        <button onclick="toggleQBank()" id="harness-qbank-btn" title="Question bank">📋</button>
         <button onclick="harnessEnsembleClear()">✕ Clear</button>
       </span>
       <span id="harness-ralph-controls" style="display:none;gap:6px;align-items:center">
@@ -1492,6 +1500,22 @@
       <div id="harness-ensemble-model-list" style="display:flex;flex-wrap:wrap;gap:6px;max-height:80px;overflow-y:auto">
         <span style="color:var(--fg-muted);font-size:11px">Loading models…</span>
       </div>
+    </div>
+
+    <!-- Ensemble: question bank (toggled by 📋 button) -->
+    <div id="harness-qbank-area" style="display:none;padding:6px 12px;background:var(--bg-deep);border-bottom:1px solid var(--bg-border)">
+      <div style="display:flex;gap:5px;align-items:center;margin-bottom:6px;flex-wrap:wrap">
+        <span style="font-size:10px;color:var(--fg-muted);text-transform:uppercase;letter-spacing:1px;flex-shrink:0">Category:</span>
+        <button onclick="qbankSetCat('all')"       id="qbcat-all"       class="qbcat active-cat">All</button>
+        <button onclick="qbankSetCat('math')"      id="qbcat-math"      class="qbcat">Math</button>
+        <button onclick="qbankSetCat('logic')"     id="qbcat-logic"     class="qbcat">Logic</button>
+        <button onclick="qbankSetCat('coding')"    id="qbcat-coding"    class="qbcat">Coding</button>
+        <button onclick="qbankSetCat('reasoning')" id="qbcat-reasoning" class="qbcat">Reasoning</button>
+        <button onclick="qbankSetCat('knowledge')" id="qbcat-knowledge" class="qbcat">Knowledge</button>
+        <span style="flex:1"></span>
+        <button onclick="qbankRandom()" style="padding:1px 10px;font-size:11px;background:var(--yellow);color:#000;border:none;border-radius:2px;cursor:pointer">🎲 Random</button>
+      </div>
+      <div id="harness-qbank-list" style="max-height:190px;overflow-y:auto;display:flex;flex-direction:column;gap:3px"></div>
     </div>
 
     <!-- Prompt input (shared — hidden in ralph mode) -->
@@ -3903,6 +3927,8 @@ function setHarnessMode(mode) {
   const promptArea      = document.getElementById('harness-prompt-area');
   if (orchTargetArea) orchTargetArea.style.display = isOrch  ? 'flex' : 'none';
   if (ensModelArea)   ensModelArea.style.display   = isEns   ? ''     : 'none';
+  // Hide question bank when leaving ensemble mode
+  if (!isEns) { const qba = document.getElementById('harness-qbank-area'); if (qba) qba.style.display = 'none'; _qbankOpen = false; }
   if (ralphConfig)    ralphConfig.style.display    = isRalph ? 'flex' : 'none';
   if (ralphSpecArea)  ralphSpecArea.style.display  = isRalph ? 'flex' : 'none';
   if (promptArea)     promptArea.style.display     = isRalph ? 'none' : 'flex';
@@ -4657,6 +4683,7 @@ function wiggamApproveAndRun() {
 
 // ── 7b. Ensemble Voting (Harness mode) ────────────────────────────────────────
 let ensembleSelectedModels = new Set();
+let _ensState = null; // persists round 1 results for challenge round
 
 function harnessEnsemblePopulateModels() {
   const listEl = document.getElementById('harness-ensemble-model-list');
@@ -4722,6 +4749,7 @@ async function harnessEnsembleRun() {
 
   // Winner banner placeholder
   const banner = document.createElement('div');
+  banner.id = 'ens-result-banner';
   banner.style.cssText = 'width:100%;padding:10px 14px;border:1px solid var(--bg-border);border-radius:3px;background:var(--bg-deep);font-size:12px';
   banner.innerHTML = '<span style="color:var(--fg-muted)">Waiting for judge…</span>';
   grid.insertBefore(banner, grid.firstChild);
@@ -4763,8 +4791,26 @@ async function harnessEnsembleRun() {
               body.textContent = ev.response;
             }
             cards[ev.model].querySelector('div').style.color = 'var(--lavender)';
+          } else if (ev.type === 'judge_token') {
+            // Show judge typing in the banner
+            if (!banner.dataset.judging) {
+              banner.innerHTML = '<span style="color:var(--yellow);font-size:10px;text-transform:uppercase;letter-spacing:1px">⚖ Judging… </span><span id="ens-judge-text" style="font-size:11px;color:var(--fg-dim)"></span>';
+              banner.dataset.judging = '1';
+            }
+            const judgeText = banner.querySelector('#ens-judge-text');
+            if (judgeText) judgeText.textContent += ev.token;
+          } else if (ev.type === 'evaluate') {
+            // Capture round 1 state so challenge round can use it
+            _ensState = { prompt, judgeModel: judgeModel || '', responses: ev.all_responses, cards, r1Winner: '' };
           } else if (ev.type === 'finish') {
-            banner.innerHTML = `<div style="color:var(--green);font-weight:bold;margin-bottom:4px">🏆 Winner: ${esc(ev.winner)}</div>
+            delete banner.dataset.judging;
+            if (_ensState) _ensState.r1Winner = ev.winner;
+            banner.innerHTML = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+                <span style="color:var(--green);font-weight:bold">🏆 Winner: ${esc(ev.winner)}</span>
+                <button onclick="harnessEnsembleChallenge()" id="ens-challenge-btn"
+                  style="padding:1px 10px;font-size:10px;background:var(--yellow);color:#000;border:none;border-radius:2px;cursor:pointer"
+                  title="Ask all models to verify their answer — reveals which models self-correct">⚡ Challenge</button>
+              </div>
               <div style="font-size:11px;color:var(--fg-dim);white-space:pre-wrap">${esc(ev.verdict || '')}</div>`;
             if (cards[ev.winner]) {
               cards[ev.winner].style.borderColor = 'var(--green)';
@@ -4788,6 +4834,245 @@ function harnessEnsembleClear() {
   const grid = document.getElementById('harness-ensemble-grid');
   if (grid) grid.innerHTML = '<div class="empty">Select models, enter a prompt, and run ensemble.</div>';
   harnessEnsemblePopulateModels();
+}
+
+// ── 7c. Question Bank ─────────────────────────────────────────────────────────
+let _qbankCat  = 'all';
+let _qbankOpen = false;
+
+const _qbank = [
+  // ── Math ──────────────────────────────────────────────────────────────────
+  { cat: 'math', q: `A bat and a ball together cost $1.10. The bat costs exactly $1.00 more than the ball. How much does the ball cost? Show your reasoning step by step.` },
+  { cat: 'math', q: `You have two jugs with no markings: one holds exactly 3 gallons and one holds exactly 5 gallons. You have unlimited water. Describe the exact steps to measure out exactly 4 gallons.` },
+  { cat: 'math', q: `A standard 8×8 chessboard has its two diagonally opposite corner squares removed, leaving 62 squares. You have 31 dominoes, each covering exactly 2 adjacent squares. Can you tile all 62 remaining squares with the 31 dominoes? Prove your answer — don't just guess.` },
+  { cat: 'math', q: `Two trains are 100 miles apart and heading toward each other. Train A travels at 40 mph, Train B at 60 mph. A fly starts at the front of Train A and flies at 75 mph back and forth between the trains until they collide. How far does the fly travel in total? Explain the elegant solution.` },
+  { cat: 'math', q: `In the Monty Hall problem: you pick door 1, Monty opens door 3 revealing a goat. Should you switch to door 2? Calculate the exact probability of winning if you switch vs. stay, and explain why the result surprises most people.` },
+
+  // ── Logic ─────────────────────────────────────────────────────────────────
+  { cat: 'logic', q: `On an island, knights always tell the truth and knaves always lie. You meet two people, A and B. A says: "We are both knaves." What is A? What is B? Explain your reasoning.` },
+  { cat: 'logic', q: `Three boxes are labeled "Apples", "Oranges", and "Apples & Oranges". All three labels are wrong. You may draw exactly one fruit from exactly one box without looking inside. Which box do you draw from, and how does a single draw let you correctly label all three boxes?` },
+  { cat: 'logic', q: `You have 4 cards on a table showing: D, K, 3, 7. Rule: "If a card has a vowel on one face, it has an even number on the other face." Which cards must you flip to determine whether the rule is being violated? Most people get this wrong — explain carefully.` },
+  { cat: 'logic', q: `Mary's father has five daughters: Nana, Nene, Nini, Nono, and ___. What is the fifth daughter's name?` },
+  { cat: 'logic', q: `A rooster is sitting on the peak of a barn roof. It lays an egg. Which side does the egg roll down — the left side or the right side of the roof?` },
+
+  // ── Coding ────────────────────────────────────────────────────────────────
+  { cat: 'coding', q: `What is the bug in this Python code? What does it actually do vs. what was intended?\n\ndef process(items):\n    for i in range(len(items)):\n        if items[i] % 2 == 0:\n            items.append(items[i] // 2)\n    return items` },
+  { cat: 'coding', q: `What does this Python code print, and why?\n\nx = [1, 2, 3]\ny = x\ny.append(4)\nprint(x)` },
+  { cat: 'coding', q: `Find the bug in this binary search. Under what input does it loop forever?\n\ndef binary_search(arr, target):\n    low, high = 0, len(arr) - 1\n    while low <= high:\n        mid = (low + high) // 2\n        if arr[mid] == target: return mid\n        elif arr[mid] < target: low = mid\n        else: high = mid - 1\n    return -1` },
+  { cat: 'coding', q: `What do these two Python expressions evaluate to, and what is the fundamental difference they illustrate?\n\n[] == []\n[] is []` },
+  { cat: 'coding', q: `What does this function print when called twice in a row, and why? What is the general lesson?\n\ndef append_to(element, to=[]):\n    to.append(element)\n    return to\n\nprint(append_to(1))\nprint(append_to(2))` },
+
+  // ── Reasoning ─────────────────────────────────────────────────────────────
+  { cat: 'reasoning', q: `You have two ropes. Each takes exactly 60 minutes to burn completely, but burns unevenly — neither is uniform. You have matches. How do you measure exactly 45 minutes? You may only use the ropes and matches.` },
+  { cat: 'reasoning', q: `You are in a completely dark room. In the room there is a candle, a wood stove, and a gas lamp. You have a single match. What do you light first?` },
+  { cat: 'reasoning', q: `What is the next number in this sequence, and what is the rule?\n\n1, 11, 21, 1211, 111221, ___` },
+  { cat: 'reasoning', q: `I have two coins that together total 30 cents. One of them is not a nickel. What are the two coins?` },
+  { cat: 'reasoning', q: `A woman shoots her husband. Then she holds him underwater for over five minutes. A little while later they go out to dinner together. How is this possible? (This is not a trick about survival — it is a straightforward misdirection puzzle.)` },
+
+  // ── Knowledge ─────────────────────────────────────────────────────────────
+  { cat: 'knowledge', q: `State the Halting Problem precisely. Sketch why it is undecidable (the key idea of Turing's proof). In one sentence, explain why this matters for real software engineering.` },
+  { cat: 'knowledge', q: `What is a race condition? Give a concrete minimal code example (any language) where one exists, and explain exactly how to prevent it in that example.` },
+  { cat: 'knowledge', q: `Explain the difference between a deadlock and a livelock. Give a real-world analogy for each that a non-programmer could understand.` },
+  { cat: 'knowledge', q: `State the CAP theorem. Name one real database or system that prioritizes CP and one that prioritizes AP. Explain the practical trade-off each makes.` },
+  { cat: 'knowledge', q: `What is the difference between memoization and bottom-up dynamic programming (tabulation)? They solve the same problems — when would you choose one over the other, and why?` },
+];
+
+const _qbankColors = {
+  math: 'var(--blue)', logic: 'var(--lavender)', coding: 'var(--green)',
+  reasoning: 'var(--yellow)', knowledge: 'var(--cyan)',
+};
+
+function toggleQBank() {
+  _qbankOpen = !_qbankOpen;
+  const area = document.getElementById('harness-qbank-area');
+  if (area) area.style.display = _qbankOpen ? 'block' : 'none';
+  if (_qbankOpen) renderQBank();
+}
+
+function qbankSetCat(cat) {
+  _qbankCat = cat;
+  document.querySelectorAll('.qbcat').forEach(b => b.classList.remove('active-cat'));
+  document.getElementById('qbcat-' + cat)?.classList.add('active-cat');
+  renderQBank();
+}
+
+function renderQBank() {
+  const list = document.getElementById('harness-qbank-list');
+  if (!list) return;
+  const pool = _qbankCat === 'all' ? _qbank : _qbank.filter(q => q.cat === _qbankCat);
+  list.innerHTML = pool.map((item, i) => {
+    const color = _qbankColors[item.cat] || 'var(--fg-muted)';
+    const idx   = _qbank.indexOf(item);
+    const preview = item.q.replace(/\n/g, ' ');
+    return `<div style="display:flex;align-items:flex-start;gap:8px;padding:4px 8px;border-radius:2px;background:var(--bg-panel);border:1px solid var(--bg-border)">
+      <span style="font-size:9px;color:${color};text-transform:uppercase;letter-spacing:0.5px;min-width:52px;padding-top:2px;flex-shrink:0;font-weight:bold">${item.cat}</span>
+      <span style="font-size:11px;color:var(--fg);flex:1;line-height:1.5">${esc(preview.length > 130 ? preview.slice(0, 130) + '…' : preview)}</span>
+      <button onclick="qbankUse(${idx})" style="padding:1px 8px;font-size:10px;flex-shrink:0;background:var(--bg-input);border:1px solid var(--bg-border);color:var(--fg);border-radius:2px;cursor:pointer" title="Load into prompt">↑ Use</button>
+    </div>`;
+  }).join('');
+}
+
+function qbankUse(idx) {
+  const item = _qbank[idx];
+  if (!item) return;
+  const ta = document.getElementById('harness-prompt');
+  if (ta) { ta.value = item.q; ta.focus(); }
+}
+
+function qbankRandom() {
+  const pool = _qbankCat === 'all' ? _qbank : _qbank.filter(q => q.cat === _qbankCat);
+  if (!pool.length) return;
+  const item = pool[Math.floor(Math.random() * pool.length)];
+  const ta = document.getElementById('harness-prompt');
+  if (ta) { ta.value = item.q; ta.focus(); }
+}
+
+// ── 7d. Ensemble Challenge Round ──────────────────────────────────────────────
+const _ENS_CHALLENGE_MSG = 'Verify your answer. Walk through your reasoning step by step and correct any errors you find.';
+
+function _ensModelId(model) { return model.replace(/[^a-zA-Z0-9]/g, '_'); }
+
+async function harnessEnsembleChallenge() {
+  if (!_ensState) return;
+  const { prompt, judgeModel, responses, cards, r1Winner } = _ensState;
+
+  const btn = document.getElementById('ens-challenge-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Challenging…'; }
+
+  const banner = document.getElementById('ens-result-banner');
+
+  // Append challenge section to each model card
+  responses.forEach(({ model }) => {
+    const card = cards[model];
+    if (!card) return;
+    const sec = document.createElement('div');
+    sec.style.cssText = 'margin-top:10px;padding-top:8px;border-top:1px dashed var(--bg-border)';
+    sec.innerHTML = `<div style="font-size:9px;color:var(--yellow);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">⚡ challenge round</div>` +
+      `<div id="ens-r2-${_ensModelId(model)}" style="font-size:12px;line-height:1.6;color:var(--fg-dim)">…</div>`;
+    card.appendChild(sec);
+  });
+
+  if (banner) banner.innerHTML = '<span style="color:var(--yellow);font-size:11px">⚡ Challenge round running…</span>';
+
+  // Stream all challenge responses in parallel
+  let round2;
+  try {
+    round2 = await Promise.all(
+      responses.map(({ model, response }) => _ensChallengeModel(model, prompt, response))
+    );
+  } catch (e) {
+    if (banner) banner.innerHTML = `<div class="error-box">Challenge failed: ${esc(e.message)}</div>`;
+    if (btn) { btn.disabled = false; btn.textContent = '⚡ Challenge'; }
+    return;
+  }
+
+  // Stream judge verdict for round 2
+  if (banner) banner.innerHTML =
+    '<span style="color:var(--yellow);font-size:10px;text-transform:uppercase;letter-spacing:1px">⚖ Judging… </span>' +
+    '<span id="ens-r2-judge-text" style="font-size:11px;color:var(--fg-dim)"></span>';
+
+  const modelsList   = round2.map(r => r.model).join(', ');
+  const respText     = round2.map(r => `[${r.model}]:\n${r.response}`).join('\n\n');
+  const judgeContent = `Original question: ${prompt}\n\nChallenge round — each model was asked to verify its answer:\n${respText}\n\nWhich model gave the best response in this challenge round? Choose from: ${modelsList}`;
+
+  let rawVerdict = '';
+  try {
+    const jResp = await fetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer beigebox' },
+      body: JSON.stringify({
+        model: judgeModel || '',
+        messages: [
+          { role: 'system', content: 'You are an expert evaluator. Respond ONLY with valid JSON: {"winner":"<model_name>","reasoning":"<brief explanation>"}' },
+          { role: 'user',   content: judgeContent },
+        ],
+        temperature: 0.2, stream: true, keep_alive: -1,
+      }),
+    });
+    if (jResp.ok) {
+      const reader = jResp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n'); buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const d = line.slice(6).trim();
+          if (d === '[DONE]') break;
+          try {
+            const delta = JSON.parse(d).choices?.[0]?.delta?.content || '';
+            if (delta) {
+              rawVerdict += delta;
+              const jt = document.getElementById('ens-r2-judge-text');
+              if (jt) jt.textContent += delta;
+            }
+          } catch {}
+        }
+      }
+    }
+  } catch {}
+
+  let verdict = { winner: round2[0]?.model || '', reasoning: '' };
+  try { const m = rawVerdict.match(/\{[\s\S]*\}/); if (m) verdict = JSON.parse(m[0]); } catch {}
+
+  const sameWinner = verdict.winner === r1Winner;
+  if (banner) banner.innerHTML =
+    `<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+       <span style="color:var(--green)">R1: <b>${esc(r1Winner)}</b></span>
+       <span style="color:var(--fg-muted)">→</span>
+       <span style="color:${sameWinner ? 'var(--green)' : 'var(--yellow)'}">R2: <b>${esc(verdict.winner)}</b></span>
+       ${sameWinner ? '<span style="font-size:10px;color:var(--fg-muted)">consistent</span>' : '<span style="font-size:10px;color:var(--yellow)">changed</span>'}
+     </div>
+     <div style="font-size:11px;color:var(--fg-dim);white-space:pre-wrap">${esc(verdict.reasoning)}</div>`;
+
+  // Outline the R2 winner card in yellow
+  if (cards[verdict.winner]) cards[verdict.winner].style.outline = '2px solid var(--yellow)';
+}
+
+async function _ensChallengeModel(model, prompt, originalResponse) {
+  const outEl = document.getElementById(`ens-r2-${_ensModelId(model)}`);
+  let text = '', firstToken = true;
+  const resp = await fetch('/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer beigebox' },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'user',      content: prompt },
+        { role: 'assistant', content: originalResponse },
+        { role: 'user',      content: _ENS_CHALLENGE_MSG },
+      ],
+      temperature: 0.7, stream: true, keep_alive: -1,
+    }),
+  });
+  if (!resp.ok) throw new Error(`${model}: HTTP ${resp.status}`);
+
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split('\n'); buf = lines.pop();
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const d = line.slice(6).trim();
+      if (d === '[DONE]') break;
+      try {
+        const delta = JSON.parse(d).choices?.[0]?.delta?.content || '';
+        if (delta) {
+          if (firstToken && outEl) { outEl.style.color = 'var(--fg)'; firstToken = false; }
+          text += delta;
+          if (outEl) outEl.textContent = text;
+        }
+      } catch {}
+    }
+  }
+  return { model, response: text || '(no response)' };
 }
 function cfgInput(id, label, value, type='text') {
   return `<div class="kv-row" style="gap:12px;align-items:center">
