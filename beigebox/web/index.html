@@ -395,6 +395,42 @@
   }
   #op-input { flex: 1; }
 
+  /* ── Council ─────────────────────────────────────────────────────────── */
+  #council-area { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+  #council-input-area {
+    padding:10px 16px; background:var(--bg-panel);
+    border-top:1px solid var(--bg-border);
+    display:flex; gap:8px; flex-shrink:0;
+  }
+  #council-input { flex:1; }
+  #council-proposal-area {
+    flex:1; overflow-y:auto; padding:12px 16px; display:flex; flex-direction:column; gap:10px;
+  }
+  .council-card {
+    background:var(--bg-panel); border:1px solid var(--bg-border);
+    border-radius:4px; padding:10px 12px; display:flex; flex-direction:column; gap:6px;
+  }
+  .council-card-header { display:flex; gap:8px; align-items:center; }
+  .council-card-name { font-size:12px; font-weight:600; color:var(--lavender); min-width:100px; }
+  .council-card-model { flex:1; height:24px; font-size:11px; padding:2px 6px;
+    background:var(--bg-input); border:1px solid var(--bg-border); color:var(--fg); border-radius:2px; }
+  .council-card-task { width:100%; height:44px; font-size:11px; padding:4px 8px; resize:vertical;
+    background:var(--bg-input); border:1px solid var(--bg-border); color:var(--fg);
+    border-radius:2px; font-family:inherit; line-height:1.4; }
+  .council-member-result {
+    border-left:3px solid var(--lavender); padding:6px 10px; margin:4px 0;
+    font-size:12px; white-space:pre-wrap; word-break:break-word;
+  }
+  .council-member-label { font-size:11px; color:var(--lavender); margin-bottom:4px; }
+  .council-member-running { color:var(--yellow); font-style:italic; font-size:11px; }
+  .council-synthesis {
+    border-left:3px solid var(--cyan); padding:8px 12px; margin-top:8px;
+    font-size:12px; white-space:pre-wrap; word-break:break-word; color:var(--fg);
+  }
+  .council-synthesis-label { font-size:11px; color:var(--cyan); margin-bottom:6px; font-weight:600; }
+  #council-engage-row { display:flex; gap:8px; align-items:center; padding:0 0 4px 0; }
+  #council-results { display:flex; flex-direction:column; gap:4px; }
+
   /* ── Spinner ─────────────────────────────────────────────────────────── */
   .spinner {
     display: inline-block; width: 10px; height: 10px;
@@ -1296,23 +1332,51 @@
   </div>
 
   <!-- 6. Operator -->
-  <!-- 6. Operator -->
   <div class="panel" id="panel-operator">
     <div class="toolbar">
-      <span class="toolbar-label">Agent:</span>
-      <select id="op-target" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
-        <option value="operator">operator (default)</option>
-      </select>
+      <!-- Mode toggle -->
+      <div style="display:flex;gap:0;border:1px solid var(--bg-border);border-radius:2px;overflow:hidden;flex-shrink:0">
+        <button id="op-mode-agent"   onclick="setOpMode('agent')"
+          style="border-radius:0;border:none;padding:2px 12px;font-size:11px;background:var(--lavender);color:#000">Agent</button>
+        <button id="op-mode-council" onclick="setOpMode('council')"
+          style="border-radius:0;border:none;padding:2px 12px;font-size:11px;background:var(--bg-input);color:var(--fg-dim)">⚖ Council</button>
+      </div>
+      <!-- Agent controls -->
+      <span id="op-agent-controls" style="display:flex;gap:6px;align-items:center">
+        <span class="toolbar-label">Model:</span>
+        <select id="op-target" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
+          <option value="operator">operator (default)</option>
+        </select>
+      </span>
+      <!-- Council controls -->
+      <span id="op-council-controls" style="display:none;gap:6px;align-items:center">
+        <span class="toolbar-label" style="color:var(--lavender)">Proposer:</span>
+        <select id="council-op-model" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
+          <option value="">— operator default —</option>
+        </select>
+      </span>
       <span class="toolbar-spacer"></span>
-      <span style="color:var(--fg-muted);font-size:10px">LangChain ReAct · tool registry</span>
-      <span class="toolbar-spacer"></span>
-      <button onclick="clearOp()">✕ Clear</button>
+      <button onclick="opClear()">✕ Clear</button>
     </div>
-    <div id="op-log"></div>
-    <div id="op-input-area">
-      <input id="op-input" placeholder="Ask the operator anything…"
-        onkeydown="if(event.key==='Enter')runOp()">
-      <button class="primary" onclick="runOp()" id="op-btn">Run</button>
+
+    <!-- Agent mode -->
+    <div id="op-agent-area" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+      <div id="op-log"></div>
+      <div id="op-input-area">
+        <input id="op-input" placeholder="Ask the operator anything…"
+          onkeydown="if(event.key==='Enter')runOp()">
+        <button class="primary" onclick="runOp()" id="op-btn">Run</button>
+      </div>
+    </div>
+
+    <!-- Council mode -->
+    <div id="op-council-area" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+      <div id="council-proposal-area"></div>
+      <div id="council-input-area">
+        <input id="council-input" placeholder="Describe what you need the council to think about…"
+          onkeydown="if(event.key==='Enter'&&!_councilRunning)councilPropose()">
+        <button class="primary" onclick="councilPropose()" id="council-propose-btn">Propose</button>
+      </div>
     </div>
   </div>
 
@@ -2542,6 +2606,13 @@ async function loadModelsForPanes() {
     const d = await api('/v1/models');
     models = (d.data || d.models || []).map(m => m.id || m.name || m);
     allModels = models.map(id => ({id}));
+    // Populate council proposer model dropdown + store for council card selects
+    _availModels = models;
+    const councilSel = document.getElementById('council-op-model');
+    if (councilSel) {
+      councilSel.innerHTML = '<option value="">— operator default —</option>'
+        + models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+    }
   } catch {}
 
   document.querySelectorAll('.pane-target-sel').forEach(sel => {
@@ -3565,6 +3636,232 @@ async function runOp() {
 
 function clearOp() {
   document.getElementById('op-log').innerHTML = '';
+}
+
+function opClear() {
+  document.getElementById('op-log').innerHTML = '';
+  councilClear();
+}
+
+// ── Operator mode toggle ──────────────────────────────────────────────────────
+let _opMode = 'agent';
+
+function setOpMode(mode) {
+  _opMode = mode;
+  const isAgent   = mode === 'agent';
+  const isCouncil = mode === 'council';
+
+  const agentBtn   = document.getElementById('op-mode-agent');
+  const councilBtn = document.getElementById('op-mode-council');
+  agentBtn.style.background   = isAgent   ? 'var(--lavender)' : 'var(--bg-input)';
+  agentBtn.style.color        = isAgent   ? '#000'            : 'var(--fg-dim)';
+  councilBtn.style.background = isCouncil ? 'var(--lavender)' : 'var(--bg-input)';
+  councilBtn.style.color      = isCouncil ? '#000'            : 'var(--fg-dim)';
+
+  document.getElementById('op-agent-controls').style.display   = isAgent   ? 'flex' : 'none';
+  document.getElementById('op-council-controls').style.display = isCouncil ? 'flex' : 'none';
+  document.getElementById('op-agent-area').style.display       = isAgent   ? 'flex' : 'none';
+  document.getElementById('op-council-area').style.display     = isCouncil ? 'flex' : 'none';
+}
+
+// ── Council mode ──────────────────────────────────────────────────────────────
+let _councilRunId   = null;
+let _councilRunning = false;
+let _availModels    = [];   // populated when models are loaded
+
+function councilClear() {
+  document.getElementById('council-proposal-area').innerHTML = '';
+  document.getElementById('council-input').value = '';
+  _councilRunId   = null;
+  _councilRunning = false;
+  const btn = document.getElementById('council-propose-btn');
+  if (btn) { btn.textContent = 'Propose'; btn.disabled = false; }
+}
+
+async function councilPropose() {
+  const input = document.getElementById('council-input');
+  const query = input.value.trim();
+  if (!query || _councilRunning) return;
+
+  const area  = document.getElementById('council-proposal-area');
+  const btn   = document.getElementById('council-propose-btn');
+  const model = document.getElementById('council-op-model')?.value || '';
+
+  btn.disabled = true;
+  btn.textContent = '⟳ Proposing…';
+  area.innerHTML  = '<div class="op-pending" style="padding:12px 0">⟳ Operator is assembling a council…</div>';
+
+  try {
+    const body = { query };
+    if (model) body.model = model;
+    const d = await api('/api/v1/council/propose', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(body),
+    });
+
+    if (d.error) throw new Error(d.error);
+    _councilRunId = d.run_id;
+    _renderCouncilCards(area, d.council);
+    btn.textContent = 'Re-propose';
+    btn.disabled    = false;
+
+  } catch(e) {
+    area.innerHTML = `<div class="op-error">✗ ${esc(e.message)}</div>`;
+    btn.textContent = 'Propose';
+    btn.disabled    = false;
+  }
+}
+
+function _renderCouncilCards(area, council) {
+  // Build model options HTML from available models
+  const modelOpts = _availModels.map(m =>
+    `<option value="${esc(m)}">${esc(m)}</option>`
+  ).join('');
+
+  let html = '<div id="council-engage-row">'
+           + `<span style="font-size:11px;color:var(--fg-muted)">Review and adjust the council, then engage.</span>`
+           + '<span style="flex:1"></span>'
+           + '<button class="primary" onclick="councilEngage()" id="council-engage-btn" '
+           + 'style="background:var(--lavender);color:#000">⚖ Engage Council</button>'
+           + '</div>';
+
+  html += '<div id="council-cards">';
+  council.forEach((m, i) => {
+    html += `
+    <div class="council-card" data-idx="${i}">
+      <div class="council-card-header">
+        <span class="council-card-name">${esc(m.name)}</span>
+        <select class="council-card-model" id="council-model-${i}">
+          ${modelOpts}
+        </select>
+      </div>
+      <textarea class="council-card-task" id="council-task-${i}">${esc(m.task)}</textarea>
+    </div>`;
+  });
+  html += '</div><div id="council-results"></div>';
+
+  area.innerHTML = html;
+
+  // Set selected model for each card
+  council.forEach((m, i) => {
+    const sel = document.getElementById(`council-model-${i}`);
+    if (sel) {
+      // Try exact match first, then partial
+      const opt = [...sel.options].find(o => o.value === m.model)
+               || [...sel.options].find(o => o.value.includes(m.model) || m.model.includes(o.value));
+      if (opt) sel.value = opt.value;
+    }
+  });
+}
+
+function _councilGetCards() {
+  const cards = document.querySelectorAll('.council-card');
+  const council = [];
+  cards.forEach((card, i) => {
+    const name  = card.querySelector('.council-card-name')?.textContent?.trim() || `Specialist ${i+1}`;
+    const model = document.getElementById(`council-model-${i}`)?.value || '';
+    const task  = document.getElementById(`council-task-${i}`)?.value?.trim() || '';
+    if (model && task) council.push({ name, model, task });
+  });
+  return council;
+}
+
+async function councilEngage() {
+  if (!_councilRunId || _councilRunning) return;
+  const council = _councilGetCards();
+  if (!council.length) return;
+
+  _councilRunning = true;
+  const engageBtn  = document.getElementById('council-engage-btn');
+  const proposeBtn = document.getElementById('council-propose-btn');
+  if (engageBtn)  { engageBtn.disabled = true; engageBtn.textContent = '⟳ Running…'; }
+  if (proposeBtn) { proposeBtn.disabled = true; }
+
+  const results = document.getElementById('council-results');
+  results.innerHTML = '';
+
+  // Status placeholders per member
+  const memberEls = {};
+  council.forEach(m => {
+    const id = `cr-${m.name.replace(/\s+/g,'-')}`;
+    memberEls[m.name] = id;
+    results.insertAdjacentHTML('beforeend', `
+      <div class="council-member-result" id="${id}">
+        <div class="council-member-label">⚖ ${esc(m.name)} <span style="color:var(--fg-muted);font-size:10px">(${esc(m.model)})</span></div>
+        <span class="council-member-running">⟳ thinking…</span>
+      </div>`);
+  });
+
+  // Synthesis placeholder
+  results.insertAdjacentHTML('beforeend', `
+    <div class="council-synthesis" id="council-synthesis-el" style="display:none">
+      <div class="council-synthesis-label">◈ Commander Synthesis</div>
+      <span class="council-member-running">⟳ synthesising…</span>
+    </div>`);
+
+  results.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  try {
+    const resp = await fetch(`/api/v1/council/${_councilRunId}/engage`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', ...(window._bbApiKey ? {'Authorization':`Bearer ${window._bbApiKey}`} : {}) },
+      body:    JSON.stringify({ council }),
+    });
+
+    const reader = resp.body.getReader();
+    const dec    = new TextDecoder();
+    let   buf    = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        let evt;
+        try { evt = JSON.parse(line.slice(6)); } catch { continue; }
+
+        if (evt.type === 'member_done') {
+          const el = document.getElementById(memberEls[evt.name]);
+          if (el) {
+            el.querySelector('.council-member-running')?.remove();
+            el.insertAdjacentHTML('beforeend',
+              `<div style="white-space:pre-wrap;word-break:break-word">${esc(evt.result)}</div>`);
+          }
+        } else if (evt.type === 'member_error') {
+          const el = document.getElementById(memberEls[evt.name]);
+          if (el) {
+            el.querySelector('.council-member-running')?.remove();
+            el.insertAdjacentHTML('beforeend',
+              `<div style="color:var(--red)">✗ ${esc(evt.error)}</div>`);
+          }
+        } else if (evt.type === 'synthesizing') {
+          const el = document.getElementById('council-synthesis-el');
+          if (el) el.style.display = '';
+        } else if (evt.type === 'synthesis') {
+          const el = document.getElementById('council-synthesis-el');
+          if (el) {
+            el.querySelector('.council-member-running')?.remove();
+            el.insertAdjacentHTML('beforeend',
+              `<div>${esc(evt.result)}</div>`);
+          }
+        } else if (evt.type === 'error') {
+          results.insertAdjacentHTML('beforeend',
+            `<div class="op-error">✗ ${esc(evt.message)}</div>`);
+        }
+      }
+    }
+  } catch(e) {
+    results.insertAdjacentHTML('beforeend',
+      `<div class="op-error">✗ ${esc(e.message)}</div>`);
+  }
+
+  _councilRunning = false;
+  if (engageBtn)  { engageBtn.disabled = false; engageBtn.textContent = '⚖ Engage Again'; }
+  if (proposeBtn) { proposeBtn.disabled = false; }
 }
 
 // ── 7. Harness — parallel agent runner ────────────────────────────────────────
