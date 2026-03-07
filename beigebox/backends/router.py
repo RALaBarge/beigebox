@@ -239,7 +239,21 @@ class MultiBackendRouter:
 
         First pass: try fast (non-degraded) backends in priority order.
         Second pass: if all fast backends fail, try degraded backends as fallback.
+
+        If ``_bb_force_backend`` is present in the body it is stripped and used
+        to target a specific named backend, bypassing normal selection.
         """
+        force_name: str | None = body.pop("_bb_force_backend", None)
+        if force_name:
+            backend = self.get_backend(force_name)
+            if backend:
+                logger.debug("routing_rules: forcing backend '%s'", force_name)
+                return await backend.forward(body)
+            logger.warning(
+                "routing_rules: backend '%s' not found — falling back to normal routing",
+                force_name,
+            )
+
         model = body.get("model", "")
         errors: list[str] = []
         fast, degraded = self._partition_backends(model)
@@ -292,7 +306,23 @@ class MultiBackendRouter:
         First pass: fast backends in priority order.
         Second pass: degraded backends as fallback.
         Total elapsed time per backend is recorded in the rolling window.
+
+        If ``_bb_force_backend`` is present in the body it is stripped and used
+        to target a specific named backend, bypassing normal selection.
         """
+        force_name: str | None = body.pop("_bb_force_backend", None)
+        if force_name:
+            backend = self.get_backend(force_name)
+            if backend:
+                logger.debug("routing_rules: forcing backend '%s' (stream)", force_name)
+                async for line in backend.forward_stream(body):
+                    yield line
+                return
+            logger.warning(
+                "routing_rules: backend '%s' not found — falling back to normal routing",
+                force_name,
+            )
+
         model = body.get("model", "")
         errors: list[str] = []
         fast, degraded = self._partition_backends(model)

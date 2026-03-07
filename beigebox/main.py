@@ -369,6 +369,10 @@ async def chat_completions(request: Request):
             status_code=403,
         )
 
+    # Embed auth key name for routing_rules engine (stripped before reaching backend)
+    if _auth_key:
+        body["_bb_auth_key"] = _auth_key.name
+
     stream = body.get("stream", False)
 
     if stream:
