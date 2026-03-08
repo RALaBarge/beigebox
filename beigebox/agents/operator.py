@@ -446,7 +446,8 @@ class Operator:
             # Tool call
             if "tool" in parsed:
                 tool_name = parsed.get("tool", "")
-                tool_input = str(parsed.get("input", ""))
+                _inp = parsed.get("input", "")
+                tool_input = json.dumps(_inp) if isinstance(_inp, (dict, list)) else str(_inp)
                 thought = parsed.get("thought", "")
 
                 logger.info("Operator tool call: %s(%r) — %s", tool_name, tool_input, thought)
@@ -550,7 +551,8 @@ class Operator:
 
             if "tool" in parsed:
                 tool_name = parsed.get("tool", "")
-                tool_input = str(parsed.get("input", ""))
+                _inp = parsed.get("input", "")
+                tool_input = json.dumps(_inp) if isinstance(_inp, (dict, list)) else str(_inp)
                 thought = parsed.get("thought", "")
 
                 logger.info("Operator stream tool call: %s(%r) — %s", tool_name, tool_input, thought)
