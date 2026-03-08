@@ -105,6 +105,7 @@ Three complementary cache layers, all in-process:
 - **Group Chat** — turn-by-turn multi-agent conversation: an LLM moderator picks who speaks next from a configurable roster of models/operator agents; inject thoughts mid-conversation to steer the discussion
 - **Council mode** — "council then commander": operator proposes a specialist council (name, model, task) for any query; select which models the council may use from a checklist (leave all unchecked to allow any); user reviews and edits council members via dropdowns before engaging; specialists run in parallel, operator synthesises results into a final answer; **model affinity batching** groups same-model members to run in parallel while dispatching model groups sequentially — prevents Ollama VRAM thrashing and roughly halves latency for typical 4-member/2-model councils; **kill button** aborts the SSE stream mid-run; individual cards can be closed or added on the fly
 - **Operator agent** — JSON tool-loop agent with sandboxed shell, web search, memory recall, calculator, and plugin tools; streaming mode shows tool calls and results as they happen; maintains multi-turn conversation history; **TIR mode** runs Python code in a bwrap sandbox (stdin-pipe, no tempfile) and feeds stdout back as an observation; **ReAct fallback** parses `Thought:/Action:/Final Answer:` text when JSON output fails; **persistent notes** — operator can write `workspace/out/operator_notes.md` for cross-session memory (injected at session start without an extra LLM call); **notes panel** in the UI lets you read and edit notes directly
+- **Operator pre-hook** — optional pre-processing pass where the operator enriches every incoming chat message before it reaches the LLM; uses tools (memory recall, web search, system info, etc.) and replaces the message with a context-enriched version; enable with `operator.pre_hook.enabled: true`; max iterations configurable to keep latency low; visible in the Tap tab as `internal/proxy` entries
 
 ### Storage
 
@@ -582,6 +583,23 @@ POST /api/v1/operator                   Run the operator agent (blocking)
 POST /api/v1/operator/stream            Run the operator agent with streaming progress (SSE)
 GET  /api/v1/operator/notes             Read operator persistent notes (workspace/out/operator_notes.md)
 POST /api/v1/operator/notes             Write operator persistent notes
+```
+
+### Operator pre-hook
+
+Intercept and enrich every chat message before it reaches the LLM. Enable in `config.yaml`:
+
+```yaml
+operator:
+  pre_hook:
+    enabled: true
+    model: "qwen3:4b"      # model used for enrichment
+    max_iterations: 3      # keep it fast
+```
+
+When active, each message passes through a lightweight operator loop that can call tools (memory recall, web search, system info, etc.) and return an enriched version. The main LLM sees the enriched message. Enrichment steps are logged to the Tap tab as `internal/proxy` entries.
+
+```
 POST /api/v1/ensemble                   Multi-model ensemble with LLM judge
 POST /api/v1/harness/orchestrate        Goal-driven orchestration (SSE stream)
 POST /api/v1/harness/group-chat         Turn-by-turn multi-agent group conversation (SSE stream)
@@ -652,6 +670,7 @@ beigebox/
 │   ├── ensemble.py         Ensemble tool for operator
 │   ├── browserbox.py       BrowserBox browser API relay tool (deadline-tracked recv loop)
 │   ├── python_interpreter.py  TIR code interpreter (bwrap sandbox, stdin-pipe)
+│   └── ...                 web_search (direct DDGS), calculator, datetime, memory, etc.
 │   ├── connection_tool.py  Credentialed API calls via agentauth
 │   ├── notifier.py         Webhook notifications
 │   └── plugin_loader.py    Auto-discovery from plugins/
