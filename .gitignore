@@ -17,6 +17,10 @@ data/
 *.jsonl
 chroma/
 
+# Agent output files (keep directory, ignore contents)
+workspace/out/*
+!workspace/out/.gitkeep
+
 # Secrets
 *.key
 *.pem

@@ -1,28 +1,32 @@
 """
-DuckDuckGo web search via LangChain.
+DuckDuckGo web search.
 Free, no API key required. Default search provider.
 """
 
 import logging
-from langchain_community.tools import DuckDuckGoSearchResults
+from duckduckgo_search import DDGS
 
 logger = logging.getLogger(__name__)
 
 
 class WebSearchTool:
-    """Wraps LangChain's DuckDuckGo search."""
+    """DuckDuckGo web search via duckduckgo_search."""
 
     def __init__(self, max_results: int = 5):
         self.max_results = max_results
-        self.search = DuckDuckGoSearchResults(max_results=max_results)
         logger.info("WebSearchTool initialized (max_results=%d)", max_results)
 
     def run(self, query: str) -> str:
         """Execute a web search and return results as text."""
         try:
-            results = self.search.invoke(query)
-            logger.debug("Search for '%s' returned results", query)
-            return results
+            with DDGS() as ddgs:
+                results = list(ddgs.text(query, max_results=self.max_results))
+            if not results:
+                return "No results found."
+            lines = []
+            for r in results:
+                lines.append(f"[{r.get('title', '')}]({r.get('href', '')})\n{r.get('body', '')}")
+            return "\n\n".join(lines)
         except Exception as e:
             logger.error("Search failed for '%s': %s", query, e)
             return f"Search failed: {e}"

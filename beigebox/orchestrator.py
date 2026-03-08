@@ -186,39 +186,3 @@ class ParallelOrchestrator:
             result = asyncio.run(self.run(plan))
 
         return json.dumps(result, indent=2)
-
-
-def get_orchestrator_tool():
-    """
-    Create a LangChain-compatible tool for the Orchestrator.
-    Returns None if orchestrator is disabled in config.
-    """
-    cfg = get_config()
-    orch_cfg = cfg.get("orchestrator", {})
-
-    if not orch_cfg.get("enabled", False):
-        return None
-
-    orchestrator = ParallelOrchestrator(
-        max_parallel_tasks=orch_cfg.get("max_parallel_tasks", 5),
-        task_timeout_seconds=orch_cfg.get("task_timeout_seconds", 120),
-        total_timeout_seconds=orch_cfg.get("total_timeout_seconds", 300),
-    )
-
-    try:
-        from langchain_core.tools import Tool
-
-        return Tool(
-            name="parallel_orchestrator",
-            description=(
-                "Execute multiple LLM tasks in parallel. "
-                "Input: JSON array of tasks, each with 'model' and 'prompt' keys. "
-                "Example: [{\"model\": \"code\", \"prompt\": \"Analyze this function\"}, "
-                "{\"model\": \"large\", \"prompt\": \"Explain the implications\"}]. "
-                "Returns collected results from all tasks."
-            ),
-            func=orchestrator.run_sync,
-        )
-    except ImportError:
-        logger.warning("langchain_core not available — orchestrator tool disabled")
-        return None
