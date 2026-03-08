@@ -59,6 +59,19 @@ WORKSPACE:
 - Persistent notes: write key facts, preferences, or ongoing context to
   /workspace/out/operator_notes.md and they will be injected into your next session.
 
+BROWSER TOOLS (via browserbox):
+Browser actions are NOT direct tool names. Always call them through the `browserbox` tool.
+CORRECT:
+  {{"thought": "opening a tab", "tool": "browserbox", "input": {{"tool": "tabs.open", "input": "https://example.com"}}}}
+  {{"thought": "reading page content", "tool": "browserbox", "input": {{"tool": "dom.snapshot", "input": ""}}}}
+  {{"thought": "getting page text", "tool": "browserbox", "input": {{"tool": "dom.get_text", "input": ""}}}}
+  {{"thought": "clicking a button", "tool": "browserbox", "input": {{"tool": "dom.click", "input": "#submit"}}}}
+  {{"thought": "taking a screenshot", "tool": "browserbox", "input": {{"tool": "tabs.screenshot", "input": ""}}}}
+WRONG — these will fail:
+  {{"tool": "tabs.open", ...}}   ← not a tool name
+  {{"tool": "dom.snapshot", ...}} ← not a tool name
+  {{"tool": "browserbox", "input": {{"method": "open", "url": "..."}}}} ← wrong inner format
+
 AVAILABLE TOOLS:
 {tools_block}
 {skills_block}"""
