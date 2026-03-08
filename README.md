@@ -105,12 +105,16 @@ Three complementary cache layers, all in-process:
 - **Group Chat** — turn-by-turn multi-agent conversation: an LLM moderator picks who speaks next from a configurable roster of models/operator agents; inject thoughts mid-conversation to steer the discussion
 - **Council mode** — "council then commander": operator proposes a specialist council (name, model, task) for any query; select which models the council may use from a checklist (leave all unchecked to allow any); user reviews and edits council members via dropdowns before engaging; specialists run in parallel, operator synthesises results into a final answer; **model affinity batching** groups same-model members to run in parallel while dispatching model groups sequentially — prevents Ollama VRAM thrashing and roughly halves latency for typical 4-member/2-model councils; **kill button** aborts the SSE stream mid-run; individual cards can be closed or added on the fly
 - **Operator agent** — JSON tool-loop agent with sandboxed shell, web search, memory recall, calculator, and plugin tools; streaming mode shows tool calls and results as they happen; maintains multi-turn conversation history; **TIR mode** runs Python code in a bwrap sandbox (stdin-pipe, no tempfile) and feeds stdout back as an observation; **ReAct fallback** parses `Thought:/Action:/Final Answer:` text when JSON output fails; **persistent notes** — operator can write `workspace/out/operator_notes.md` for cross-session memory (injected at session start without an extra LLM call); **notes panel** in the UI lets you read and edit notes directly
-- **Operator pre-hook** — optional pre-processing pass where the operator enriches every incoming chat message before it reaches the LLM; uses tools (memory recall, web search, system info, etc.) and replaces the message with a context-enriched version; enable with `operator.pre_hook.enabled: true`; max iterations configurable to keep latency low; visible in the Tap tab as `internal/proxy` entries
+- **Operator pre-hook** — optional pre-processing pass where the operator enriches every incoming chat message before it reaches the LLM; uses tools (memory recall, web search, system info, etc.) and replaces the message with a context-enriched version; enable with `operator.pre_hook.enabled: true`; max iterations configurable to keep latency low; visible in the Tap tab as `internal/proxy` entries; tool I/O dumped to `workspace/out/.prehook/` (not indexed)
+- **Operator post-hook** — fire-and-forget operator pass that runs after the LLM has fully responded; receives the completed response so the operator can extract facts, write notes, or trigger side effects; never modifies the response; enable with `operator.post_hook.enabled: true`; tool I/O dumped to `workspace/out/.posthook/`
+- **Operator tool capture** — operator tool calls can opt in to full I/O capture; raw result stored in the blob store, preview embedding in ChromaDB for semantic retrieval; per-tool opt-in via `capture_tool_io = True` class attribute; `max_context_chars` limits what the operator sees while storing full content; enabled on web_search, web_scraper, pdf_reader, browserbox, python_interpreter
 
 ### Storage
 
-- **SQLite** — every conversation, message, cost, and latency metric persisted locally
-- **ChromaDB** — vector embeddings for semantic search and classification (embedded, no separate service)
+- **SQLite** — every conversation, message, cost, and latency metric persisted locally; WAL mode enabled for concurrent read performance
+- **ChromaDB** — vector embeddings for semantic search and classification (embedded, no separate service); stores conversation messages, document chunks, and operator tool results in a single collection separated by `source_type` metadata
+- **Blob store** — content-addressed gzip store at `{vector_store_path}/blobs/`; sha256 filename = identity; natural dedup; used for full operator tool results and document chunk source text; verbatim retrieval by hash
+- **Document RAG** — files uploaded to `workspace/in/` are automatically chunked, embedded, and indexed; retrievable by the operator via the `document_search` tool; paragraph-aware chunking with overlap; PDF support via pdf_oxide
 - **Conversation replay** — reconstruct any conversation with full routing context
 - **Conversation forking** — branch a conversation into a new thread via `z: fork`
 
@@ -585,9 +589,9 @@ GET  /api/v1/operator/notes             Read operator persistent notes (workspac
 POST /api/v1/operator/notes             Write operator persistent notes
 ```
 
-### Operator pre-hook
+### Operator hooks
 
-Intercept and enrich every chat message before it reaches the LLM. Enable in `config.yaml`:
+**Pre-hook** — intercept and enrich every chat message before it reaches the LLM:
 
 ```yaml
 operator:
@@ -597,7 +601,19 @@ operator:
     max_iterations: 3      # keep it fast
 ```
 
-When active, each message passes through a lightweight operator loop that can call tools (memory recall, web search, system info, etc.) and return an enriched version. The main LLM sees the enriched message. Enrichment steps are logged to the Tap tab as `internal/proxy` entries.
+When active, each message passes through a lightweight operator loop that can call tools (memory recall, web search, system info, etc.) and return an enriched version. The main LLM sees the enriched message. Enrichment steps are logged to the Tap tab as `internal/proxy` entries. Tool I/O is dumped to `workspace/out/.prehook/` — not indexed in the vector store.
+
+**Post-hook** — fire-and-forget pass that runs after the LLM has fully responded:
+
+```yaml
+operator:
+  post_hook:
+    enabled: true
+    model: "qwen3:4b"
+    max_iterations: 3
+```
+
+Receives the completed user message + assistant response. Can extract facts, write to operator notes, update workspace files, or trigger any tool-based side effect. Never modifies the response — always fire-and-forget. Tool I/O dumped to `workspace/out/.posthook/`.
 
 ```
 POST /api/v1/ensemble                   Multi-model ensemble with LLM judge
@@ -655,13 +671,16 @@ beigebox/
 │   ├── openrouter.py       OpenRouter (with cost extraction)
 │   └── retry_wrapper.py    Retry logic with exponential backoff
 ├── storage/
-│   ├── sqlite_store.py     Conversation + metrics persistence (TTFT, P50/P90/P99)
-│   ├── vector_store.py     Embedding + semantic search
+│   ├── sqlite_store.py     Conversation + metrics persistence (TTFT, P50/P90/P99, WAL mode)
+│   ├── vector_store.py     Embedding + semantic search (messages, documents, tool results)
+│   ├── blob_store.py       Content-addressed gzip store (sha256 filenames, natural dedup)
+│   ├── chunker.py          Paragraph-aware text chunker for document indexing
 │   └── backends/           Vector backend abstraction (ChromaDB, extensible)
 ├── tools/
 │   ├── registry.py         Tool dispatch + plugin loading
 │   ├── system_info.py      System stats (bwrap sandboxed)
 │   ├── memory.py           Conversation recall via vector search
+│   ├── document_search.py  Semantic search over indexed workspace documents
 │   ├── calculator.py       Math evaluation
 │   ├── datetime_tool.py    Time/date
 │   ├── web_search.py       DuckDuckGo search

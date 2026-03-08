@@ -17,10 +17,14 @@ No TUI dependency. Works from CLI, HTTP API, or any caller.
 """
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 import re
 import time
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -94,6 +98,27 @@ RULES:
 - Your answer becomes the message the main LLM will receive, so include the original intent plus any useful context you found.
 - If no enrichment is needed, return the original message unchanged.
 - Keep the enriched message focused — do not pad or waffle.
+
+AVAILABLE TOOLS:
+{tools_block}
+{skills_block}"""
+
+_POST_HOOK_SYSTEM = """\
+You are a post-response processing agent that runs after the main LLM has answered.
+Your job is to review the user's question and the assistant's response, then use tools
+to take any useful follow-up actions (store facts, write notes, update workspace files, etc.).
+
+You have access to tools. To use a tool, respond with ONLY this JSON:
+{{"thought": "why I'm calling this tool", "tool": "TOOL_NAME", "input": "what to pass"}}
+
+When done, signal completion:
+{{"thought": "post-processing complete", "answer": "done"}}
+
+RULES:
+- Do NOT re-answer the user's question. Act on the response, don't restate it.
+- Use tools to persist useful information, trigger side effects, or enrich workspace output.
+- If no action is needed, return done immediately.
+- Keep it fast — you have a limited iteration budget.
 
 AVAILABLE TOOLS:
 {tools_block}
@@ -210,12 +235,30 @@ class Operator:
       5. If parse fails -> retry once with a correction prompt, then give up
     """
 
-    def __init__(self, vector_store=None, model_override: str | None = None,
-                 max_iterations_override: int | None = None, pre_hook: bool = False):
+    def __init__(self, vector_store=None, blob_store=None,
+                 model_override: str | None = None,
+                 max_iterations_override: int | None = None,
+                 pre_hook: bool = False, post_hook: bool = False):
         from beigebox.tools.registry import ToolRegistry
 
         self.cfg = get_config()
         self.vector_store = vector_store
+        self._blob_store = blob_store
+        self._session_id: str | None = None
+        self._pre_hook = pre_hook
+        self._post_hook = post_hook
+
+        # Dump dir for hook tool I/O — pre/post hook calls go to workspace
+        # files instead of ChromaDB to keep infrastructure noise out of the
+        # main data chain.
+        if pre_hook or post_hook:
+            _hook_subdir = ".prehook" if pre_hook else ".posthook"
+            _ws_path = self.cfg.get("workspace", {}).get("path", "./workspace")
+            _app_root = Path(__file__).parent.parent.parent
+            self._dump_dir: Path | None = (_app_root / _ws_path / "out" / _hook_subdir).resolve()
+        else:
+            self._dump_dir = None
+
         self._registry = ToolRegistry(vector_store=vector_store)
         self._model = (
             model_override
@@ -268,6 +311,11 @@ class Operator:
 
         if pre_hook:
             self._system = _PRE_HOOK_SYSTEM.format(
+                tools_block=_build_tools_block(tools) if tools else "(no tools available)",
+                skills_block=skills_block,
+            )
+        elif post_hook:
+            self._system = _POST_HOOK_SYSTEM.format(
                 tools_block=_build_tools_block(tools) if tools else "(no tools available)",
                 skills_block=skills_block,
             )
@@ -406,9 +454,52 @@ class Operator:
             available = ", ".join(self._tools.keys()) or "none"
             return f"Error: unknown tool '{name}'. Available: {available}"
         try:
-            return str(tool.run(input_str))
+            raw_result = str(tool.run(input_str))
         except Exception as e:
             return f"Error running {name}: {e}"
+
+        ts = datetime.now(timezone.utc).isoformat()
+
+        if self._dump_dir is not None:
+            # Hook mode: dump to workspace file, never touch ChromaDB.
+            try:
+                self._dump_dir.mkdir(parents=True, exist_ok=True)
+                ts_safe = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+                dump_path = self._dump_dir / f"{ts_safe}_{name}.json.gz"
+                payload = json.dumps({
+                    "tool": name, "input": input_str, "result": raw_result, "ts": ts,
+                })
+                with gzip.open(dump_path, "wb") as f:
+                    f.write(payload.encode("utf-8"))
+            except Exception as e:
+                logger.warning("hook dump failed for %s: %s", name, e)
+        elif getattr(tool, "capture_tool_io", False) and self.vector_store and self._blob_store:
+            # Normal operator mode: store to blob + ChromaDB.
+            if self._session_id is None:
+                self._session_id = uuid.uuid4().hex[:12]
+            try:
+                blob_hash = self._blob_store.write(raw_result)
+                self.vector_store.store_tool_result(
+                    session_id=self._session_id,
+                    tool_name=name,
+                    tool_input=input_str,
+                    blob_hash=blob_hash,
+                    preview=raw_result[:300],
+                    timestamp=ts,
+                )
+            except Exception as e:
+                logger.warning("tool capture failed for %s: %s", name, e)
+                blob_hash = ""
+
+        # Truncate what the operator sees if the tool requests it.
+        max_chars = getattr(tool, "max_context_chars", None)
+        if max_chars and len(raw_result) > max_chars:
+            hint = f" [{blob_hash[:8]}]" if (
+                getattr(tool, "capture_tool_io", False) and self._blob_store
+                and self._dump_dir is None
+            ) else ""
+            return raw_result[:max_chars] + f"\n[...truncated{hint} — full result stored]"
+        return raw_result
 
     # ------------------------------------------------------------------
     # Main loop

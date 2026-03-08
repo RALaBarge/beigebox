@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 
 
 class PdfReaderTool:
+    capture_tool_io: bool = True
+    max_context_chars: int = 8000
+
     description = (
         "Read and extract content from a PDF file. "
         "Input: filename in workspace/in/ (e.g. 'report.pdf'), or absolute path. "

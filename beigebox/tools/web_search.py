@@ -12,6 +12,9 @@ logger = logging.getLogger(__name__)
 class WebSearchTool:
     """DuckDuckGo web search via duckduckgo_search."""
 
+    capture_tool_io: bool = True
+    max_context_chars: int = 4000
+
     def __init__(self, max_results: int = 5):
         self.max_results = max_results
         logger.info("WebSearchTool initialized (max_results=%d)", max_results)

@@ -56,6 +56,7 @@ proxy: Proxy | None = None
 tool_registry: ToolRegistry | None = None
 sqlite_store: SQLiteStore | None = None
 vector_store: VectorStore | None = None
+blob_store = None
 decision_agent: DecisionAgent | None = None
 hook_manager: HookManager | None = None
 backend_router: MultiBackendRouter | None = None
@@ -109,7 +110,7 @@ async def _preload_embedding_model(cfg: dict):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
-    global proxy, tool_registry, sqlite_store, vector_store
+    global proxy, tool_registry, sqlite_store, vector_store, blob_store
     global decision_agent, hook_manager, backend_router, cost_tracker
     global embedding_classifier, auth_registry, mcp_server
 
@@ -125,11 +126,13 @@ async def lifespan(app: FastAPI):
     _backend_type = _storage_cfg.get("vector_backend", "chromadb")
     _backend_path = vector_store_path
     from beigebox.storage.backends import make_backend as _make_backend
+    from beigebox.storage.blob_store import BlobStore
     vector_store = VectorStore(
         embedding_model=_embed_cfg["model"],
         embedding_url=_embed_cfg.get("backend_url") or cfg["backend"]["url"],
         backend=_make_backend(_backend_type, path=_backend_path),
     )
+    blob_store = BlobStore(Path(vector_store_path) / "blobs")
 
     # Tools (pass vector_store for the memory tool)
     tool_registry = ToolRegistry(vector_store=vector_store)
@@ -186,6 +189,7 @@ async def lifespan(app: FastAPI):
         embedding_classifier=embedding_classifier,
         tool_registry=tool_registry,
         backend_router=backend_router,
+        blob_store=blob_store,
     )
 
     logger.info(
@@ -1812,7 +1816,7 @@ async def api_operator(request: Request):
             import uuid as _uuid
             _conv_id = _uuid.uuid4().hex[:8]
             _wire = proxy.wire if proxy else None
-            op = Operator(vector_store=vs, model_override=model_override)
+            op = Operator(vector_store=vs, blob_store=blob_store, model_override=model_override)
             _op_model = op._model
             if _wire:
                 _wire.log("inbound", "user", question,
@@ -1896,7 +1900,7 @@ async def api_operator_stream(request: Request):
             except Exception:
                 vs = None
 
-            op = Operator(vector_store=vs, model_override=model_override)
+            op = Operator(vector_store=vs, blob_store=blob_store, model_override=model_override)
             _op_model = op._model
 
             # Wiretap: log the incoming operator query
@@ -2390,6 +2394,53 @@ async def openrouter_balance():
         return JSONResponse({"error": str(e)}, status_code=502)
 
 
+def _index_document(file_path: Path, vs, bs) -> None:
+    """Parse, chunk, embed, and store a workspace document.  Runs in a thread."""
+    from beigebox.storage.chunker import chunk_text
+
+    _log = logging.getLogger(__name__)
+    source = file_path.name
+    suffix = file_path.suffix.lower()
+
+    try:
+        if suffix == ".pdf":
+            try:
+                import pdf_oxide as pox
+                doc = pox.PdfDocument(str(file_path))
+                parts = []
+                for i in range(doc.page_count()):
+                    md = doc.to_markdown(i, detect_headings=True)
+                    if md.strip():
+                        parts.append(md)
+                text = "\n\n".join(parts)
+            except Exception as e:
+                _log.warning("_index_document: pdf_oxide failed for %s: %s", source, e)
+                return
+        else:
+            # Plain text, markdown, code files, etc.
+            text = file_path.read_text(encoding="utf-8", errors="replace")
+
+        if not text.strip():
+            _log.info("_index_document: %s is empty, skipping", source)
+            return
+
+        chunks = chunk_text(text, source_file=source)
+        for chunk in chunks:
+            blob_hash = bs.write(chunk["text"])
+            vs.store_document_chunk(
+                source_file=source,
+                chunk_index=chunk["chunk_index"],
+                char_offset=chunk["char_offset"],
+                blob_hash=blob_hash,
+                text=chunk["text"],
+            )
+
+        _log.info("_index_document: indexed %d chunks from %s", len(chunks), source)
+
+    except Exception as e:
+        _log.error("_index_document failed for %s: %s", source, e)
+
+
 @app.post("/api/v1/workspace/upload")
 async def api_workspace_upload(file: UploadFile):
     """Upload a file to workspace/in/. Guards against path traversal."""
@@ -2410,9 +2461,15 @@ async def api_workspace_upload(file: UploadFile):
     try:
         content = await file.read()
         target.write_bytes(content)
-        return JSONResponse({"ok": True, "name": filename, "size": len(content)})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    # Background: chunk, embed, and index the uploaded file.
+    if vector_store and blob_store:
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, _index_document, target, vector_store, blob_store)
+
+    return JSONResponse({"ok": True, "name": filename, "size": len(content)})
 
 
 @app.post("/api/v1/transform/pdf")

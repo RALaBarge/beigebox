@@ -271,6 +271,68 @@ class VectorStore:
         ranked = sorted(groups.values(), key=lambda x: x["score"], reverse=True)
         return ranked[:n_conversations]
 
+    def store_tool_result(
+        self,
+        session_id: str,
+        tool_name: str,
+        tool_input: str,
+        blob_hash: str,
+        preview: str,
+        timestamp: str,
+    ) -> None:
+        """Embed and store a tool I/O record from an operator session."""
+        if not preview.strip():
+            return
+        try:
+            embedding = self._get_embedding(preview)
+            entry_id = f"tool_{session_id}_{tool_name}_{timestamp}"
+            self._backend.upsert(
+                ids=[entry_id],
+                embeddings=[embedding],
+                documents=[preview],
+                metadatas=[{
+                    "source_type": "tool_result",
+                    "session_id": session_id,
+                    "tool_name": tool_name,
+                    "tool_input": tool_input[:500],
+                    "blob_hash": blob_hash,
+                    "timestamp": timestamp,
+                }],
+            )
+            logger.debug("Stored tool result %s/%s", session_id, tool_name)
+        except Exception as e:
+            logger.error("Failed to store tool result %s/%s: %s", session_id, tool_name, e)
+
+    def store_document_chunk(
+        self,
+        source_file: str,
+        chunk_index: int,
+        char_offset: int,
+        blob_hash: str,
+        text: str,
+    ) -> None:
+        """Embed and store a document chunk."""
+        if not text.strip():
+            return
+        try:
+            embedding = self._get_embedding(text)
+            entry_id = f"doc_{blob_hash[:16]}_{chunk_index}"
+            self._backend.upsert(
+                ids=[entry_id],
+                embeddings=[embedding],
+                documents=[text[:400]],
+                metadatas=[{
+                    "source_type": "document",
+                    "source_file": source_file,
+                    "chunk_index": chunk_index,
+                    "char_offset": char_offset,
+                    "blob_hash": blob_hash,
+                }],
+            )
+            logger.debug("Stored document chunk %s[%d]", source_file, chunk_index)
+        except Exception as e:
+            logger.error("Failed to store document chunk %s[%d]: %s", source_file, chunk_index, e)
+
     def get_stats(self) -> dict:
         """Return collection stats."""
         return {"total_embeddings": self._backend.count()}

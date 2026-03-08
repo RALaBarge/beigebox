@@ -55,9 +55,11 @@ class Proxy:
         embedding_classifier: EmbeddingClassifier | None = None,
         tool_registry=None,
         backend_router=None,
+        blob_store=None,
     ):
         self.sqlite = sqlite
         self.vector = vector
+        self.blob_store = blob_store
         self.decision_agent = decision_agent
         self.hook_manager = hook_manager
         self.embedding_classifier = embedding_classifier
@@ -700,6 +702,7 @@ class Proxy:
 
         op = Operator(
             vector_store=self.vector,
+            blob_store=self.blob_store,
             model_override=pre_hook_cfg.get("model"),
             max_iterations_override=pre_hook_cfg.get("max_iterations", 3),
             pre_hook=True,
@@ -728,6 +731,44 @@ class Proxy:
             model=op._model,
         )
         return {**body, "messages": messages}
+
+    async def _run_operator_post_hook(self, body: dict, response_text: str) -> None:
+        """Fire-and-forget operator pass that runs after the LLM has responded.
+
+        Receives the completed response so the operator can extract facts,
+        write notes, or trigger side effects.  Never modifies the response.
+        Tool I/O is dumped to workspace/out/.posthook/ — not stored in ChromaDB.
+        """
+        post_hook_cfg = self.cfg.get("operator", {}).get("post_hook", {})
+        if not post_hook_cfg.get("enabled", False):
+            return
+
+        user_msg = self._get_latest_user_message(body)
+        if not user_msg or not response_text.strip():
+            return
+
+        from beigebox.agents.operator import Operator
+        import asyncio
+
+        op = Operator(
+            vector_store=self.vector,
+            blob_store=self.blob_store,
+            model_override=post_hook_cfg.get("model"),
+            max_iterations_override=post_hook_cfg.get("max_iterations", 3),
+            post_hook=True,
+        )
+
+        # Compose context: user question + assistant response
+        combined = (
+            f"[USER MESSAGE]\n{user_msg}\n\n"
+            f"[ASSISTANT RESPONSE]\n{response_text}"
+        )
+
+        loop = asyncio.get_event_loop()
+        try:
+            await loop.run_in_executor(None, op.run, combined)
+        except Exception as e:
+            logger.warning("operator post_hook failed: %s", e)
 
     def _inject_system_context(self, body: dict) -> dict:
         """Inject system_context.md content into the request (hot-reloaded)."""
@@ -922,6 +963,11 @@ class Proxy:
             context = self._build_hook_context(body, conversation_id, model, decision)
             data = self.hook_manager.run_post_response(body, data, context)
         _stages["post_hooks"] = (_time.monotonic() - _t_post) * 1000
+
+        # Operator post-hook — fire-and-forget, does not modify response
+        if assistant_content:
+            import asyncio as _asyncio
+            _asyncio.ensure_future(self._run_operator_post_hook(body, assistant_content))
 
         # Emit timing summary to wiretap
         total_ms = (_time.monotonic() - _t0) * 1000
@@ -1191,6 +1237,10 @@ class Proxy:
                 # Store in semantic cache for future similar queries
                 if not is_synthetic:
                     self.semantic_cache.store(user_message, complete_text, model)
+
+                # Operator post-hook — fire-and-forget, does not modify response
+                import asyncio as _asyncio
+                _asyncio.ensure_future(self._run_operator_post_hook(body, complete_text))
 
         # Emit timing summary to wiretap
         cost_str = f" · ${stream_cost_usd:.6f}" if stream_cost_usd else ""

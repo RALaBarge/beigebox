@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 
 
 class BrowserboxTool:
+    capture_tool_io: bool = True
+    max_context_chars: int = 4000
+
     description = (
         "Access browser APIs via the active Chrome tab.\n"
         "REQUIRED input format — always a JSON object with exactly these two keys:\n"

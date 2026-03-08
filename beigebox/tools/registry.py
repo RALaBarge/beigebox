@@ -18,6 +18,7 @@ from beigebox.tools.calculator import CalculatorTool
 from beigebox.tools.datetime_tool import DateTimeTool
 from beigebox.tools.system_info import SystemInfoTool
 from beigebox.tools.memory import MemoryTool
+from beigebox.tools.document_search import DocumentSearchTool
 from beigebox.tools.ensemble import EnsembleTool
 from beigebox.tools.notifier import ToolNotifier
 from beigebox.tools.pdf_reader import PdfReaderTool
@@ -92,6 +93,15 @@ class ToolRegistry:
         si_cfg = tools_cfg.get("system_info", {})
         if si_cfg.get("enabled", True):  # Enabled by default — no deps
             self.tools["system_info"] = SystemInfoTool()
+
+        # --- Document Search (workspace document RAG) ---
+        ds_cfg = tools_cfg.get("document_search", {})
+        if ds_cfg.get("enabled", True) and vector_store is not None:
+            self.tools["document_search"] = DocumentSearchTool(
+                vector_store=vector_store,
+                max_results=ds_cfg.get("max_results", 5),
+                min_score=ds_cfg.get("min_score", 0.3),
+            )
 
         # --- Memory (conversation recall) ---
         mem_cfg = tools_cfg.get("memory", {})

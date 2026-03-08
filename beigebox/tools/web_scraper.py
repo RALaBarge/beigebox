@@ -18,6 +18,9 @@ DEFAULT_HEADERS = {
 class WebScraperTool:
     """Fetch a URL and return clean text content."""
 
+    capture_tool_io: bool = True
+    max_context_chars: int = 6000
+
     def __init__(self, max_content_length: int = 10000):
         self.max_content_length = max_content_length
         logger.info("WebScraperTool initialized (max_chars=%d)", max_content_length)

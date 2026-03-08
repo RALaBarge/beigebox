@@ -73,6 +73,9 @@ class PythonInterpreterTool:
     """
     Execute Python code in a bwrap sandbox and return stdout/stderr.
 
+    capture_tool_io is enabled so execution results are indexed for later
+    retrieval — useful for debugging multi-step data analysis sessions.
+
     Implements the TIR (Tool-Integrated Reasoning) pattern: the operator
     model can generate Python to crunch numbers, parse files, or produce
     structured output, and gets the result back as an observation.
@@ -84,6 +87,8 @@ class PythonInterpreterTool:
       /workspace/in/  — files the user dropped in (read-only)
       /workspace/out/ — write results here; tell the user the filename
     """
+
+    capture_tool_io: bool = True
 
     description = (
         "Execute Python code and return the output. "
