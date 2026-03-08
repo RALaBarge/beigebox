@@ -29,22 +29,21 @@ logger = logging.getLogger(__name__)
 
 class BrowserboxTool:
     description = (
-        "Access browser APIs via the active Chrome tab. "
-        "Input must be JSON: {\"tool\": \"namespace.method\", \"input\": \"...\"}. "
-        "Namespaces and methods:\n"
-        "  dom     — snapshot, query, query_all, get_text, get_html, get_url, get_title, "
-                     "click, fill, scroll, wait_for\n"
-        "  tabs    — list, get_current, open, close, switch, screenshot\n"
-        "  nav     — go, back, forward, reload\n"
-        "  clip    — read, write\n"
-        "  storage — get, set, delete, list, get_cookie, list_cookies\n"
-        "  fetch   — get, post, head  (carries real session cookies)\n"
-        "  network — start_capture, stop_capture, get_captured, clear\n"
-        "  inject  — js, css, css_remove\n"
-        "  pdf     — extract  (fetches current tab PDF → saves to workspace/in/)\n"
-        "Start with dom.snapshot to orient on the active page. "
-        "For SPA scraping: network.start_capture, interact, network.get_captured. "
-        "Example: {\"tool\": \"dom.snapshot\", \"input\": \"\"}"
+        "Access browser APIs via the active Chrome tab.\n"
+        "REQUIRED input format — always a JSON object with exactly these two keys:\n"
+        "  {\"tool\": \"namespace.method\", \"input\": <value>}\n"
+        "The 'tool' field is MANDATORY and must be 'namespace.method' (dot-separated).\n"
+        "CORRECT examples:\n"
+        "  Open a URL:       {\"tool\": \"tabs.open\", \"input\": \"https://example.com\"}\n"
+        "  Snapshot page:    {\"tool\": \"dom.snapshot\", \"input\": \"\"}\n"
+        "  Get page text:    {\"tool\": \"dom.get_text\", \"input\": \"\"}\n"
+        "  Click element:    {\"tool\": \"dom.click\", \"input\": \"#submit-btn\"}\n"
+        "  Navigate back:    {\"tool\": \"nav.back\", \"input\": \"\"}\n"
+        "  Screenshot:       {\"tool\": \"tabs.screenshot\", \"input\": \"\"}\n"
+        "WRONG (do not use): {\"method\": \"open\", \"url\": \"...\"} — missing 'tool' field\n"
+        "WRONG (do not use): {\"ns\": \"tabs\", \"method\": \"open\"} — wrong format\n"
+        "Available namespaces: dom, tabs, nav, clip, storage, fetch, network, inject, pdf.\n"
+        "Start with dom.snapshot to orient on the active page."
     )
 
     def __init__(
