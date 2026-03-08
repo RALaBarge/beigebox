@@ -138,9 +138,10 @@ conversation_replay:
 
 auto_summarization:
   enabled: false
-  model: "llama3.2:3b"
-  token_budget: 500
-  keep_last_n: 5
+  summary_model: "llama3.2:3b"  # model used to generate summaries (defaults to backend.default_model if blank)
+  token_budget: 24000            # trigger when estimated token count exceeds this
+  keep_last: 8                   # always keep the N most recent turns intact, unsummarised
+  summary_prefix: "Summary of earlier conversation: "
 
 # ─────────────────────────────────────────────────────────────────────────────
 # System Context — Global Prompt Injection
@@ -210,7 +211,12 @@ operator:
     enabled: false       # When true, operator enriches every chat message before it reaches the LLM
     model: "qwen3:4b"    # Model to use for enrichment (defaults to operator.model if blank)
     max_iterations: 3    # Keep it fast — limit tool calls
+  post_hook:
+    enabled: false       # When true, operator runs a fire-and-forget pass after every LLM response
+    model: "qwen3:4b"    # Model to use (defaults to operator.model if blank)
+    max_iterations: 3
   max_iterations: 10
+  timeout: 300           # seconds before an operator run is abandoned
   allowed_tools: []                     # Empty = all registered tools. Set explicitly to restrict: ["system_info", "memory", "calculator", "datetime"]
   shell:
     enabled: true
@@ -366,6 +372,18 @@ classifier:
   centroid_rebuild_interval: 3600  # Rebuild every hour
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Semantic Cache — deduplicate near-identical requests
+# ─────────────────────────────────────────────────────────────────────────────
+# Requests whose embedding is within `similarity_threshold` of a cached entry
+# are served from cache without hitting the backend.
+
+semantic_cache:
+  enabled: false
+  similarity_threshold: 0.92  # cosine similarity cutoff (0–1); higher = stricter
+  max_entries: 500            # evict oldest when exceeded
+  ttl_seconds: 3600           # cache entries expire after this many seconds
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Z-Commands (Special command syntax like "z: code", "z: search")
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -403,23 +421,23 @@ wasm:
       enabled: true
       description: "Extract text/markdown from PDF files (pdf_oxide 0.3)"
     passthrough:
-      path: "./wasm_modules/passthrough/target/wasm32-wasip1/release/passthrough.wasm"
+      path: "./wasm_modules/passthrough.wasm"
       enabled: false
       description: "Identity transform — passes response through unmodified (reference impl)"
     opener_strip:
-      path: "./wasm_modules/opener_strip/target/wasm32-wasip1/release/opener_strip.wasm"
+      path: "./wasm_modules/opener_strip.wasm"
       enabled: false
       description: "Strip sycophantic opener phrases (Certainly!, Of course!, etc.)"
     pii_redactor:
-      path: "./wasm_modules/pii_redactor/target/wasm32-wasip1/release/pii_redactor.wasm"
+      path: "./wasm_modules/pii_redactor.wasm"
       enabled: false
       description: "Redact PII (emails, phones, SSNs, credit cards) from responses"
     json_extractor:
-      path: "./wasm_modules/json_extractor/target/wasm32-wasip1/release/json_extractor.wasm"
+      path: "./wasm_modules/json_extractor.wasm"
       enabled: false
       description: "Extract first valid JSON block from mixed prose+JSON responses"
     markdown_stripper:
-      path: "./wasm_modules/markdown_stripper/target/wasm32-wasip1/release/markdown_stripper.wasm"
+      path: "./wasm_modules/markdown_stripper.wasm"
       enabled: false
       description: "Strip Markdown formatting for plain-text / TTS output"
   default_module: ""                 # Optional: always run this module regardless of routing

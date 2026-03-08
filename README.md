@@ -125,7 +125,12 @@ Three complementary cache layers, all in-process:
 - Any language that compiles to WASI works (Rust, C, Go, AssemblyScript)
 - Timeout-enforced (configurable `timeout_ms`) — if the module times out, the original response passes through unmodified
 - Decision LLM can suggest WASM modules per route via `[suggest wasm: <module>]` hints in the routing prompt
-- Included example: `opener_strip` — strips sycophantic openers ("Certainly!", "Of course!", etc.)
+- Included modules (pre-compiled, drop-in):
+  - `opener_strip` — strips sycophantic openers ("Certainly!", "Of course!", etc.)
+  - `json_extractor` — extracts the first valid JSON object/array from mixed prose+JSON responses; handles raw JSON, code fences, and inline JSON
+  - `markdown_stripper` — strips Markdown formatting to plain text; useful for TTS pipelines where `**bold**` would be read aloud literally
+  - `pii_redactor` — redacts emails, US phone numbers, SSNs, and credit card numbers with labelled placeholders (`[REDACTED_EMAIL]`, etc.)
+  - `passthrough` — identity transform; reference implementation for writing new modules
 
 ### Hooks & Plugins
 
@@ -186,6 +191,10 @@ Each chat pane has an independent ⚙ settings drawer. Configure separately per 
 | System prompt | Per-pane system message, replaces the global system context for this window |
 
 All settings inherit from global config when left blank. The ⚙ button glows when any non-default setting is active.
+
+**Status bar** — the header status bar shows a live context token counter (`~Nk tok`) that updates after each message; colour-coded neutral → yellow (12k) → red (24k). The vi-mode toggle is an inline `π` pill in the same bar — hover to see state, click to toggle.
+
+**Z-command help** — a `z: ?` button left of the chat textarea shows a CSS-only hover popover listing all available z-commands grouped by category (routing, tools, special, custom). Content is fetched once from `/api/v1/zcommands` at page load — custom commands added to `config.yaml` appear automatically.
 
 Optional vi-mode keybindings. Mobile-responsive. No JavaScript dependencies.
 
@@ -627,6 +636,7 @@ POST /api/v1/conversation/{id}/fork     Branch a conversation
 GET  /api/v1/workspace                  List workspace/in and workspace/out files
 POST /api/v1/workspace/upload           Upload a file to workspace/in (multipart)
 DELETE /api/v1/workspace/out/{file}     Delete a file from workspace/out
+GET  /api/v1/zcommands                  Available z-commands (routing, tools, specials, custom from config)
 GET  /api/v1/openrouter/balance         Remaining credit balance for configured OR key
 POST /api/v1/build-centroids            Rebuild embedding classifier centroids
 POST /mcp                               MCP server (Model Context Protocol, Streamable HTTP)
@@ -706,8 +716,12 @@ workspace/
 └── out/                    Agents write here — retrieve results from host
 
 wasm_modules/
-├── passthrough/            Reference Rust/WASI module (stdin → stdout identity)
-└── opener_strip/           Strips sycophantic openers from responses
+├── passthrough.wasm        Reference Rust/WASI module (stdin → stdout identity)
+├── opener_strip.wasm       Strips sycophantic openers from responses
+├── json_extractor.wasm     Extracts first valid JSON from mixed prose+JSON responses
+├── markdown_stripper.wasm  Strips Markdown formatting to plain text (TTS-ready)
+├── pii_redactor.wasm       Redacts emails, phones, SSNs, credit cards
+└── pdf_oxide/              PDF text extraction (pdf_oxide 0.3, pre-compiled)
 ```
 
 ---

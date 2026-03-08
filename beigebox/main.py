@@ -464,6 +464,42 @@ async def mcp_endpoint(request: Request):
     return JSONResponse(result)
 
 
+@app.get("/api/v1/zcommands")
+async def api_zcommands():
+    """Return all available z-commands — hardcoded + any custom ones from config."""
+    from beigebox.agents.zcommand import ROUTE_ALIASES, TOOL_DIRECTIVES
+    cfg = get_config()
+    zcfg = cfg.get("zcommands", {})
+
+    # Collapse aliases into display groups: target → [aliases]
+    route_groups: dict[str, list[str]] = {}
+    for alias, target in ROUTE_ALIASES.items():
+        route_groups.setdefault(target, []).append(alias)
+
+    tool_groups: dict[str, list[str]] = {}
+    for alias, target in TOOL_DIRECTIVES.items():
+        tool_groups.setdefault(target, []).append(alias)
+
+    # Custom commands from config zcommands.commands (if any)
+    custom = [
+        {"name": c["name"], "description": c.get("description", ""), "route_to": c.get("route_to", "")}
+        for c in zcfg.get("commands", [])
+        if c.get("name") not in {**ROUTE_ALIASES, **TOOL_DIRECTIVES, "help": 1, "fork": 1}
+    ]
+
+    return JSONResponse({
+        "prefix": zcfg.get("prefix", "z:"),
+        "enabled": zcfg.get("enabled", True),
+        "routing": [{"aliases": aliases, "target": target} for target, aliases in route_groups.items()],
+        "tools":   [{"aliases": aliases, "target": target} for target, aliases in tool_groups.items()],
+        "special": [
+            {"name": "help",  "description": "list available z-commands"},
+            {"name": "fork",  "description": "fork conversation into a new branch"},
+        ],
+        "custom": custom,
+    })
+
+
 @app.get("/api/v1/search")
 async def api_search_conversations(q: str, n: int = 5, role: str | None = None):
     """

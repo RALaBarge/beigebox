@@ -332,6 +332,45 @@
     align-items: flex-end;
     flex-shrink: 0;
   }
+
+  /* ── Z-command help button ───────────────────────────────────────────── */
+  .z-help-wrap { position: relative; display: inline-flex; align-items: flex-end; }
+  #z-help-btn {
+    background: none;
+    border: 1px solid var(--bg-border);
+    color: var(--fg-muted);
+    font-size: 10px;
+    padding: 2px 5px;
+    border-radius: 3px;
+    cursor: default;
+    opacity: 0.5;
+    transition: opacity 0.15s;
+    white-space: nowrap;
+    margin-bottom: 2px;
+  }
+  .z-help-wrap:hover #z-help-btn { opacity: 1; }
+  .z-help-tip {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    min-width: 280px;
+    background: var(--bg-panel);
+    border: 1px solid var(--bg-border);
+    border-radius: 4px;
+    padding: 10px 12px;
+    font-size: 11px;
+    color: var(--fg-dim);
+    white-space: pre;
+    line-height: 1.7;
+    pointer-events: none;
+    z-index: 200;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  }
+  .z-help-wrap:hover .z-help-tip { display: block; }
+  .z-help-tip .zh-head { color: var(--fg-muted); font-size: 10px; opacity: 0.7; margin-bottom: 2px; }
+  .z-help-tip .zh-cmd  { color: var(--lavender); }
+  .z-help-tip .zh-sep  { color: var(--fg-muted); opacity: 0.4; }
   #chat-input {
     flex: 1;
     resize: none;
@@ -446,49 +485,30 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* ── π Vi mode toggle ───────────────────────────────────────────────── */
-  #vi-toggle {
-    position: fixed;
-    bottom: 10px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    background: var(--bg-panel);
-    border: 1px solid var(--bg-border);
-    color: var(--fg-muted);
-    font-size: 13px;
+  /* ── π Vi mode pill (inline status bar) ─────────────────────────────── */
+  #vi-pill {
     cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 9998;
-    transition: all 0.2s;
-    user-select: none;
-  }
-  #vi-toggle:hover { border-color: var(--lavender); color: var(--lavender); }
-  #vi-toggle.active {
-    background: var(--lavender-dim);
-    border-color: var(--lavender);
-    color: var(--bg);
-    box-shadow: 0 0 8px var(--lavender-dim);
-  }
-  #vi-toggle .tooltip {
-    display: none;
-    position: absolute;
-    left: 30px;
-    bottom: 0;
-    background: var(--bg-panel);
-    border: 1px solid var(--bg-border);
+    font-size: 11px;
+    opacity: 0.4;
     color: var(--fg-dim);
-    font-size: 10px;
-    padding: 2px 6px;
-    white-space: nowrap;
-    border-radius: 2px;
-    pointer-events: none;
+    user-select: none;
+    transition: opacity 0.15s, color 0.15s;
+    padding: 0 1px;
+    line-height: 1;
   }
-  #vi-toggle:hover .tooltip { display: block; }
+  #vi-pill:hover { opacity: 0.85; color: var(--lavender); }
+  #vi-pill.active { opacity: 1; color: var(--lavender); }
+
+  /* ── Context token counter ───────────────────────────────────────────── */
+  #ctx-usage {
+    font-size: 10px;
+    color: var(--fg-muted);
+    opacity: 0.55;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.2px;
+  }
+  #ctx-usage.warn   { color: var(--yellow); opacity: 0.85; }
+  #ctx-usage.danger { color: var(--red);    opacity: 1;    }
 
   /* ── Network Probe modal ─────────────────────────────────────────────── */
   #probe-modal-overlay {
@@ -1205,16 +1225,6 @@
       line-height: 1.5;
     }
     
-    /* VI toggle: always visible on mobile */
-    #vi-toggle {
-      bottom: 8px;
-      left: 10px;
-      width: 40px;
-      height: 40px;
-      font-size: 16px;
-    }
-    #vi-toggle .tooltip { left: 48px; }
-    
     /* Scrollbars: wider for touch */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -1249,7 +1259,6 @@
     
     .button-row { gap: 4px; }
     
-    #vi-toggle { width: 36px; height: 36px; font-size: 14px; }
   }
 
   /* ── Landscape orientation (any device) ────────────────────────────── */
@@ -1268,12 +1277,11 @@
       font-size: 11px;
     }
     
-    #vi-toggle { width: 32px; height: 32px; font-size: 12px; }
   }
 
   /* ── Print styles ────────────────────────────────────────────────────── */
   @media print {
-    #header, #tabs, #chat-input-area, .button-row, #vi-toggle { display: none; }
+    #header, #tabs, #chat-input-area, .button-row { display: none; }
     body { background: white; color: black; }
     .msg { max-width: 100%; }
   }
@@ -1289,6 +1297,8 @@
   </div>
   <div class="status-bar">
     <span><span class="status-dot" id="proxy-dot"></span><span id="proxy-status" style="font-size:11px;color:var(--fg-dim)">connecting…</span></span>
+    <span id="ctx-usage"></span>
+    <span id="vi-pill" onclick="toggleViMode()" title="toggle vi mode">π</span>
     <span id="clock"></span>
   </div>
 </div>
@@ -1340,6 +1350,10 @@
     </div>
     <div class="z-hint">z-commands: <code>z: search</code> <code>z: code</code> <code>z: complex</code> <code>z: help</code> — or target <code>@op</code> to route to Operator</div>
     <div id="chat-input-area">
+      <div class="z-help-wrap">
+        <button id="z-help-btn">z: ?</button>
+        <div class="z-help-tip" id="z-help-tip">loading…</div>
+      </div>
       <textarea id="chat-input" placeholder="Send a message… (Enter=send, Shift+Enter=newline, @op prefix=operator)" rows="1"
         onkeydown="chatKeydown(event)" oninput="autoResize(this)"></textarea>
       <button id="mic-btn" title="Push to talk (click to toggle, hold to record)">🎙</button>
@@ -1715,11 +1729,6 @@
   </div>
 </div>
 
-<!-- ── Vi mode toggle ───────────────────────────────────────────────────── -->
-<div id="vi-toggle" onclick="toggleViMode()" title="">
-  π
-  <span class="tooltip" id="vi-tooltip">vi mode: off</span>
-</div>
 
 <script>
 // ── State ───────────────────────────────────────────────────────────────────
@@ -1812,10 +1821,26 @@ function applyPalette(name) {
 // ── Vi mode ─────────────────────────────────────────────────────────────────
 function setViToggleState(active) {
   viModeActive = active;
-  const btn = document.getElementById('vi-toggle');
-  const tip = document.getElementById('vi-tooltip');
-  btn.classList.toggle('active', active);
-  if (tip) tip.textContent = `vi mode: ${active ? 'on' : 'off'}`;
+  const pill = document.getElementById('vi-pill');
+  if (pill) {
+    pill.classList.toggle('active', active);
+    pill.title = `vi mode: ${active ? 'on' : 'off'}`;
+  }
+}
+
+// ── Context token usage counter ──────────────────────────────────────────────
+function updateCtxUsage(pane) {
+  const el = document.getElementById('ctx-usage');
+  if (!el || !pane) return;
+  const chars = pane.history.reduce((n, m) => {
+    const c = m.content;
+    return n + (typeof c === 'string' ? c.length : JSON.stringify(c).length);
+  }, 0);
+  const tok = Math.round(chars / 4);
+  if (tok < 100) { el.textContent = ''; el.className = ''; return; }
+  const label = tok >= 1000 ? `~${(tok/1000).toFixed(1)}k tok` : `~${tok} tok`;
+  el.textContent = label;
+  el.className = tok > 24000 ? 'danger' : tok > 12000 ? 'warn' : '';
 }
 
 function injectViMode() {
@@ -1840,6 +1865,46 @@ async function toggleViMode() {
     if (d.vi_mode) injectViMode(); else removeViMode();
   } catch(e) {
     console.error('vi mode toggle failed:', e);
+  }
+}
+
+// ── Z-command help tooltip ───────────────────────────────────────────────────
+async function loadZHelp() {
+  const tip = document.getElementById('z-help-tip');
+  if (!tip) return;
+  try {
+    const d = await api('/api/v1/zcommands');
+    const pfx = d.prefix || 'z:';
+    let html = '';
+
+    if (d.routing?.length) {
+      html += `<span class="zh-head">ROUTING</span>\n`;
+      for (const r of d.routing) {
+        html += `  <span class="zh-cmd">${pfx} ${r.aliases.join('/')}</span><span class="zh-sep"> → </span>${r.target}\n`;
+      }
+    }
+    if (d.tools?.length) {
+      html += `\n<span class="zh-head">TOOLS</span>\n`;
+      for (const t of d.tools) {
+        html += `  <span class="zh-cmd">${pfx} ${t.aliases.join('/')}</span><span class="zh-sep"> → </span>${t.target}\n`;
+      }
+    }
+    if (d.special?.length) {
+      html += `\n<span class="zh-head">SPECIAL</span>\n`;
+      for (const s of d.special) {
+        html += `  <span class="zh-cmd">${pfx} ${s.name}</span><span class="zh-sep"> → </span>${s.description}\n`;
+      }
+    }
+    if (d.custom?.length) {
+      html += `\n<span class="zh-head">CUSTOM</span>\n`;
+      for (const c of d.custom) {
+        html += `  <span class="zh-cmd">${pfx} ${c.name}</span><span class="zh-sep"> → </span>${c.description || c.route_to}\n`;
+      }
+    }
+    html += `\n<span class="zh-sep">chain: </span><span class="zh-cmd">${pfx} complex,search</span>  combine directives`;
+    tip.innerHTML = html.trimEnd();
+  } catch(e) {
+    tip.textContent = 'z-commands unavailable';
   }
 }
 
@@ -3148,6 +3213,7 @@ async function sendToPane(pane, text, forceOp) {
 
   // Add user message to history (store text content for replay; multimodal stored separately)
   pane.history.push({ role: 'user', content: userContent, _display: displayLabel });
+  updateCtxUsage(pane);
   appendMsgToPane(pane.id, 'user', displayLabel, '', area);
   renderAttachmentPills(pane.id);
 
@@ -3286,6 +3352,7 @@ async function sendToPane(pane, text, forceOp) {
         delete pane._streaming;
         if (assistantDiv) delete assistantDiv.dataset.streaming;
         pane.history.push({ role: 'assistant', content: fullText, model: model || 'assistant' });
+        updateCtxUsage(pane);
         // force_reload is one-shot — clear after use so next send doesn't re-evict
         if (pane.config?.force_reload) {
           setPaneConfig(pane.id, 'force_reload', false);
@@ -6393,6 +6460,7 @@ try {
 initChatPanes();
 
 // Bootstrap vi mode and palette from runtime config in a single fetch
+loadZHelp();
 (async function initWebUi() {
   try {
     const d = await api('/api/v1/config');

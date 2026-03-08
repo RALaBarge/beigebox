@@ -1,0 +1,12 @@
+[package]
+name = "pii_redactor"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "pii_redactor"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+regex = "1"
