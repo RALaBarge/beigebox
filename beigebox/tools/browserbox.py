@@ -104,17 +104,34 @@ class BrowserboxTool:
         call_id = str(uuid.uuid4())
         payload = json.dumps({"id": call_id, "tool": tool, "input": input_value})
 
+        # Reserve at most 3s for the TCP handshake; the remaining budget is for the
+        # actual tool round-trip (extension dispatches + response).
+        connect_timeout = min(self._timeout * 0.3, 3.0)
+        recv_deadline   = self._timeout - connect_timeout
+
         logger.debug("browserbox: connecting to %s (call_id=%s)", self._ws_url, call_id)
         try:
             async with websockets.connect(
                 self._ws_url,
-                open_timeout=self._timeout,
+                open_timeout=connect_timeout,
                 close_timeout=2,
             ) as ws:
                 await ws.send(json.dumps({"role": "agent"}))
                 await ws.send(payload)
-                logger.debug("browserbox: sent %s, waiting for response…", tool)
-                async for raw in ws:
+                logger.debug("browserbox: sent %s, waiting for response (%.0fs budget)…",
+                             tool, recv_deadline)
+
+                # Read messages with a hard deadline — guards against the extension
+                # being silently dead (SW killed but socket still open at OS level).
+                end = asyncio.get_event_loop().time() + recv_deadline
+                while True:
+                    remaining = end - asyncio.get_event_loop().time()
+                    if remaining <= 0:
+                        return "Error: timed out waiting for response from BrowserBox"
+                    try:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
+                    except (asyncio.TimeoutError, TimeoutError):
+                        return "Error: timed out waiting for response from BrowserBox"
                     msg = json.loads(raw)
                     if msg.get("id") != call_id:
                         continue
@@ -131,8 +148,8 @@ class BrowserboxTool:
         except OSError as e:
             logger.debug("browserbox: OSError connecting to %s — %s", self._ws_url, e)
             return f"Error: could not connect to BrowserBox relay at {self._ws_url} — {e}"
-        except TimeoutError:
-            logger.debug("browserbox: timeout waiting for response from %s", self._ws_url)
+        except (asyncio.TimeoutError, TimeoutError):
+            logger.debug("browserbox: connection timed out to %s", self._ws_url)
             return "Error: timed out waiting for response from BrowserBox"
 
     def _save_pdf(self, result: str) -> str:

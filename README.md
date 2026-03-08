@@ -90,7 +90,7 @@ Three complementary cache layers, all in-process:
 
 ### Observability
 
-- **Wiretap** — structured JSONL log of every request, response, routing decision, tool call, WASM transform, timing breakdown, and all passthrough routes; filterable by role (`user`, `assistant`, `system`, `decision`, `tool`, `proxy`, `wasm`) and direction in the Tap tab
+- **Wiretap** — structured JSONL log of every request, response, routing decision, tool call, WASM transform, timing breakdown, and all passthrough routes; operator tool calls and council member responses are also logged (operator and council call Ollama directly — wiretap coverage is added at the endpoint level in `main.py`); filterable by role (`user`, `assistant`, `system`, `decision`, `tool`, `proxy`, `wasm`) and direction in the Tap tab
 - **TTFT tracking** — time to first token captured on every streaming response, stored in SQLite
 - **Latency percentiles** — P50/P90/P95/P99 per model surfaced in the Dashboard performance table and latency chart
 - **Tokens/sec** — uses `tokens / (latency - TTFT)` for generation throughput (excludes prompt processing time)
@@ -103,8 +103,8 @@ Three complementary cache layers, all in-process:
 - **Orchestrated mode** — goal-driven agent loop: plan → dispatch tasks to models/operator → evaluate → iterate
 - **Ensemble voting** — parallel responses judged by an LLM arbiter; always streams tokens as they arrive; built-in question bank (25 curated benchmark questions across math, logic, coding, reasoning, and knowledge) with category filter and random picker; **Challenge round** button asks all models to verify their answer, reruns the judge, and shows whether winners are consistent — useful for comparing quantised vs full-precision models
 - **Group Chat** — turn-by-turn multi-agent conversation: an LLM moderator picks who speaks next from a configurable roster of models/operator agents; inject thoughts mid-conversation to steer the discussion
-- **Council mode** — "council then commander": operator proposes a specialist council (name, model, task) for any query; select which models the council may use from a checklist (leave all unchecked to allow any); user reviews and edits council members via dropdowns before engaging; specialists run in parallel, operator synthesises results into a final answer
-- **Operator agent** — JSON tool-loop agent with sandboxed shell, web search, memory recall, calculator, and plugin tools; streaming mode shows tool calls and results as they happen; maintains multi-turn conversation history
+- **Council mode** — "council then commander": operator proposes a specialist council (name, model, task) for any query; select which models the council may use from a checklist (leave all unchecked to allow any); user reviews and edits council members via dropdowns before engaging; specialists run in parallel, operator synthesises results into a final answer; **model affinity batching** groups same-model members to run in parallel while dispatching model groups sequentially — prevents Ollama VRAM thrashing and roughly halves latency for typical 4-member/2-model councils; **kill button** aborts the SSE stream mid-run; individual cards can be closed or added on the fly
+- **Operator agent** — JSON tool-loop agent with sandboxed shell, web search, memory recall, calculator, and plugin tools; streaming mode shows tool calls and results as they happen; maintains multi-turn conversation history; **TIR mode** runs Python code in a bwrap sandbox (stdin-pipe, no tempfile) and feeds stdout back as an observation; **ReAct fallback** parses `Thought:/Action:/Final Answer:` text when JSON output fails; **persistent notes** — operator can write `workspace/out/operator_notes.md` for cross-session memory (injected at session start without an extra LLM call); **notes panel** in the UI lets you read and edit notes directly
 
 ### Storage
 
@@ -480,6 +480,8 @@ When running BeigeBox in Docker, the `ws_url` must use `host.docker.internal` in
 
 The operator calls it with JSON: `{"tool": "namespace.method", "input": {...}}`. Start with `dom.snapshot` to orient on the active page. `pdf.extract` results are automatically saved to `workspace/in/` so the `pdf_reader` tool can process them.
 
+**Reliability note (v1.2.3):** Chrome MV3 service workers can be killed after ~30s of inactivity. BrowserBox now sends a `{"type":"ping"}` keepalive every 20s via `setInterval` to keep the SW alive (more reliable than Chrome alarms, which round up to 1 minute for unpacked extensions). The relay silently drops ping/pong frames. The `browserbox.py` tool uses a deadline-tracked `asyncio.wait_for` receive loop instead of an unbounded `async for` — so a dead extension is detected within the configured timeout rather than hanging forever.
+
 Available namespaces: `dom`, `tabs`, `nav`, `fetch`, `storage`, `clip`, `network`, `inject`, `pdf` (40 tools total). Full schema: `GET http://localhost:9010/tools`.
 
 ---
@@ -578,6 +580,8 @@ GET  /api/v1/model-performance          Tokens/sec, P50/P90/P95/P99 latency, TTF
 GET  /api/v1/routing-stats              Session cache hit rate
 POST /api/v1/operator                   Run the operator agent (blocking)
 POST /api/v1/operator/stream            Run the operator agent with streaming progress (SSE)
+GET  /api/v1/operator/notes             Read operator persistent notes (workspace/out/operator_notes.md)
+POST /api/v1/operator/notes             Write operator persistent notes
 POST /api/v1/ensemble                   Multi-model ensemble with LLM judge
 POST /api/v1/harness/orchestrate        Goal-driven orchestration (SSE stream)
 POST /api/v1/harness/group-chat         Turn-by-turn multi-agent group conversation (SSE stream)
@@ -622,7 +626,8 @@ beigebox/
 │   ├── embedding_classifier.py  Centroid classifier (Tier 3)
 │   ├── agentic_scorer.py   Keyword pre-filter (Tier 2)
 │   ├── zcommand.py         Z-command parser (Tier 1)
-│   ├── operator.py         JSON tool-loop agent
+│   ├── operator.py         JSON tool-loop agent (TIR, ReAct fallback, persistent notes)
+│   ├── council.py          Council mode — propose + engage, model affinity batching
 │   ├── harness_orchestrator.py  Goal-driven orchestration
 │   └── ensemble_voter.py   Multi-model voting with LLM judge
 ├── backends/
@@ -645,7 +650,8 @@ beigebox/
 │   ├── google_search.py    Google Custom Search
 │   ├── web_scraper.py      Page content extraction
 │   ├── ensemble.py         Ensemble tool for operator
-│   ├── browserbox.py       BrowserBox browser API relay tool
+│   ├── browserbox.py       BrowserBox browser API relay tool (deadline-tracked recv loop)
+│   ├── python_interpreter.py  TIR code interpreter (bwrap sandbox, stdin-pipe)
 │   ├── connection_tool.py  Credentialed API calls via agentauth
 │   ├── notifier.py         Webhook notifications
 │   └── plugin_loader.py    Auto-discovery from plugins/

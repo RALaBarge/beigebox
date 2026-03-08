@@ -23,6 +23,7 @@ from beigebox.tools.notifier import ToolNotifier
 from beigebox.tools.pdf_reader import PdfReaderTool
 from beigebox.tools.browserbox import BrowserboxTool
 from beigebox.tools.connection_tool import ConnectionTool
+from beigebox.tools.python_interpreter import PythonInterpreterTool
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +135,11 @@ class ToolRegistry:
                 timeout=bb_cfg.get("timeout", 10.0),
                 workspace_in=_ws_in,
             )
+
+        # --- Python Interpreter (TIR — disabled by default, requires bwrap) ---
+        pi_cfg = tools_cfg.get("python_interpreter", {})
+        if pi_cfg.get("enabled", False):
+            self.tools["python"] = PythonInterpreterTool()
 
         # --- Connections (agentauth — auto-enabled if connections: configured) ---
         conn_cfg = cfg.get("connections", {})

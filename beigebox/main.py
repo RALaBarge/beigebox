@@ -1809,9 +1809,19 @@ async def api_operator(request: Request):
             vs = None
 
         try:
+            import uuid as _uuid
+            _conv_id = _uuid.uuid4().hex[:8]
+            _wire = proxy.wire if proxy else None
             op = Operator(vector_store=vs, model_override=model_override)
+            _op_model = op._model
+            if _wire:
+                _wire.log("inbound", "user", question,
+                          model=_op_model, conversation_id=_conv_id)
             loop = asyncio.get_event_loop()
             answer = await loop.run_in_executor(None, op.run, question, history)
+            if _wire:
+                _wire.log("outbound", "assistant", answer,
+                          model=_op_model, conversation_id=_conv_id)
             return JSONResponse({
                 "success": True,
                 "query": question,
@@ -1863,6 +1873,9 @@ async def api_operator_stream(request: Request):
 
     async def event_stream():
         import json as _json
+        import uuid as _uuid
+        _conv_id = _uuid.uuid4().hex[:8]
+        _wire = proxy.wire if proxy else None
         try:
             from beigebox.storage.vector_store import VectorStore
             from beigebox.storage.backends import make_backend as _mk2
@@ -1884,9 +1897,40 @@ async def api_operator_stream(request: Request):
                 vs = None
 
             op = Operator(vector_store=vs, model_override=model_override)
+            _op_model = op._model
+
+            # Wiretap: log the incoming operator query
+            if _wire:
+                _wire.log("inbound", "user", question,
+                          model=_op_model, conversation_id=_conv_id)
+
             async for event in op.run_stream(question, history):
+                # Wiretap: log tool calls, results, and final answer
+                if _wire:
+                    etype = event.get("type")
+                    if etype == "tool_call":
+                        _wire.log("internal", "tool",
+                                  f"{event.get('thought','')} → {event.get('input','')}",
+                                  tool_name=event.get("tool", ""),
+                                  model=_op_model, conversation_id=_conv_id)
+                    elif etype == "tool_result":
+                        _wire.log("internal", "tool",
+                                  event.get("result", ""),
+                                  tool_name=event.get("tool", ""),
+                                  model=_op_model, conversation_id=_conv_id)
+                    elif etype == "answer":
+                        _wire.log("outbound", "assistant",
+                                  event.get("content", ""),
+                                  model=_op_model, conversation_id=_conv_id)
+                    elif etype == "error":
+                        _wire.log("outbound", "system",
+                                  f"operator error: {event.get('message','')}",
+                                  model=_op_model, conversation_id=_conv_id)
                 yield f"data: {_json.dumps(event)}\n\n"
         except Exception as e:
+            if _wire:
+                _wire.log("outbound", "system", f"operator exception: {e}",
+                          conversation_id=_conv_id)
             import json as _json2
             yield f"data: {_json2.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
@@ -1895,6 +1939,45 @@ async def api_operator_stream(request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ---------------------------------------------------------------------------
+# Operator notes — cross-session persistent context
+# ---------------------------------------------------------------------------
+
+def _notes_path() -> Path:
+    cfg = get_config()
+    ws_raw = cfg.get("workspace", {}).get("path", "./workspace")
+    return (Path(__file__).parent.parent / ws_raw / "out" / "operator_notes.md").resolve()
+
+
+@app.get("/api/v1/operator/notes")
+async def api_operator_notes_get():
+    """Read the operator's persistent notes file (workspace/out/operator_notes.md)."""
+    p = _notes_path()
+    if not p.exists():
+        return JSONResponse({"content": "", "exists": False})
+    try:
+        return JSONResponse({"content": p.read_text(encoding="utf-8"), "exists": True})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/v1/operator/notes")
+async def api_operator_notes_set(request: Request):
+    """Write the operator's persistent notes file."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+    content = body.get("content", "")
+    p = _notes_path()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        return JSONResponse({"ok": True, "bytes": len(content.encode())})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
@@ -1947,7 +2030,19 @@ async def api_council_propose(request: Request):
         "query":          query,
         "operator_model": operator_model,
         "backend_url":    backend_url,
+        "run_id":         run_id,
     }
+
+    # Wiretap: log the incoming query and the proposed council lineup
+    if proxy and proxy.wire:
+        proxy.wire.log("inbound", "user", query,
+                       model=operator_model, conversation_id=run_id)
+        member_summary = ", ".join(
+            f"{m['name']}({m['model']})" for m in council
+        )
+        proxy.wire.log("internal", "decision",
+                       f"council proposed: {member_summary}",
+                       model=operator_model, conversation_id=run_id)
 
     return JSONResponse({"run_id": run_id, "council": council})
 
@@ -1989,6 +2084,8 @@ async def api_council_engage(run_id: str, request: Request):
     operator_model = session["operator_model"]
     backend_url    = session["backend_url"]
 
+    _wire = proxy.wire if proxy else None
+
     async def _stream():
         from pathlib import Path as _Path
         _ws_out = _Path(__file__).parent.parent / "workspace" / "out"
@@ -1996,6 +2093,23 @@ async def api_council_engage(run_id: str, request: Request):
         yield f"data: {_json.dumps({'type': 'dispatch', 'count': len(council)})}\n\n"
         try:
             async for event in _council_execute(query, council, backend_url, operator_model):
+                # Wiretap each council event
+                if _wire:
+                    etype = event.get("type")
+                    if etype == "member_done":
+                        _wire.log("internal", "assistant",
+                                  event.get("result", ""),
+                                  model=event.get("model", ""),
+                                  conversation_id=run_id,
+                                  tool_name=event.get("name", ""))
+                    elif etype == "member_error":
+                        _wire.log("internal", "system",
+                                  f"member error [{event.get('name','')}]: {event.get('error','')}",
+                                  conversation_id=run_id)
+                    elif etype == "synthesis":
+                        _wire.log("outbound", "assistant",
+                                  event.get("result", ""),
+                                  model=operator_model, conversation_id=run_id)
                 yield f"data: {_json.dumps(event)}\n\n"
                 if event.get("type") == "synthesis":
                     try:
@@ -2010,6 +2124,9 @@ async def api_council_engage(run_id: str, request: Request):
                     except Exception:
                         pass
         except Exception as e:
+            if _wire:
+                _wire.log("outbound", "system",
+                          f"council error: {e}", conversation_id=run_id)
             yield f"data: {_json.dumps({'type': 'error', 'message': str(e)})}\n\n"
         finally:
             _council_sessions.pop(run_id, None)

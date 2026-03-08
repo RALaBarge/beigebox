@@ -56,6 +56,8 @@ WORKSPACE:
 - Output files: /workspace/out/ — write any files you produce here using the shell tool.
   Example: {{"tool": "system_info", "input": "echo 'result' > /workspace/out/report.txt"}}
   Always tell the user the filename when you write to workspace/out/.
+- Persistent notes: write key facts, preferences, or ongoing context to
+  /workspace/out/operator_notes.md and they will be injected into your next session.
 
 AVAILABLE TOOLS:
 {tools_block}
@@ -77,7 +79,7 @@ def _build_tools_block(registry_tools: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# JSON extraction helper
+# Output extraction helpers (JSON primary, ReAct fallback)
 # ---------------------------------------------------------------------------
 
 def _extract_json(text: str) -> dict | None:
@@ -112,6 +114,46 @@ def _extract_json(text: str) -> dict | None:
                     return json.loads(text[start:i + 1])
                 except json.JSONDecodeError:
                     start = None  # keep scanning for the next candidate
+
+    return None
+
+
+def _extract_react(text: str) -> dict | None:
+    """
+    Parse ReAct-style (non-JSON) model output as a fallback.
+
+    Looks for:
+      Thought: ...
+      Action: tool_name
+      Action Input: input text
+
+    or a terminal:
+      Final Answer: ...
+    """
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+    # Final answer patterns
+    for pat in (r"Final Answer:\s*(.+)", r"Answer:\s*(.+)"):
+        m = re.search(pat, text, re.DOTALL | re.IGNORECASE)
+        if m:
+            return {"answer": m.group(1).strip()}
+
+    # Tool call
+    action_m = re.search(r"^Action:\s*(\S+)", text, re.MULTILINE | re.IGNORECASE)
+    if action_m:
+        input_m = re.search(
+            r"^Action Input:\s*(.+?)(?=\n(?:Thought:|Observation:|Action:)|\Z)",
+            text, re.DOTALL | re.MULTILINE | re.IGNORECASE,
+        )
+        thought_m = re.search(
+            r"^Thought:\s*(.+?)(?=\nAction:|\Z)",
+            text, re.DOTALL | re.MULTILINE | re.IGNORECASE,
+        )
+        return {
+            "tool":    action_m.group(1).strip(),
+            "input":   input_m.group(1).strip() if input_m else "",
+            "thought": thought_m.group(1).strip() if thought_m else "",
+        }
 
     return None
 
@@ -243,6 +285,38 @@ class Operator:
         )
 
     # ------------------------------------------------------------------
+    # Persistent notes (inject-then-acknowledge)
+    # ------------------------------------------------------------------
+
+    def _notes_path(self):
+        from pathlib import Path
+        ws = self.cfg.get("workspace", {}).get("path", "./workspace")
+        p = Path(ws) / "out" / "operator_notes.md"
+        if not p.is_absolute():
+            p = Path(__file__).parent.parent.parent / p
+        return p
+
+    def _load_notes(self) -> str | None:
+        """
+        Load the operator's persistent cross-session notes.
+
+        The operator can write to /workspace/out/operator_notes.md during a
+        session. On the next session those notes are injected before the first
+        user message and a synthetic assistant acknowledgment is prepended so
+        the model treats the context as already digested.
+        """
+        try:
+            p = self._notes_path()
+            if p.exists():
+                content = p.read_text(encoding="utf-8").strip()
+                if content:
+                    logger.info("Operator: loaded persistent notes (%d chars)", len(content))
+                    return content
+        except Exception as e:
+            logger.debug("Operator: could not load notes: %s", e)
+        return None
+
+    # ------------------------------------------------------------------
     # LLM call
     # ------------------------------------------------------------------
 
@@ -304,6 +378,15 @@ class Operator:
             return "No question provided."
 
         messages = [{"role": "system", "content": self._system}]
+
+        # Inject-then-acknowledge: prepend persistent notes from previous sessions.
+        # A synthetic assistant message acts as the acknowledgment so the model
+        # treats the notes as already digested — no extra LLM round-trip needed.
+        notes = self._load_notes()
+        if notes:
+            messages.append({"role": "user", "content": f"[NOTES FROM PREVIOUS SESSIONS]\n{notes}\n[END NOTES]"})
+            messages.append({"role": "assistant", "content": '{"thought": "I have reviewed my previous session notes and am ready to assist.", "status": "ready"}'})
+
         if history:
             messages.extend(history)
         messages.append({"role": "user", "content": question})
@@ -331,7 +414,13 @@ class Operator:
 
             parsed = _extract_json(raw)
 
-            # Parse failed — nudge the model once then return raw
+            # JSON failed — try ReAct-style fallback before giving up
+            if parsed is None:
+                parsed = _extract_react(raw)
+                if parsed is not None:
+                    logger.info("Operator: ReAct fallback parsed successfully (iter %d)", iteration)
+
+            # Still nothing — nudge once then return raw
             if parsed is None:
                 if iteration == 0:
                     messages.append({"role": "assistant", "content": raw})
@@ -347,7 +436,7 @@ class Operator:
                     })
                     continue
                 else:
-                    logger.warning("Operator: could not parse JSON after nudge, returning raw")
+                    logger.warning("Operator: could not parse output after nudge, returning raw")
                     return raw.strip()
 
             # Final answer
@@ -397,6 +486,13 @@ class Operator:
             return
 
         messages = [{"role": "system", "content": self._system}]
+
+        # Inject-then-acknowledge persistent notes (same as sync run())
+        notes = self._load_notes()
+        if notes:
+            messages.append({"role": "user", "content": f"[NOTES FROM PREVIOUS SESSIONS]\n{notes}\n[END NOTES]"})
+            messages.append({"role": "assistant", "content": '{"thought": "I have reviewed my previous session notes and am ready to assist.", "status": "ready"}'})
+
         if history:
             messages.extend(history)
         messages.append({"role": "user", "content": question})
@@ -423,6 +519,12 @@ class Operator:
 
             parsed = _extract_json(raw)
 
+            # JSON failed — try ReAct-style fallback
+            if parsed is None:
+                parsed = _extract_react(raw)
+                if parsed is not None:
+                    logger.info("Operator stream: ReAct fallback parsed successfully (iter %d)", iteration)
+
             if parsed is None:
                 if iteration == 0:
                     messages.append({"role": "assistant", "content": raw})
@@ -438,7 +540,7 @@ class Operator:
                     })
                     continue
                 else:
-                    logger.warning("Operator stream: could not parse JSON after nudge, returning raw")
+                    logger.warning("Operator stream: could not parse output after nudge, returning raw")
                     yield {"type": "answer", "content": raw.strip()}
                     return
 

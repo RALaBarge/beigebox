@@ -200,6 +200,24 @@ async def propose(
     return valid or [{"name": "Analyst", "model": operator_model, "task": query}]
 
 
+async def _run_member(member: dict, backend_url: str, query: str, queue: asyncio.Queue) -> None:
+    """Run a single council member and push events onto queue."""
+    name  = member["name"]
+    model = member["model"]
+    task  = member["task"]
+    await queue.put({"type": "member_start", "name": name, "model": model})
+    try:
+        messages = [
+            {"role": "system", "content": _MEMBER_SYSTEM.format(role=name, task=task)},
+            {"role": "user",   "content": query},
+        ]
+        result = await _chat(backend_url, model, messages)
+        await queue.put({"type": "member_done", "name": name, "model": model, "result": result})
+    except Exception as e:
+        logger.error("council member %s failed: %s", name, e)
+        await queue.put({"type": "member_error", "name": name, "error": str(e)})
+
+
 async def execute(
     query: str,
     council: list[dict],
@@ -207,7 +225,11 @@ async def execute(
     operator_model: str,
 ):
     """
-    Async generator. Dispatches council members in parallel, yields events:
+    Async generator. Dispatches council members grouped by model (model-affinity
+    batching) to minimise Ollama VRAM thrashing. Members sharing a model run in
+    parallel; groups are sequential.
+
+    Yields events:
       {"type": "member_start",  "name": str, "model": str}
       {"type": "member_done",   "name": str, "model": str, "result": str}
       {"type": "member_error",  "name": str, "error": str}
@@ -219,37 +241,29 @@ async def execute(
         yield {"type": "error", "message": "Empty council"}
         return
 
-    # -- Dispatch all members in parallel, yield as they complete --
+    # -- Group by model: members sharing a model run in parallel,
+    #    groups are dispatched sequentially to avoid Ollama model evictions. --
     results: list[dict] = []
-    queue: asyncio.Queue = asyncio.Queue()
 
-    async def run_member(member: dict):
-        name  = member["name"]
-        model = member["model"]
-        task  = member["task"]
-        await queue.put({"type": "member_start", "name": name, "model": model})
-        try:
-            messages = [
-                {"role": "system", "content": _MEMBER_SYSTEM.format(role=name, task=task)},
-                {"role": "user",   "content": query},
-            ]
-            result = await _chat(backend_url, model, messages)
-            await queue.put({"type": "member_done", "name": name, "model": model, "result": result})
-        except Exception as e:
-            logger.error("council member %s failed: %s", name, e)
-            await queue.put({"type": "member_error", "name": name, "error": str(e)})
+    # Stable sort preserves user-defined order within each model group
+    from itertools import groupby
+    sorted_council = sorted(council, key=lambda m: m["model"])
 
-    tasks = [asyncio.create_task(run_member(m)) for m in council]
-
-    done_count = 0
-    total = len(tasks)
-    while done_count < total:
-        event = await queue.get()
-        if event["type"] in ("member_done", "member_error"):
-            done_count += 1
-            if event["type"] == "member_done":
-                results.append(event)
-        yield event
+    for _model_key, group_iter in groupby(sorted_council, key=lambda m: m["model"]):
+        members = list(group_iter)
+        queue: asyncio.Queue = asyncio.Queue()
+        tasks = [
+            asyncio.create_task(_run_member(m, backend_url, query, queue))
+            for m in members
+        ]
+        done_count = 0
+        while done_count < len(tasks):
+            event = await queue.get()
+            if event["type"] in ("member_done", "member_error"):
+                done_count += 1
+                if event["type"] == "member_done":
+                    results.append(event)
+            yield event
 
     # -- Synthesis --
     yield {"type": "synthesizing"}

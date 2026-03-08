@@ -414,6 +414,8 @@
   }
   .council-card-header { display:flex; gap:8px; align-items:center; }
   .council-card-name { font-size:12px; font-weight:600; color:var(--lavender); min-width:100px; }
+  .council-card-close { background:none; border:none; color:var(--fg-dim); font-size:14px; padding:0 2px; line-height:1; cursor:pointer; }
+  .council-card-close:hover { color:var(--red); }
   .council-card-model { flex:1; height:24px; font-size:11px; padding:2px 6px;
     background:var(--bg-input); border:1px solid var(--bg-border); color:var(--fg); border-radius:2px; }
   .council-card-task { width:100%; height:44px; font-size:11px; padding:4px 8px; resize:vertical;
@@ -1425,7 +1427,18 @@
         </select>
       </span>
       <span class="toolbar-spacer"></span>
+      <button id="op-notes-toggle" onclick="toggleOpNotes()" title="Persistent operator notes">📝 Notes</button>
       <button onclick="opClear()">✕ Clear</button>
+    </div>
+
+    <!-- Operator notes panel (collapsed by default) -->
+    <div id="op-notes-panel" style="display:none;padding:8px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border);flex-shrink:0">
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+        <span style="font-size:11px;color:var(--fg-muted);flex:1">Persistent notes — injected at the start of every operator session</span>
+        <button onclick="saveOpNotes()" style="font-size:11px;padding:1px 8px">Save</button>
+        <span id="op-notes-status" style="font-size:10px;color:var(--fg-dim)"></span>
+      </div>
+      <textarea id="op-notes-area" style="width:100%;height:80px;font-size:11px;font-family:inherit;resize:vertical;background:var(--bg-input);border:1px solid var(--bg-border);color:var(--fg);padding:4px 6px;border-radius:2px;line-height:1.4" placeholder="e.g. User prefers concise answers. Project is BeigeBox. Stack: Python/FastAPI/Ollama."></textarea>
     </div>
 
     <!-- Council: allowed model pool (shown only in council mode) -->
@@ -3849,6 +3862,40 @@ function clearOp() {
   _opHistory = [];
 }
 
+// ── Operator notes ────────────────────────────────────────────────────────────
+let _opNotesOpen = false;
+
+function toggleOpNotes() {
+  _opNotesOpen = !_opNotesOpen;
+  const panel = document.getElementById('op-notes-panel');
+  const btn   = document.getElementById('op-notes-toggle');
+  if (panel) panel.style.display = _opNotesOpen ? '' : 'none';
+  if (btn)   btn.style.color = _opNotesOpen ? 'var(--lavender)' : '';
+  if (_opNotesOpen) loadOpNotes();
+}
+
+async function loadOpNotes() {
+  try {
+    const d = await api('/api/v1/operator/notes');
+    const ta = document.getElementById('op-notes-area');
+    if (ta) ta.value = d.content || '';
+  } catch(e) {
+    // silently fail — notes may not exist yet
+  }
+}
+
+async function saveOpNotes() {
+  const ta     = document.getElementById('op-notes-area');
+  const status = document.getElementById('op-notes-status');
+  if (!ta) return;
+  try {
+    await api('/api/v1/operator/notes', { method: 'POST', body: { content: ta.value } });
+    if (status) { status.textContent = 'saved'; setTimeout(() => { status.textContent = ''; }, 2000); }
+  } catch(e) {
+    if (status) status.textContent = 'error: ' + e.message;
+  }
+}
+
 function opClear() {
   document.getElementById('op-log').innerHTML = '';
   _opHistory = [];
@@ -3965,6 +4012,10 @@ function _renderCouncilCards(area, council) {
   let html = '<div id="council-engage-row">'
            + `<span style="font-size:11px;color:var(--fg-muted)">Review and adjust the council, then engage.</span>`
            + '<span style="flex:1"></span>'
+           + `<button onclick="councilAddCard()" title="Add a specialist" `
+           + `style="background:none;border:1px solid var(--bg-border);color:var(--fg-dim);padding:2px 8px;border-radius:2px;cursor:pointer;font-size:12px">＋ Add</button>`
+           + '<button id="council-kill-btn" onclick="councilKill()" title="Abort running council" '
+           + 'style="display:none;background:var(--red);color:#fff;border:none;padding:2px 10px;border-radius:2px;cursor:pointer;font-size:12px">■ Stop</button>'
            + '<button class="primary" onclick="councilEngage()" id="council-engage-btn" '
            + 'style="background:var(--lavender);color:#000">⚖ Engage Council</button>'
            + '</div>';
@@ -3978,6 +4029,7 @@ function _renderCouncilCards(area, council) {
         <select class="council-card-model" id="council-model-${i}">
           ${modelOpts}
         </select>
+        <button class="council-card-close" onclick="this.closest('.council-card').remove()" title="Remove specialist">✕</button>
       </div>
       <textarea class="council-card-task" id="council-task-${i}">${esc(m.task)}</textarea>
     </div>`;
@@ -3999,15 +4051,41 @@ function _renderCouncilCards(area, council) {
 }
 
 function _councilGetCards() {
-  const cards = document.querySelectorAll('.council-card');
   const council = [];
-  cards.forEach((card, i) => {
+  document.querySelectorAll('.council-card').forEach((card, i) => {
     const name  = card.querySelector('.council-card-name')?.textContent?.trim() || `Specialist ${i+1}`;
-    const model = document.getElementById(`council-model-${i}`)?.value || '';
-    const task  = document.getElementById(`council-task-${i}`)?.value?.trim() || '';
+    const model = card.querySelector('.council-card-model')?.value || '';
+    const task  = card.querySelector('.council-card-task')?.value?.trim() || '';
     if (model && task) council.push({ name, model, task });
   });
   return council;
+}
+
+function councilAddCard() {
+  const cardsEl = document.getElementById('council-cards');
+  if (!cardsEl) return;
+  const idx = cardsEl.querySelectorAll('.council-card').length;
+  const modelsToShow = councilAllowedModels.size > 0
+    ? _availModels.filter(m => councilAllowedModels.has(m))
+    : _availModels;
+  const modelOpts = modelsToShow.map(m =>
+    `<option value="${esc(m)}">${esc(m)}</option>`
+  ).join('');
+  cardsEl.insertAdjacentHTML('beforeend', `
+    <div class="council-card" data-idx="${idx}">
+      <div class="council-card-header">
+        <span class="council-card-name" contenteditable="true" style="outline:none;min-width:80px">Specialist ${idx+1}</span>
+        <select class="council-card-model" id="council-model-${idx}">${modelOpts}</select>
+        <button class="council-card-close" onclick="this.closest('.council-card').remove()" title="Remove specialist">✕</button>
+      </div>
+      <textarea class="council-card-task" id="council-task-${idx}" placeholder="Describe this specialist's angle…"></textarea>
+    </div>`);
+}
+
+let _councilAbort = null;
+
+function councilKill() {
+  if (_councilAbort) { _councilAbort.abort(); _councilAbort = null; }
 }
 
 async function councilEngage() {
@@ -4016,10 +4094,17 @@ async function councilEngage() {
   if (!council.length) return;
 
   _councilRunning = true;
+  _councilAbort   = new AbortController();
   const engageBtn  = document.getElementById('council-engage-btn');
   const proposeBtn = document.getElementById('council-propose-btn');
+  const killBtn    = document.getElementById('council-kill-btn');
   if (engageBtn)  { engageBtn.disabled = true; engageBtn.textContent = '⟳ Running…'; }
   if (proposeBtn) { proposeBtn.disabled = true; }
+  if (killBtn)    { killBtn.style.display = ''; }
+
+  // Collapse proposal cards once engaged — results take over the space
+  const cardsEl = document.getElementById('council-cards');
+  if (cardsEl) cardsEl.style.display = 'none';
 
   const results = document.getElementById('council-results');
   results.innerHTML = '';
@@ -4050,6 +4135,7 @@ async function councilEngage() {
       method:  'POST',
       headers: { 'Content-Type': 'application/json', ...(window._bbApiKey ? {'Authorization':`Bearer ${window._bbApiKey}`} : {}) },
       body:    JSON.stringify({ council }),
+      signal:  _councilAbort.signal,
     });
 
     const reader = resp.body.getReader();
@@ -4101,13 +4187,17 @@ async function councilEngage() {
       }
     }
   } catch(e) {
-    results.insertAdjacentHTML('beforeend',
-      `<div class="op-error">✗ ${esc(e.message)}</div>`);
+    if (e.name !== 'AbortError') {
+      results.insertAdjacentHTML('beforeend',
+        `<div class="op-error">✗ ${esc(e.message)}</div>`);
+    }
   }
 
   _councilRunning = false;
+  _councilAbort   = null;
   if (engageBtn)  { engageBtn.disabled = false; engageBtn.textContent = '⚖ Engage Again'; }
   if (proposeBtn) { proposeBtn.disabled = false; }
+  if (killBtn)    { killBtn.style.display = 'none'; }
 }
 
 // ── 7. Harness — parallel agent runner ────────────────────────────────────────
