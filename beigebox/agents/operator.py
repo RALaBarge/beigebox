@@ -67,9 +67,11 @@ CORRECT:
   {{"thought": "getting page text", "tool": "browserbox", "input": {{"tool": "dom.get_text", "input": ""}}}}
   {{"thought": "clicking a button", "tool": "browserbox", "input": {{"tool": "dom.click", "input": "#submit"}}}}
   {{"thought": "taking a screenshot", "tool": "browserbox", "input": {{"tool": "tabs.screenshot", "input": ""}}}}
-WRONG — these will fail:
-  {{"tool": "tabs.open", ...}}   ← not a tool name
-  {{"tool": "dom.snapshot", ...}} ← not a tool name
+WRONG — these will all fail:
+  {{"tool": "tabs.open", ...}}            ← not a tool name
+  {{"tool": "dom.snapshot", ...}}         ← not a tool name
+  {{"tool": "browserbox.tabs.open", ...}} ← not a tool name, dot-notation doesn't work
+  {{"tool": "browserbox.nav.go", ...}}    ← same mistake
   {{"tool": "browserbox", "input": {{"method": "open", "url": "..."}}}} ← wrong inner format
 
 AVAILABLE TOOLS:
