@@ -63,6 +63,27 @@ AVAILABLE TOOLS:
 {tools_block}
 {skills_block}"""
 
+_PRE_HOOK_SYSTEM = """\
+You are a query enrichment agent that runs before the main LLM sees a message.
+Your job is to use tools to gather context and return an enriched version of the user's message.
+
+You have access to tools. To use a tool, respond with ONLY this JSON:
+{{"thought": "why I'm calling this tool", "tool": "TOOL_NAME", "input": "what to pass"}}
+
+When ready, return an enriched version of the message:
+{{"thought": "enrichment complete", "answer": "enriched message text here"}}
+
+RULES:
+- Do NOT answer the user's question. Enrich the message and return it.
+- Use tools to fetch relevant context: memory recall, current info, system state, etc.
+- Your answer becomes the message the main LLM will receive, so include the original intent plus any useful context you found.
+- If no enrichment is needed, return the original message unchanged.
+- Keep the enriched message focused — do not pad or waffle.
+
+AVAILABLE TOOLS:
+{tools_block}
+{skills_block}"""
+
 _NO_TOOLS_SYSTEM = """\
 You are BeigeBox Operator, an admin assistant for a local LLM proxy.
 Answer the user's question directly and helpfully.
@@ -174,7 +195,8 @@ class Operator:
       5. If parse fails -> retry once with a correction prompt, then give up
     """
 
-    def __init__(self, vector_store=None, model_override: str | None = None):
+    def __init__(self, vector_store=None, model_override: str | None = None,
+                 max_iterations_override: int | None = None, pre_hook: bool = False):
         from beigebox.tools.registry import ToolRegistry
 
         self.cfg = get_config()
@@ -189,7 +211,7 @@ class Operator:
             self.cfg.get("embedding", {}).get("backend_url")
             or self.cfg.get("backend", {}).get("url", "http://localhost:11434")
         ).rstrip("/")
-        self._max_iter = self.cfg.get("operator", {}).get("max_iterations", 8)
+        self._max_iter = max_iterations_override or self.cfg.get("operator", {}).get("max_iterations", 8)
         self._timeout = self.cfg.get("operator", {}).get("timeout", 300)
 
         # Tool sandboxing: restrict which tools the LLM agent can call
@@ -229,7 +251,12 @@ class Operator:
                 f"{skills_xml}\n"
             )
 
-        if tools:
+        if pre_hook:
+            self._system = _PRE_HOOK_SYSTEM.format(
+                tools_block=_build_tools_block(tools) if tools else "(no tools available)",
+                skills_block=skills_block,
+            )
+        elif tools:
             self._system = _SYSTEM.format(
                 tools_block=_build_tools_block(tools),
                 skills_block=skills_block,

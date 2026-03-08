@@ -19,7 +19,7 @@ server:
 # ─────────────────────────────────────────────────────────────────────────────
 
 backend:
-  default_model: "hf.co/unsloth/Qwen3.5-9B-GGUF:Q8_0"
+  default_model: "qwen3:4b"
   url: "http://localhost:11434"  # Ollama default
   timeout: 120
 
@@ -205,7 +205,11 @@ harness:
 
 operator:
   enabled: true                         # CAUTION: enables LLM-driven tool execution. Review allowed_tools before enabling.
-  model: "hf.co/unsloth/Qwen3.5-9B-GGUF:Q8_0"
+  model: "qwen3:4b"
+  pre_hook:
+    enabled: false       # When true, operator enriches every chat message before it reaches the LLM
+    model: "qwen3:4b"    # Model to use for enrichment (defaults to operator.model if blank)
+    max_iterations: 3    # Keep it fast — limit tool calls
   max_iterations: 10
   allowed_tools: []                     # Empty = all registered tools. Set explicitly to restrict: ["system_info", "memory", "calculator", "datetime"]
   shell:

@@ -685,6 +685,50 @@ class Proxy:
         except Exception as e:
             logger.warning("Failed to evict model '%s': %s", model, e)
 
+    async def _run_operator_pre_hook(self, body: dict) -> dict:
+        """Run operator as a pre-processing pass — enriches the last user message before it reaches the LLM."""
+        pre_hook_cfg = self.cfg.get("operator", {}).get("pre_hook", {})
+        if not pre_hook_cfg.get("enabled", False):
+            return body
+
+        user_msg = self._get_latest_user_message(body)
+        if not user_msg:
+            return body
+
+        from beigebox.agents.operator import Operator
+        import asyncio
+
+        op = Operator(
+            vector_store=self.vector,
+            model_override=pre_hook_cfg.get("model"),
+            max_iterations_override=pre_hook_cfg.get("max_iterations", 3),
+            pre_hook=True,
+        )
+
+        loop = asyncio.get_event_loop()
+        try:
+            enriched = await loop.run_in_executor(None, op.run, user_msg)
+        except Exception as e:
+            logger.warning("operator pre_hook failed: %s", e)
+            return body
+
+        if not enriched or enriched.strip() == user_msg.strip():
+            return body
+
+        # Replace last user message with enriched version
+        messages = list(body.get("messages", []))
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "user":
+                messages[i] = {**messages[i], "content": enriched}
+                break
+
+        self.wire.log(
+            direction="internal", role="proxy",
+            content=f"pre_hook enriched: {user_msg[:120]!r} → {enriched[:120]!r}",
+            model=op._model,
+        )
+        return {**body, "messages": messages}
+
     def _inject_system_context(self, body: dict) -> dict:
         """Inject system_context.md content into the request (hot-reloaded)."""
         try:
@@ -802,6 +846,9 @@ class Proxy:
             body["messages"] = await maybe_summarize(body.get("messages", []), self.cfg)
         except Exception as _e:
             logger.debug("auto_summarizer skipped: %s", _e)
+
+        # Operator pre-hook — enrich/modify message before it reaches the LLM
+        body = await self._run_operator_pre_hook(body)
 
         # Inject system context (hot-reloaded from system_context.md)
         body = self._inject_system_context(body)
@@ -976,6 +1023,9 @@ class Proxy:
             body["messages"] = await maybe_summarize(body.get("messages", []), self.cfg)
         except Exception as _e:
             logger.debug("auto_summarizer skipped: %s", _e)
+
+        # Operator pre-hook — enrich/modify message before it reaches the LLM
+        body = await self._run_operator_pre_hook(body)
 
         # Inject system context (hot-reloaded from system_context.md)
         body = self._inject_system_context(body)
