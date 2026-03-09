@@ -67,7 +67,9 @@ class WireLog:
 
     def _ensure_open(self):
         if self._file is None:
-            self._file = open(self.log_path, "a", buffering=1)  # line-buffered
+            # buffering=1 = line-buffered: each log() call flushes immediately
+            # so the tap viewer sees entries in real time without extra flushing.
+            self._file = open(self.log_path, "a", buffering=1)
 
     def log(
         self,
@@ -104,7 +106,8 @@ class WireLog:
         if timing:
             entry["timing"] = {k: round(v, 1) for k, v in timing.items()}
 
-        # Store content — truncate for sanity but keep full for short messages
+        # Preserve head + tail for long messages so the log never blows up
+        # while still capturing both the opening context and the conclusion.
         if len(content) <= 2000:
             entry["content"] = content
         else:
@@ -241,7 +244,8 @@ def live_tap(
     # Follow mode — watch for new lines
     try:
         with open(wire_path) as f:
-            # Seek to end
+            # SEEK_END: position at the end of the file before entering the
+            # readline loop so we only emit entries written after this call.
             f.seek(0, 2)
             while True:
                 line = f.readline()

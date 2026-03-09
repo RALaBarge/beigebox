@@ -72,7 +72,9 @@ class OpenAICompatibleBackend(BaseBackend):
                     data=data,
                     backend_name=self.name,
                     latency_ms=latency,
-                    cost_usd=None,  # Local/self-hosted is always free
+                    # cost_usd=None signals "not applicable" to the cost tracker;
+                    # local and self-hosted backends have no per-token billing.
+                    cost_usd=None,
                 )
         except httpx.TimeoutException:
             latency = (time.monotonic() - t0) * 1000
@@ -158,6 +160,8 @@ class OpenAICompatibleBackend(BaseBackend):
                 )
                 resp.raise_for_status()
                 data = resp.json()
+                # "id" is the OpenAI spec field; "name" is a common variant
+                # used by llama.cpp and LocalAI.
                 models = [
                     m.get("id", m.get("name", ""))
                     for m in data.get("data", [])

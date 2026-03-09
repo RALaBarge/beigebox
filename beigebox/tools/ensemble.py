@@ -54,10 +54,13 @@ class EnsembleTool:
             models = models[: self.max_models]
             logger.warning("EnsembleTool: capped models at %d", self.max_models)
 
+        # asyncio.run() creates a new event loop and runs until complete.
+        # The RuntimeError branch handles the edge case where someone calls
+        # this from inside an async context (e.g. tests, notebook); it falls
+        # back to a manually-managed loop instead of crashing.
         try:
             return asyncio.run(self._run_async(prompt, models, judge))
         except RuntimeError:
-            # Already inside an event loop (shouldn't happen in sync operator, but safe)
             loop = asyncio.new_event_loop()
             try:
                 return loop.run_until_complete(self._run_async(prompt, models, judge))

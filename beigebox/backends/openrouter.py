@@ -210,7 +210,13 @@ class OpenRouterBackend(BaseBackend):
         return "/" in model
 
     async def list_models(self) -> list[str]:
-        """Return pinned OpenRouter model IDs (from runtime_config.yaml)."""
+        """Return pinned OpenRouter model IDs (from runtime_config.yaml).
+
+        We use a curated pinned list rather than calling /models because
+        OpenRouter exposes hundreds of models and sending them all to the
+        frontend would be slow and noisy. Only models you actually want to
+        use need to appear in openrouter_pinned_models in runtime_config.yaml.
+        """
         from beigebox.config import get_runtime_config
         pinned = get_runtime_config().get("openrouter_pinned_models", [])
         if not pinned:

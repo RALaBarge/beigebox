@@ -60,6 +60,8 @@ class ToolNotifier:
     def _send_http(self, payload: dict):
         """Send via HTTP POST."""
         try:
+            # Short timeout — notifier must never block the operator loop.
+            # Exceptions are silently swallowed; a dead webhook is not fatal.
             httpx.post(
                 self.webhook_url,
                 json=payload,
@@ -74,6 +76,7 @@ class ToolNotifier:
 
         # Parse host:port from URL like "tcp://localhost:9999"
         addr = self.webhook_url.replace("tcp://", "")
+        # rsplit from the right so IPv6 addresses with colons still parse.
         if ":" in addr:
             host, port = addr.rsplit(":", 1)
             port = int(port)

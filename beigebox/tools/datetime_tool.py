@@ -15,7 +15,9 @@ from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
-# Common timezone offsets (no pytz dependency needed)
+# Static UTC offsets rather than DST-aware rules — avoids the pytz/zoneinfo
+# dependency at the cost of DST accuracy. Acceptable for a conversational
+# "what time is it roughly" use case; precise scheduling should use system tz.
 TIMEZONE_OFFSETS = {
     "utc": 0, "gmt": 0,
     "est": -5, "edt": -4, "et": -5,
@@ -57,7 +59,9 @@ class DateTimeTool:
         query_lower = query.lower().strip()
         now_utc = datetime.now(timezone.utc)
 
-        # Check for timezone conversion
+        # First match wins — longer names (e.g. "new york") are checked before
+        # their abbreviation components because dict insertion order is preserved
+        # (Python 3.7+) and the city entries appear after abbreviations.
         for tz_name, offset in TIMEZONE_OFFSETS.items():
             if tz_name in query_lower:
                 tz = timezone(timedelta(hours=offset))

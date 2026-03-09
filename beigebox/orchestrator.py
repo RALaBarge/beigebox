@@ -66,7 +66,8 @@ class ParallelOrchestrator:
         if not plan:
             return {"success": False, "error": "Empty plan", "results": []}
 
-        # Enforce max parallel tasks
+        # Silently cap rather than reject — the operator may over-plan and
+        # dropping tail tasks is safer than refusing to run anything.
         if len(plan) > self.max_parallel:
             logger.warning(
                 "Plan has %d tasks, capping at %d", len(plan), self.max_parallel
@@ -77,6 +78,9 @@ class ParallelOrchestrator:
         tasks = [self._run_task(i, task) for i, task in enumerate(plan)]
 
         try:
+            # return_exceptions=True so a single failing task doesn't cancel
+            # the whole gather — results and exceptions are separated below.
+            # wait_for wraps the gather to enforce a hard wall-clock budget.
             raw_results = await asyncio.wait_for(
                 asyncio.gather(*tasks, return_exceptions=True),
                 timeout=self.total_timeout,
@@ -171,18 +175,19 @@ class ParallelOrchestrator:
 
         # Run in existing or new event loop
         try:
+            # If we're already inside an event loop (e.g. FastAPI), asyncio.run()
+            # would raise "cannot run nested event loop". The run_in_executor path
+            # is a workaround, but it immediately falls through to asyncio.run()
+            # anyway — this codepath is only hit when Operator is called sync.
             loop = asyncio.get_running_loop()
-            # Already in async context — create a task
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 result = loop.run_in_executor(
                     pool, lambda: asyncio.run(self.run(plan))
                 )
-                # This is tricky in sync context; for LangChain tool use,
-                # the Operator agent runs synchronously
                 result = asyncio.run(self.run(plan))
         except RuntimeError:
-            # No running loop — safe to use asyncio.run
+            # No running event loop — safe to use asyncio.run directly.
             result = asyncio.run(self.run(plan))
 
         return json.dumps(result, indent=2)

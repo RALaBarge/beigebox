@@ -43,6 +43,10 @@ def _extract_code(text: str) -> str:
 def _bwrap_argv() -> list[str]:
     bwrap = shutil.which("bwrap") or "bwrap"
     python = shutil.which("python3") or "/usr/bin/python3"
+    # --die-with-parent: sandbox dies when the BeigeBox process exits, even on
+    # SIGKILL. --unshare-all: new network/pid/user/mount namespaces — no
+    # network and no visibility of the host filesystem beyond explicit binds.
+    # Code is fed via stdin (python "-") so no tempfile bind is needed.
     return [
         bwrap,
         "--die-with-parent",

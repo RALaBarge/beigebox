@@ -21,6 +21,10 @@ logger = logging.getLogger(__name__)
 # Each entry: (compiled_pattern, weight, label)
 # Weights are additive; final score is clamped to [0.0, 1.0].
 # ---------------------------------------------------------------------------
+# Pattern weights are additive and clamped to [0.0, 1.0]. The label strings
+# appear in matched[] and in debug logs for traceability. Higher-confidence
+# patterns (tool_ref, factual_now) carry more weight than softer signals
+# (quantitative, multistep) that frequently appear in non-agentic prompts too.
 _PATTERNS: list[tuple[re.Pattern, float, str]] = [
     # --- Tool-calling verbs ---
     (re.compile(r"\\b(search|look up|find|fetch|retrieve|get me)\\b", re.I), 0.25, "tool_verb"),

@@ -12,11 +12,16 @@ from uuid import uuid4
 @dataclass
 class Message:
     """A single message in a conversation."""
+    # uuid4().hex gives a compact 32-char hex string (no hyphens) as the
+    # primary key. Generated at object creation so the ID is available before
+    # the message is written to SQLite.
     id: str = field(default_factory=lambda: uuid4().hex)
     conversation_id: str = ""
     role: str = ""           # "user", "assistant", "system"
     content: str = ""
     model: str = ""
+    # UTC ISO-8601 timestamp set at construction time — not at DB insert time —
+    # so the timestamp reflects when the message was received, not when it was stored.
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     token_count: int = 0     # Approximate, filled in by proxy
 

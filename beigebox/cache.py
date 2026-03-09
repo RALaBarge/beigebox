@@ -237,7 +237,11 @@ class SemanticCache:
             self._misses += 1
             return None
 
-        # Vectorised cosine similarity (all entries already L2-normalised)
+        # Vectorised cosine similarity: stack all stored embeddings into a
+        # (N, D) matrix and compute dot products against the query vector in
+        # one NumPy call. All embeddings were L2-normalised at store time so
+        # dot product == cosine similarity. Faster than looping for even a
+        # few hundred entries, and avoids per-entry Python overhead.
         matrix = np.stack([e.embedding for e in self._entries])  # (N, D)
         sims = matrix @ vec
         best_idx = int(np.argmax(sims))

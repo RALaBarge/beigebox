@@ -226,6 +226,10 @@ class VectorStore:
           1. Retrieve `candidates` message-level hits.
           2. Group by conversation_id, keep best (lowest distance) hit per
              conversation, sort by score, return top n_conversations.
+
+        candidates >> n_conversations because a long conversation may contribute
+        many message-level hits — without the overfetch, a single very active
+        conversation could dominate the top-K and crowd out other conversations.
         """
         try:
             embedding = self._get_embedding(query)
@@ -285,12 +289,19 @@ class VectorStore:
             return
         try:
             embedding = self._get_embedding(preview)
+            # ID format encodes session, tool, and timestamp so each tool call
+            # gets a unique deterministic key. Upserting with the same key is
+            # safe (idempotent) in case of retry.
             entry_id = f"tool_{session_id}_{tool_name}_{timestamp}"
             self._backend.upsert(
                 ids=[entry_id],
                 embeddings=[embedding],
                 documents=[preview],
                 metadatas=[{
+                    # source_type distinguishes tool results, document chunks, and
+                    # conversation messages within the shared ChromaDB collection.
+                    # Missing-key exclusion means older entries (no source_type)
+                    # are simply excluded from filtered queries — no cleanup needed.
                     "source_type": "tool_result",
                     "session_id": session_id,
                     "tool_name": tool_name,
@@ -316,6 +327,9 @@ class VectorStore:
             return
         try:
             embedding = self._get_embedding(text)
+            # ID uses blob_hash prefix (content-addressed) so the same file
+            # uploaded twice produces identical IDs → natural dedup at the
+            # ChromaDB level. chunk_index disambiguates chunks within one doc.
             entry_id = f"doc_{blob_hash[:16]}_{chunk_index}"
             self._backend.upsert(
                 ids=[entry_id],

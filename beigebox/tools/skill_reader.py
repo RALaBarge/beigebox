@@ -20,6 +20,7 @@ class SkillReaderTool:
     )
 
     def __init__(self, skills: list[dict]):
+        # Index by name for O(1) lookup at tool-call time.
         self._skills = {s["name"]: s for s in skills}
 
     def run(self, input_str: str) -> str:
@@ -37,7 +38,8 @@ class SkillReaderTool:
             content = skill_md_path.read_text(encoding="utf-8")
             result = content
 
-            # List scripts/ if present
+            # List bundled scripts so the operator knows which shell commands
+            # it can run via the python_interpreter or shell tool.
             scripts_dir = skill_md_path.parent / "scripts"
             if scripts_dir.exists():
                 scripts = sorted(f.name for f in scripts_dir.iterdir() if f.is_file())
@@ -45,7 +47,7 @@ class SkillReaderTool:
                     result += f"\n\n---\nScripts available in {scripts_dir}:\n"
                     result += "\n".join(f"  {s}" for s in scripts)
 
-            # List references/ if present
+            # List reference files (e.g. example configs, templates).
             refs_dir = skill_md_path.parent / "references"
             if refs_dir.exists():
                 refs = sorted(f.name for f in refs_dir.iterdir() if f.is_file())

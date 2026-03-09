@@ -258,6 +258,9 @@ Respond ONLY with valid JSON in this exact schema:
                 tid = v.get("task_id", "?")
                 task_votes.setdefault(tid, []).append(bool(v.get("simple_enough", True)))
 
+        # Majority rule: a task fails consensus only if more than half of
+        # the officers marked it too complex. This tolerates one dissenting
+        # officer without forcing Wiggam to re-break an already-fine task.
         failing = [
             tid for tid, votes in task_votes.items()
             if votes.count(False) > len(votes) / 2
@@ -327,6 +330,9 @@ Respond ONLY with valid JSON in this exact schema:
             )
 
             # ── Officers vote ─────────────────────────────────────────────────
+            # All officer votes are dispatched in parallel — same round, same plan.
+            # return_exceptions=True means a single failed officer doesn't abort
+            # the round; that officer's vote is simply excluded from consensus.
             vote_tasks = [
                 self._officer_vote(m, plan, round_)
                 for m in self.officer_models
@@ -373,7 +379,9 @@ Respond ONLY with valid JSON in this exact schema:
                 )
                 return
 
-        # Hit round cap without full consensus — emit best effort
+        # Hit round cap without full consensus. Emit the last plan anyway with
+        # consensus=False so the caller can decide whether to proceed with Ralph
+        # or surface the partial plan to the user for manual review.
         spec_md = self._build_spec_md(last_plan)
         yield _ev(
             "finish",

@@ -37,6 +37,10 @@ class ChromaBackend(VectorBackend):
 
         self._lock = threading.Lock()
         self._client = chromadb.PersistentClient(path=str(chroma_path))
+        # Single shared collection for all source types (conversations, tool
+        # results, document chunks) — separated at query time via the
+        # source_type metadata filter. hnsw:space=cosine means distances are
+        # cosine distances in [0,2]; 0=identical, 2=orthogonal.
         self._collection = self._client.get_or_create_collection(
             name="conversations",
             metadata={"hnsw:space": "cosine"},

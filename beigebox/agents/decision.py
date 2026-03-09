@@ -39,7 +39,9 @@ class Decision:
     tools: list[str] = field(default_factory=list)  # Which tools to invoke
     reasoning: str = ""              # Brief explanation (for logging/debug)
     confidence: float = 1.0          # 0-1, how sure the router is
-    fallback: bool = False           # True if this is a default/fallback decision
+    fallback: bool = False           # True = decision was NOT made by the LLM;
+                                     # it is the safe pass-through default.
+                                     # Callers can use this to suppress routing metrics.
     wasm_module: str = ""            # WASM transform module to apply post-response
 
 
@@ -146,7 +148,9 @@ class DecisionAgent:
         self.wasm_modules = wasm_modules or {}
         self.enabled = bool(model and backend_url)
 
-        # Pre-build the system prompt
+        # Pre-build the system prompt once at startup — routes and tools
+        # don't change at runtime so there's no need to format this on every
+        # incoming request. Avoids repeated string formatting on the hot path.
         self._system_prompt = DECISION_SYSTEM_PROMPT.format(
             routes_block=_build_routes_block(self.routes),
             tools_block=_build_tools_block(self.available_tools),
@@ -218,6 +222,8 @@ class DecisionAgent:
             model=resolved_model,
             needs_search=bool(data.get("needs_search", False)),
             needs_rag=bool(data.get("needs_rag", False)),
+            # Hallucination guard: only pass through tool names that actually
+            # exist in the registry. The LLM may invent plausible-sounding names.
             tools=[t for t in data.get("tools", []) if t in self.available_tools],
             reasoning=str(data.get("reasoning", "")),
             confidence=float(data.get("confidence", 0.8)),
@@ -268,6 +274,10 @@ class DecisionAgent:
             )
             return decision
 
+        # All three failure modes (timeout, bad JSON, general error) return the
+        # same safe default. Routing failures are silent pass-throughs — the
+        # request continues with the default model, never surfaces as an error
+        # to the client.
         except httpx.TimeoutException:
             logger.warning("Decision LLM timed out after %ds, using default", effective_timeout)
             return Decision(model=self.default_model, fallback=True)
@@ -293,6 +303,9 @@ class DecisionAgent:
                     json={
                         "model": self.model,
                         "prompt": "",
+                        # keep_alive: -1 pins the model in Ollama's VRAM indefinitely
+                        # (Ollama's sentinel for "never evict"). Appropriate here because
+                        # the decision model needs to respond within ~5s on every request.
                         "keep_alive": -1,  # Pin in memory forever
                     },
                 )

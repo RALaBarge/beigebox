@@ -98,6 +98,7 @@ class HookManager:
             return
 
         for py_file in sorted(hooks_path.glob("*.py")):
+            # Skip __init__.py, __pycache__ entry points, and private helpers
             if py_file.name.startswith("_"):
                 continue
             name = py_file.stem
@@ -134,6 +135,8 @@ class HookManager:
                 continue
             try:
                 result = hook.pre_request(body, context)
+                # A hook can return None to signal "no change" — only replace
+                # the body when the hook explicitly returns a dict.
                 if result is not None and isinstance(result, dict):
                     body = result
                     logger.debug("Hook '%s' pre_request applied", hook.name)

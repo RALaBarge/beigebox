@@ -108,7 +108,9 @@ class McpServer:
         id_: Any = body.get("id")          # None → notification
         params: dict = body.get("params") or {}
 
-        # Notifications — acknowledged without response
+        # JSON-RPC notifications have no "id" field. The MCP spec forbids
+        # sending a response to a notification, so we return None and the
+        # FastAPI endpoint converts that to HTTP 202 Accepted.
         if id_ is None:
             if method not in ("notifications/initialized", "initialized"):
                 logger.debug("MCP: unrecognised notification '%s' — ignored", method)
@@ -162,7 +164,9 @@ class McpServer:
         if not name:
             raise ValueError("tools/call requires 'name'")
 
-        # Accept 'input' key, or fall back to JSON-encoding the whole arguments dict
+        # Prefer the idiomatic "input" key that our tool schema defines.
+        # Fall back to JSON-encoding the whole arguments dict so callers that
+        # pass structured arguments (e.g. {"query": "..."}) still work.
         if "input" in arguments:
             input_text = str(arguments["input"])
         else:

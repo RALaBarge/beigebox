@@ -176,6 +176,11 @@ class MultiBackendRouter:
         )
 
     def _can_attempt_model(self, backend: BaseBackend, model: str) -> bool:
+        # OpenRouter uses provider/model IDs (e.g. "openai/gpt-4o"). Plain model names
+        # (no "/") are for Ollama/local backends by default. The allow_unqualified_models
+        # flag or the global allow_openrouter_for_plain_models override lets OpenRouter
+        # try plain names too — useful when you want to route a local model name to OR as
+        # a fallback when Ollama is down.
         if "/" not in model and self._is_openrouter(backend):
             return self._allow_unqualified_models.get(backend.name, False) or self._global_allow_openrouter_for_plain_models()
         return backend.supports_model(model)
@@ -228,6 +233,9 @@ class MultiBackendRouter:
         weights = [self._weights.get(b.name, 0.0) for b in backends]
         if not any(w > 0 for w in weights):
             return backends  # no A/B split configured — keep priority order
+        # random.choices handles zero-weight entries naturally (0 probability),
+        # so backends without traffic_split set are effectively excluded from
+        # primary selection but still appear as fallbacks in the returned list.
         chosen = random.choices(backends, weights=weights, k=1)[0]
         rest = [b for b in backends if b is not chosen]
         logger.debug("A/B split selected primary backend '%s'", chosen.name)
@@ -334,6 +342,9 @@ class MultiBackendRouter:
                 ", ".join(b.name for b in degraded),
             )
 
+        # Merge fast and degraded into a single loop so we can use a single
+        # try/except with continue — streaming backends can't be retried
+        # mid-stream so on any error we just move on to the next backend.
         for backend in fast + degraded:
             is_fallback = backend in degraded
             if is_fallback:

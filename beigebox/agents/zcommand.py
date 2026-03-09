@@ -38,7 +38,9 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-# Recognized route aliases
+# Route aliases collapse all synonyms down to the four canonical route names.
+# The canonical names ("fast", "large", "code", "default") match the tier keys
+# in config.yaml so the router can look them up directly.
 ROUTE_ALIASES = {
     "simple": "fast",
     "easy": "fast",
@@ -53,7 +55,9 @@ ROUTE_ALIASES = {
     "default": "default",
 }
 
-# Recognized tool directives
+# Tool directives map synonym tokens to canonical tool names used by the
+# tool registry. Multiple user-facing tokens can map to the same tool
+# (e.g. "memory", "rag", "recall" all call the memory/RAG tool).
 TOOL_DIRECTIVES = {
     "search": "web_search",
     "websearch": "web_search",
@@ -130,7 +134,9 @@ def parse_z_command(text: str) -> ZCommand:
 
     # Split directives from the actual message
     # Directives are comma-separated words before the first "real" content
-    parts = rest.split(None, 1)  # Split on first whitespace
+    # Split exactly once on whitespace: left side = directive token(s),
+    # right side = the actual user message (may be empty for tool-only calls).
+    parts = rest.split(None, 1)
     if not parts:
         return ZCommand(active=False, message=text)
 
@@ -173,8 +179,8 @@ def parse_z_command(text: str) -> ZCommand:
             model = directive
             continue
 
-        # Unknown directive — could be start of the actual message
-        # Reconstruct: put it back with the rest
+        # Unrecognised token: assume it's the start of the user message,
+        # not a directive. Prepend it back so we don't silently swallow words.
         remaining = f"{directive} {remaining}".strip() if remaining else directive
 
     cmd = ZCommand(

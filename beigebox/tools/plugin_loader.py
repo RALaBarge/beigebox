@@ -62,8 +62,10 @@ def _class_to_name(cls_name: str) -> str:
 def _find_tool_class(module) -> type | None:
     """Return the first class ending in 'Tool' that has a .run() method."""
     for name, obj in inspect.getmembers(module, inspect.isclass):
+        # Only consider classes defined in this module; skip anything imported
+        # (e.g. a plugin that imports from beigebox wouldn't match).
         if obj.__module__ != module.__name__:
-            continue  # skip imported classes
+            continue
         if name.endswith("Tool") and callable(getattr(obj, "run", None)):
             return obj
     return None
@@ -105,6 +107,8 @@ def load_plugins(plugins_dir: str | Path, tools_cfg: dict) -> dict[str, object]:
                 continue
 
             module = importlib.util.module_from_spec(spec)
+            # Register in sys.modules before exec_module so any relative imports
+            # inside the plugin can find it; prevents "module not found" errors.
             sys.modules[module_name] = module
             spec.loader.exec_module(module)  # type: ignore[attr-defined]
 
@@ -143,6 +147,8 @@ def load_plugins(plugins_dir: str | Path, tools_cfg: dict) -> dict[str, object]:
         # Auto-register z-command aliases so `z: <plugin_name>` works out of the box.
         # Plugins can override with PLUGIN_Z_ALIASES = {"alias": "tool_name", ...}.
         # Set PLUGIN_Z_ALIASES = {} to suppress auto-registration.
+        # TOOL_DIRECTIVES is a live module-level dict; mutating it here is safe
+        # because plugin loading runs once at startup before any requests arrive.
         try:
             from beigebox.agents.zcommand import TOOL_DIRECTIVES
             z_aliases: dict[str, str] = getattr(

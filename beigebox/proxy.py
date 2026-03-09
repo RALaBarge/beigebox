@@ -107,7 +107,12 @@ class Proxy:
         return model
 
     def _set_session_model(self, conversation_id: str, model: str):
-        """Cache the routing decision for this conversation."""
+        """Cache the routing decision for this conversation.
+
+        Proactive eviction at every ~100 writes keeps memory bounded without
+        paying the TTL sweep cost on every single write. The hard cap (1000 → 800)
+        is a safety net for when sessions expire very slowly.
+        """
         if conversation_id and model:
             self._session_cache[conversation_id] = (model, time.time())
             # Proactive eviction: sweep stale entries every ~100 writes
@@ -137,6 +142,11 @@ class Proxy:
         """
         Try to extract a conversation ID from the request.
         Open WebUI doesn't always send one, so we generate if missing.
+
+        A stable ID is required for session-cache stickiness — without one,
+        every turn would get a fresh UUID and the session cache would never
+        hit. We only generate when messages are present (skip empty bodies
+        from health-check-style callers that don't represent real sessions).
         """
         conv_id = body.get("conversation_id") or body.get("session_id") or ""
         if not conv_id:
@@ -155,6 +165,8 @@ class Proxy:
         for msg in reversed(messages):
             if msg.get("role") == "user":
                 content = msg.get("content", "")
+                # OpenAI vision format sends content as a list of typed parts.
+                # JSON-serialise so downstream code always receives a plain string.
                 return content if isinstance(content, str) else json.dumps(content)
         return ""
 
@@ -169,6 +181,9 @@ class Proxy:
         for msg in messages:
             role = msg.get("role", "")
             content = msg.get("content", "")
+            # Skip system messages: they're injected by BeigeBox itself and
+            # re-logged on every turn, which would pollute the conversation store
+            # and double-count tokens.
             if not content or role == "system":
                 continue
             content_str = content if isinstance(content, str) else json.dumps(content)
@@ -346,12 +361,14 @@ class Proxy:
         if not tool_results:
             return body
         messages = body.get("messages", [])
-        # Insert tool results as a system message before the last user message
+        # Insert at position -1 (just before the last user message) so the LLM
+        # sees the tool results immediately before the question it needs to answer.
+        # Appending to the end would place results after the user message, which
+        # confuses some instruction-tuned models that expect user-message-last.
         tool_msg = {
             "role": "system",
             "content": f"The following tool results are available:\n\n{tool_results}",
         }
-        # Insert before the last message
         if messages:
             messages.insert(-1, tool_msg)
         body["messages"] = messages
@@ -950,6 +967,9 @@ class Proxy:
             )
 
         # Log assistant response (skip synthetic)
+        # assistant_content is set inside the if-block; guard below prevents
+        # NameError on the post-hook line when is_synthetic=True or choices=[].
+        assistant_content = ""
         if not is_synthetic:
             choices = data.get("choices", [])
             if choices:
@@ -964,7 +984,8 @@ class Proxy:
             data = self.hook_manager.run_post_response(body, data, context)
         _stages["post_hooks"] = (_time.monotonic() - _t_post) * 1000
 
-        # Operator post-hook — fire-and-forget, does not modify response
+        # Operator post-hook — fire-and-forget via ensure_future. The hook
+        # runs concurrently with the return; it cannot modify the response.
         if assistant_content:
             import asyncio as _asyncio
             _asyncio.ensure_future(self._run_operator_post_hook(body, assistant_content))
@@ -1087,7 +1108,10 @@ class Proxy:
         if _force_reload:
             await self._evict_model(body.get("model", ""))
 
-        # Emit routing metadata so the UI can show which model/path is handling this
+        # Emit a routing metadata chunk before the real stream starts. The
+        # frontend reads bb_type=="routing" and updates the model badge in the
+        # pane header immediately — before any tokens arrive. Not sent for
+        # synthetic requests because synthetic clients don't have a UI.
         if not is_synthetic:
             routing_meta = {"bb_type": "routing", "model": model}
             if zcmd.active and zcmd.route:
@@ -1118,14 +1142,17 @@ class Proxy:
         if not is_synthetic:
             self._log_messages(conversation_id, body.get("messages", []), model)
 
-        # Buffer for the full response
+        # full_response accumulates token deltas so we can log and cache the
+        # complete assistant message after streaming. It's also the WASM input
+        # buffer when a module is active.
         full_response = []
         stream_cost_usd: float | None = None
         backend_name = "direct"
         _t_backend = _time.monotonic()
-        _first_chunk = True  # TTFT sentinel
-        # When a WASM module is active, buffer the stream and re-emit after
-        # transformation so the client receives the transformed content.
+        _first_chunk = True  # TTFT sentinel — cleared after the first yielded chunk
+        # WASM buffer mode: withhold all stream chunks from the client until the
+        # full response is assembled, run the transform, then emit in one shot.
+        # Normal (non-WASM) mode passes each chunk through immediately as it arrives.
         wasm_mod = decision.wasm_module if decision else ""
         _wasm_buffer_mode = bool(wasm_mod and self.wasm_runtime.enabled)
 
@@ -1238,7 +1265,9 @@ class Proxy:
                 if not is_synthetic:
                     self.semantic_cache.store(user_message, complete_text, model)
 
-                # Operator post-hook — fire-and-forget, does not modify response
+                # Operator post-hook — fire-and-forget. Runs after stream is
+                # fully assembled; uses ensure_future so the generator returns
+                # to the client without waiting for the hook to complete.
                 import asyncio as _asyncio
                 _asyncio.ensure_future(self._run_operator_post_hook(body, complete_text))
 
@@ -1262,6 +1291,9 @@ class Proxy:
         are visible regardless of whether multi-backend routing is enabled.
         Router backends (e.g. pinned OpenRouter models) are merged on top.
         """
+        # `seen` deduplicates by model ID so a model available on both Ollama
+        # and a router backend (e.g. an OR alias for a local model) only appears
+        # once. Ollama wins because it's fetched first.
         seen: set[str] = set()
         all_models: list[dict] = []
 
@@ -1301,9 +1333,10 @@ class Proxy:
         cfg = self.cfg.get("model_advertising", {})
         mode = cfg.get("mode", "hidden")  # "advertise" or "hidden"
         prefix = cfg.get("prefix", "beigebox:")
-        
+
         if mode == "hidden":
-            # Don't modify model names — just pass through
+            # Transparent mode — pass model list through unchanged.
+            # Frontends will see the backend's real model names.
             return data
         
         # Mode: advertise — prepend prefix to all models

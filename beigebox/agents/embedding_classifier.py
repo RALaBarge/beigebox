@@ -253,6 +253,9 @@ class EmbeddingClassifier:
                 vec = np.array(embeddings[0], dtype=np.float32)
                 norm = np.linalg.norm(vec)
                 if norm > 0:
+                    # L2-normalise to a unit vector so np.dot(emb, centroid)
+                    # computes cosine similarity: dot(u, v) == cos(θ) when
+                    # both vectors have unit length.
                     vec = vec / norm
                 return vec
         except Exception as e:
@@ -309,12 +312,17 @@ class EmbeddingClassifier:
 
         best_route = max(scores, key=scores.get)
         scores_sorted = sorted(scores.values(), reverse=True)
+        # Confidence = margin between the best and second-best centroid score.
+        # A small margin means the prompt sits near the decision boundary between
+        # two routes → borderline=True → escalate to the Decision LLM.
         confidence = scores_sorted[0] - scores_sorted[1] if len(scores_sorted) > 1 else 1.0
 
         latency_ms = int((time.monotonic() - start) * 1000)
         borderline = confidence < self.threshold
 
-        # Map route name to tier for backward compat
+        # Map route name to tier for backward compat. Code/creative routes map
+        # to "complex" as a safe default so callers that only know simple/complex
+        # (e.g. the session cache key) continue to work correctly.
         tier = best_route if best_route in ("simple", "complex") else "complex"
         model = self._resolve_model(best_route)
 
@@ -353,6 +361,9 @@ class EmbeddingClassifier:
                 logger.error("Failed to embed prototypes for route '%s'", route_name)
                 return False
 
+            # Mean of all prototype embeddings = "centre of mass" in embedding
+            # space for this route category. Re-normalise to a unit vector so
+            # classify()'s np.dot() still computes cosine similarity.
             centroid = np.mean(embs, axis=0).astype(np.float32)
             centroid = centroid / np.linalg.norm(centroid)
 
@@ -375,7 +386,12 @@ _singleton: Optional[EmbeddingClassifier] = None
 
 
 def get_embedding_classifier() -> EmbeddingClassifier:
-    """Return singleton embedding classifier."""
+    """Return singleton embedding classifier.
+
+    Singleton avoids reloading .npy centroid files on every request.
+    Tradeoff: adding new centroid files requires a process restart (or a
+    manual call to _load_centroids()) to take effect.
+    """
     global _singleton
     if _singleton is None:
         _singleton = EmbeddingClassifier()

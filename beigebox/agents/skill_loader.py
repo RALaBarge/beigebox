@@ -20,6 +20,8 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
     """Extract YAML frontmatter and body from SKILL.md content."""
     if not text.startswith("---"):
         return {}, text
+    # Search for the closing delimiter starting at offset 3 to skip past the
+    # opening "---" line itself. Returns (meta_dict, body_text).
     end = text.find("\n---", 3)
     if end == -1:
         return {}, text
@@ -88,7 +90,10 @@ def skills_to_xml(skills: list[dict]) -> str:
     """
     Generate a compact skills list for injection into the system prompt.
     Only includes names — call read_skill(name) to get full instructions.
-    Keeps the token footprint small so it doesn't crowd out the context window.
+
+    Intentionally terse: injecting full SKILL.md bodies for every skill would
+    consume thousands of tokens even before the user message. The operator reads
+    the full skill on demand via the skill_reader tool when it decides to act.
     """
     if not skills:
         return ""

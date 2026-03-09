@@ -95,6 +95,9 @@ class RalphOrchestrator:
         self.cfg = cfg
         self.backend_url = cfg["backend"]["url"].rstrip("/")
         self.backend_router = backend_router
+        # injection_queue receives mid-run steering messages from the API
+        # endpoint (POST /api/v1/harness/ralph/inject). The run loop drains it
+        # at the start of each iteration and appends items to the prompt.
         self.injection_queue = injection_queue
 
         self.spec_path = Path(spec_path).expanduser() if spec_path else None
@@ -142,6 +145,8 @@ class RalphOrchestrator:
                 timeout=120,
             )
             latency = round((time.monotonic() - t0) * 1000)
+            # Take the tail (most recent output) when truncating — test failures
+            # almost always manifest at the end of stdout/stderr, not the start.
             stdout = result.stdout[-MAX_TEST_OUTPUT_CHARS:] if result.stdout else ""
             stderr = result.stderr[-MAX_TEST_OUTPUT_CHARS:] if result.stderr else ""
             return {
@@ -336,6 +341,9 @@ class RalphOrchestrator:
             # Run tests
             yield _ev("test_run", iteration=iteration, cmd=self.test_cmd)
 
+            # _run_tests is synchronous (subprocess.run). run_in_executor
+            # offloads it to the thread pool so the event loop stays responsive
+            # while the test command is running.
             loop = asyncio.get_running_loop()
             test_result = await loop.run_in_executor(None, self._run_tests)
             last_test = test_result

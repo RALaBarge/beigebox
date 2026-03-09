@@ -38,6 +38,11 @@ async def _stall_guarded(aiter, timeout_secs: float):
     """
     Yield items from an async iterator.
     Raises StreamStallError if no item arrives within timeout_secs.
+
+    Per-item timeout (not total) — each received token resets the clock.
+    This catches a backend that goes silent mid-response while the
+    connection is still open, which wouldn't be detected by httpx's
+    overall request timeout.
     """
     while True:
         try:
@@ -82,7 +87,11 @@ class RetryableBackendWrapper:
         return status_code in (429, 500, 502, 503, 504)
 
     def _backoff_seconds(self, attempt: int, retry_after: float | None = None) -> float:
-        """Calculate backoff time for attempt N, respecting Retry-After if present."""
+        """Calculate backoff time for attempt N, respecting Retry-After if present.
+
+        `attempt` is passed as `attempt + 1` from the retry loop so the first
+        retry gets base^1 (e.g. 1.5s) rather than base^0 (1.0s flat).
+        """
         if retry_after is not None and retry_after > 0:
             return min(retry_after, self.backoff_max)
         delay = self.backoff_base ** attempt
@@ -130,7 +139,9 @@ class RetryableBackendWrapper:
 
             # Transient error — retry if attempts remain
             if attempt < self.max_retries:
-                # 429 gets a longer default backoff since rate-limit windows are typically >1s
+                # 429 gets a minimum 5s backoff floor — most rate-limit reset windows
+                # are at least a few seconds; the exponential formula alone could
+                # produce sub-second delays on the first retry.
                 base_backoff = self._backoff_seconds(attempt + 1)
                 backoff = max(base_backoff, 5.0) if response.status_code == 429 else base_backoff
                 logger.warning(

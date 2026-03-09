@@ -38,7 +38,10 @@ logger = logging.getLogger(__name__)
 def _bwrap_available() -> bool:
     """
     Return True if bubblewrap is installed AND user namespaces work.
-    Result is cached after the first call.
+
+    lru_cache(maxsize=1) makes this a once-per-process probe — bwrap
+    availability doesn't change at runtime, so re-checking every tool
+    call would waste a subprocess.
     """
     bwrap = shutil.which("bwrap")
     if not bwrap:
@@ -163,6 +166,8 @@ def _is_command_allowed(cmd: str) -> tuple[bool, str]:
     if not allowed:
         return False, "allowlist_empty"
 
+    # Strip shell metacharacters before the allowlist check so "ls | rm -rf"
+    # can't masquerade as "ls" by hiding the dangerous part after a pipe.
     base_cmd = cmd_stripped.split()[0].split("|")[0].split(";")[0].strip()
 
     if base_cmd not in allowed:
@@ -203,6 +208,8 @@ def _run(cmd: str, gpu: bool = False) -> str:
     """
     # Gate: honour operator.shell.enabled config flag
     try:
+        # Allow ops to disable shell execution entirely without touching code.
+        # Default True keeps old behaviour when the key is absent from config.
         from beigebox.config import get_config as _gc
         if not _gc().get("operator", {}).get("shell", {}).get("enabled", True):
             _audit_log(cmd, "shell_disabled_by_config", False)
@@ -327,7 +334,9 @@ class SystemInfoTool:
                     f"RAM: {parts[2]} used / {parts[1]} total (available: {avail})"
                 )
 
-        # GPU — uses the gpu bwrap profile (needs real /dev device nodes)
+        # GPU uses the dedicated bwrap GPU profile which binds host /dev
+        # so nvidia character device nodes (nvidia0, nvidiactl) are visible
+        # inside the sandbox. Network isolation still applies.
         gpu_info = _run(
             "nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu"
             " --format=csv,noheader,nounits 2>/dev/null",

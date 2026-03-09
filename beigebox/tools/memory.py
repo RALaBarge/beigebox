@@ -55,6 +55,8 @@ class MemoryTool:
         self.vector_store           = vector_store
         self.max_results            = max_results
         self.min_score              = min_score
+        # Guard: disabling preprocess if no model is configured prevents silent
+        # no-op LLM calls that would fall back to the raw query anyway.
         self.query_preprocess       = query_preprocess and bool(query_preprocess_model)
         self.query_preprocess_model = query_preprocess_model
         self.backend_url            = backend_url.rstrip("/")
@@ -118,6 +120,7 @@ class MemoryTool:
             included = 0
 
             for hit in results:
+                # ChromaDB returns cosine distance [0, 2]; convert to similarity.
                 score = 1 - hit["distance"]
                 if score < self.min_score:
                     continue

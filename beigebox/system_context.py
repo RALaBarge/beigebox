@@ -106,7 +106,9 @@ def inject_system_context(body: dict, cfg: dict) -> dict:
     if not messages:
         return body
 
-    # Check for existing system message at position 0
+    # Prepend to any existing system message rather than replacing it so the
+    # user's own system prompt (e.g. a pane persona) is preserved and appears
+    # after the global context. Insert a fresh system message if none exists.
     if messages[0].get("role") == "system":
         existing = messages[0].get("content", "")
         messages[0]["content"] = f"{context}\n\n{existing}" if existing else context

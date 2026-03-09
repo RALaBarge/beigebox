@@ -132,6 +132,9 @@ No tools are currently available.
 
 
 def _build_tools_block(registry_tools: dict) -> str:
+    # Rendered verbatim into the system prompt so the LLM has a live inventory
+    # of available tools. This is why the system prompt is rebuilt whenever tools
+    # or skills change — there's no separate tools/list API call at runtime.
     lines = []
     for name, tool_obj in registry_tools.items():
         desc = getattr(tool_obj, "description", f"Run the {name} tool")
@@ -160,7 +163,10 @@ def _extract_json(text: str) -> dict | None:
     except json.JSONDecodeError:
         pass
 
-    # Find the outermost {...} block (handles nested braces)
+    # Find the outermost {...} block (handles nested braces).
+    # Depth-tracking cursor: when depth returns to 0 we have a complete {…} span.
+    # If that span isn't valid JSON (e.g. prose mid-object from a chatty model),
+    # reset start=None and keep scanning for the next candidate block.
     depth = 0
     start = None
     for i, ch in enumerate(text):
@@ -182,6 +188,11 @@ def _extract_json(text: str) -> dict | None:
 def _extract_react(text: str) -> dict | None:
     """
     Parse ReAct-style (non-JSON) model output as a fallback.
+
+    Fires only after _extract_json fails — small models sometimes ignore the
+    JSON-only rule and emit classic Thought/Action/Observation text instead.
+    The two parsers together make the loop resilient to format drift without
+    adding latency for well-behaved models.
 
     Looks for:
       Thought: ...
@@ -272,7 +283,10 @@ class Operator:
         self._max_iter = max_iterations_override or self.cfg.get("operator", {}).get("max_iterations", 8)
         self._timeout = self.cfg.get("operator", {}).get("timeout", 300)
 
-        # Tool sandboxing: restrict which tools the LLM agent can call
+        # Tool sandboxing: restrict which tools the LLM agent can call.
+        # When allowed_tools is set, silently drop every other entry from the
+        # dict the LLM sees — the model cannot call a tool it cannot name in
+        # the system prompt, so exclusion is enforced at the prompt level.
         allowed_tools = self.cfg.get("operator", {}).get("allowed_tools", [])
         tools = self._registry.tools
         if allowed_tools:
@@ -339,7 +353,12 @@ class Operator:
     # ------------------------------------------------------------------
 
     def _reload_skills_if_changed(self) -> None:
-        """Re-scan skills dir and rebuild system prompt if any SKILL.md changed."""
+        """Re-scan skills dir and rebuild system prompt if any SKILL.md changed.
+
+        skills_fingerprint() returns a hash/mtime digest of the skills directory.
+        On the hot path (nothing changed) this is a fast dict comparison with no
+        extra filesystem I/O beyond what fingerprint itself does.
+        """
         fp = skills_fingerprint(self._skills_dir)
         if fp == self._skills_fp:
             return
@@ -553,7 +572,10 @@ class Operator:
                 if parsed is not None:
                     logger.info("Operator: ReAct fallback parsed successfully (iter %d)", iteration)
 
-            # Still nothing — nudge once then return raw
+            # Still nothing — nudge once then return raw.
+            # The correction prompt is sent only on iteration 0. If the model
+            # still fails to produce JSON after one nudge we return the raw text
+            # rather than looping indefinitely on correction messages.
             if parsed is None:
                 if iteration == 0:
                     messages.append({"role": "assistant", "content": raw})
@@ -580,6 +602,9 @@ class Operator:
             if "tool" in parsed:
                 tool_name = parsed.get("tool", "")
                 _inp = parsed.get("input", "")
+                # Re-serialise dict/list inputs to a JSON string so tools that
+                # call json.loads() on their input (e.g. browserbox) receive a
+                # valid JSON string instead of Python's str(dict) representation.
                 tool_input = json.dumps(_inp) if isinstance(_inp, (dict, list)) else str(_inp)
                 thought = parsed.get("thought", "")
 
@@ -643,6 +668,9 @@ class Operator:
                 })
 
             try:
+                # _chat uses httpx's synchronous client (blocking). run_in_executor
+                # offloads it to a thread pool so the asyncio event loop stays free
+                # while waiting for Ollama to respond token by token.
                 raw = await loop.run_in_executor(None, self._chat, messages)
             except Exception as e:
                 logger.error("Operator LLM call failed: %s", e)

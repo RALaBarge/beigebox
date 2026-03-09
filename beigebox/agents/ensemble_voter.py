@@ -69,6 +69,10 @@ class EnsembleVoter:
         yield _ev("dispatch", model_count=len(self.models))
 
         responses: list[tuple[str, str, int]] = []
+        # Shared queue lets all N model coroutines fan out their token/result
+        # events into a single ordered stream. The main loop drains until all
+        # "result" events are accounted for — one per model. Tasks and the
+        # drain loop run concurrently within the same event loop.
         queue: asyncio.Queue = asyncio.Queue()
         pending = len(self.models)
         tasks = [
@@ -254,7 +258,9 @@ class EnsembleVoter:
                     pass
         except Exception as e:
             logger.error("Judge stream failed: %s", e)
-            # Fallback: emit a pre-cooked verdict token so caller has something
+            # Fallback: emit a synthetic verdict token so the caller's
+            # _parse_json always has something to work with and the "finish"
+            # event still fires with a usable (first-model) winner.
             fallback = json.dumps({
                 "winner": responses[0][0] if responses else "unknown",
                 "reasoning": f"Judge failed: {e}",
@@ -263,7 +269,12 @@ class EnsembleVoter:
 
     @staticmethod
     def _parse_json(text: str) -> dict:
-        """Parse JSON from text, handling markdown fences and partial content."""
+        """Parse JSON from text, handling markdown fences and partial content.
+
+        Three-tier fallback: direct parse → strip markdown fences and retry
+        → regex scan for first {...} block. The judge is instructed to emit raw
+        JSON only, but LLMs sometimes add fences or prose; this tolerates that.
+        """
         # Try direct parse
         try:
             return json.loads(text)

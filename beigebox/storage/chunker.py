@@ -33,7 +33,10 @@ def chunk_text(
     if not text.strip():
         return []
 
-    # Split on paragraph boundaries, keeping the delimiter with the preceding block.
+    # re.split with a capture group returns the separators interleaved with
+    # the text parts. We re-join each text part with its following separator
+    # so that paragraph breaks are preserved inside the chunk that precedes them,
+    # giving more natural boundaries rather than isolated blank-line chunks.
     raw_parts = re.split(r"(\n\n+)", text)
     parts: list[str] = []
     i = 0
@@ -60,6 +63,8 @@ def chunk_text(
                     "source_file": source_file,
                     "char_offset": current_offset,
                 })
+            # Carry the tail of the previous chunk forward as overlap so
+            # sentences that span a chunk boundary remain retrievable.
             overlap_start = max(0, len(current) - overlap_chars)
             current = current[overlap_start:] + part
             current_offset = text_offset - overlap_chars

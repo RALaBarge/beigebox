@@ -126,7 +126,10 @@ class HarnessOrchestrator:
         self.run_id = uuid4().hex[:16]
         self.run_start_time = time.time()
         
-        history: list[dict] = []   # running log of all results across rounds
+        # history accumulates every task result across all rounds. The planner
+        # and evaluator receive the full history so they can build on prior work
+        # rather than re-discovering the same facts each round.
+        history: list[dict] = []
         round_num = 0
 
         yield _ev("start", run_id=self.run_id, goal=goal, model=self.model, targets=self.available_targets)
@@ -163,8 +166,9 @@ class HarnessOrchestrator:
             tasks = plan_result.get("tasks", [])
             reasoning = plan_result.get("reasoning", "")
 
-            # Stamp each task with a unique id so the UI can give each its own pane
-            # even when the same target appears more than once in a round.
+            # Stamp each task with a deterministic ID (round + index) so the UI
+            # can give each task its own card even when the same target appears
+            # more than once in a round. setdefault preserves any id the LLM set.
             for i, t in enumerate(tasks):
                 t.setdefault("task_id", f"r{round_num}-t{i}")
 
@@ -329,6 +333,9 @@ class HarnessOrchestrator:
 
         async def _run_and_enqueue(i: int, task: dict) -> None:
             target = task.get("target", "")
+            # Operator tasks stagger more (1.0s) than model tasks (0.4s) because
+            # the operator opens SQLite/ChromaDB; rapid concurrent opens cause
+            # "database is locked" errors under high parallelism.
             stagger = self.operator_stagger_seconds if target == "operator" else self.model_stagger_seconds
             if i > 0:
                 await asyncio.sleep(i * stagger)
@@ -337,12 +344,16 @@ class HarnessOrchestrator:
 
         job_tasks = [asyncio.create_task(_run_and_enqueue(i, t)) for i, t in enumerate(capped)]
 
+        # Drain the shared queue until all N tasks have posted their result.
+        # Yields each result as soon as it arrives (fan-out, stream-back pattern).
         pending = len(capped)
         while pending > 0:
             result = await queue.get()
             yield result
             pending -= 1
 
+        # Await all tasks to propagate any unhandled exceptions before returning.
+        # return_exceptions=True prevents a single failure from cancelling others.
         await asyncio.gather(*job_tasks, return_exceptions=True)
 
     async def _run_task(self, task: dict) -> dict:
@@ -480,29 +491,21 @@ class HarnessOrchestrator:
             "internal_error" — 500/502/503 server error (retryable)
             "unknown" — other error (non-retryable)
         """
+        # String-based classification avoids importing httpx here (circular risk)
+        # and works with both httpx exceptions and generic Exception strings.
         exc_str = str(exc).lower()
-        
-        # Check for timeout
+
         if "timeout" in exc_str or "timed out" in exc_str:
             return "timeout"
-        
-        # Check for connection issues
         if "connection" in exc_str or "refused" in exc_str or "reset" in exc_str:
             return "connection"
-        
-        # Check for 404 (model not found — Ollama may be loading)
+        # 404 from Ollama = model not loaded yet; retry after backoff often succeeds
         if "404" in exc_str or "not found" in exc_str:
             return "not_found"
-        
-        # Check for rate limit
         if "429" in exc_str:
             return "rate_limit"
-        
-        # Check for server errors
         if "500" in exc_str or "502" in exc_str or "503" in exc_str:
             return "internal_error"
-        
-        # Unknown error
         return "unknown"
 
     # ── Helpers ───────────────────────────────────────────────────────────────
@@ -574,7 +577,10 @@ class HarnessOrchestrator:
             if result is not None:
                 return result
 
-        # 4. Truncation recovery — count unclosed braces and close them
+        # 4. Truncation recovery — small models sometimes hit their max_tokens
+        #    mid-object. Count unclosed braces (tracking string state so brace
+        #    chars inside string literals don't affect depth), then append the
+        #    missing closers and retry the parse.
         try:
             depth = 0
             in_str = False

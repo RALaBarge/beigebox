@@ -61,6 +61,9 @@ decision_agent: DecisionAgent | None = None
 hook_manager: HookManager | None = None
 backend_router: MultiBackendRouter | None = None
 cost_tracker: CostTracker | None = None
+# Live map of run_id → asyncio.Queue for steering message injection.
+# An active harness/ralph run registers its queue on start and removes it
+# in the finally block; the /inject endpoint looks up the queue by run_id.
 _harness_injection_queues: dict[str, asyncio.Queue] = {}
 embedding_classifier = None
 auth_registry: MultiKeyAuthRegistry | None = None
@@ -217,7 +220,9 @@ async def lifespan(app: FastAPI):
     if decision_agent:
         await decision_agent.preload()
 
-    # Auto-build centroids if they don't exist yet
+    # Auto-build centroids if they don't exist yet. Uses create_task (not
+    # await) so the startup finishes immediately and the server begins
+    # accepting requests while the embedding model warms up in the background.
     if not embedding_classifier.ready:
         import asyncio as _asyncio
 
@@ -373,7 +378,8 @@ async def chat_completions(request: Request):
             status_code=403,
         )
 
-    # Embed auth key name for routing_rules engine (stripped before reaching backend)
+    # Inject the key name as a special body field so the routing rules engine
+    # can match on BB_AUTH_KEY conditions. The proxy strips it before forwarding.
     if _auth_key:
         body["_bb_auth_key"] = _auth_key.name
 
@@ -1146,9 +1152,10 @@ async def api_routing_stats(lines: int = 10000):
 
     if wire_path.exists():
         try:
-            # Read tail efficiently — open, seek from end, grab last `lines` newlines
+            # Tail-seek: seek to end (SEEK_END), measure file size, then seek back
+            # by `lines * ~220 bytes` to read just the relevant tail without
+            # loading the entire wire.jsonl into memory.
             with open(wire_path, "rb") as fh:
-                # Estimate ~200 bytes/entry; read enough to cover `lines` entries
                 fh.seek(0, 2)
                 size = fh.tell()
                 chunk = min(size, lines * 220)
@@ -1223,7 +1230,9 @@ async def api_backends_apply(request: Request):
         if not isinstance(new_backends, list):
             return JSONResponse({"error": "backends must be a list"}, status_code=400)
 
-        # Preserve existing API keys when the UI submits the "***" masked placeholder
+        # The web UI displays API keys as "***" (never sends the real value).
+        # On save, re-inject the real key from the existing config so a
+        # round-trip through the UI never silently clears a configured key.
         rt = get_runtime_config()
         cfg = get_config()
         existing = rt.get("backends") if rt.get("backends") is not None else cfg.get("backends", [])
@@ -1241,7 +1250,8 @@ async def api_backends_apply(request: Request):
         update_runtime_config("backends_enabled", enabled)
         update_runtime_config("backends", resolved)
 
-        # Rebuild the router in-place
+        # Rebuild the router in-place so existing requests using the old router
+        # finish cleanly while new requests immediately see the updated config.
         new_router = None
         if enabled and resolved:
             try:
@@ -1516,8 +1526,9 @@ async def api_harness_orchestrate(request: Request):
         finally:
             if run_id and run_id in _harness_injection_queues:
                 del _harness_injection_queues[run_id]
-            # Store run after completion
-            if orch.store_runs:
+            # Persist the completed run in the finally block so it's always stored
+        # even if the SSE stream was interrupted mid-run by the client.
+        if orch.store_runs:
                 try:
                     from beigebox.storage.sqlite_store import SQLiteStore
                     cfg = get_config()
@@ -1705,6 +1716,9 @@ async def api_harness_inject(run_id: str, request: Request):
     message = (body.get("message") or "").strip()
     if not message:
         return JSONResponse({"error": "message required"}, status_code=400)
+    # Queue lookup is O(1) and safe under concurrent async tasks because
+    # Python's GIL serialises dict mutations. The put() is non-blocking since
+    # the injection queue is unbounded — the run loop drains it at each round.
     queue = _harness_injection_queues.get(run_id)
     if queue is None:
         return JSONResponse({"error": "run not found or already completed"}, status_code=404)
@@ -1986,6 +2000,8 @@ async def api_operator_stream(request: Request):
 # ---------------------------------------------------------------------------
 
 def _notes_path() -> Path:
+    # Resolve against the project root (two levels up from this file) so the
+    # path is correct whether BeigeBox is run as a package or from the repo root.
     cfg = get_config()
     ws_raw = cfg.get("workspace", {}).get("path", "./workspace")
     return (Path(__file__).parent.parent / ws_raw / "out" / "operator_notes.md").resolve()
@@ -2024,7 +2040,9 @@ async def api_operator_notes_set(request: Request):
 # Council — "council then commander" pattern
 # ---------------------------------------------------------------------------
 
-# In-memory session store: run_id → {query, operator_model, backend_url}
+# In-memory council session store: run_id → {query, operator_model, backend_url}.
+# Cleared on restart. Sessions are only needed for the duration of a single
+# propose → engage cycle; no persistence required.
 _council_sessions: dict[str, dict] = {}
 
 
@@ -2169,6 +2187,8 @@ async def api_council_engage(run_id: str, request: Request):
                           f"council error: {e}", conversation_id=run_id)
             yield f"data: {_json.dumps({'type': 'error', 'message': str(e)})}\n\n"
         finally:
+            # Always remove the session even if the stream was interrupted —
+            # prevents stale run_ids from leaking memory and blocking re-use.
             _council_sessions.pop(run_id, None)
         yield f"data: {_json.dumps({'type': 'done'})}\n\n"
 
@@ -2365,7 +2385,9 @@ async def api_workspace_delete(filename: str):
     app_root = Path(__file__).parent.parent
     target = (app_root / ws_path_raw / "out" / filename).resolve()
 
-    # Double-check resolved path is inside workspace/out
+    # Path traversal guard: resolve() canonicalises symlinks and ".." so the
+    # startswith check is a reliable confinement test. os.sep suffix ensures
+    # "workspace/out2" cannot match the "workspace/out" prefix.
     out_dir = (app_root / ws_path_raw / "out").resolve()
     if not str(target).startswith(str(out_dir) + os.sep) and target != out_dir:
         return JSONResponse({"ok": False, "error": "Invalid path"}, status_code=400)
@@ -2500,7 +2522,9 @@ async def api_workspace_upload(file: UploadFile):
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
-    # Background: chunk, embed, and index the uploaded file.
+    # Chunk and embed the file in a background thread — keeps the upload
+    # response fast even for large PDFs. The file is already saved to disk
+    # so if indexing fails the file is still accessible via workspace/in.
     if vector_store and blob_store:
         loop = asyncio.get_event_loop()
         loop.run_in_executor(None, _index_document, target, vector_store, blob_store)
@@ -2603,6 +2627,8 @@ async def _wire_and_forward(request: Request, route_label: str, override_base_ur
         target += f"?{query}"
 
     body = await request.body()
+    # Strip hop-by-hop headers that must not be forwarded — host would misdirect
+    # the request; content-length is re-computed by httpx from the body bytes.
     headers = {
         k: v for k, v in request.headers.items()
         if k.lower() not in ("host", "content-length")

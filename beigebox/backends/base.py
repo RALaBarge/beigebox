@@ -73,8 +73,12 @@ class BaseBackend(abc.ABC):
         ...
 
     def supports_model(self, model: str) -> bool:
-        """Check if this backend can serve the given model."""
-        # If we haven't fetched models yet, assume yes (try and fail)
+        """Check if this backend can serve the given model.
+
+        Optimistic default when the model list is empty: assume yes and let
+        the backend fail naturally. This avoids blocking requests at startup
+        before list_models() has been called.
+        """
         if not self._available_models:
             return True
         return model in self._available_models

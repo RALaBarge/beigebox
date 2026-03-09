@@ -18,7 +18,12 @@ _REGISTRY: dict[str, type[VectorBackend]] = {}
 
 
 def _register():
-    """Lazy-import backends to avoid hard dependencies at import time."""
+    """Lazy-import backends to avoid hard dependencies at import time.
+
+    chromadb is optional — importing it at module level would fail the entire
+    beigebox import for users who run without a vector store. The guard on
+    _REGISTRY ensures the import and class registration happen exactly once.
+    """
     global _REGISTRY
     if _REGISTRY:
         return

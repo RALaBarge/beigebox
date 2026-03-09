@@ -93,7 +93,10 @@ async def maybe_summarize(
     if estimated <= token_budget:
         return messages
 
-    # Separate system messages (keep at front), messages to summarise, recent tail
+    # System messages are always preserved at the front of the context window
+    # (they carry the operator system prompt, skills list, etc.). We only
+    # summarise the user/assistant turn history, keeping the N most recent turns
+    # verbatim so the model has full detail on the immediate conversation.
     system_msgs = [m for m in messages if m.get("role") == "system"]
     non_system  = [m for m in messages if m.get("role") != "system"]
 

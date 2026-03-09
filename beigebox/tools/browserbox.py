@@ -135,6 +135,8 @@ class BrowserboxTool:
                     except (asyncio.TimeoutError, TimeoutError):
                         return "Error: timed out waiting for response from BrowserBox"
                     msg = json.loads(raw)
+                    # Each agent call gets a unique UUID; skip any stale
+                    # responses from previous calls that arrive late.
                     if msg.get("id") != call_id:
                         continue
                     if "error" in msg:

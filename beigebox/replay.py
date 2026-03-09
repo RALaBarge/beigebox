@@ -85,6 +85,8 @@ class ConversationReplayer:
         if not self.wiretap_path.exists():
             return []
 
+        # WireLog stores only the first 16 chars of the conversation ID in the
+        # "conv" field, so match on the prefix.
         conv_prefix = conversation_id[:16]
         events = []
         try:
@@ -95,8 +97,9 @@ class ConversationReplayer:
                         continue
                     try:
                         entry = json.loads(line)
-                        # Include entries that match this conversation
-                        # or internal routing/tool entries near the same timestamps
+                        # Internal routing/tool events (dir="internal") don't
+                        # carry a conversation ID — include all of them and let
+                        # the timestamp-based correlation filter them later.
                         entry_conv = entry.get("conv", "")
                         if entry_conv == conv_prefix or (
                             entry.get("dir") == "internal"
@@ -188,6 +191,8 @@ class ConversationReplayer:
         if not msg_ts or msg["role"] != "assistant":
             return None
 
+        # Traverse in reverse chronological order so the most recent backend
+        # routing entry before this message's timestamp is found first.
         for event in reversed(wire_events):
             if event.get("role") != "system":
                 continue

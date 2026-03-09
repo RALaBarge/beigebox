@@ -103,11 +103,16 @@ class MultiKeyAuthRegistry:
         Rolling 60-second window rate limiter.
         Returns True if request is within limit, False if exceeded.
         Records the request on True.
+
+        Uses a deque of monotonic timestamps. On each call we evict
+        timestamps older than 60s from the front (sliding window), then
+        check if the remaining count is still under the RPM limit.
         """
         if meta.rate_limit_rpm <= 0:
             return True
         now = time.monotonic()
         window = self._rate_windows.setdefault(meta.name, deque())
+        # Evict timestamps that have fallen outside the 60-second window
         while window and now - window[0] > 60.0:
             window.popleft()
         if len(window) >= meta.rate_limit_rpm:
@@ -125,7 +130,13 @@ class MultiKeyAuthRegistry:
 
 
 def _resolve_token(name: str) -> str | None:
-    """Resolve token via agentauth keychain, then BB_<NAME>_TOKEN env var."""
+    """Resolve token via agentauth keychain, then BB_<NAME>_TOKEN env var.
+
+    Resolution order:
+      1. agentauth OS keychain (works on Linux/macOS with a keyring backend)
+      2. BB_<NAME>_TOKEN environment variable (Docker/headless fallback)
+    If neither has a value, returns None and the key is skipped at startup.
+    """
     try:
         from agentauth.registry import get_token
         token = get_token(name)

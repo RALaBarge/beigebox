@@ -214,6 +214,9 @@ logger = logging.getLogger(__name__)
 BB_FORCE_BACKEND       = "_bb_force_backend"
 BB_SKIP_SEMANTIC_CACHE = "_bb_skip_semantic_cache"
 BB_RULE_TAG            = "_bb_rule_tag"
+# BB_AUTH_KEY is injected into the request body by ApiKeyMiddleware in main.py
+# and stripped by evaluate_routing_rules() before any rule sees the body —
+# it is never forwarded to the backend.
 BB_AUTH_KEY            = "_bb_auth_key"
 BB_FORCED_TOOLS        = "_bb_forced_tools"
 
@@ -231,6 +234,9 @@ def _get_user_message(body: dict) -> str:
     for msg in reversed(body.get("messages", [])):
         if msg.get("role") == "user":
             content = msg.get("content", "")
+            # OpenAI vision format sends content as a list of typed parts
+            # ({"type": "text", "text": "..."} and {"type": "image_url", ...}).
+            # Extract and join only the text parts for pattern matching.
             if isinstance(content, list):
                 return " ".join(
                     p.get("text", "")
@@ -260,7 +266,11 @@ def _match_rule(
     body: dict,
     auth_key_name: str | None,
 ) -> bool:
-    """Return True iff every condition in match_spec is satisfied."""
+    """Return True iff every condition in match_spec is satisfied.
+
+    Each condition short-circuits with return False on first mismatch —
+    implementing AND semantics: all conditions must be true for the rule to fire.
+    """
 
     # message — regex on latest user message
     if pattern := match_spec.get("message"):
@@ -347,6 +357,8 @@ def _apply_action(body: dict, action: dict, routes: dict | None = None) -> dict:
     if tools := action.get("tools"):
         if isinstance(tools, list) and tools:
             existing = list(body.get(BB_FORCED_TOOLS) or [])
+            # Merge without duplicates so multiple continue:true rules can each
+            # contribute tool names and they accumulate correctly across rules.
             body[BB_FORCED_TOOLS] = existing + [t for t in tools if t not in existing]
 
     # ── Generation params ─────────────────────────────────────────────────────
@@ -372,6 +384,10 @@ def _apply_action(body: dict, action: dict, routes: dict | None = None) -> dict:
         text_parts.append(str(explicit))
 
     if text_parts:
+        # All three injection keys combined in a fixed order (inject_file →
+        # inject_context → system_prompt) and written with a single
+        # _prepend_system_message call to keep the system message coherent
+        # rather than triple-prepending with separate calls.
         body = _prepend_system_message(body, "\n\n".join(text_parts))
 
     # ── Cache flags ───────────────────────────────────────────────────────────
@@ -409,6 +425,8 @@ def evaluate_routing_rules(
         pass_through       — True if any matched rule set pass_through
                              (means: apply actions but still run the ML stack)
     """
+    # pop (not get) ensures the auth key is stripped from the body even if no
+    # rule matches — it can never leak through to the backend under any path.
     auth_key_name: str | None = body.pop(BB_AUTH_KEY, None)
     user_message: str = _get_user_message(body)
 
@@ -436,6 +454,9 @@ def evaluate_routing_rules(
         if action.get("pass_through"):
             pass_through = True
 
+        # Default stop-on-first-match. continue:true allows effect layering:
+        # one rule injects context, another overrides the model — both fire on
+        # the same request and their effects accumulate on the body dict.
         if not rule.get("continue", False):
             break
 

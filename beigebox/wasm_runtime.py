@@ -45,6 +45,9 @@ class WasmRuntime:
         self._default_module = self._cfg.get("default_module", "")
         self._loaded: dict = {}       # name -> wasmtime.Module
         self._engine = None
+        # Two workers: one active transform + one warm slot for back-to-back
+        # requests. More workers would spin up idle threads; WASM transforms
+        # are CPU-bound so they don't benefit from high parallelism.
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="wasm-rt")
 
         if self._enabled:
@@ -100,7 +103,12 @@ class WasmRuntime:
     # ------------------------------------------------------------------
 
     def _effective_module(self, requested: str) -> str:
-        """Return the module to actually use — requested name, or config default."""
+        """Return the module to actually use — requested name, or config default.
+
+        Falls back to the default module when the requested name is empty or
+        not loaded (e.g. decision LLM returned a module name that wasn't compiled).
+        Returns "" when neither is available, which callers treat as a no-op.
+        """
         if requested and requested in self._loaded:
             return requested
         if self._default_module and self._default_module in self._loaded:
@@ -111,8 +119,9 @@ class WasmRuntime:
         """
         Execute a WASM module synchronously (called inside thread pool).
 
-        Uses temp files for stdin/stdout — works across all wasmtime-py versions
-        and avoids in-process pipe complexity.
+        Uses temp files for stdin/stdout rather than in-process pipes because
+        wasmtime-py's WasiConfig requires file paths, not file objects. The temp
+        files are always deleted in the finally block, even on exception.
 
         Returns output bytes, or the original input bytes on any failure.
         """
@@ -134,6 +143,8 @@ class WasmRuntime:
             config = WasiConfig()
             config.stdin_file(stdin_path)
             config.stdout_file(stdout_path)
+            # inherit_stderr: let the module write to the host's stderr for
+            # debugging without capturing it as output to be returned.
             config.inherit_stderr()
 
             store = Store(self._engine)
@@ -144,6 +155,9 @@ class WasmRuntime:
 
             instance = linker.instantiate(store, module)
             exports = instance.exports(store)
+            # WASI modules export "_start" as the entry point (equivalent to
+            # main()). Some modules may export a different function — this
+            # handles the standard WASI target compiled with Rust/C.
             start = exports.get("_start")
             if start:
                 start(store)
@@ -344,6 +358,8 @@ class WasmRuntime:
         self._cfg = fresh.get("wasm", {})
         self._modules_cfg = self._cfg.get("modules", {})
         self._default_module = self._cfg.get("default_module", "")
+        # Clear before re-loading so modules that were removed from config
+        # don't persist in the dict after the reload.
         self._loaded.clear()
         if self._engine:
             self._load_modules()

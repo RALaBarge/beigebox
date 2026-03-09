@@ -44,6 +44,8 @@ class BlobStore:
         raw = content.encode("utf-8")
         blob_hash = hashlib.sha256(raw).hexdigest()
         path = self._blob_path(blob_hash)
+        # Idempotent write: same content → same hash → same path. If the file
+        # already exists we skip compression and writing entirely (free dedup).
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             with gzip.open(path, "wb") as f:

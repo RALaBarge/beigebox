@@ -17,7 +17,9 @@ import re
 
 logger = logging.getLogger(__name__)
 
-# Safe operators for eval
+# Whitelist of AST node types → stdlib operator functions. The recursive
+# evaluator rejects any node type not in this dict, preventing code injection
+# via attribute access, function calls, or any other non-arithmetic construct.
 SAFE_OPS = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
@@ -72,7 +74,8 @@ class CalculatorTool:
         cleaned = cleaned.replace("×", "*")
         cleaned = cleaned.replace("÷", "/")
 
-        # Try to extract just the math expression if there's surrounding text
+        # Extract the longest contiguous math-looking substring so the LLM can
+        # pass natural language like "what is 3 * 4?" without pre-cleaning.
         math_match = re.search(r'[\d\s\+\-\*/\.\(\)\%\*]+', cleaned)
         if math_match:
             cleaned = math_match.group().strip()
@@ -81,7 +84,7 @@ class CalculatorTool:
             tree = ast.parse(cleaned, mode='eval')
             result = _safe_eval(tree)
 
-            # Format nicely
+            # Coerce whole-number floats (e.g. 4.0) to int for cleaner output.
             if isinstance(result, float) and result == int(result):
                 result = int(result)
 

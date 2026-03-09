@@ -77,6 +77,9 @@ class ToolRegistry:
                 max_results=gs_cfg.get("max_results", 5),
             )
 
+        # Calculator, DateTime, SystemInfo default to enabled because they have
+        # no external dependencies (pure Python stdlib / psutil). They can be
+        # individually disabled in config under tools.calculator.enabled: false.
         # --- Calculator ---
         calc_cfg = tools_cfg.get("calculator", {})
         if calc_cfg.get("enabled", True):  # Enabled by default — no deps
@@ -147,10 +150,14 @@ class ToolRegistry:
             )
 
         # --- Python Interpreter (TIR — disabled by default, requires bwrap) ---
+        # Registered under the key "python" (not "python_interpreter") so the
+        # operator can call it as {"tool": "python", "input": "..."}.
         pi_cfg = tools_cfg.get("python_interpreter", {})
         if pi_cfg.get("enabled", False):
             self.tools["python"] = PythonInterpreterTool()
 
+        # Connection tool auto-enables whenever the top-level connections: section
+        # is present in config.yaml — no separate enabled flag needed.
         # --- Connections (agentauth — auto-enabled if connections: configured) ---
         conn_cfg = cfg.get("connections", {})
         if conn_cfg:

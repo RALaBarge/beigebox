@@ -12,6 +12,9 @@ logger = logging.getLogger(__name__)
 class WebSearchTool:
     """DuckDuckGo web search via duckduckgo_search."""
 
+    # Class-level flags checked by operator._run_tool() via getattr to decide
+    # whether to write the output to the blob store and how much to truncate
+    # when injecting it back into the operator's context window.
     capture_tool_io: bool = True
     max_context_chars: int = 4000
 

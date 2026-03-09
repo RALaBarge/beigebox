@@ -30,6 +30,9 @@ class DocumentSearchTool:
             return "Document search unavailable — vector store not initialized."
 
         try:
+            # where filter restricts to document chunks only — excludes
+            # conversation messages and tool results that share the same
+            # ChromaDB collection.
             results = self.vector_store.search(
                 query,
                 n_results=self.max_results,
@@ -45,6 +48,8 @@ class DocumentSearchTool:
         lines = []
         included = 0
         for hit in results:
+            # ChromaDB returns cosine distance [0, 2]; convert to similarity [0, 1].
+            # max(0.0, ...) guards against floating-point rounding above 1.0.
             score = max(0.0, round(1.0 - hit["distance"], 4))
             if score < self.min_score:
                 continue

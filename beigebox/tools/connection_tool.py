@@ -63,6 +63,8 @@ class ConnectionTool:
             result = self._registry.call(name, method, path, body=body)
             status = result["status"]
             body_text = result["body"]
+            # Only prefix non-200 responses — keeps clean 200 output readable
+            # while making error codes visible to the agent for retry logic.
             prefix = f"[HTTP {status}]\n" if status != 200 else ""
             return prefix + body_text
         except PermissionError as e:

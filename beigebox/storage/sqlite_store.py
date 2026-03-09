@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS harness_runs (
     id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL,
     goal TEXT NOT NULL,
-    targets TEXT NOT NULL,
+    targets TEXT NOT NULL,          -- JSON array of target URLs/resources
     model TEXT NOT NULL,
     max_rounds INTEGER DEFAULT 8,
     final_answer TEXT,
@@ -48,9 +48,14 @@ CREATE TABLE IF NOT EXISTS harness_runs (
     was_capped BOOLEAN DEFAULT 0,
     total_latency_ms INTEGER DEFAULT 0,
     error_count INTEGER DEFAULT 0,
-    events_jsonl TEXT
+    events_jsonl TEXT               -- newline-delimited JSON event log for replay
 );
 
+-- Indexes chosen for the most common access patterns:
+-- conversation_id: fetching all messages in a conversation (very frequent)
+-- timestamp: recent conversations list, date-range queries for metrics
+-- role: filtering assistant messages for latency/cost stats
+-- harness created_at: sorting runs list by recency
 CREATE INDEX IF NOT EXISTS idx_messages_conversation
     ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp
@@ -61,7 +66,10 @@ CREATE INDEX IF NOT EXISTS idx_harness_runs_created
     ON harness_runs(created_at);
 """
 
-# Migrations: add columns to existing databases (safe to re-run)
+# Migrations: append-only ALTER TABLE statements that add new columns to
+# existing databases. Safe to re-run — OperationalError "duplicate column name"
+# is silently swallowed. Never DROP or RENAME columns here; that would destroy
+# data for existing users who upgrade without a full migration tool.
 MIGRATIONS = [
     # v0.6
     "ALTER TABLE messages ADD COLUMN cost_usd REAL DEFAULT NULL",
@@ -97,6 +105,9 @@ class SQLiteStore:
     def _connect(self):
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
+        # WAL mode allows concurrent readers while a write is in progress.
+        # Without WAL, any write holds an exclusive lock that blocks all reads —
+        # problematic for the web UI polling metrics while requests are flowing.
         conn.execute("PRAGMA journal_mode=WAL")
         try:
             yield conn
@@ -243,7 +254,13 @@ class SQLiteStore:
             return round(vals[idx], 1)
 
         def _avg_tps(rows: list[tuple[float, float | None, int]]) -> float:
-            """Tokens/sec using generation latency (total − TTFT) when available."""
+            """Tokens/sec using generation latency (total − TTFT) when available.
+
+            TTFT (time-to-first-token) is the model-load + prefill phase — not
+            generation. Subtracting it gives a cleaner measure of how fast the
+            model actually decodes. Falls back to total latency when TTFT is
+            missing (older rows before v0.7 migration).
+            """
             rates = []
             for lat, ttft, tok in rows:
                 if tok <= 0:

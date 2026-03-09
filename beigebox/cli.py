@@ -118,7 +118,8 @@ def cmd_setup(args):
         return
 
     for model in required:
-        # Check if any existing model matches (ignoring tag specifics)
+        # Split on ":" to strip tag specifics (e.g. ":latest", ":7b") so
+        # "qwen3:4b" still matches "qwen3:4b-instruct" in the installed list.
         model_base = model.split(":")[0]
         already = any(model_base in m for m in existing)
 
@@ -132,6 +133,9 @@ def cmd_setup(args):
                 "POST",
                 f"{ollama_url}/api/pull",
                 json={"name": model},
+                # timeout=None is intentional — large models (7B+) can take
+                # many minutes to download. Any finite timeout would break
+                # pulls on slow connections without warning.
                 timeout=None,
             ) as resp:
                 for line in resp.iter_lines():
@@ -145,6 +149,8 @@ def cmd_setup(args):
                                 completed = data.get("completed", 0)
                                 if total > 0:
                                     pct = completed / total * 100
+                                    # \r overwrites the same line; filled/empty block
+                                    # chars give a 20-segment progress bar.
                                     bar = "█" * int(pct // 5) + "░" * (20 - int(pct // 5))
                                     print(f"\r     {bar} {pct:.0f}%  ", end="", flush=True)
                             elif status:
@@ -224,6 +230,7 @@ def cmd_sweep(args):
 
     for i, hit in enumerate(results, 1):
         meta = hit["metadata"]
+        # ChromaDB returns cosine distance [0, 2]; convert to similarity [0, 1].
         score = 1 - hit["distance"]
         content = hit["content"]
         if len(content) > 200:
@@ -337,7 +344,8 @@ def cmd_flash(args):
 
 
     # Cost summary — reads directly from SQLite via CostTracker.
-    # Falls back silently if DB doesn't exist or cost_tracking is disabled.
+    # getattr guards against commands that share cmd_flash but don't add --days.
+    # Falls back silently if the DB doesn't exist or cost_tracking is disabled.
     days = getattr(args, "days", 30)
     try:
         from beigebox.costs import CostTracker
@@ -385,6 +393,8 @@ def cmd_flash(args):
                 name = model[:26] + ".." if len(model) > 28 else model
                 # Colour-code p95: green <1s, yellow <3s, red ≥3s
                 p95 = s["p95_latency_ms"]
+                # Colour-code p95: red ≥3s (unacceptably slow), yellow 1-3s
+                # (borderline), green <1s (healthy for local inference).
                 if p95 >= 3000:
                     p95_col = "\033[91m"
                 elif p95 >= 1000:
@@ -494,7 +504,11 @@ def cmd_build_centroids(args):
 # ---------------------------------------------------------------------------
 
 def _add_command(subparsers, names, help_text, func, setup_fn=None):
-    """Register a command under multiple names (phreaker + standard)."""
+    """Register a command under multiple names (phreaker + standard).
+
+    names[0] is the canonical name shown in help; names[1:] are hidden aliases
+    so familiar commands like "start" and "pull" work without user training.
+    """
     p = subparsers.add_parser(names[0], help=help_text, aliases=names[1:])
     p.set_defaults(func=func)
     if setup_fn:

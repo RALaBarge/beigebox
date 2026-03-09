@@ -30,6 +30,8 @@ class GoogleSearchTool:
         self.api_key = api_key
         self.cse_id = cse_id
         self.max_results = max_results
+        # Both credentials are required for real searches; either missing
+        # means the tool would fail anyway, so mock mode is the safe default.
         self.mock_mode = not (api_key and cse_id)
 
         if self.mock_mode:
@@ -56,6 +58,7 @@ class GoogleSearchTool:
                     "key": self.api_key,
                     "cx": self.cse_id,
                     "q": query,
+                    # Google CSE hard-caps at 10 results per request.
                     "num": min(self.max_results, 10),
                 },
                 timeout=10,

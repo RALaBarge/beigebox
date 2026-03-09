@@ -33,13 +33,16 @@ class WebScraperTool:
 
             soup = BeautifulSoup(resp.text, "lxml")
 
-            # Remove noise
+            # decompose() removes each tag and its subtree from the parse tree
+            # entirely, so get_text() below never sees script/style content.
             for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
                 tag.decompose()
 
             text = soup.get_text(separator="\n", strip=True)
 
-            # Collapse excessive whitespace
+            # Filter blank lines and strip leading/trailing whitespace per line.
+            # This collapses the excessive blank lines that get_text() emits
+            # between block elements into a clean single-newline-separated text.
             lines = [line.strip() for line in text.splitlines() if line.strip()]
             text = "\n".join(lines)
 

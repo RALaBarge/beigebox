@@ -121,14 +121,15 @@ async def _fetch_models(backend_url: str) -> list[str]:
 
 def _extract_json_array(text: str) -> list | None:
     text = re.sub(r"```(?:json)?", "", text).strip().strip("`").strip()
-    # Try whole thing
+    # Fast path: the whole string is already a clean JSON array.
     try:
         v = json.loads(text)
         if isinstance(v, list):
             return v
     except json.JSONDecodeError:
         pass
-    # Find first [...] block
+    # Bracket-depth scan — mirrors _extract_json in operator.py. Tolerates
+    # prose before/after the array and resets start on malformed inner spans.
     depth, start = 0, None
     for i, ch in enumerate(text):
         if ch == "[":
@@ -179,7 +180,8 @@ async def propose(
     council = _extract_json_array(raw)
     if not council:
         logger.warning("council: could not parse proposal JSON, returning fallback")
-        # Fallback: two generic members using whatever model is available
+        # Two-member generic fallback ensures the engage phase always has
+        # something to run even when the operator model returns unparseable output.
         fallback_model = models[0] if models else operator_model
         return [
             {"name": "Analyst A", "model": fallback_model, "task": f"Analyse: {query}"},
@@ -201,7 +203,13 @@ async def propose(
 
 
 async def _run_member(member: dict, backend_url: str, query: str, queue: asyncio.Queue) -> None:
-    """Run a single council member and push events onto queue."""
+    """Run a single council member and push events onto queue.
+
+    Defined at module level (not as a closure or lambda) to avoid Python's
+    late-binding closure bug: a function defined inside a for-loop closes over
+    the loop variable by reference, so all tasks would see the last iteration's
+    value when they execute. Top-level receives each member as a concrete argument.
+    """
     name  = member["name"]
     model = member["model"]
     task  = member["task"]
@@ -252,11 +260,18 @@ async def execute(
     for _model_key, group_iter in groupby(sorted_council, key=lambda m: m["model"]):
         members = list(group_iter)
         queue: asyncio.Queue = asyncio.Queue()
+        # All members in this group share a model already resident in VRAM —
+        # launch them all concurrently. The outer for-loop makes groups
+        # sequential so Ollama isn't asked to swap models mid-batch.
         tasks = [
             asyncio.create_task(_run_member(m, backend_url, query, queue))
             for m in members
         ]
         done_count = 0
+        # Drain the shared queue until every task has pushed a terminal event
+        # (member_done or member_error). member_start events pass through
+        # without incrementing done_count so we keep draining until all N
+        # tasks have finished.
         while done_count < len(tasks):
             event = await queue.get()
             if event["type"] in ("member_done", "member_error"):
@@ -274,6 +289,9 @@ async def execute(
 
     briefing = "\n\n".join(briefing_parts)
     try:
+        # Synthesis uses operator_model (not a specialist) because the synthesis
+        # step requires broad reasoning to reconcile potentially conflicting member
+        # outputs — domain-specific models would be too narrow here.
         synthesis = await _chat(
             backend_url,
             operator_model,

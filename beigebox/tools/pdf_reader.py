@@ -29,15 +29,19 @@ class PdfReaderTool:
         self._workspace_in = Path(workspace_in) if workspace_in else None
 
     def _resolve_path(self, input_str: str) -> Path:
+        """Resolve a filename or path to an existing PDF.
+
+        Priority: absolute path → workspace/in/ → cwd-relative.
+        The operator typically passes just a filename (e.g. "report.pdf"),
+        so the workspace/in/ check is the common success path.
+        """
         p = Path(input_str)
         if p.is_absolute() and p.exists():
             return p
-        # Try workspace/in/
         if self._workspace_in:
             candidate = self._workspace_in / input_str
             if candidate.exists():
                 return candidate
-        # Try relative to cwd
         if p.exists():
             return p.resolve()
         raise FileNotFoundError(
@@ -71,7 +75,8 @@ class PdfReaderTool:
                 if md.strip():
                     parts.append(f"\n---\n## Page {i + 1}\n\n{md}")
 
-            # Append form fields if present
+            # Form fields are a bonus — ignore failures silently since most
+            # PDFs don't have fillable forms and pdf_oxide's API may vary.
             try:
                 fields = doc.get_form_fields()
                 if fields:

@@ -114,7 +114,8 @@ def _validate_config(cfg: dict) -> None:
 load_dotenv()
 
 _CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
-# data/ is mounted as a Docker volume so runtime settings survive image rebuilds
+# data/ is a Docker volume mount — settings written here survive container
+# rebuilds/restarts. In bare-metal dev, data/ sits next to config.yaml.
 _RUNTIME_CONFIG_PATH = Path(__file__).parent.parent / "data" / "runtime_config.yaml"
 
 _config: dict | None = None
@@ -128,7 +129,9 @@ def _resolve_env_vars(value: str) -> str:
     """Replace ${ENV_VAR} and ${ENV_VAR:-default} patterns with environment variable values."""
     def replacer(match):
         var_name = match.group(1)
-        default  = match.group(2)  # None if no ':-default' suffix
+        # group(2) is None when the ":-default" suffix is absent; distinguish
+        # between "no default provided" (leave empty) and explicit empty default.
+        default  = match.group(2)
         val = os.environ.get(var_name)
         if val is not None:
             return val
@@ -295,6 +298,8 @@ def update_runtime_config(key: str, value) -> bool:
         with open(_RUNTIME_CONFIG_PATH, "w") as f:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
+        # Reset mtime so the next get_runtime_config() call triggers a reload
+        # even if the OS mtime resolution is coarser than the write interval.
         global _runtime_mtime
         _runtime_mtime = 0.0
         return True

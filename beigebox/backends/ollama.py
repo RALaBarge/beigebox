@@ -90,7 +90,12 @@ class OllamaBackend(BaseBackend):
             return False
 
     def supports_model(self, model: str) -> bool:
-        """Ollama never handles provider/model style IDs (those belong to API backends)."""
+        """Ollama never handles provider/model style IDs (those belong to API backends).
+
+        A "/" in the model name signals an OpenRouter-style ID like "openai/gpt-4o".
+        Ollama only knows bare names like "llama3.2:3b", so we reject qualified IDs
+        here so the router falls through to an API backend.
+        """
         if "/" in model:
             return False
         return super().supports_model(model)
@@ -103,6 +108,8 @@ class OllamaBackend(BaseBackend):
                 resp.raise_for_status()
                 data = resp.json()
                 models = [m.get("id", m.get("name", "")) for m in data.get("data", [])]
+                # Cache in _available_models so supports_model() can answer
+                # without an extra network call between health checks.
                 self._available_models = [m for m in models if m]
                 return self._available_models
         except Exception as e:
