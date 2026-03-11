@@ -4,10 +4,13 @@ llama.cpp backend plugin.
 Drop-in HTTP server for llama.cpp. Implements OpenAI-compatible /v1/chat/completions.
 
 Setup:
+    # All backends use the shared MODELS_PATH (e.g., /mnt/storage/models)
+    # This path is configured in config.yaml backend.models_path
+
     docker run -d -p 8000:8000 \
-      -v ~/models:/models \
+      -v /mnt/storage/models:/models \
       ghcr.io/ggerganov/llama.cpp:latest-server \
-      -m /models/model.gguf
+      --models-path /models
 
 Then add to config.yaml:
     backends:
@@ -15,11 +18,13 @@ Then add to config.yaml:
         name: llama-cpp-local
         url: http://localhost:8000
         priority: 1
+        # Uses backend.models_path automatically
 """
 
 import logging
 import httpx
 from beigebox.backends.base import BaseBackend, BackendResponse
+from beigebox.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +35,9 @@ class LlamaCppBackend(BaseBackend):
 
     llama.cpp: https://github.com/ggerganov/llama.cpp
     Extremely lightweight C++ inference engine (~15KB binary), zero dependencies.
+
+    Models are shared via backend.models_path from config.yaml, so all backends
+    (Ollama, llama.cpp, Mini-SGLang, etc.) can access the same model files.
     """
 
     async def forward(self, body: dict) -> BackendResponse:

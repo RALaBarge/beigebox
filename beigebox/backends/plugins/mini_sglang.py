@@ -4,9 +4,11 @@ Mini-SGLang backend plugin.
 Drop-in HTTP server for Mini-SGLang (lightweight serving framework).
 
 Setup:
+    # All backends use the shared MODELS_PATH from config.yaml
     git clone https://github.com/sgl-project/mini-sglang
     cd mini-sglang
-    python -m mini_sglang.server --host 0.0.0.0 --port 8000
+    python -m mini_sglang.server --host 0.0.0.0 --port 8000 \
+      --model-dir /mnt/storage/models
 
 Then add to config.yaml:
     backends:
@@ -30,6 +32,9 @@ class MiniSglangBackend(BaseBackend):
     Mini-SGLang: https://github.com/sgl-project/mini-sglang
     Clean, modular serving framework (only 5k Python lines).
     Great for understanding and customizing inference serving.
+
+    Models are shared via backend.models_path from config.yaml, so all backends
+    (Ollama, llama.cpp, Mini-SGLang, etc.) can access the same model files.
     """
 
     async def forward(self, body: dict) -> BackendResponse:

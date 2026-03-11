@@ -44,6 +44,16 @@ class BaseBackend(abc.ABC):
         self.timeout = timeout
         self.priority = priority
         self._available_models: list[str] = []
+        self.models_path = self._get_models_path()
+
+    def _get_models_path(self) -> str:
+        """Get shared models path from config (used by all backends)."""
+        try:
+            from beigebox.config import get_config
+            cfg = get_config()
+            return cfg.get("backend", {}).get("models_path", "/mnt/storage/models")
+        except Exception:
+            return "/mnt/storage/models"
 
     @abc.abstractmethod
     async def forward(self, body: dict) -> BackendResponse:

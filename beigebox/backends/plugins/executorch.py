@@ -12,7 +12,8 @@ The actual HTTP server would need to be created separately.
 Setup:
     # You'd need to build an HTTP wrapper around ExecuTorch
     # See: https://github.com/pytorch/executorch
-    python server.py --model model.pte --port 8000
+    # All backends use the shared MODELS_PATH from config.yaml
+    python server.py --model-dir /mnt/storage/models --port 8000
 
 Then add to config.yaml:
     backends:
@@ -36,6 +37,9 @@ class ExecutorchBackend(BaseBackend):
     ExecuTorch: https://github.com/pytorch/executorch
     Meta's production-ready embedded LLM engine.
     50KB footprint, runs on devices from phones to microcontrollers.
+
+    Models are shared via backend.models_path from config.yaml, so all backends
+    (Ollama, llama.cpp, Mini-SGLang, etc.) can access the same model files.
     """
 
     async def forward(self, body: dict) -> BackendResponse:

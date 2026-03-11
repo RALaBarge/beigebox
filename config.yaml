@@ -22,6 +22,7 @@ backend:
   default_model: "qwen3:4b"
   url: "http://localhost:11434"  # Ollama default
   timeout: 120
+  models_path: "${MODELS_PATH:-/mnt/storage/models}"  # Shared path for all backends (llama.cpp, Mini-SGLang, etc.)
 
 # Multi-backend routing (STEP 2 & 3: Retry logic + Generic OpenAI)
 backends_enabled: false  # Set to true to enable multi-backend routing

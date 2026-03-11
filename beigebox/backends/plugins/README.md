@@ -2,6 +2,41 @@
 
 Drop custom LLM backend implementations here and BeigeBox will auto-discover and load them at startup.
 
+## Shared Model Path
+
+**All backends use the same model path** configured in `config.yaml`:
+
+```yaml
+backend:
+  models_path: "/mnt/storage/models"  # Shared across Ollama, llama.cpp, Mini-SGLang, etc.
+```
+
+This means:
+- Store your models in one place (e.g., `/mnt/storage/models/model.gguf`)
+- All inference engines can access them without duplication
+- No need to download models separately for each backend
+- Use `${MODELS_PATH}` env var override in Docker
+
+**Example Docker setup:**
+```yaml
+services:
+  ollama:
+    volumes:
+      - /mnt/storage/models:/root/.ollama/models
+
+  llama-cpp:
+    volumes:
+      - /mnt/storage/models:/models
+    command: --models-path /models
+
+  mini-sglang:
+    volumes:
+      - /mnt/storage/models:/models
+    command: --model-dir /models
+```
+
+All three see the same model files — no redundant storage.
+
 ## Quick Start
 
 1. **Create a new Python file** with your backend implementation
