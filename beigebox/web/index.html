@@ -6094,7 +6094,7 @@ async function saveModelGpu(model) {
 
 // ── Multi-Backend Editor ──────────────────────────────────────────────────
 
-let _backendsState = null; // {enabled: bool, backends: [{name, provider, url, api_key, priority}]}
+let _backendsState = null; // {enabled: bool, backends: [{name, provider, url, api_key, priority, allowed_models}]}
 const _bbInputStyle = 'background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px';
 const _bbProviderDefaults = { openrouter: 'https://openrouter.ai/api/v1' };
 
@@ -6113,14 +6113,14 @@ function _bb_enabledChange(checked) {
     if (!_backendsState.backends.some(b => b.provider === 'ollama')) {
       _backendsState.backends.unshift({
         name: 'ollama-local', provider: 'ollama',
-        url: 'http://ollama:11434', priority: 1, api_key: '',
+        url: 'http://ollama:11434', priority: 1, api_key: '', allowed_models: [],
       });
     }
     // Auto-add OpenRouter backend if none exists
     if (!_backendsState.backends.some(b => b.provider === 'openrouter')) {
       _backendsState.backends.push({
         name: 'openrouter', provider: 'openrouter',
-        url: _bbProviderDefaults.openrouter, priority: 2, api_key: '',
+        url: _bbProviderDefaults.openrouter, priority: 2, api_key: '', allowed_models: [],
       });
     }
   }
@@ -6204,6 +6204,25 @@ function _renderBackendCard(b, i) {
         oninput="_backendsState.backends[${i}].api_key=this.value"
         style="width:100%;font-family:monospace;${_bbInputStyle}">
     </div>` : ''}
+    <div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <label style="font-size:10px;color:var(--muted)">Offered Models
+          <span style="color:var(--fg-dim)">(empty = all)</span></label>
+        <button onclick="fetchBackendModels(${i})" title="Fetch models from this backend"
+          style="padding:2px 6px;font-size:11px;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:3px;cursor:pointer">↺</button>
+      </div>
+      <div id="bk-chips-${i}" style="display:flex;flex-wrap:wrap;gap:4px;margin:4px 0">
+        ${_renderBackendChips(i)}
+      </div>
+      <div style="display:flex;gap:4px">
+        <input id="bk-model-input-${i}" type="text" placeholder="model name…"
+          style="${_bbInputStyle};flex:1;font-size:11px" list="bk-models-list-${i}"
+          onkeydown="if(event.key==='Enter')addBackendModel(${i})">
+        <datalist id="bk-models-list-${i}"></datalist>
+        <button onclick="addBackendModel(${i})"
+          style="padding:2px 6px;font-size:11px;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:3px;cursor:pointer">+ Add</button>
+      </div>
+    </div>
     <div style="margin-top:6px">
       <button class="action-btn" onclick="removeBackend(${i})"
         style="color:var(--warn,#f66);border-color:var(--warn,#f66)">✕ Remove</button>
@@ -6213,7 +6232,7 @@ function _renderBackendCard(b, i) {
 
 function addBackend() {
   if (!_backendsState) return;
-  _backendsState.backends.push({ name: '', provider: 'ollama', url: '', priority: 1, api_key: '' });
+  _backendsState.backends.push({ name: '', provider: 'ollama', url: '', priority: 1, api_key: '', allowed_models: [] });
   renderBackendsSection();
 }
 
@@ -6242,6 +6261,73 @@ async function applyBackends() {
     loadModelsForPanes();
   } catch(e) {
     if (status) status.textContent = `✗ ${esc(e.message)}`;
+  }
+}
+
+// Backend model picker helpers
+function _renderBackendChips(i) {
+  const b = _backendsState.backends[i];
+  const allowedModels = b.allowed_models || [];
+  if (allowedModels.length === 0) {
+    return `<span style="color:var(--muted);font-size:11px">No restrictions</span>`;
+  }
+  return allowedModels.map(model =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:2px 8px;font-size:11px;margin:2px">
+       ${esc(model)}
+       <button onclick="removeBackendModel(${i},'${esc(model).replace(/'/g, "\\'")}')" title="Remove"
+         style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px;padding:0;line-height:1">✕</button>
+     </span>`
+  ).join('');
+}
+
+function addBackendModel(i) {
+  const input = document.getElementById(`bk-model-input-${i}`);
+  if (!input) return;
+  const model = input.value.trim();
+  if (!model) return;
+  if (!_backendsState.backends[i].allowed_models) {
+    _backendsState.backends[i].allowed_models = [];
+  }
+  if (!_backendsState.backends[i].allowed_models.includes(model)) {
+    _backendsState.backends[i].allowed_models.push(model);
+  }
+  input.value = '';
+  const chipsEl = document.getElementById(`bk-chips-${i}`);
+  if (chipsEl) chipsEl.innerHTML = _renderBackendChips(i);
+}
+
+function removeBackendModel(i, model) {
+  if (!_backendsState.backends[i].allowed_models) return;
+  const idx = _backendsState.backends[i].allowed_models.indexOf(model);
+  if (idx >= 0) {
+    _backendsState.backends[i].allowed_models.splice(idx, 1);
+  }
+  const chipsEl = document.getElementById(`bk-chips-${i}`);
+  if (chipsEl) chipsEl.innerHTML = _renderBackendChips(i);
+}
+
+async function fetchBackendModels(i) {
+  const b = _backendsState.backends[i];
+  if (!b.name) {
+    alert('Backend must have a name first');
+    return;
+  }
+  const datalist = document.getElementById(`bk-models-list-${i}`);
+  if (!datalist) return;
+
+  try {
+    datalist.innerHTML = '<option>Loading…</option>';
+    const d = await api(`/api/v1/backends/${encodeURIComponent(b.name)}/models`);
+    const models = d.models || [];
+    datalist.innerHTML = models.map(m => `<option value="${esc(m)}"></option>`).join('');
+    if (models.length === 0) {
+      const input = document.getElementById(`bk-model-input-${i}`);
+      if (input) input.placeholder = 'Backend unavailable or no models';
+    }
+  } catch(e) {
+    const input = document.getElementById(`bk-model-input-${i}`);
+    if (input) input.placeholder = `Error: ${e.message}`;
+    datalist.innerHTML = '';
   }
 }
 

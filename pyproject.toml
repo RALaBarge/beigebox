@@ -7,7 +7,7 @@ name = "beigebox"
 version = "1.2.4"
 description = "Tap the line. Control the carrier."
 readme = "README.md"
-license = {text = "AGPL-3.0"}
+license = {text = "AGPL-3.0 (see LICENSE.md and COMMERCIAL_LICENSE.md for dual-license options)"}
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0",

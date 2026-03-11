@@ -17,6 +17,7 @@ Transparent to clients: same OpenAI-compatible request in, same response out.
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 import random
 import time
@@ -100,6 +101,7 @@ class MultiBackendRouter:
         self._thresholds: dict[str, float] = {}  # backend name → ms threshold (0=off)
         self._weights: dict[str, float] = {}     # backend name → traffic split weight (0=off)
         self._allow_unqualified_models: dict[str, bool] = {}  # backend opt-in for plain model ids
+        self._allowed_models: dict[str, list[str]] = {}  # backend name → list of allowed model globs
         self._tracker = LatencyTracker()
 
         for cfg in backends_config:
@@ -133,6 +135,15 @@ class MultiBackendRouter:
                         wrapped.name, weight,
                     )
                 self._allow_unqualified_models[wrapped.name] = bool(cfg.get("allow_unqualified_models", False))
+                # Per-backend allowed models list (empty = unrestricted, offer all models)
+                allowed_models = cfg.get("allowed_models", [])
+                if isinstance(allowed_models, list):
+                    self._allowed_models[wrapped.name] = allowed_models
+                    if allowed_models:
+                        logger.info(
+                            "Backend '%s': allowed_models restricted to %s",
+                            wrapped.name, allowed_models,
+                        )
 
         self.backends.sort(key=lambda b: b.priority)
         names = [f"{b.name}(p{b.priority})" for b in self.backends]
@@ -182,6 +193,13 @@ class MultiBackendRouter:
         )
 
     def _can_attempt_model(self, backend: BaseBackend, model: str) -> bool:
+        # Check allowed_models list first (if configured, non-empty = restrictive)
+        allowed = self._allowed_models.get(backend.name)
+        if allowed:  # Non-empty list = restrict to these models
+            if not any(fnmatch.fnmatch(model, p) for p in allowed):
+                return False
+        # Empty list = unrestricted (existing behaviour preserved)
+
         # OpenRouter uses provider/model IDs (e.g. "openai/gpt-4o"). Plain model names
         # (no "/") are for Ollama/local backends by default. The allow_unqualified_models
         # flag or the global allow_openrouter_for_plain_models override lets OpenRouter

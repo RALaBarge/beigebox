@@ -58,6 +58,10 @@ backends:
     backoff_max: 10.0           # Cap backoff at 10 seconds
     # latency_p95_threshold_ms: 3000  # Latency-aware routing: skip if rolling P95 > 3s (0 = disabled)
     # traffic_split: 70         # A/B split weight (relative, e.g. 70/30 across two backends; 0 = priority order)
+    # allowed_models: []        # Restrict models available from this backend (empty = all models allowed)
+    #   # Examples:
+    #   # allowed_models: ["qwen3:4b", "llama3.2:3b"]  # Restrict to specific models
+    #   # allowed_models: ["qwen*"]  # Glob pattern (qwen3:4b, qwen2, qwen1.8b, etc.)
 
   # Secondary: Generic OpenAI-compatible backend (llama.cpp, vLLM, etc)
   # STEP 3: Uncomment to enable — change URL to your endpoint

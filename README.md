@@ -756,6 +756,16 @@ beigebox dial
 
 ## License
 
-AGPL-3.0. See [LICENSE.md](LICENSE.md) for the full text.
+**Dual License:**
+
+- **AGPL-3.0** (Free) — Use, modify, and contribute back. See [LICENSE.md](LICENSE.md)
+- **Commercial License** (Paid) — Use in proprietary products without open-sourcing modifications. See [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md)
+
+**Choose what fits your use case:**
+- Open-source project? → AGPL-3.0 ✅
+- Internal use only? → AGPL-3.0 ✅
+- SaaS / proprietary product? → Commercial License 💼
+
+BeigeBox is open-source first. Commercial licensing exists to support proprietary deployments while sustaining development.
 
 Commercial licensing available — reach out for proprietary use cases.

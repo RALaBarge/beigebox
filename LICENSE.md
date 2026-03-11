@@ -1,3 +1,23 @@
+# BeigeBox — Dual License
+
+**CHOOSE YOUR LICENSE:**
+
+1. **Free & Open Source (AGPL v3)**
+   - Use, modify, and distribute BeigeBox freely
+   - If you run BeigeBox as a service and modify it, you must share your modifications
+   - Perfect for open-source projects and non-commercial use
+   - See full terms below
+
+2. **Commercial License**
+   - Use BeigeBox in proprietary products without open-sourcing modifications
+   - No obligation to share improvements
+   - For enterprise deployments, SaaS products, or commercial services
+   - Contact us for licensing terms and pricing
+
+---
+
+# GNU AFFERO GENERAL PUBLIC LICENSE (AGPL v3)
+
                     GNU AFFERO GENERAL PUBLIC LICENSE
                        Version 3, 19 November 2007
 

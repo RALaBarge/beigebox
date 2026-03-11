@@ -1,4 +1,9 @@
 """
+BeigeBox — LLM Middleware Control Plane
+
+LICENSING: Dual-licensed under AGPL-3.0 (free) and Commercial License (proprietary).
+See LICENSE.md and COMMERCIAL_LICENSE.md for details.
+
 FastAPI application — the BeigeBox entry point.
 Implements OpenAI-compatible endpoints that proxy to Ollama.
 
@@ -1310,6 +1315,32 @@ async def api_backends_apply(request: Request):
     except Exception as e:
         logger.error("api_backends_apply unexpected error: %s", e, exc_info=True)
         return JSONResponse({"error": f"Unexpected error: {e}"}, status_code=500)
+
+
+@app.get("/api/v1/backends/{backend_name}/models")
+async def api_backend_models(backend_name: str):
+    """
+    List available models from a specific backend.
+
+    Used by the web UI to populate model picker when configuring backend restrictions.
+    Returns {"models": ["model1", "model2", ...]} or falls back to empty list on error.
+    """
+    if not backend_router:
+        return JSONResponse({"models": []})
+
+    backend = backend_router.get_backend(backend_name)
+    if not backend:
+        return JSONResponse({"models": []})
+
+    try:
+        # Call the backend's list_models() method (async)
+        # Unwrap from RetryableBackendWrapper if needed
+        inner = getattr(backend, "backend", backend)
+        models = await inner.list_models()
+        return JSONResponse({"models": models or []})
+    except Exception as e:
+        logger.warning("Failed to list models from backend '%s': %s", backend_name, e)
+        return JSONResponse({"models": []})
 
 
 # ---------------------------------------------------------------------------
