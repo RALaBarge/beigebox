@@ -31,7 +31,7 @@ from uuid import uuid4
 
 import httpx
 
-from beigebox.config import get_config
+from beigebox.config import get_config, get_runtime_config
 
 logger = logging.getLogger(__name__)
 
@@ -70,12 +70,14 @@ class HarnessOrchestrator:
         injection_queue: asyncio.Queue | None = None,
     ):
         cfg = get_config()
+        rt = get_runtime_config()
         self.cfg = cfg
         self.backend_url = cfg["backend"]["url"].rstrip("/")
         self.backend_router = backend_router
         self.injection_queue = injection_queue
         self.model = (
             model
+            or (rt and rt.get("operator_model"))
             or cfg.get("operator", {}).get("model")
             or cfg.get("backend", {}).get("default_model", "")
         )

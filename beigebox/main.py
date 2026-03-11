@@ -664,7 +664,7 @@ async def api_config():
         # ── Operator ─────────────────────────────────────────────────
         "operator": {
             "enabled":        rt.get("operator_enabled", cfg.get("operator", {}).get("enabled", False)),
-            "model":          cfg.get("operator", {}).get("model", ""),
+            "model":          rt.get("operator_model") or cfg.get("operator", {}).get("model", ""),
             "max_iterations": cfg.get("operator", {}).get("max_iterations", 10),
             "shell_enabled":  cfg.get("operator", {}).get("shell", {}).get("enabled", False),
         },
@@ -833,6 +833,7 @@ async def api_config_save(request: Request):
         "system_context_enabled":       "system_context_enabled",
         # Operator
         "operator_enabled":             "operator_enabled",
+        "operator_model":               "operator_model",
         # Generation parameters
         "gen_temperature":              "gen_temperature",
         "gen_top_p":                    "gen_top_p",

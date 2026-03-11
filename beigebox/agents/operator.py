@@ -29,7 +29,7 @@ from typing import Any
 
 import httpx
 
-from beigebox.config import get_config
+from beigebox.config import get_config, get_runtime_config
 from beigebox.agents.skill_loader import load_skills, skills_to_xml, skills_fingerprint
 
 logger = logging.getLogger(__name__)
@@ -253,6 +253,7 @@ class Operator:
         from beigebox.tools.registry import ToolRegistry
 
         self.cfg = get_config()
+        self.rt = get_runtime_config()
         self.vector_store = vector_store
         self._blob_store = blob_store
         self._session_id: str | None = None
@@ -273,6 +274,7 @@ class Operator:
         self._registry = ToolRegistry(vector_store=vector_store)
         self._model = (
             model_override
+            or (self.rt and self.rt.get("operator_model"))
             or self.cfg.get("operator", {}).get("model")
             or self.cfg.get("backend", {}).get("default_model", "")
         )

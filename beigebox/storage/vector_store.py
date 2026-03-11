@@ -191,6 +191,7 @@ class VectorStore:
         query: str,
         n_results: int = 5,
         role_filter: str | None = None,
+        where: dict | None = None,
     ) -> list[dict]:
         """Semantic search over stored messages."""
         try:
@@ -199,7 +200,12 @@ class VectorStore:
             logger.error("search: failed to embed query: %s", e)
             return []
 
-        where = {"role": role_filter} if role_filter else None
+        # Merge role_filter into where clause if provided
+        if role_filter and not where:
+            where = {"role": role_filter}
+        elif role_filter and where:
+            where["role"] = role_filter
+
         results = self._backend.query(embedding, n_results=n_results, where=where)
 
         return [

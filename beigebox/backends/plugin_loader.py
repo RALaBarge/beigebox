@@ -32,7 +32,6 @@ Example: backends/plugins/llama_cpp.py
 import importlib.util
 import logging
 from pathlib import Path
-from typing import dict, type
 
 from beigebox.backends.base import BaseBackend
 

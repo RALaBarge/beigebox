@@ -5625,7 +5625,7 @@ async function loadConfig() {
     html += cfgInput('auto_keep_last',     'Keep last N messages',   c.auto_summarization?.keep_last ?? 4, 'number');
     html += '</div>';
     html += cfgToggle('operator_enabled', 'Operator (LLM-driven tools)', c.operator?.enabled ?? false);
-    html += kv('operator model', esc(c.operator?.model || '—'));
+    html += cfgInput('operator_model', 'Operator Model', c.operator?.model || '');
     html += kv('max iterations', String(c.operator?.max_iterations || 10));
     html += kv('shell', badge(c.operator?.shell_enabled));
     html += cfgToggle('tools_enabled', 'Tools master switch', c.tools?.enabled ?? false);
