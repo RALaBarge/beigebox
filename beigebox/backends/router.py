@@ -26,16 +26,22 @@ from beigebox.backends.base import BaseBackend, BackendResponse
 from beigebox.backends.ollama import OllamaBackend
 from beigebox.backends.openrouter import OpenRouterBackend
 from beigebox.backends.openai_compat import OpenAICompatibleBackend
+from beigebox.backends.plugin_loader import load_backend_plugins
 from beigebox.config import get_config, get_runtime_config
 
 logger = logging.getLogger(__name__)
 
 # Provider name → backend class
+# Built-in providers (always available)
 PROVIDERS: dict[str, type[BaseBackend]] = {
     "ollama": OllamaBackend,
     "openrouter": OpenRouterBackend,
     "openai_compat": OpenAICompatibleBackend,
 }
+
+# Load custom backend plugins from backends/plugins/
+_PLUGINS = load_backend_plugins("backends/plugins")
+PROVIDERS.update(_PLUGINS)
 
 _LATENCY_WINDOW = 100  # rolling window size per backend
 
