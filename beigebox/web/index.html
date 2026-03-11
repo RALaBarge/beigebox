@@ -425,8 +425,10 @@
   .op-query       { color: var(--cyan);    margin-bottom: 4px; }
   .op-answer      { color: var(--fg);      white-space: pre-wrap; word-break: break-word; margin-bottom: 12px; }
   .op-error       { color: var(--red);     margin-bottom: 12px; }
+  .op-info        { color: var(--blue);    font-size: 11px; margin: 4px 0; font-style: italic; }
   .op-pending     { color: var(--yellow);  font-style: italic; }
   .op-sep         { border-top: 1px solid var(--bg-border); margin: 8px 0; }
+  .op-turn-sep    { color: var(--fg-muted); font-size: 0.75rem; text-align: center; margin: 6px 0; }
   .op-tool-call   { color: var(--yellow);  font-size: 11px; margin: 3px 0; font-style: italic; }
   .op-tool-result { color: var(--green);   font-size: 11px; margin: 3px 0 6px; }
   #op-input-area {
@@ -1432,6 +1434,11 @@
         <select id="op-target" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
           <option value="operator">operator (default)</option>
         </select>
+        <span style="margin-left:6px;padding-left:6px;border-left:1px solid var(--bg-border);display:flex;gap:4px;align-items:center">
+          <span class="toolbar-label">Turns:</span>
+          <input id="op-max-turns" type="number" min="1" max="20" value="1"
+            style="height:26px;font-size:12px;padding:2px 4px;width:40px" title="Max autonomous turns (1 = single-turn)">
+        </span>
       </span>
       <!-- Council controls -->
       <span id="op-council-controls" style="display:none;gap:6px;align-items:center">
@@ -3841,7 +3848,8 @@ async function runOp() {
 
   try {
     const modelId = isModel ? target.slice(6) : null;
-    const reqBody = { query, history: _opHistory };
+    const maxTurns = parseInt(document.getElementById('op-max-turns').value, 10) || 1;
+    const reqBody = { query, history: _opHistory, max_turns: maxTurns };
     if (modelId) reqBody.model = modelId;
 
     const resp = await fetch('/api/v1/operator/stream', {
@@ -3873,7 +3881,13 @@ async function runOp() {
           let evt;
           try { evt = JSON.parse(line.slice(6)); } catch { continue; }
 
-          if (evt.type === 'tool_call') {
+          if (evt.type === 'turn_start') {
+            streamEl.insertAdjacentHTML('beforeend',
+              `<div class="op-turn-sep">── Turn ${evt.turn} / ${evt.total} ──</div>`);
+          } else if (evt.type === 'info') {
+            streamEl.insertAdjacentHTML('beforeend',
+              `<div class="op-info">ℹ ${esc(evt.message)}</div>`);
+          } else if (evt.type === 'tool_call') {
             const tid = 'op-tc-' + Math.random().toString(36).slice(2);
             lastToolCallId = tid;
             const inputSnippet = evt.input.length > 120 ? evt.input.slice(0, 120) + '…' : evt.input;

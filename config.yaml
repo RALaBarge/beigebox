@@ -207,6 +207,9 @@ harness:
 operator:
   enabled: true                         # CAUTION: enables LLM-driven tool execution. Review allowed_tools before enabling.
   model: "qwen3:4b"
+  autonomous:
+    enabled: false       # Set true to enable multi-turn autonomous mode
+    max_turns: 5         # Max consecutive autonomous turns (stops early if no tool calls)
   pre_hook:
     enabled: false       # When true, operator enriches every chat message before it reaches the LLM
     model: "qwen3:4b"    # Model to use for enrichment (defaults to operator.model if blank)

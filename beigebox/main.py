@@ -1961,6 +1961,7 @@ async def api_operator_stream(request: Request):
 
     history = body.get("history") or None
     model_override = body.get("model", "").strip() or None
+    max_turns_override = body.get("max_turns", None)
 
     async def event_stream():
         import json as _json
@@ -1987,37 +1988,82 @@ async def api_operator_stream(request: Request):
             except Exception:
                 vs = None
 
-            op = Operator(vector_store=vs, blob_store=blob_store, model_override=model_override)
-            _op_model = op._model
+            # Read autonomous multi-turn config
+            # Request body max_turns overrides config (enables per-request turns even if config disabled)
+            auto_cfg = cfg2.get("operator", {}).get("autonomous", {})
+            auto_enabled = auto_cfg.get("enabled", False)
+            if max_turns_override is not None and max_turns_override > 1:
+                # User specified max_turns in request — enable autonomous mode for this request
+                max_turns = max(1, int(max_turns_override))
+            else:
+                # Use config or default to 1 (single-turn)
+                max_turns = auto_cfg.get("max_turns", 5) if auto_enabled else 1
 
-            # Wiretap: log the incoming operator query
-            if _wire:
-                _wire.log("inbound", "user", question,
-                          model=_op_model, conversation_id=_conv_id)
+            cur_question = question
+            cur_history = list(history or [])
+            final_answer = None
 
-            async for event in op.run_stream(question, history):
-                # Wiretap: log tool calls, results, and final answer
-                if _wire:
-                    etype = event.get("type")
-                    if etype == "tool_call":
-                        _wire.log("internal", "tool",
-                                  f"{event.get('thought','')} → {event.get('input','')}",
-                                  tool_name=event.get("tool", ""),
-                                  model=_op_model, conversation_id=_conv_id)
-                    elif etype == "tool_result":
-                        _wire.log("internal", "tool",
-                                  event.get("result", ""),
-                                  tool_name=event.get("tool", ""),
-                                  model=_op_model, conversation_id=_conv_id)
-                    elif etype == "answer":
-                        _wire.log("outbound", "assistant",
-                                  event.get("content", ""),
-                                  model=_op_model, conversation_id=_conv_id)
-                    elif etype == "error":
-                        _wire.log("outbound", "system",
-                                  f"operator error: {event.get('message','')}",
-                                  model=_op_model, conversation_id=_conv_id)
-                yield f"data: {_json.dumps(event)}\n\n"
+            for turn_n in range(max_turns):
+                # Emit turn separator for turns after the first
+                if turn_n > 0:
+                    yield f"data: {_json.dumps({'type': 'turn_start', 'turn': turn_n + 1, 'total': max_turns})}\n\n"
+                    # Feed previous answer back as history context
+                    cur_history.append({'role': 'user', 'content': cur_question})
+                    cur_history.append({'role': 'assistant', 'content': final_answer or ''})
+                    cur_question = "Continue."
+
+                op = Operator(vector_store=vs, blob_store=blob_store, model_override=model_override)
+                _op_model = op._model
+
+                # Wiretap: log the incoming operator query
+                if _wire and turn_n == 0:
+                    _wire.log("inbound", "user", question,
+                              model=_op_model, conversation_id=_conv_id)
+                elif _wire and turn_n > 0:
+                    _wire.log("inbound", "user", cur_question,
+                              model=_op_model, conversation_id=_conv_id)
+
+                had_tool_call = False
+                turn_answer = None
+
+                async for event in op.run_stream(cur_question, cur_history if turn_n == 0 else cur_history):
+                    # Track if this turn had any tool calls
+                    if event.get("type") == "tool_call":
+                        had_tool_call = True
+                    elif event.get("type") == "answer":
+                        turn_answer = event.get("content", "")
+
+                    # Wiretap: log tool calls, results, and final answer
+                    if _wire:
+                        etype = event.get("type")
+                        if etype == "tool_call":
+                            _wire.log("internal", "tool",
+                                      f"{event.get('thought','')} → {event.get('input','')}",
+                                      tool_name=event.get("tool", ""),
+                                      model=_op_model, conversation_id=_conv_id)
+                        elif etype == "tool_result":
+                            _wire.log("internal", "tool",
+                                      event.get("result", ""),
+                                      tool_name=event.get("tool", ""),
+                                      model=_op_model, conversation_id=_conv_id)
+                        elif etype == "answer":
+                            _wire.log("outbound", "assistant",
+                                      event.get("content", ""),
+                                      model=_op_model, conversation_id=_conv_id)
+                        elif etype == "error":
+                            _wire.log("outbound", "system",
+                                      f"operator error: {event.get('message','')}",
+                                      model=_op_model, conversation_id=_conv_id)
+                    yield f"data: {_json.dumps(event)}\n\n"
+
+                final_answer = turn_answer
+
+                # Stop early if operator gave an answer without any tool use
+                if not had_tool_call:
+                    # On first turn with no tool calls, emit informational event
+                    if turn_n == 0:
+                        yield f"data: {_json.dumps({'type': 'info', 'message': 'No tools used — operator answered directly'})}\n\n"
+                    break
         except Exception as e:
             if _wire:
                 _wire.log("outbound", "system", f"operator exception: {e}",
