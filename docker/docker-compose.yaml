@@ -1,11 +1,12 @@
-# BeigeBox — Full Stack
+# BeigeBox — Full Stack (Middleware + LLM)
 # Tap the line. Control the carrier.
 #
 # QUICKSTART:
 #   docker compose up -d          ← full working stack (CPU inference)
+#   Open browser to: http://localhost:1337
 #
 # PROFILES:
-#   (default)       Ollama (CPU) + BeigeBox + Open WebUI — everything you need
+#   (default)       Ollama (CPU) + BeigeBox — transparent proxy + integrated UI
 #   voice           adds Whisper (STT) + Kokoro (TTS)
 #
 # EXAMPLES:
@@ -22,10 +23,17 @@
 #
 # SERVICES:
 #   ollama      → :11434  LLM inference engine
-#   beigebox    → :1337   transparent proxy + middleware
-#   open-webui  → :3000   chat interface
+#   beigebox    → :1337   transparent proxy + integrated web UI
 #   whisper     → :9000   speech-to-text (voice profile)
 #   kokoro      → :8880   text-to-speech (voice profile)
+#
+# ALTERNATIVE FRONTENDS:
+#   BeigeBox exposes OpenAI-compatible /v1 endpoint.
+#   Use any frontend (Open WebUI, LM Studio, etc):
+#   docker run -d -p 3000:8080 \
+#     -e OPENAI_API_BASE_URL=http://host.docker.internal:1337/v1 \
+#     -e OPENAI_API_KEY=any-key \
+#     ghcr.io/open-webui/open-webui:main
 
 services:
   # ---------------------------------------------------------------------------
@@ -110,26 +118,6 @@ services:
       retries: 5
 
   # ---------------------------------------------------------------------------
-  # Open WebUI — chat frontend
-  # ---------------------------------------------------------------------------
-  open-webui:
-    image: ghcr.io/open-webui/open-webui:main
-    container_name: beigebox-webui
-    ports:
-      - "${WEBUI_PORT:-3000}:8080"
-    volumes:
-      - open_webui_data:/app/backend/data
-    environment:
-      - OPENAI_API_BASE_URL=http://beigebox:8000/v1
-      - OPENAI_API_KEY=not-needed
-      - OLLAMA_BASE_URL=http://${OLLAMA_HOST:-ollama}:11434
-      - WEBUI_AUTH=${WEBUI_AUTH:-false}
-    depends_on:
-      beigebox:
-        condition: service_started
-    restart: unless-stopped
-
-  # ---------------------------------------------------------------------------
   # Whisper — STT (voice profile)
   # ---------------------------------------------------------------------------
   whisper:
@@ -174,6 +162,5 @@ services:
 volumes:
   ollama_data:
   beigebox_data:
-  open_webui_data:
   whisper_cache:
   kokoro_models:

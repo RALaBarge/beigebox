@@ -6,12 +6,14 @@ Tap the line. Control the carrier.
 
 ```mermaid
 flowchart LR
-  FE["Frontend (Open WebUI / any client)"]
+  UI["BeigeBox UI (built-in)"]
+  FE["Or: Any OpenAI-compatible client"]
   BB["BeigeBox"]
   LM["Ollama (local)"]
   EP["OpenRouter / OpenAI / API"]
   DB["SQLite + ChromaDB (embedded)"]
 
+  UI --> BB
   FE --> BB
   BB --> LM
   BB --> EP
@@ -33,17 +35,16 @@ The `--recursive` flag initializes the community skill submodules (187 skills ac
 Anthropic's official collection and K-Dense's scientific library). Skip it if you
 don't need them. If you already cloned without it: `git submodule update --init --recursive`.
 
-This brings up three services plus a one-shot model pull:
+This brings up two services plus a one-shot model pull:
 
 | Service | Port | What it does |
 |---|---|---|
 | Ollama | `11434` | Local model inference |
-| **BeigeBox** | `1337` | Middleware proxy + API + web UI + embedded vector store |
-| Open WebUI | `3000` | Chat frontend (talks to BeigeBox, not Ollama directly) |
+| **BeigeBox** | `1337` | Middleware proxy + integrated web UI + API + embedded vector store |
 
-Open **http://localhost:1337** for BeigeBox's built-in web interface, or **http://localhost:3000** for Open WebUI.
+Open **http://localhost:1337** for BeigeBox's built-in web interface.
 
-The OpenAI-compatible API is at `http://localhost:1337/v1` — point any client at it.
+The OpenAI-compatible API is at `http://localhost:1337/v1` — point any OpenAI-compatible client at it.
 
 ### Voice support
 
@@ -56,6 +57,21 @@ Adds Whisper (STT) on `:9000` and Kokoro (TTS) on `:8880` as sidecars. Enable in
 ### GPU acceleration
 
 Uncomment the `deploy` block on the `ollama` service in `docker-compose.yaml` and restart. For per-model GPU layer control see [Per-model options](#per-model-options) below.
+
+### Alternative frontends
+
+BeigeBox exposes a standard OpenAI-compatible `/v1` endpoint. You can use any compatible client:
+
+**Open WebUI** (if you prefer a feature-rich chat interface):
+```bash
+docker run -d -p 3000:8080 \
+  -e OPENAI_API_BASE_URL=http://host.docker.internal:1337/v1 \
+  -e OPENAI_API_KEY=any-key \
+  ghcr.io/open-webui/open-webui:main
+```
+Then open http://localhost:3000 (runs alongside BeigeBox on `:1337`).
+
+**Any OpenAI-compatible client** — LM Studio, Cursor, VS Code, etc. — just point it to `http://localhost:1337/v1` and provide any API key.
 
 ---
 
