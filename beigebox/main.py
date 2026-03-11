@@ -45,6 +45,7 @@ from beigebox.backends.router import MultiBackendRouter
 from beigebox.costs import CostTracker
 from beigebox.auth import MultiKeyAuthRegistry
 from beigebox.mcp_server import McpServer
+from beigebox.amf_mesh import AmfMeshAdvertiser
 
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,7 @@ _harness_injection_queues: dict[str, asyncio.Queue] = {}
 embedding_classifier = None
 auth_registry: MultiKeyAuthRegistry | None = None
 mcp_server: McpServer | None = None
+amf_advertiser: AmfMeshAdvertiser | None = None
 
 
 def _setup_logging(cfg: dict):
@@ -115,7 +117,7 @@ async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     global proxy, tool_registry, sqlite_store, vector_store, blob_store
     global decision_agent, hook_manager, backend_router, cost_tracker
-    global embedding_classifier, auth_registry, mcp_server
+    global embedding_classifier, auth_registry, mcp_server, amf_advertiser
 
     cfg = get_config()
     _setup_logging(cfg)
@@ -183,6 +185,10 @@ async def lifespan(app: FastAPI):
     mcp_server = McpServer(tool_registry)
     logger.info("MCP server: enabled (POST /mcp)")
 
+    # AMF mesh advertisement (mDNS + NATS heartbeat)
+    amf_advertiser = AmfMeshAdvertiser(cfg, tool_names=tool_registry.list_tools())
+    await amf_advertiser.start()
+
     # Proxy (with decision agent, hooks, embedding classifier, tools, and router)
     proxy = Proxy(
         sqlite=sqlite_store,
@@ -242,6 +248,8 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("BeigeBox shutting down")
+    if amf_advertiser:
+        await amf_advertiser.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -516,6 +524,35 @@ async def api_search_conversations(q: str, n: int = 5, role: str | None = None):
         return JSONResponse({"error": "Vector store not initialized"}, status_code=503)
     results = vector_store.search_grouped(q, n_conversations=n, role_filter=role)
     return JSONResponse({"query": q, "results": results, "count": len(results)})
+
+
+@app.get("/.well-known/agent-card.json")
+async def agent_card():
+    """A2A agent card — describes this node to the AMF mesh and any A2A client."""
+    cfg = get_config()
+    port = cfg["server"]["port"]
+    endpoint = f"http://localhost:{port}"
+    tools = tool_registry.list_tools() if tool_registry else []
+    skills = [
+        {"id": t, "name": t, "description": f"BeigeBox tool: {t}", "tags": [t]}
+        for t in tools
+    ]
+    return JSONResponse({
+        "name": "beigebox",
+        "description": "BeigeBox — OpenAI-compatible proxy with local LLM routing and MCP skill access",
+        "url": endpoint,
+        "version": "1.0.1",
+        "capabilities": {"streaming": True, "pushNotifications": False},
+        "skills": skills,
+        "defaultInputModes": ["application/json"],
+        "defaultOutputModes": ["application/json", "text/event-stream"],
+        "x-amf": {
+            "agent_id": amf_advertiser._agent_id if amf_advertiser else "spiffe://local/beigebox/unknown",
+            "trust_domain": cfg.get("amf_mesh", {}).get("trust_domain", "local"),
+            "protocols": ["MCP/2024-11-05"],
+            "mcp_endpoint": f"{endpoint}/mcp",
+        },
+    })
 
 
 @app.get("/beigebox/health")

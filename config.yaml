@@ -510,3 +510,15 @@ advanced:
   # Use compression for wiretap (reduces disk usage)
   wiretap_compress: false
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AMF Mesh Advertisement
+# ─────────────────────────────────────────────────────────────────────────────
+
+amf_mesh:
+  enabled: false              # set true to advertise on the local AMF mesh
+  instance_name: "beigebox"  # mDNS service instance name
+  host: "localhost"
+  port: null                 # null → uses server.port above
+  trust_domain: "local"
+  nats_url: "nats://127.0.0.1:4222"  # empty string to disable NATS heartbeat

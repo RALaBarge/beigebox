@@ -30,7 +30,7 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "auto_summarization", "system_context", "generation", "models",
     "wasm", "web_ui", "voice", "wiretap", "semantic_cache", "classifier",
     "model_advertising", "zcommands", "advanced", "runtime", "skills",
-    "workspace", "hooks", "connections",
+    "workspace", "hooks", "connections", "amf_mesh",
 }
 
 # ── Pydantic models for key sections ─────────────────────────────────────────
