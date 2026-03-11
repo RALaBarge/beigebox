@@ -22,7 +22,25 @@ backend:
   default_model: "qwen3:4b"
   url: "http://localhost:11434"  # Ollama default
   timeout: 120
-  models_path: "${MODELS_PATH:-/mnt/storage/models}"  # Shared path for all backends (llama.cpp, Mini-SGLang, etc.)
+  # Model path resolution — smart fallback chain:
+  # 1. OLLAMA_DATA env var (if set) → {OLLAMA_DATA}/models (Ollama's native location)
+  # 2. MODELS_PATH env var (explicit override)
+  # 3. model_paths list below (first existing path used)
+  # 4. models_path single path (simple case)
+  # 5. Default: /mnt/storage/models
+  #
+  # Uncomment ONE of the following approaches:
+  #
+  # SIMPLE: Single unified model directory (all backends share it)
+  # models_path: "/mnt/storage/models"
+  #
+  # ADVANCED: Multiple mount points with priority (first existing wins)
+  # Useful when models are scattered across different storage locations
+  model_paths:
+    - "/mnt/storage/models"        # Primary: fast NVMe SSD
+    - "/mnt/archive/models"        # Fallback: slower HDD archive
+    - "${HOME}/.ollama/models"     # Fallback: user's home directory
+    - "/var/lib/models"            # Fallback: system-wide location
 
 # Multi-backend routing (STEP 2 & 3: Retry logic + Generic OpenAI)
 backends_enabled: false  # Set to true to enable multi-backend routing

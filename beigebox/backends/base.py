@@ -44,16 +44,68 @@ class BaseBackend(abc.ABC):
         self.timeout = timeout
         self.priority = priority
         self._available_models: list[str] = []
-        self.models_path = self._get_models_path()
+        self.models_path = self._resolve_models_path()
 
-    def _get_models_path(self) -> str:
-        """Get shared models path from config (used by all backends)."""
+    def _resolve_models_path(self) -> str:
+        """
+        Resolve model path with smart fallback chain:
+        1. OLLAMA_DATA environment variable (if set) → {OLLAMA_DATA}/models
+        2. MODELS_PATH environment variable (if set)
+        3. backend.model_paths list in config (first existing path)
+        4. backend.models_path single path in config
+        5. Default: /mnt/storage/models
+
+        This allows:
+        - Reusing Ollama's existing model directory
+        - ENV var overrides (Docker-friendly)
+        - Multiple mount points with fallback (scattered models)
+        - Single unified path (simple case)
+        """
+        import os
+        from pathlib import Path
+
+        # Check 1: OLLAMA_DATA env var (if using Ollama)
+        ollama_data = os.getenv("OLLAMA_DATA")
+        if ollama_data:
+            ollama_models = os.path.join(ollama_data, "models")
+            if Path(ollama_models).exists():
+                logger.debug(f"Using OLLAMA_DATA models: {ollama_models}")
+                return ollama_models
+
+        # Check 2: MODELS_PATH env var (explicit override)
+        models_path_env = os.getenv("MODELS_PATH")
+        if models_path_env:
+            logger.debug(f"Using MODELS_PATH from env: {models_path_env}")
+            return models_path_env
+
+        # Check 3 & 4: Config file paths (with fallback chain)
         try:
             from beigebox.config import get_config
             cfg = get_config()
-            return cfg.get("backend", {}).get("models_path", "/mnt/storage/models")
-        except Exception:
-            return "/mnt/storage/models"
+            backend_cfg = cfg.get("backend", {})
+
+            # Check for model_paths list (priority order, first existing wins)
+            model_paths = backend_cfg.get("model_paths", [])
+            if model_paths:
+                for path in model_paths:
+                    if Path(path).exists():
+                        logger.debug(f"Using first existing model_paths entry: {path}")
+                        return path
+                logger.warning(f"No model_paths entries exist, trying fallback: {model_paths}")
+                return model_paths[0]  # Return first even if doesn't exist (user's responsibility)
+
+            # Check for single models_path (simple case)
+            single_path = backend_cfg.get("models_path")
+            if single_path:
+                logger.debug(f"Using models_path from config: {single_path}")
+                return single_path
+        except Exception as e:
+            logger.debug(f"Error reading config for model paths: {e}")
+
+        # Check 5: Default fallback
+        default = "/mnt/storage/models"
+        logger.debug(f"Using default model path: {default}")
+        return default
 
     @abc.abstractmethod
     async def forward(self, body: dict) -> BackendResponse:
