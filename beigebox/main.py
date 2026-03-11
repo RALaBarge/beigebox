@@ -1998,8 +1998,11 @@ async def api_operator_stream(request: Request):
     async def event_stream():
         import json as _json
         import uuid as _uuid
+        import time as _time
+        _run_id = _uuid.uuid4().hex[:8]
         _conv_id = _uuid.uuid4().hex[:8]
         _wire = proxy.wire if proxy else None
+        _start_time = _time.time()
         try:
             from beigebox.storage.vector_store import VectorStore
             from beigebox.storage.backends import make_backend as _mk2
@@ -2019,6 +2022,9 @@ async def api_operator_stream(request: Request):
                 )
             except Exception:
                 vs = None
+
+            # Emit run_id as first event so client can track the background run
+            yield f"data: {_json.dumps({'type': 'start', 'run_id': _run_id})}\n\n"
 
             # Read autonomous multi-turn config
             # Request body max_turns overrides config (enables per-request turns even if config disabled)
@@ -2096,11 +2102,45 @@ async def api_operator_stream(request: Request):
                     if turn_n == 0:
                         yield f"data: {_json.dumps({'type': 'info', 'message': 'No tools used — operator answered directly'})}\n\n"
                     break
+
+            # Store successful run to database
+            _latency_ms = int((_time.time() - _start_time) * 1000)
+            try:
+                if sqlite_store:
+                    sqlite_store.store_operator_run(
+                        run_id=_run_id,
+                        query=question,
+                        history=cur_history,
+                        model=_op_model,
+                        status="completed",
+                        result=final_answer or "",
+                        latency_ms=_latency_ms,
+                    )
+            except Exception as store_err:
+                logger.warning("Failed to store operator run: %s", store_err)
+
         except Exception as e:
             if _wire:
                 _wire.log("outbound", "system", f"operator exception: {e}",
                           conversation_id=_conv_id)
             import json as _json2
+
+            # Store failed run to database
+            _latency_ms = int((_time.time() - _start_time) * 1000)
+            try:
+                if sqlite_store:
+                    sqlite_store.store_operator_run(
+                        run_id=_run_id,
+                        query=question,
+                        history=history or [],
+                        model=model_override or "unknown",
+                        status="error",
+                        result=str(e),
+                        latency_ms=_latency_ms,
+                    )
+            except Exception as store_err:
+                logger.warning("Failed to store operator error run: %s", store_err)
+
             yield f"data: {_json2.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(
@@ -2149,6 +2189,33 @@ async def api_operator_notes_set(request: Request):
         return JSONResponse({"ok": True, "bytes": len(content.encode())})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ---------------------------------------------------------------------------
+# Operator Run Retrieval & History
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v1/operator/{run_id}")
+async def api_operator_get_run(run_id: str):
+    """Retrieve a completed operator run by ID."""
+    if not sqlite_store:
+        return JSONResponse({"error": "storage not available"}, status_code=503)
+
+    run = sqlite_store.get_operator_run(run_id)
+    if not run:
+        return JSONResponse({"error": f"Run '{run_id}' not found"}, status_code=404)
+
+    return JSONResponse(run)
+
+
+@app.get("/api/v1/operator/runs")
+async def api_operator_list_runs():
+    """List recent operator runs."""
+    if not sqlite_store:
+        return JSONResponse({"error": "storage not available"}, status_code=503)
+
+    runs = sqlite_store.list_operator_runs(limit=50)
+    return JSONResponse({"runs": runs})
 
 
 # ---------------------------------------------------------------------------

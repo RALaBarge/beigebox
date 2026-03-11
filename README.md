@@ -120,7 +120,7 @@ Three complementary cache layers, all in-process:
 - **Ensemble voting** — parallel responses judged by an LLM arbiter; always streams tokens as they arrive; built-in question bank (25 curated benchmark questions across math, logic, coding, reasoning, and knowledge) with category filter and random picker; **Challenge round** button asks all models to verify their answer, reruns the judge, and shows whether winners are consistent — useful for comparing quantised vs full-precision models
 - **Group Chat** — turn-by-turn multi-agent conversation: an LLM moderator picks who speaks next from a configurable roster of models/operator agents; inject thoughts mid-conversation to steer the discussion
 - **Council mode** — "council then commander": operator proposes a specialist council (name, model, task) for any query; select which models the council may use from a checklist (leave all unchecked to allow any); user reviews and edits council members via dropdowns before engaging; specialists run in parallel, operator synthesises results into a final answer; **model affinity batching** groups same-model members to run in parallel while dispatching model groups sequentially — prevents Ollama VRAM thrashing and roughly halves latency for typical 4-member/2-model councils; **kill button** aborts the SSE stream mid-run; individual cards can be closed or added on the fly
-- **Operator agent** — JSON tool-loop agent with sandboxed shell, web search, memory recall, calculator, and plugin tools; streaming mode shows tool calls and results as they happen; maintains multi-turn conversation history; **TIR mode** runs Python code in a bwrap sandbox (stdin-pipe, no tempfile) and feeds stdout back as an observation; **ReAct fallback** parses `Thought:/Action:/Final Answer:` text when JSON output fails; **persistent notes** — operator can write `workspace/out/operator_notes.md` for cross-session memory (injected at session start without an extra LLM call); **notes panel** in the UI lets you read and edit notes directly
+- **Operator agent** — JSON tool-loop agent with sandboxed shell, web search, memory recall, calculator, and plugin tools; streaming mode shows tool calls and results as they happen; maintains multi-turn conversation history; **TIR mode** runs Python code in a bwrap sandbox (stdin-pipe, no tempfile) and feeds stdout back as an observation; **ReAct fallback** parses `Thought:/Action:/Final Answer:` text when JSON output fails; **persistent notes** — operator can write `workspace/out/operator_notes.md` for cross-session memory (injected at session start without an extra LLM call); **notes panel** in the UI lets you read and edit notes directly; **configurable model** — operator model is runtime-configurable in the Config tab, defaults to `operator.model` from config.yaml, falls back to `backend.default_model`
 - **Operator pre-hook** — optional pre-processing pass where the operator enriches every incoming chat message before it reaches the LLM; uses tools (memory recall, web search, system info, etc.) and replaces the message with a context-enriched version; enable with `operator.pre_hook.enabled: true`; max iterations configurable to keep latency low; visible in the Tap tab as `internal/proxy` entries; tool I/O dumped to `workspace/out/.prehook/` (not indexed)
 - **Operator post-hook** — fire-and-forget operator pass that runs after the LLM has fully responded; receives the completed response so the operator can extract facts, write notes, or trigger side effects; never modifies the response; enable with `operator.post_hook.enabled: true`; tool I/O dumped to `workspace/out/.posthook/`
 - **Operator tool capture** — operator tool calls can opt in to full I/O capture; raw result stored in the blob store, preview embedding in ChromaDB for semantic retrieval; per-tool opt-in via `capture_tool_io = True` class attribute; `max_context_chars` limits what the operator sees while storing full content; enabled on web_search, web_scraper, pdf_reader, browserbox, python_interpreter
@@ -265,6 +265,31 @@ Two config files, by design:
 - **`runtime_config.yaml`** — session overrides (default model, temperature, voice toggle, vi mode). Hot-reloaded on every request via mtime check — no restart needed.
 
 Everything in both files is editable from the web UI Config tab (collapsible sections, Save & Apply button).
+
+### Operator configuration
+
+The operator agent model can be configured at startup and changed at runtime (hot-reloaded):
+
+```yaml
+# config.yaml (static, loaded once at startup)
+operator:
+  enabled: true
+  model: "qwen3:4b"          # Main model for operator agent
+  max_iterations: 10
+  pre_hook:
+    enabled: false
+    model: "qwen3:4b"        # Optional separate model for pre-hook (defaults to operator.model)
+  post_hook:
+    enabled: false
+    model: "qwen3:4b"        # Optional separate model for post-hook (defaults to operator.model)
+  allowed_tools: []          # Empty = all tools; set to restrict access
+```
+
+**Change the operator model at runtime:** Open the Config tab and edit the "Operator Model" field. The change takes effect immediately on the next operator call without restarting. The web UI respects the following priority chain:
+
+1. Runtime config override (editable in Config tab)
+2. Static config `operator.model`
+3. Falls back to `backend.default_model`
 
 ### Key feature flags (all disabled by default)
 

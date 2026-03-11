@@ -36,6 +36,18 @@ CREATE TABLE IF NOT EXISTS messages (
     FOREIGN KEY (conversation_id) REFERENCES conversations(id)
 );
 
+CREATE TABLE IF NOT EXISTS operator_runs (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    query TEXT NOT NULL,
+    history TEXT NOT NULL,          -- JSON array of past messages
+    model TEXT NOT NULL,
+    status TEXT DEFAULT 'running',  -- running, completed, error
+    result TEXT,                    -- final answer or error message
+    latency_ms INTEGER DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS harness_runs (
     id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL,
@@ -55,13 +67,15 @@ CREATE TABLE IF NOT EXISTS harness_runs (
 -- conversation_id: fetching all messages in a conversation (very frequent)
 -- timestamp: recent conversations list, date-range queries for metrics
 -- role: filtering assistant messages for latency/cost stats
--- harness created_at: sorting runs list by recency
+-- harness/operator created_at: sorting runs list by recency
 CREATE INDEX IF NOT EXISTS idx_messages_conversation
     ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp
     ON messages(timestamp);
 CREATE INDEX IF NOT EXISTS idx_messages_role
     ON messages(role);
+CREATE INDEX IF NOT EXISTS idx_operator_runs_created
+    ON operator_runs(created_at);
 CREATE INDEX IF NOT EXISTS idx_harness_runs_created
     ON harness_runs(created_at);
 """
@@ -544,5 +558,78 @@ class SQLiteStore:
                    LIMIT ?""",
                 (limit,),
             ).fetchall()
-        
+
         return [dict(r) for r in rows]
+
+    def store_operator_run(self, run_id: str, query: str, history: list,
+                          model: str, status: str = "running",
+                          result: str = None, latency_ms: int = 0) -> None:
+        """Store an operator run."""
+        import time
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO operator_runs
+                   (id, created_at, query, history, model, status, result, latency_ms, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    run_id,
+                    now,
+                    query,
+                    json.dumps(history),
+                    model,
+                    status,
+                    result,
+                    latency_ms,
+                    now,
+                ),
+            )
+        logger.debug("Stored operator run %s (query=%s, status=%s)", run_id, query[:50], status)
+
+    def get_operator_run(self, run_id: str) -> dict | None:
+        """Retrieve a stored operator run by ID."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM operator_runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()
+
+        if not row:
+            return None
+
+        run = dict(row)
+        run["history"] = json.loads(run["history"])
+        return run
+
+    def list_operator_runs(self, limit: int = 50) -> list[dict]:
+        """List recent operator runs."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT id, created_at, query, model, status, latency_ms, updated_at
+                   FROM operator_runs
+                   ORDER BY created_at DESC
+                   LIMIT ?""",
+                (limit,),
+            ).fetchall()
+
+        return [dict(r) for r in rows]
+
+    def update_operator_run_status(self, run_id: str, status: str, result: str = None,
+                                   latency_ms: int = 0) -> None:
+        """Update status of an operator run after completion."""
+        import time
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        with self._connect() as conn:
+            conn.execute(
+                """UPDATE operator_runs
+                   SET status = ?, result = ?, latency_ms = ?, updated_at = ?
+                   WHERE id = ?""",
+                (status, result, latency_ms, now, run_id),
+            )
+        logger.debug("Updated operator run %s (status=%s)", run_id, status)

@@ -1448,6 +1448,9 @@
         </select>
       </span>
       <span class="toolbar-spacer"></span>
+      <span id="op-bg-indicator" style="font-size:11px;color:var(--fg-dim);padding:0 8px;display:none;align-items:center" title="Background operator run in progress">
+        ⟳ <span id="op-bg-status">running</span>
+      </span>
       <button id="op-notes-toggle" onclick="toggleOpNotes()" title="Persistent operator notes">📝 Notes</button>
       <button onclick="opClear()">✕ Clear</button>
     </div>
@@ -1930,8 +1933,17 @@ function switchTab(name) {
   if (name === 'tap')       loadTap();
   if (name === 'config')    loadConfig();
   if (name === 'chat')      { initChatPanes(); loadModels(); }
-  if (name === 'operator')  { loadOpTargets(); }
+  if (name === 'operator')  {
+    loadOpTargets();
+    // Hide background indicator when returning to operator tab
+    hideOpBgIndicator();
+  }
   if (name === 'harness')   { loadModelsForPanes(); setHarnessMode(harnessMode); }
+
+  // Show background operator indicator if leaving operator tab while a run is in progress
+  if (name !== 'operator' && _lastOpRunId) {
+    showOpBgIndicator();
+  }
 }
 
 document.addEventListener('keydown', e => {
@@ -3819,6 +3831,26 @@ function loadOpTargets() {
 
 // Operator conversation history — maintained across messages, cleared with Clear button
 let _opHistory = [];
+let _lastOpRunId = null;
+
+// Load history from localStorage on page load
+function loadOpHistory() {
+  try {
+    const saved = localStorage.getItem('_opHistory');
+    if (saved) _opHistory = JSON.parse(saved);
+  } catch(e) {
+    // silently fail
+  }
+}
+
+// Save history to localStorage after each run
+function saveOpHistory() {
+  try {
+    localStorage.setItem('_opHistory', JSON.stringify(_opHistory));
+  } catch(e) {
+    // silently fail (quota exceeded, etc)
+  }
+}
 
 async function runOp() {
   const input = document.getElementById('op-input');
@@ -3881,6 +3913,14 @@ async function runOp() {
           let evt;
           try { evt = JSON.parse(line.slice(6)); } catch { continue; }
 
+          // Capture run_id from the start event
+          if (evt.type === 'start') {
+            _lastOpRunId = evt.run_id;
+            localStorage.setItem('_lastOpRunId', _lastOpRunId);
+            // Don't display start event to user
+            continue;
+          }
+
           if (evt.type === 'turn_start') {
             streamEl.insertAdjacentHTML('beforeend',
               `<div class="op-turn-sep">── Turn ${evt.turn} / ${evt.total} ──</div>`);
@@ -3931,6 +3971,7 @@ async function runOp() {
     _opHistory.push({role: 'assistant', content: finalAnswer});
     // Cap at 20 messages (10 turns) to stay within context limits
     if (_opHistory.length > 20) _opHistory = _opHistory.slice(-20);
+    saveOpHistory();
   }
 
   btn.disabled = false;
@@ -3941,6 +3982,9 @@ async function runOp() {
 function clearOp() {
   document.getElementById('op-log').innerHTML = '';
   _opHistory = [];
+  localStorage.removeItem('_opHistory');
+  localStorage.removeItem('_lastOpRunId');
+  _lastOpRunId = null;
 }
 
 // ── Operator notes ────────────────────────────────────────────────────────────
@@ -3962,6 +4006,49 @@ async function loadOpNotes() {
     if (ta) ta.value = d.content || '';
   } catch(e) {
     // silently fail — notes may not exist yet
+  }
+}
+
+// Show background run indicator when navigating away
+function showOpBgIndicator() {
+  const ind = document.getElementById('op-bg-indicator');
+  if (ind && _lastOpRunId) {
+    ind.style.display = 'flex';
+  }
+}
+
+function hideOpBgIndicator() {
+  const ind = document.getElementById('op-bg-indicator');
+  if (ind) ind.style.display = 'none';
+}
+
+// Retrieve a background operator run result
+async function retrieveOpRun(runId) {
+  try {
+    const run = await api(`/api/v1/operator/${runId}`);
+    if (!run) {
+      alert(`Run ${runId} not found`);
+      return;
+    }
+    // Restore history and result
+    _opHistory = run.history || [];
+    saveOpHistory();
+    // Display result
+    const log = document.getElementById('op-log');
+    if (log) {
+      log.insertAdjacentHTML('beforeend', `
+        <div class="op-sep"></div>
+        <div class="op-info">ℹ Retrieved background run ${runId.slice(0, 4)}…</div>
+        <div class="op-answer">${esc(run.result || '(no result)')}</div>
+        <div class="op-sep"></div>
+      `);
+      log.scrollTop = log.scrollHeight;
+    }
+    hideOpBgIndicator();
+    _lastOpRunId = null;
+    localStorage.removeItem('_lastOpRunId');
+  } catch(e) {
+    alert(`Failed to retrieve run: ${e.message}`);
   }
 }
 
@@ -6544,6 +6631,7 @@ async function deleteWorkspaceOut(filename) {
 
 loadDashboard();
 loadModels();
+loadOpHistory();  // Restore operator history from previous sessions
 
 // Restore tap filters from localStorage
 try {
