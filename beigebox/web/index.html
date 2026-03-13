@@ -427,6 +427,8 @@
   .op-query       { color: var(--cyan);    margin-bottom: 4px; }
   .op-answer      { color: var(--fg);      white-space: pre-wrap; word-break: break-word; margin-bottom: 12px; }
   .op-error       { color: var(--red);     margin-bottom: 12px; }
+  .op-score       { color: var(--lavender); font-size: 11px; margin: 6px 0 12px; opacity: 0.85; }
+  .op-score-flags { color: var(--yellow); }
   .op-info        { color: var(--blue);    font-size: 11px; margin: 4px 0; font-style: italic; }
   .op-pending     { color: var(--yellow);  font-style: italic; }
   .op-sep         { border-top: 1px solid var(--bg-border); margin: 8px 0; }
@@ -4043,6 +4045,10 @@ async function runOp() {
             streamEl.insertAdjacentHTML('beforeend',
               `<div class="op-answer">${esc(evt.content)}</div>`);
             speakText(evt.content);
+          } else if (evt.type === 'run_score') {
+            const flags = evt.flags && evt.flags.length ? ` <span class="op-score-flags">[${evt.flags.join(', ')}]</span>` : '';
+            streamEl.insertAdjacentHTML('beforeend',
+              `<div class="op-score">Score <strong>${evt.score}</strong>/10 &nbsp;·&nbsp; Flow ${evt.flow} · Eff ${evt.efficiency} · Quality ${evt.quality} · Intent ${evt.intent} &nbsp;·&nbsp; ${evt.turns_used}t/${evt.tool_calls}calls${flags}</div>`);
           } else if (evt.type === 'error') {
             streamEl.insertAdjacentHTML('beforeend',
               `<div class="op-error">✗ ${esc(evt.message)}</div>`);

@@ -92,6 +92,8 @@ MIGRATIONS = [
     "ALTER TABLE messages ADD COLUMN custom_field_2 TEXT DEFAULT NULL",
     # v0.7 — TTFT persistence
     "ALTER TABLE messages ADD COLUMN ttft_ms REAL DEFAULT NULL",
+    # v0.8 — trajectory evaluation scores for operator runs
+    "ALTER TABLE operator_runs ADD COLUMN score_json TEXT DEFAULT NULL",
 ]
 
 
@@ -633,3 +635,14 @@ class SQLiteStore:
                 (status, result, latency_ms, now, run_id),
             )
         logger.debug("Updated operator run %s (status=%s)", run_id, status)
+
+    def store_run_score(self, run_id: str, score_dict: dict) -> None:
+        """Persist trajectory score JSON for an operator run."""
+        import json as _json
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE operator_runs SET score_json = ? WHERE id = ?",
+                (_json.dumps(score_dict), run_id),
+            )
+        logger.debug("Stored trajectory score for run %s (score=%.1f)", run_id, score_dict.get("score", 0))
+

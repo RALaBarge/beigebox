@@ -2413,12 +2413,14 @@ async def api_operator_stream(request: Request):
 
             had_tool_call = False
             final_answer = None
+            _traj_events: list[dict] = []
 
             async for event in op.run_stream(question, initial_history):
                 if event.get("type") == "tool_call":
                     had_tool_call = True
                 elif event.get("type") == "answer":
                     final_answer = event.get("content", "")
+                _traj_events.append(event)
 
                 if _wire:
                     etype = event.get("type")
@@ -2445,6 +2447,16 @@ async def api_operator_stream(request: Request):
             if not had_tool_call:
                 yield f"data: {_json.dumps({'type': 'info', 'message': 'No tools used — operator answered directly'})}\n\n"
 
+            # Trajectory evaluation — score the run and emit as SSE
+            try:
+                from beigebox.trajectory import score_run as _score_run
+                _score = _score_run(question, _traj_events, 1, final_answer or "")
+                yield f"data: {_json.dumps({'type': 'run_score', **_score})}\n\n"
+            except Exception as score_err:
+                logger.debug("Trajectory scoring failed: %s", score_err)
+                _score = None
+
+            # Store successful run to database
             _latency_ms = int((_time.time() - _start_time) * 1000)
             try:
                 if sqlite_store:
@@ -2457,6 +2469,8 @@ async def api_operator_stream(request: Request):
                         result=final_answer or "",
                         latency_ms=_latency_ms,
                     )
+                    if _score:
+                        sqlite_store.store_run_score(_run_id, _score)
             except Exception as store_err:
                 logger.warning("Failed to store operator run: %s", store_err)
 
