@@ -220,6 +220,10 @@ operator:
     enabled: false       # Compress previous-turn answers before feeding to history
     model: ""            # Defaults to operator model
     timeout: 8           # Seconds before pruner gives up and returns original
+  reflection:
+    enabled: false       # Async fire-and-forget reflection; insight injected next turn
+    model: ""            # Defaults to operator model
+    timeout: 20          # Seconds before reflection task is abandoned
   pre_hook:
     enabled: false       # When true, operator enriches every chat message before it reaches the LLM
     model: "qwen3:4b"    # Model to use for enrichment (defaults to operator.model if blank)

@@ -2187,6 +2187,8 @@ async def api_harness_autonomous(request: Request):
 
             from beigebox.agents.pruner import ContextPruner as _ContextPruner
             _pruner = _ContextPruner.from_config()
+            from beigebox.agents.reflector import Reflector as _Reflector
+            _reflector = _Reflector.from_config()
 
             _ws_path_cfg = cfg2.get("workspace", {}).get("path", "./workspace")
             _workspace_out = (Path(__file__).parent.parent / _ws_path_cfg / "out").resolve()
@@ -2207,6 +2209,11 @@ async def api_harness_autonomous(request: Request):
                 if turn_n > 0:
                     remaining = max_turns - turn_n
                     yield f"data: {_json.dumps({'type': 'turn_start', 'turn': turn_n + 1, 'total': max_turns})}\n\n"
+
+                    # Inject reflector insight if ready from previous turn
+                    _insight = _reflector.consume_insight()
+                    if _insight and final_answer:
+                        final_answer += f"\n\n[Reflection] {_insight}"
 
                     # State reducer: harness reads plan.md so the model doesn't have to replay history
                     state = _reduce_plan_state(_workspace_out)
@@ -2301,6 +2308,10 @@ async def api_harness_autonomous(request: Request):
                     yield f"data: {_json.dumps(event)}\n\n"
 
                 final_answer = turn_answer
+
+                # Fire-and-forget reflection on completed turn
+                if _reflector.enabled and turn_answer:
+                    await _reflector.reflect_async(turn_answer, cur_question, f"turn {turn_n + 1}")
 
                 # Context pruner: compress turn answer to reduce inter-turn token bloat
                 if _pruner.enabled and turn_answer and turn_n + 1 < max_turns:
