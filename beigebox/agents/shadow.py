@@ -83,8 +83,7 @@ class ShadowAgent:
         Returns answer string or None on failure/timeout.
         """
         try:
-            from beigebox.storage.vector_store import VectorStore
-            from beigebox.agents.operator import Operator
+            from beigebox.agents.operator import Operator  # noqa: PLC0415
 
             shadow_question = _SHADOW_PREFIX + question
 

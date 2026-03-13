@@ -40,10 +40,14 @@ def test_diverges_empty_strings():
     assert not ShadowAgent.diverges("", "")
 
 def test_diverges_threshold():
-    # With threshold=0.0 → never diverges (similarity always >= 0)
-    assert not ShadowAgent.diverges("hello world", "goodbye world", threshold=0.0)
-    # With threshold=1.0 → always diverges (similarity < 0 is impossible, but 1.0 means always True if any diff)
-    assert ShadowAgent.diverges("hello world", "goodbye world", threshold=0.99)
+    # diverges = similarity < (1 - threshold)
+    # threshold=1.0 → check similarity < 0.0, impossible → never diverges
+    assert not ShadowAgent.diverges("hello world", "goodbye world", threshold=1.0)
+    # "hello world" vs "goodbye world": Jaccard = 1/3 ≈ 0.33
+    # threshold=0.5 → check 0.33 < 0.5 → True
+    assert ShadowAgent.diverges("hello world", "goodbye world", threshold=0.5)
+    # threshold=0.0 → check 0.33 < 1.0 → True (any non-identical text diverges)
+    assert ShadowAgent.diverges("hello world", "goodbye world", threshold=0.0)
 
 
 # ── from_config disabled ──────────────────────────────────────────────────────
@@ -83,7 +87,7 @@ def test_from_config_enabled(monkeypatch):
 @pytest.mark.asyncio
 async def test_run_shadow_returns_none_on_error():
     s = ShadowAgent("model", "http://localhost:11434", timeout=1)
-    with patch("beigebox.agents.shadow.Operator") as MockOp:
+    with patch("beigebox.agents.operator.Operator") as MockOp:
         MockOp.side_effect = Exception("import error")
         result = await s.run_shadow("build something", None)
     assert result is None
@@ -97,7 +101,7 @@ async def test_run_shadow_timeout():
         await asyncio.sleep(10)
         return "answer"
 
-    with patch("beigebox.agents.shadow.Operator") as MockOp:
+    with patch("beigebox.agents.operator.Operator") as MockOp:
         mock_op = MagicMock()
         mock_op.run.side_effect = lambda q, history: __import__("time").sleep(10) or "ans"
         MockOp.return_value = mock_op
@@ -145,7 +149,7 @@ async def test_run_shadow_passes_max_tool_calls():
     s = ShadowAgent("model", "http://localhost:11434", timeout=5, max_tool_calls=2)
     captured = {}
 
-    with patch("beigebox.agents.shadow.Operator") as MockOp:
+    with patch("beigebox.agents.operator.Operator") as MockOp:
         mock_op = MagicMock()
         mock_op.run.return_value = "shadow result"
         MockOp.return_value = mock_op
