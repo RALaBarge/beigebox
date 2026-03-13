@@ -2189,6 +2189,9 @@ async def api_harness_autonomous(request: Request):
             _pruner = _ContextPruner.from_config()
             from beigebox.agents.reflector import Reflector as _Reflector
             _reflector = _Reflector.from_config()
+            from beigebox.agents.shadow import ShadowAgent as _ShadowAgent
+            _shadow = _ShadowAgent.from_config()
+            _shadow_task = None
 
             _ws_path_cfg = cfg2.get("workspace", {}).get("path", "./workspace")
             _workspace_out = (Path(__file__).parent.parent / _ws_path_cfg / "out").resolve()
@@ -2277,6 +2280,10 @@ async def api_harness_autonomous(request: Request):
                             f"When all work is done, end your answer with ##DONE##."
                         )
 
+                # Fire shadow agent on turn 0 (fire-and-forget, collected after stream)
+                if turn_n == 0 and _shadow.enabled:
+                    _shadow_task = asyncio.ensure_future(_shadow.run_shadow(question, vs))
+
                 op = Operator(vector_store=vs, model_override=model_override, autonomous=True)
                 _op_model = op._model
 
@@ -2308,6 +2315,14 @@ async def api_harness_autonomous(request: Request):
                     yield f"data: {_json.dumps(event)}\n\n"
 
                 final_answer = turn_answer
+
+                # Collect shadow result on turn 0 and emit if it diverges
+                if turn_n == 0 and _shadow.enabled and _shadow_task is not None:
+                    _shadow_answer = await _shadow.collect(_shadow_task, wait=2.0)
+                    if _shadow_answer and _ShadowAgent.diverges(
+                        final_answer or "", _shadow_answer, _shadow._divergence_threshold
+                    ):
+                        yield f"data: {_json.dumps({'type': 'alternative_plan', 'content': _shadow_answer})}\n\n"
 
                 # Fire-and-forget reflection on completed turn
                 if _reflector.enabled and turn_answer:
