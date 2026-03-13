@@ -148,6 +148,10 @@ class DecisionAgent:
         self.wasm_modules = wasm_modules or {}
         self.enabled = bool(model and backend_url)
 
+        # Fallback counters — monotonically increasing, never reset
+        self._decisions_total: int = 0
+        self._fallbacks_total: int = 0
+
         # Pre-build the system prompt once at startup — routes and tools
         # don't change at runtime so there's no need to format this on every
         # incoming request. Avoids repeated string formatting on the hot path.
@@ -242,6 +246,7 @@ class DecisionAgent:
         if not self.enabled:
             return Decision(model=self.default_model, fallback=True)
 
+        self._decisions_total += 1
         effective_timeout = timeout if timeout is not None else self.timeout
         try:
             async with httpx.AsyncClient(timeout=effective_timeout) as client:
@@ -279,37 +284,56 @@ class DecisionAgent:
         # request continues with the default model, never surfaces as an error
         # to the client.
         except httpx.TimeoutException:
+            self._fallbacks_total += 1
             logger.warning("Decision LLM timed out after %ds, using default", effective_timeout)
             return Decision(model=self.default_model, fallback=True)
         except json.JSONDecodeError as e:
+            self._fallbacks_total += 1
             logger.warning("Decision LLM returned invalid JSON: %s", e)
             return Decision(model=self.default_model, fallback=True)
         except Exception as e:
+            self._fallbacks_total += 1
             logger.warning("Decision LLM failed: %s", e)
             return Decision(model=self.default_model, fallback=True)
 
-    async def preload(self):
+    def fallback_stats(self) -> dict:
+        """Return fallback rate metrics for observability."""
+        total = self._decisions_total
+        fallbacks = self._fallbacks_total
+        rate = (fallbacks / total) if total > 0 else 0.0
+        return {
+            "decisions_total": total,
+            "fallbacks_total": fallbacks,
+            "fallback_rate": round(rate, 4),
+        }
+
+    async def preload(self, retries: int = 5, base_delay: float = 5.0):
         """
         Preload the decision model into Ollama and pin it in memory.
-        Called at startup so the first decision doesn't have load latency.
+        Retries with exponential backoff — Ollama may still be loading the
+        model from disk when beigebox first starts.
         """
         if not self.enabled:
             return
 
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(
-                    f"{self.backend_url}/api/generate",
-                    json={
-                        "model": self.model,
-                        "prompt": "",
-                        # keep_alive: -1 pins the model in Ollama's VRAM indefinitely
-                        # (Ollama's sentinel for "never evict"). Appropriate here because
-                        # the decision model needs to respond within ~5s on every request.
-                        "keep_alive": -1,  # Pin in memory forever
-                    },
-                )
-                resp.raise_for_status()
+        import asyncio as _aio
+        for attempt in range(retries):
+            try:
+                async with httpx.AsyncClient(timeout=120) as client:
+                    resp = await client.post(
+                        f"{self.backend_url}/api/generate",
+                        json={"model": self.model, "prompt": "", "keep_alive": -1},
+                    )
+                    resp.raise_for_status()
                 logger.info("Decision model '%s' preloaded and pinned", self.model)
-        except Exception as e:
-            logger.warning("Failed to preload decision model: %s", e)
+                return
+            except Exception as e:
+                delay = base_delay * (2 ** attempt)
+                if attempt < retries - 1:
+                    logger.warning(
+                        "Decision preload attempt %d/%d failed (%s) — retrying in %.0fs",
+                        attempt + 1, retries, e, delay,
+                    )
+                    await _aio.sleep(delay)
+                else:
+                    logger.warning("Failed to preload decision model after %d attempts: %s", retries, e)

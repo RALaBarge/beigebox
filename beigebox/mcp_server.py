@@ -31,12 +31,32 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, Callable, Awaitable
 
 logger = logging.getLogger(__name__)
 
 MCP_PROTOCOL_VERSION = "2025-03-26"
-_SERVER_INFO = {"name": "beigebox", "version": "1.0.1"}
+from beigebox import __version__ as _BB_VERSION
+_SERVER_INFO = {"name": "beigebox", "version": _BB_VERSION}
+
+_OPERATOR_RUN_SCHEMA = {
+    "name": "operator/run",
+    "description": (
+        "Run BeigeBox Operator — a JSON-based ReAct agent with access to tools "
+        "(web_search, calculator, memory, workspace_file, etc.). "
+        "Submit a question or task; the operator reasons step by step and returns a final answer."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "input": {
+                "type": "string",
+                "description": "The question or task for the operator to complete.",
+            }
+        },
+        "required": ["input"],
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -89,12 +109,21 @@ class McpServer:
     """
     Stateless MCP request handler. Thread-safe — shares the tool registry
     with the rest of BeigeBox but never mutates it.
+
+    operator_factory: optional async callable (question: str) -> str
+        When provided, adds operator/run as an MCP tool that external clients
+        (Claude Desktop, AMF mesh workers, etc.) can invoke.
     """
 
-    def __init__(self, tool_registry):
+    def __init__(
+        self,
+        tool_registry,
+        operator_factory: Callable[[str], Awaitable[str]] | None = None,
+    ):
         self._registry = tool_registry
+        self._operator_factory = operator_factory
 
-    def handle(self, body: dict) -> dict | None:
+    async def handle(self, body: dict) -> dict | None:
         """
         Dispatch a JSON-RPC request.
 
@@ -122,7 +151,7 @@ class McpServer:
             if method == "tools/list":
                 return _ok(id_, self._tools_list())
             if method == "tools/call":
-                return _ok(id_, self._tools_call(params))
+                return _ok(id_, await self._tools_call(params))
             return _err(id_, -32601, f"Method not found: {method}")
         except ValueError as e:
             return _err(id_, -32602, str(e))
@@ -154,10 +183,12 @@ class McpServer:
 
     def _tools_list(self) -> dict:
         tools = [_tool_schema(name, tool) for name, tool in self._registry.tools.items()]
+        if self._operator_factory is not None:
+            tools.append(_OPERATOR_RUN_SCHEMA)
         logger.debug("MCP tools/list: %d tools", len(tools))
         return {"tools": tools}
 
-    def _tools_call(self, params: dict) -> dict:
+    async def _tools_call(self, params: dict) -> dict:
         name: str = params.get("name", "").strip()
         arguments: dict = params.get("arguments") or {}
 
@@ -172,10 +203,36 @@ class McpServer:
         else:
             input_text = json.dumps(arguments)
 
+        _MCP_INPUT_LIMIT = 1_000_000  # 1 MB
+        if len(input_text) > _MCP_INPUT_LIMIT:
+            raise ValueError(f"Input too large ({len(input_text)} chars, limit {_MCP_INPUT_LIMIT})")
+
         logger.info("MCP tools/call: %s (input=%r)", name, input_text[:120])
+
+        # operator/run — dispatches to the BeigeBox Operator agent
+        if name == "operator/run":
+            if self._operator_factory is None:
+                return {
+                    "content": [{"type": "text", "text": "operator/run is not available (operator disabled or not configured)."}],
+                    "isError": True,
+                }
+            try:
+                answer = await self._operator_factory(input_text)
+                return {
+                    "content": [{"type": "text", "text": answer or "(no result)"}],
+                    "isError": False,
+                }
+            except Exception as e:
+                logger.error("MCP operator/run error: %s", e)
+                return {
+                    "content": [{"type": "text", "text": f"Operator error: {e}"}],
+                    "isError": True,
+                }
 
         if name not in self._registry.tools:
             known = ", ".join(self._registry.tools.keys()) or "(none)"
+            if self._operator_factory is not None:
+                known += ", operator/run"
             return {
                 "content": [{"type": "text", "text": f"Tool '{name}' not found. Available: {known}"}],
                 "isError": True,

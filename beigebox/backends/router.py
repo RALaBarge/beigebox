@@ -427,24 +427,30 @@ class MultiBackendRouter:
     async def list_all_models(self) -> dict:
         """
         Aggregate models from all backends into a unified /v1/models response.
-        Deduplicates by model id.
+        Deduplicates by model id. Fetches all backends in parallel.
         """
-        seen: set[str] = set()
-        all_models: list[dict] = []
+        import asyncio as _asyncio
 
-        for backend in self.backends:
+        async def _fetch(backend):
             try:
-                models = await backend.list_models()
-                for model_id in models:
-                    if model_id not in seen:
-                        seen.add(model_id)
-                        all_models.append({
-                            "id": model_id,
-                            "object": "model",
-                            "owned_by": backend.name,
-                        })
+                return backend.name, await backend.list_models()
             except Exception as e:
                 logger.warning("Failed to list models from '%s': %s", backend.name, e)
+                return backend.name, []
+
+        results = await _asyncio.gather(*[_fetch(b) for b in self.backends])
+
+        seen: set[str] = set()
+        all_models: list[dict] = []
+        for backend_name, models in results:
+            for model_id in models:
+                if model_id not in seen:
+                    seen.add(model_id)
+                    all_models.append({
+                        "id": model_id,
+                        "object": "model",
+                        "owned_by": backend_name,
+                    })
 
         return {
             "object": "list",

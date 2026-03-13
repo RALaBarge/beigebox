@@ -123,6 +123,8 @@ _config: dict | None = None
 # Runtime config hot-reload state
 _runtime_config: dict = {}
 _runtime_mtime: float = 0.0
+_runtime_mtime_last_checked: float = 0.0
+_RUNTIME_MTIME_CHECK_INTERVAL: float = 1.0  # stat() syscall at most once per second
 
 
 def _resolve_env_vars(value: str) -> str:
@@ -180,7 +182,13 @@ def get_runtime_config() -> dict:
     Return runtime_config.yaml overrides, hot-reloading if the file changed.
     Returns the contents of the `runtime` key, or {} if file is missing/empty.
     """
-    global _runtime_config, _runtime_mtime
+    global _runtime_config, _runtime_mtime, _runtime_mtime_last_checked
+
+    import time as _time
+    now = _time.monotonic()
+    if now - _runtime_mtime_last_checked < _RUNTIME_MTIME_CHECK_INTERVAL:
+        return _runtime_config
+    _runtime_mtime_last_checked = now
 
     if not _RUNTIME_CONFIG_PATH.exists():
         return {}

@@ -106,12 +106,13 @@ Three complementary cache layers, all in-process:
 
 ### Observability
 
-- **Wiretap** — structured JSONL log of every request, response, routing decision, tool call, WASM transform, timing breakdown, and all passthrough routes; operator tool calls and council member responses are also logged (operator and council call Ollama directly — wiretap coverage is added at the endpoint level in `main.py`); filterable by role (`user`, `assistant`, `system`, `decision`, `tool`, `proxy`, `wasm`) and direction in the Tap tab
+- **Wiretap** — structured JSONL log of every request, response, routing decision, tool call, WASM transform, timing breakdown, and all passthrough routes; operator tool calls and council member responses are also logged (operator and council call Ollama directly — wiretap coverage is added at the endpoint level in `main.py`); filterable by role (`user`, `assistant`, `system`, `decision`, `tool`, `proxy`, `wasm`) and direction in the Tap tab; click any `conv:` ID to highlight all entries from that conversation
 - **TTFT tracking** — time to first token captured on every streaming response, stored in SQLite
 - **Latency percentiles** — P50/P90/P95/P99 per model surfaced in the Dashboard performance table and latency chart
 - **Tokens/sec** — uses `tokens / (latency - TTFT)` for generation throughput (excludes prompt processing time)
 - **Cost tracking** — per-request, per-model, per-day spend for API backends (OpenRouter cost extraction built in)
 - **Backend health** — rolling P95 + degraded status per backend in `/api/v1/backends` and Dashboard
+- **Decision LLM health** — `GET /beigebox/stats` exposes `decisions_total`, `fallbacks_total`, and `fallback_rate` so you can detect when the routing LLM is silently failing
 
 ### Orchestration
 
@@ -189,7 +190,7 @@ BeigeBox includes a built-in single-file web interface at `http://localhost:1337
 | **Dashboard** | Storage stats, model performance charts (P50/P90/P99, TTFT), cost breakdown, backend health with rolling P95 |
 | **Chat** | Multi-pane streaming chat — fan out to N models simultaneously, per-pane settings |
 | **Conversations** | Semantic search, replay, fork, export |
-| **Tap** | Live wiretap stream with role/direction filters |
+| **Tap** | Live wiretap stream with role/direction filters; click any conv ID to highlight that conversation across all visible entries |
 | **Operator** | Interactive agent with tool execution |
 | **Harness** | Parallel model comparison + orchestrated goal-driven mode + ensemble voting + group chat |
 | **Config** | Full config editor with collapsible sections, hot-reload — every setting, feature flag, and generation parameter |

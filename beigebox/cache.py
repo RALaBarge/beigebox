@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -44,7 +45,7 @@ class EmbeddingCache:
     """
 
     def __init__(self, max_size: int = 1000, ttl: float = 300.0):
-        self._store: dict[str, tuple[np.ndarray, float]] = {}
+        self._store: OrderedDict[str, tuple[np.ndarray, float]] = OrderedDict()
         self._max_size = max_size
         self._ttl = ttl
 
@@ -56,13 +57,15 @@ class EmbeddingCache:
         if time.time() - ts > self._ttl:
             del self._store[text]
             return None
+        self._store.move_to_end(text)
         return vec
 
     def put(self, text: str, vec: np.ndarray) -> None:
-        if len(self._store) >= self._max_size:
-            oldest = min(self._store, key=lambda k: self._store[k][1])
-            del self._store[oldest]
+        if text in self._store:
+            self._store.move_to_end(text)
         self._store[text] = (vec, time.time())
+        if len(self._store) > self._max_size:
+            self._store.popitem(last=False)
 
     def size(self) -> int:
         return len(self._store)
@@ -82,7 +85,7 @@ class ToolResultCache:
     """
 
     def __init__(self, ttl: float = 300.0, max_size: int = 200):
-        self._store: dict[str, tuple[str, float]] = {}
+        self._store: OrderedDict[str, tuple[str, float]] = OrderedDict()
         self._ttl = ttl
         self._max_size = max_size
         self._hits = 0
@@ -107,10 +110,12 @@ class ToolResultCache:
         return result
 
     def put(self, tool: str, query: str, result: str) -> None:
-        if len(self._store) >= self._max_size:
-            oldest = min(self._store, key=lambda k: self._store[k][1])
-            del self._store[oldest]
-        self._store[self._key(tool, query)] = (result, time.time())
+        k = self._key(tool, query)
+        if k in self._store:
+            self._store.move_to_end(k)
+        self._store[k] = (result, time.time())
+        if len(self._store) > self._max_size:
+            self._store.popitem(last=False)
 
     def stats(self) -> dict:
         total = self._hits + self._misses
@@ -175,6 +180,8 @@ class SemanticCache:
         self._hits = 0
         self._misses = 0
         self._embedding_cache = EmbeddingCache()
+        self._last_eviction: float = 0.0
+        self._eviction_interval: float = 60.0
 
         if self.enabled:
             logger.info(
@@ -212,8 +219,17 @@ class SemanticCache:
         return None
 
     def _evict_expired(self) -> None:
-        cutoff = time.time() - self.ttl
-        self._entries = [e for e in self._entries if e.ts >= cutoff]
+        now = time.time()
+        if now - self._last_eviction < self._eviction_interval:
+            return
+        cutoff = now - self.ttl
+        write_idx = 0
+        for entry in self._entries:
+            if entry.ts >= cutoff:
+                self._entries[write_idx] = entry
+                write_idx += 1
+        del self._entries[write_idx:]
+        self._last_eviction = now
 
     # ------------------------------------------------------------------
     # Public API

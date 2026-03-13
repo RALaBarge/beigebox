@@ -32,6 +32,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
+from beigebox import __version__ as _BB_VERSION
 from beigebox.config import (
     get_config,
     get_runtime_config,
@@ -95,26 +96,43 @@ def _setup_logging(cfg: dict):
     )
 
 
+async def _preload_model(url: str, model: str, label: str,
+                         retries: int = 5, base_delay: float = 5.0):
+    """
+    Pin a model in Ollama's memory at startup.
+    Retries with exponential backoff — Ollama may still be loading the model
+    from disk when beigebox first starts, so one attempt is never enough.
+    """
+    _log = logging.getLogger(__name__)
+    for attempt in range(retries):
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                resp = await client.post(
+                    f"{url}/api/generate",
+                    json={"model": model, "prompt": "", "keep_alive": -1},
+                )
+                resp.raise_for_status()
+            _log.info("%s model '%s' preloaded and pinned", label, model)
+            return
+        except Exception as e:
+            delay = base_delay * (2 ** attempt)
+            if attempt < retries - 1:
+                _log.warning(
+                    "%s preload attempt %d/%d failed (%s) — retrying in %.0fs",
+                    label, attempt + 1, retries, e, delay,
+                )
+                await asyncio.sleep(delay)
+            else:
+                _log.warning("%s preload failed after %d attempts: %s", label, retries, e)
+
+
 async def _preload_embedding_model(cfg: dict):
     """Pin the embedding model in Ollama's memory at startup."""
     embed_cfg = cfg.get("embedding", {})
     model = embed_cfg.get("model", "")
     url = embed_cfg.get("backend_url", cfg["backend"]["url"]).rstrip("/")
-
-    if not model:
-        return
-
-    logger = logging.getLogger(__name__)
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"{url}/api/generate",
-                json={"model": model, "prompt": "", "keep_alive": -1},
-            )
-            resp.raise_for_status()
-            logger.info("Embedding model '%s' preloaded and pinned", model)
-    except Exception as e:
-        logger.warning("Failed to preload embedding model: %s", e)
+    if model:
+        await _preload_model(url, model, "Embedding")
 
 
 @asynccontextmanager
@@ -154,9 +172,11 @@ async def lifespan(app: FastAPI):
 
     # Hooks
     hooks_cfg = cfg.get("hooks", {})
+    _hooks_enabled = hooks_cfg.get("enabled", True) if isinstance(hooks_cfg, dict) else True
+    _hook_list = hooks_cfg.get("hooks", []) if isinstance(hooks_cfg, dict) else []
     hook_manager = HookManager(
-        hooks_dir=hooks_cfg.get("directory", "./hooks"),
-        hook_configs=hooks_cfg.get("hooks", []),
+        hooks_dir=hooks_cfg.get("directory", "./hooks") if _hooks_enabled else None,
+        hook_configs=_hook_list if isinstance(_hook_list, list) else [],
     )
 
     # Embedding classifier (fast path for routing)
@@ -186,9 +206,34 @@ async def lifespan(app: FastAPI):
     # Auth registry (multi-key, agentauth-backed)
     auth_registry = MultiKeyAuthRegistry(cfg.get("auth", {}))
 
-    # MCP server
-    mcp_server = McpServer(tool_registry)
-    logger.info("MCP server: enabled (POST /mcp)")
+    # MCP server — expose operator/run if operator is enabled
+    _op_enabled_for_mcp = cfg.get("operator", {}).get("enabled", False)
+    _op_mcp_factory = None
+    if _op_enabled_for_mcp:
+        async def _op_mcp_factory(question: str) -> str:
+            from beigebox.storage.vector_store import VectorStore as _VS
+            from beigebox.storage.backends import make_backend as _mk_b
+            from beigebox.agents.operator import Operator as _Op
+            _cfg2 = get_config()
+            try:
+                _sc = _cfg2["storage"]
+                _ec = _cfg2["embedding"]
+                _vs = _VS(
+                    embedding_model=_ec["model"],
+                    embedding_url=_ec.get("backend_url") or _cfg2["backend"]["url"],
+                    backend=_mk_b(_sc.get("vector_backend", "chromadb"), path=get_storage_paths(_cfg2)[1]),
+                )
+            except Exception:
+                _vs = None
+            _op = _Op(vector_store=_vs, blob_store=blob_store)
+            _loop = asyncio.get_event_loop()
+            return await _loop.run_in_executor(None, _op.run, question, None)
+
+    mcp_server = McpServer(tool_registry, operator_factory=_op_mcp_factory)
+    if _op_enabled_for_mcp:
+        logger.info("MCP server: enabled (POST /mcp) — operator/run tool exposed")
+    else:
+        logger.info("MCP server: enabled (POST /mcp)")
 
     # AMF mesh advertisement (mDNS + NATS heartbeat)
     amf_advertiser = AmfMeshAdvertiser(cfg, tool_names=tool_registry.list_tools())
@@ -226,10 +271,18 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Operator agent: disabled (set operator.enabled: true to activate)")
 
-    # Preload models in background
-    await _preload_embedding_model(cfg)
+    # Preload models — run concurrently in the background so startup is not blocked.
+    # Both use retry-with-backoff; Ollama may still be loading models from disk.
+    _preload_tasks = [asyncio.create_task(_preload_embedding_model(cfg))]
     if decision_agent:
-        await decision_agent.preload()
+        # Delay decision LLM preload by 30s — gives Ollama time to finish loading
+        # the primary chat model first so the two don't race for VRAM bandwidth.
+        async def _delayed_decision_preload():
+            await asyncio.sleep(30)
+            await decision_agent.preload()
+        _preload_tasks.append(asyncio.create_task(_delayed_decision_preload()))
+    # Fire-and-forget: server starts accepting requests immediately while
+    # models warm up. Tasks are not awaited here.
 
     # Auto-build centroids if they don't exist yet. Uses create_task (not
     # await) so the startup finishes immediately and the server begins
@@ -357,7 +410,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
 app = FastAPI(
     title="BeigeBox",
     description="Tap the line. Control the carrier.",
-    version="1.0.1",
+    version=_BB_VERSION,
     lifespan=lifespan,
 )
 
@@ -440,6 +493,7 @@ async def stats():
         "decision_llm": {
             "enabled": decision_agent.enabled if decision_agent else False,
             "model": decision_agent.model if decision_agent else "",
+            **(decision_agent.fallback_stats() if decision_agent else {}),
         },
     })
 
@@ -475,7 +529,7 @@ async def mcp_endpoint(request: Request):
             {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
             status_code=400,
         )
-    result = mcp_server.handle(body)
+    result = await mcp_server.handle(body)
     if result is None:
         # Notification — no response body
         from starlette.responses import Response as _Response
@@ -546,7 +600,7 @@ async def agent_card():
         "name": "beigebox",
         "description": "BeigeBox — OpenAI-compatible proxy with local LLM routing and MCP skill access",
         "url": endpoint,
-        "version": "1.0.1",
+        "version": _BB_VERSION,
         "capabilities": {"streaming": True, "pushNotifications": False},
         "skills": skills,
         "defaultInputModes": ["application/json"],
@@ -565,7 +619,7 @@ async def health():
     """Health check."""
     return JSONResponse({
         "status": "ok",
-        "version": "1.0.1",
+        "version": _BB_VERSION,
         "decision_llm": decision_agent.enabled if decision_agent else False,
     })
 
@@ -579,7 +633,7 @@ async def api_info():
     """System info — what features are available."""
     cfg = get_config()
     return JSONResponse({
-        "version": "1.0.1",
+        "version": _BB_VERSION,
         "name": "BeigeBox",
         "description": "Transparent Pythonic LLM Proxy",
         "server": {
@@ -588,7 +642,7 @@ async def api_info():
         },
         "backend": {
             "url": cfg["backend"].get("url", ""),
-            "default_model": cfg["backend"].get("default_model", ""),
+            "default_model": get_runtime_config().get("default_model") or cfg["backend"].get("default_model", ""),
         },
         "features": {
             "routing": True,
@@ -1960,6 +2014,90 @@ async def api_operator(request: Request):
         return JSONResponse({"error": str(e)}, status_code=400)
 
 
+def _reduce_plan_state(workspace_out: Path) -> dict:
+    """
+    Read plan.md from the operator workspace and extract structured run state.
+
+    Returns a dict:
+      found        – bool: plan.md exists and is parseable
+      objective    – str: first descriptive line of the plan
+      steps        – list[{num, name}]: numbered steps in order
+      completed    – set[int]: step numbers marked done in ## Progress
+      progress_lines – list[str]: raw lines from ## Progress section
+      next_step    – {num, name} | None: lowest-numbered incomplete step
+      all_done     – bool: every step is marked done
+    """
+    import re as _re
+
+    plan_path = workspace_out / "plan.md"
+    if not plan_path.exists():
+        return {"found": False}
+
+    try:
+        text = plan_path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return {"found": False}
+
+    # Split at ## Progress
+    progress_idx = text.find("## Progress")
+    plan_body = text[:progress_idx] if progress_idx >= 0 else text
+    progress_body = text[progress_idx:] if progress_idx >= 0 else ""
+
+    # Objective: first non-blank, non-heading line
+    objective = ""
+    for line in plan_body.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and not stripped.startswith("---"):
+            objective = stripped
+            break
+
+    # Numbered steps: "1. Step name" or "1) Step name"
+    steps = []
+    for m in _re.finditer(r'^(\d+)[.)]\s+(.+)$', plan_body, _re.MULTILINE):
+        steps.append({"num": int(m.group(1)), "name": m.group(2).strip()})
+    steps.sort(key=lambda s: s["num"])
+
+    # Progress lines (bullet items under ## Progress)
+    progress_lines = []
+    for line in progress_body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("-", "*", "+")):
+            progress_lines.append(stripped.lstrip("-*+ ").strip())
+
+    # Words that indicate a step is NOT yet done — skip these lines
+    _NOT_DONE = {"not started", "pending", "todo", "to do", "in progress",
+                 "tbd", "upcoming", "incomplete", "not done", "not complete"}
+
+    # Match completed progress lines to steps.
+    # A line only counts as "done" if it does NOT contain a "not done" marker
+    # and DOES mention the step by name or number.
+    completed: set[int] = set()
+    for step in steps:
+        for pline in progress_lines:
+            plow = pline.lower()
+            # Skip lines that explicitly say the step isn't done
+            if any(nd in plow for nd in _NOT_DONE):
+                continue
+            if (step["name"].lower() in plow
+                    or f"step {step['num']}" in plow
+                    or plow.startswith(f"{step['num']}.")):
+                completed.add(step["num"])
+                break
+
+    next_step = next((s for s in steps if s["num"] not in completed), None)
+    all_done = bool(steps) and next_step is None
+
+    return {
+        "found": True,
+        "objective": objective,
+        "steps": steps,
+        "completed": completed,
+        "progress_lines": progress_lines,
+        "next_step": next_step,
+        "all_done": all_done,
+    }
+
+
 @app.post("/api/v1/operator/stream")
 async def api_operator_stream(request: Request):
     """
@@ -2037,20 +2175,102 @@ async def api_operator_stream(request: Request):
                 # Use config or default to 1 (single-turn)
                 max_turns = auto_cfg.get("max_turns", 5) if auto_enabled else 1
 
-            cur_question = question
-            cur_history = list(history or [])
+            # Cap history to last 8 messages (4 exchanges) to prevent prompt bloat.
+            # The operator's ReAct loop is stateless per run — it doesn't benefit
+            # from deep conversation history.
+            _raw_history = list(history or [])
+            initial_history = _raw_history[-8:] if len(_raw_history) > 8 else _raw_history
             final_answer = None
+            _multi = max_turns > 1
+
+            # Resolve the workspace/out path so the harness can read plan.md
+            _ws_path_cfg = cfg2.get("workspace", {}).get("path", "./workspace")
+            _workspace_out = (Path(__file__).parent.parent / _ws_path_cfg / "out").resolve()
+
+            if _multi:
+                cur_question = (
+                    question + "\n\n"
+                    "[Multi-turn run] Start by writing a plan.md file to /workspace/out/ "
+                    "using the workspace_file tool. Include: the task summary, your numbered "
+                    "step-by-step plan (e.g. '1. Step name'), and a '## Progress' section "
+                    "you will update each turn. Then complete step 1."
+                )
+            else:
+                cur_question = question
 
             for turn_n in range(max_turns):
                 # Emit turn separator for turns after the first
                 if turn_n > 0:
+                    remaining = max_turns - turn_n
                     yield f"data: {_json.dumps({'type': 'turn_start', 'turn': turn_n + 1, 'total': max_turns})}\n\n"
-                    # Feed previous answer back as history context
-                    cur_history.append({'role': 'user', 'content': cur_question})
-                    cur_history.append({'role': 'assistant', 'content': final_answer or ''})
-                    cur_question = "Continue."
 
-                op = Operator(vector_store=vs, blob_store=blob_store, model_override=model_override)
+                    # --- State reducer: harness reads plan.md so the model doesn't have to ---
+                    state = _reduce_plan_state(_workspace_out)
+
+                    if state.get("found") and state.get("steps"):
+                        steps = state["steps"]
+                        completed = state["completed"]
+                        done_count = len(completed)
+                        total_count = len(steps)
+                        next_step = state.get("next_step")
+
+                        # Build annotated step list
+                        step_lines = []
+                        for s in steps:
+                            if s["num"] in completed:
+                                tag = "[DONE]"
+                            elif next_step and s["num"] == next_step["num"]:
+                                tag = "[NEXT]"
+                            else:
+                                tag = "[    ]"
+                            step_lines.append(f"  {s['num']}. {tag} {s['name']}")
+                        steps_display = "\n".join(step_lines)
+
+                        if state.get("all_done"):
+                            cur_question = (
+                                f"Turn {turn_n + 1} of {max_turns}.\n\n"
+                                f"All {total_count} steps are complete:\n{steps_display}\n\n"
+                                f"Write a concise final summary of what was built and where "
+                                f"the files are, then end with ##DONE##."
+                            )
+                        elif next_step:
+                            ns = next_step
+                            is_last = done_count + 1 >= total_count
+                            cur_question = (
+                                f"Turn {turn_n + 1} of {max_turns} ({remaining} turns left).\n\n"
+                                f"## Project state (read from plan.md by harness)\n\n"
+                                f"**Objective:** {state['objective']}\n\n"
+                                f"**Steps:**\n{steps_display}\n\n"
+                                f"**Progress:** {done_count} of {total_count} steps complete.\n\n"
+                                f"## Your task this turn\n\n"
+                                f"Implement step {ns['num']}: \"{ns['name']}\" completely.\n"
+                                f"- Write all code/files to /workspace/out/ using workspace_file\n"
+                                f"- Do NOT work on any other step\n"
+                                f"- When done, APPEND to plan.md under ## Progress: "
+                                f"`- Turn {turn_n + 1}: {ns['name']} done`\n"
+                                + (
+                                    "- This is the last step — end your answer with ##DONE## after completing it."
+                                    if is_last else ""
+                                )
+                            )
+                        else:
+                            # steps list empty after find — shouldn't happen, fallback
+                            cur_question = (
+                                f"Turn {turn_n + 1} of {max_turns} ({remaining} turns left).\n\n"
+                                f"Continue with the next incomplete step. "
+                                f"When all steps are done, end with ##DONE##."
+                            )
+                    else:
+                        # plan.md not found or no numbered steps — minimal fallback
+                        cur_question = (
+                            f"Turn {turn_n + 1} of {max_turns} ({remaining} turns left).\n\n"
+                            f"READ plan.md with workspace_file to review the plan.\n"
+                            f"Continue with the next incomplete step. "
+                            f"When all work is done, end your answer with ##DONE##."
+                        )
+
+                op = Operator(vector_store=vs, model_override=model_override,
+                              autonomous=_multi)
                 _op_model = op._model
 
                 # Wiretap: log the incoming operator query
@@ -2064,14 +2284,15 @@ async def api_operator_stream(request: Request):
                 had_tool_call = False
                 turn_answer = None
 
-                async for event in op.run_stream(cur_question, cur_history if turn_n == 0 else cur_history):
-                    # Track if this turn had any tool calls
+                # Pass original conversation history only on turn 0; continuation
+                # turns are self-contained — harness injects structured state via cur_question.
+                _turn_history = initial_history if turn_n == 0 else []
+                async for event in op.run_stream(cur_question, _turn_history):
                     if event.get("type") == "tool_call":
                         had_tool_call = True
                     elif event.get("type") == "answer":
                         turn_answer = event.get("content", "")
 
-                    # Wiretap: log tool calls, results, and final answer
                     if _wire:
                         etype = event.get("type")
                         if etype == "tool_call":
@@ -2095,12 +2316,13 @@ async def api_operator_stream(request: Request):
                     yield f"data: {_json.dumps(event)}\n\n"
 
                 final_answer = turn_answer
+                # Single-turn mode: stop if model answered without tools (expected behaviour)
+                if not _multi and not had_tool_call:
+                    yield f"data: {_json.dumps({'type': 'info', 'message': 'No tools used — operator answered directly'})}\n\n"
+                    break
 
-                # Stop early if operator gave an answer without any tool use
-                if not had_tool_call:
-                    # On first turn with no tool calls, emit informational event
-                    if turn_n == 0:
-                        yield f"data: {_json.dumps({'type': 'info', 'message': 'No tools used — operator answered directly'})}\n\n"
+                # Multi-turn mode: stop early only if model signals completion with ##DONE##
+                if _multi and turn_answer and "##DONE##" in turn_answer:
                     break
 
             # Store successful run to database
@@ -2110,7 +2332,7 @@ async def api_operator_stream(request: Request):
                     sqlite_store.store_operator_run(
                         run_id=_run_id,
                         query=question,
-                        history=cur_history,
+                        history=initial_history,
                         model=_op_model,
                         status="completed",
                         result=final_answer or "",

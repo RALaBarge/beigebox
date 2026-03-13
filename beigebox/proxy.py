@@ -396,18 +396,35 @@ class Proxy:
         force_decision = rt.get("force_decision", False)
 
         # 0. Session cache — sticky model within a conversation (skipped when force_decision)
+        # Only applies when the request model is the default (no explicit user selection).
+        # If the user explicitly picked a different model, respect their choice and update
+        # the cache so the new selection sticks going forward.
         if not force_decision:
+            requested_model = body.get("model", "")
             cached_model = self._get_session_model(conversation_id)
             if cached_model:
-                body["model"] = cached_model
-                self.wire.log(
-                    direction="internal",
-                    role="decision",
-                    content=f"session cache hit: model={cached_model}",
-                    model="session-cache",
-                    conversation_id=conversation_id,
-                )
-                return body, None
+                if not requested_model or requested_model == self.default_model:
+                    # No explicit selection — apply sticky routing
+                    body["model"] = cached_model
+                    self.wire.log(
+                        direction="internal",
+                        role="decision",
+                        content=f"session cache hit: model={cached_model}",
+                        model="session-cache",
+                        conversation_id=conversation_id,
+                    )
+                    return body, None
+                elif requested_model != cached_model:
+                    # User switched models — update cache and let the request through
+                    self._set_session_model(conversation_id, requested_model)
+                    self.wire.log(
+                        direction="internal",
+                        role="decision",
+                        content=f"session model updated: {cached_model} → {requested_model}",
+                        model="session-cache",
+                        conversation_id=conversation_id,
+                    )
+                    return body, None
 
         # 1. Z-command takes absolute priority
         if zcmd.active and (zcmd.route or zcmd.model):
@@ -466,7 +483,11 @@ class Proxy:
         if not force_decision and self.embedding_classifier and self.embedding_classifier.ready:
             user_msg = self._get_latest_user_message(body)
             if user_msg:
-                emb_result = self.embedding_classifier.classify(user_msg)
+                # Run synchronous httpx call in thread pool to avoid blocking the event loop
+                loop = asyncio.get_event_loop()
+                emb_result = await loop.run_in_executor(
+                    None, self.embedding_classifier.classify, user_msg
+                )
                 self.wire.log(
                     direction="internal",
                     role="decision",
@@ -1197,38 +1218,70 @@ class Proxy:
                         pass
         else:
             # Direct backend (legacy single-backend path)
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                async with client.stream(
-                    "POST",
-                    f"{self.backend_url}/v1/chat/completions",
-                    json=body,
-                ) as resp:
-                    resp.raise_for_status()
-                    async for line in resp.aiter_lines():
-                        if not line:
-                            continue
-                        if _first_chunk:
-                            _stages["ttft_ms"] = (_time.monotonic() - _t_backend) * 1000
-                            _first_chunk = False
-                        # In WASM buffer mode, collect but don't yield to client yet
-                        if not _wasm_buffer_mode:
-                            yield line + "\n"
-                        # Parse to buffer content
-                        if line.startswith("data: "):
-                            data_str = line[6:]
-                            if data_str.strip() == "[DONE]":
+            try:
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                    async with client.stream(
+                        "POST",
+                        f"{self.backend_url}/v1/chat/completions",
+                        json=body,
+                    ) as resp:
+                        if resp.status_code >= 400:
+                            err_body = await resp.aread()
+                            err_text = err_body.decode(errors="replace")[:300]
+                            logger.error(
+                                "Backend error %d for model '%s': %s",
+                                resp.status_code, model, err_text,
+                            )
+                            err_chunk = json.dumps({
+                                "choices": [{"delta": {"content": f"[Backend error {resp.status_code}: {err_text}]"}, "finish_reason": "stop", "index": 0}],
+                                "model": model,
+                            })
+                            yield f"data: {err_chunk}\n"
+                            yield "data: [DONE]\n\n"
+                            return
+                        async for line in resp.aiter_lines():
+                            if not line:
                                 continue
-                            try:
-                                chunk = json.loads(data_str)
-                                delta = (
-                                    chunk.get("choices", [{}])[0]
-                                    .get("delta", {})
-                                    .get("content", "")
-                                )
-                                if delta:
-                                    full_response.append(delta)
-                            except (json.JSONDecodeError, IndexError):
-                                pass
+                            if _first_chunk:
+                                _stages["ttft_ms"] = (_time.monotonic() - _t_backend) * 1000
+                                _first_chunk = False
+                            # In WASM buffer mode, collect but don't yield to client yet
+                            if not _wasm_buffer_mode:
+                                yield line + "\n"
+                            # Parse to buffer content
+                            if line.startswith("data: "):
+                                data_str = line[6:]
+                                if data_str.strip() == "[DONE]":
+                                    continue
+                                try:
+                                    chunk = json.loads(data_str)
+                                    delta = (
+                                        chunk.get("choices", [{}])[0]
+                                        .get("delta", {})
+                                        .get("content", "")
+                                    )
+                                    if delta:
+                                        full_response.append(delta)
+                                except (json.JSONDecodeError, IndexError):
+                                    pass
+            except httpx.TimeoutException:
+                logger.error("Backend timeout after %ss for model '%s'", self.timeout, model)
+                err_chunk = json.dumps({
+                    "choices": [{"delta": {"content": f"[Backend timed out after {self.timeout}s — model may be loading, try again]"}, "finish_reason": "stop", "index": 0}],
+                    "model": model,
+                })
+                yield f"data: {err_chunk}\n"
+                yield "data: [DONE]\n\n"
+                return
+            except httpx.RequestError as e:
+                logger.error("Backend connection error for model '%s': %s", model, e)
+                err_chunk = json.dumps({
+                    "choices": [{"delta": {"content": f"[Backend connection error: {e}]"}, "finish_reason": "stop", "index": 0}],
+                    "model": model,
+                })
+                yield f"data: {err_chunk}\n"
+                yield "data: [DONE]\n\n"
+                return
 
         # Wall-clock stream duration
         _stages["backend"] = (_time.monotonic() - _t_backend) * 1000
