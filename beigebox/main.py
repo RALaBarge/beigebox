@@ -2040,6 +2040,7 @@ async def api_operator_stream(request: Request):
             cur_question = question
             cur_history = list(history or [])
             final_answer = None
+            _traj_events: list[dict] = []
 
             for turn_n in range(max_turns):
                 # Emit turn separator for turns after the first
@@ -2070,6 +2071,7 @@ async def api_operator_stream(request: Request):
                         had_tool_call = True
                     elif event.get("type") == "answer":
                         turn_answer = event.get("content", "")
+                    _traj_events.append(event)
 
                     # Wiretap: log tool calls, results, and final answer
                     if _wire:
@@ -2103,6 +2105,15 @@ async def api_operator_stream(request: Request):
                         yield f"data: {_json.dumps({'type': 'info', 'message': 'No tools used — operator answered directly'})}\n\n"
                     break
 
+            # Trajectory evaluation — score the run and emit as SSE
+            try:
+                from beigebox.trajectory import score_run as _score_run
+                _score = _score_run(question, _traj_events, max_turns, final_answer or "")
+                yield f"data: {_json.dumps({'type': 'run_score', **_score})}\n\n"
+            except Exception as score_err:
+                logger.debug("Trajectory scoring failed: %s", score_err)
+                _score = None
+
             # Store successful run to database
             _latency_ms = int((_time.time() - _start_time) * 1000)
             try:
@@ -2116,6 +2127,8 @@ async def api_operator_stream(request: Request):
                         result=final_answer or "",
                         latency_ms=_latency_ms,
                     )
+                    if _score:
+                        sqlite_store.store_run_score(_run_id, _score)
             except Exception as store_err:
                 logger.warning("Failed to store operator run: %s", store_err)
 
