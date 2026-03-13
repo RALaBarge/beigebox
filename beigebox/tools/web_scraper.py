@@ -18,6 +18,8 @@ DEFAULT_HEADERS = {
 class WebScraperTool:
     """Fetch a URL and return clean text content."""
 
+    description = 'Fetch and read a webpage. input = full URL. Example: {"tool": "web_scraper", "input": "https://example.com/page"}'
+
     capture_tool_io: bool = True
     max_context_chars: int = 6000
 

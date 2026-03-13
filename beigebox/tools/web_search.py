@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 class WebSearchTool:
     """DuckDuckGo web search via duckduckgo_search."""
 
+    description = 'Search the web. input = plain search query string. Example: {"tool": "web_search", "input": "linux audio stacks ALSA PulseAudio 2024"}'
+
     # Class-level flags checked by operator._run_tool() via getattr to decide
     # whether to write the output to the blob store and how much to truncate
     # when injecting it back into the operator's context window.

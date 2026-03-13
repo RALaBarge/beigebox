@@ -303,6 +303,15 @@ class SystemInfoTool:
     Ollama model list is fetched via httpx (no shell, no network namespace).
     """
 
+    description = (
+        'Run a shell command or get system stats. '
+        'input = shell command string from the allowlist (cat, ls, grep, ps, df, free, uptime, nproc, wc, head, tail, cut, awk, sed, sort, uniq, stat, du, find, nvidia-smi) '
+        'OR empty string for a full system snapshot. '
+        'Examples: {"tool": "system_info", "input": "ls /workspace/out"} '
+        '{"tool": "system_info", "input": "ps aux | grep python"} '
+        '{"tool": "system_info", "input": ""}'
+    )
+
     def __init__(self):
         # Probe bwrap eagerly so the first real call isn't slow
         available = _bwrap_available()

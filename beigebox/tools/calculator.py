@@ -59,6 +59,8 @@ def _safe_eval(node):
 class CalculatorTool:
     """Safe math expression evaluator."""
 
+    description = 'Evaluate a math expression. input = expression string. Example: {"tool": "calculator", "input": "2 ** 10 + sqrt(144)"}'
+
     def __init__(self):
         logger.info("CalculatorTool initialized")
 

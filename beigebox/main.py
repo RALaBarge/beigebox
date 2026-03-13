@@ -229,7 +229,14 @@ async def lifespan(app: FastAPI):
             _loop = asyncio.get_event_loop()
             return await _loop.run_in_executor(None, _op.run, question, None)
 
-    mcp_server = McpServer(tool_registry, operator_factory=_op_mcp_factory)
+    # Load skills for MCP resources/list + resources/read
+    from beigebox.agents.skill_loader import load_skills as _load_skills
+    _skills_path = cfg.get("skills", {}).get("path") or str(
+        Path(__file__).parent.parent / "2600" / "skills"
+    )
+    _mcp_skills = _load_skills(_skills_path)
+
+    mcp_server = McpServer(tool_registry, operator_factory=_op_mcp_factory, skills=_mcp_skills)
     if _op_enabled_for_mcp:
         logger.info("MCP server: enabled (POST /mcp) — operator/run tool exposed")
     else:
@@ -740,7 +747,8 @@ async def api_config():
             "track_local": rt.get("cost_track_local", cfg.get("cost_tracking", {}).get("track_local", False)),
         },
         "harness": {
-            "enabled": rt.get("harness_enabled", cfg.get("harness", {}).get("enabled", True)),
+            "enabled":      rt.get("harness_enabled", cfg.get("harness", {}).get("enabled", True)),
+            "ralph_enabled": rt.get("ralph_enabled", cfg.get("harness", {}).get("ralph_enabled", False)),
         },
         "conversation_replay": {
             "enabled": rt.get("conversation_replay_enabled", cfg.get("conversation_replay", {}).get("enabled", False)),
@@ -1779,6 +1787,8 @@ async def api_harness_ralph(request: Request):
     rt  = get_runtime_config()
     if not rt.get("harness_enabled", cfg.get("harness", {}).get("enabled", True)):
         return JSONResponse({"error": "Harness is disabled."}, status_code=403)
+    if not rt.get("ralph_enabled", cfg.get("harness", {}).get("ralph_enabled", False)):
+        return JSONResponse({"error": "Ralph mode is disabled. Set harness.ralph_enabled: true in config.yaml to enable."}, status_code=403)
 
     try:
         body = await request.json()
@@ -2098,25 +2108,31 @@ def _reduce_plan_state(workspace_out: Path) -> dict:
     }
 
 
-@app.post("/api/v1/operator/stream")
-async def api_operator_stream(request: Request):
+@app.post("/api/v1/harness/autonomous")
+async def api_harness_autonomous(request: Request):
     """
-    Run the operator agent with streaming progress events (SSE).
+    Autonomous multi-turn operator loop — used by the Harness Agentic panel.
 
-    Body: {"query": "...", "history": [{role, content}, ...], "model": "..."}
+    Each turn the operator executes with a clean, structured context injected
+    by the harness state reducer (reads plan.md). The operator tab uses
+    /api/v1/operator/stream (single-turn only).
+
+    Body: {"query": "...", "history": [{role, content}, ...], "model": "...", "max_turns": 5}
 
     SSE events:
-      {"type": "tool_call",   "tool": str, "input": str, "thought": str}
-      {"type": "tool_result", "tool": str, "result": str}
-      {"type": "answer",      "content": str}
-      {"type": "error",       "message": str}
+      {"type": "start",      "run_id": str}
+      {"type": "turn_start", "turn": int, "total": int}
+      {"type": "tool_call",  "tool": str, "input": str, "thought": str}
+      {"type": "tool_result","tool": str, "result": str}
+      {"type": "answer",     "content": str}
+      {"type": "error",      "message": str}
     """
     cfg = get_config()
     rt = get_runtime_config()
     op_enabled = rt.get("operator_enabled", cfg.get("operator", {}).get("enabled", False))
     if not op_enabled:
         return JSONResponse(
-            {"error": "Operator is disabled. Set operator.enabled: true in config.yaml to enable LLM-driven tool execution."},
+            {"error": "Operator is disabled. Set operator.enabled: true in config.yaml."},
             status_code=403,
         )
 
@@ -2131,7 +2147,7 @@ async def api_operator_stream(request: Request):
 
     history = body.get("history") or None
     model_override = body.get("model", "").strip() or None
-    max_turns_override = body.get("max_turns", None)
+    max_turns = max(1, int(body.get("max_turns", 5)))
 
     async def event_stream():
         import json as _json
@@ -2141,6 +2157,7 @@ async def api_operator_stream(request: Request):
         _conv_id = _uuid.uuid4().hex[:8]
         _wire = proxy.wire if proxy else None
         _start_time = _time.time()
+        _op_model = model_override or "unknown"
         try:
             from beigebox.storage.vector_store import VectorStore
             from beigebox.storage.backends import make_backend as _mk2
@@ -2161,50 +2178,34 @@ async def api_operator_stream(request: Request):
             except Exception:
                 vs = None
 
-            # Emit run_id as first event so client can track the background run
             yield f"data: {_json.dumps({'type': 'start', 'run_id': _run_id})}\n\n"
 
-            # Read autonomous multi-turn config
-            # Request body max_turns overrides config (enables per-request turns even if config disabled)
-            auto_cfg = cfg2.get("operator", {}).get("autonomous", {})
-            auto_enabled = auto_cfg.get("enabled", False)
-            if max_turns_override is not None and max_turns_override > 1:
-                # User specified max_turns in request — enable autonomous mode for this request
-                max_turns = max(1, int(max_turns_override))
-            else:
-                # Use config or default to 1 (single-turn)
-                max_turns = auto_cfg.get("max_turns", 5) if auto_enabled else 1
-
-            # Cap history to last 8 messages (4 exchanges) to prevent prompt bloat.
-            # The operator's ReAct loop is stateless per run — it doesn't benefit
-            # from deep conversation history.
+            # Cap history for the run record only — turns always get clean context.
             _raw_history = list(history or [])
             initial_history = _raw_history[-8:] if len(_raw_history) > 8 else _raw_history
             final_answer = None
-            _multi = max_turns > 1
 
-            # Resolve the workspace/out path so the harness can read plan.md
             _ws_path_cfg = cfg2.get("workspace", {}).get("path", "./workspace")
             _workspace_out = (Path(__file__).parent.parent / _ws_path_cfg / "out").resolve()
 
-            if _multi:
-                cur_question = (
-                    question + "\n\n"
-                    "[Multi-turn run] Start by writing a plan.md file to /workspace/out/ "
-                    "using the workspace_file tool. Include: the task summary, your numbered "
-                    "step-by-step plan (e.g. '1. Step name'), and a '## Progress' section "
-                    "you will update each turn. Then complete step 1."
-                )
-            else:
-                cur_question = question
+            # Turn 0: self-contained question — no conversation history passed.
+            # Subsequent turns receive structured state from the state reducer instead.
+            # Each operator subagent gets: system prompt + cur_question only (~9K tokens
+            # vs ~15K with accumulated history — see 2600/multi-turn-research.md).
+            cur_question = (
+                question + "\n\n"
+                "[Autonomous run] Start by writing a plan.md file to /workspace/out/ "
+                "using the workspace_file tool. Include: the task summary, your numbered "
+                "step-by-step plan (e.g. '1. Step name'), and a '## Progress' section "
+                "you will update each turn. Then complete step 1."
+            )
 
             for turn_n in range(max_turns):
-                # Emit turn separator for turns after the first
                 if turn_n > 0:
                     remaining = max_turns - turn_n
                     yield f"data: {_json.dumps({'type': 'turn_start', 'turn': turn_n + 1, 'total': max_turns})}\n\n"
 
-                    # --- State reducer: harness reads plan.md so the model doesn't have to ---
+                    # State reducer: harness reads plan.md so the model doesn't have to replay history
                     state = _reduce_plan_state(_workspace_out)
 
                     if state.get("found") and state.get("steps"):
@@ -2214,7 +2215,6 @@ async def api_operator_stream(request: Request):
                         total_count = len(steps)
                         next_step = state.get("next_step")
 
-                        # Build annotated step list
                         step_lines = []
                         for s in steps:
                             if s["num"] in completed:
@@ -2254,14 +2254,12 @@ async def api_operator_stream(request: Request):
                                 )
                             )
                         else:
-                            # steps list empty after find — shouldn't happen, fallback
                             cur_question = (
                                 f"Turn {turn_n + 1} of {max_turns} ({remaining} turns left).\n\n"
                                 f"Continue with the next incomplete step. "
                                 f"When all steps are done, end with ##DONE##."
                             )
                     else:
-                        # plan.md not found or no numbered steps — minimal fallback
                         cur_question = (
                             f"Turn {turn_n + 1} of {max_turns} ({remaining} turns left).\n\n"
                             f"READ plan.md with workspace_file to review the plan.\n"
@@ -2269,63 +2267,184 @@ async def api_operator_stream(request: Request):
                             f"When all work is done, end your answer with ##DONE##."
                         )
 
-                op = Operator(vector_store=vs, model_override=model_override,
-                              autonomous=_multi)
+                op = Operator(vector_store=vs, model_override=model_override, autonomous=True)
                 _op_model = op._model
 
-                # Wiretap: log the incoming operator query
                 if _wire and turn_n == 0:
-                    _wire.log("inbound", "user", question,
-                              model=_op_model, conversation_id=_conv_id)
-                elif _wire and turn_n > 0:
-                    _wire.log("inbound", "user", cur_question,
-                              model=_op_model, conversation_id=_conv_id)
+                    _wire.log("inbound", "user", question, model=_op_model, conversation_id=_conv_id)
+                elif _wire:
+                    _wire.log("inbound", "user", cur_question, model=_op_model, conversation_id=_conv_id)
 
-                had_tool_call = False
                 turn_answer = None
-
-                # Pass original conversation history only on turn 0; continuation
-                # turns are self-contained — harness injects structured state via cur_question.
-                _turn_history = initial_history if turn_n == 0 else []
-                async for event in op.run_stream(cur_question, _turn_history):
-                    if event.get("type") == "tool_call":
-                        had_tool_call = True
-                    elif event.get("type") == "answer":
+                # Context isolation: every turn is a clean subagent call — no history.
+                async for event in op.run_stream(cur_question, []):
+                    if event.get("type") == "answer":
                         turn_answer = event.get("content", "")
-
                     if _wire:
                         etype = event.get("type")
                         if etype == "tool_call":
                             _wire.log("internal", "tool",
                                       f"{event.get('thought','')} → {event.get('input','')}",
-                                      tool_name=event.get("tool", ""),
-                                      model=_op_model, conversation_id=_conv_id)
+                                      tool_name=event.get("tool", ""), model=_op_model, conversation_id=_conv_id)
                         elif etype == "tool_result":
-                            _wire.log("internal", "tool",
-                                      event.get("result", ""),
-                                      tool_name=event.get("tool", ""),
-                                      model=_op_model, conversation_id=_conv_id)
+                            _wire.log("internal", "tool", event.get("result", ""),
+                                      tool_name=event.get("tool", ""), model=_op_model, conversation_id=_conv_id)
                         elif etype == "answer":
-                            _wire.log("outbound", "assistant",
-                                      event.get("content", ""),
+                            _wire.log("outbound", "assistant", event.get("content", ""),
                                       model=_op_model, conversation_id=_conv_id)
                         elif etype == "error":
-                            _wire.log("outbound", "system",
-                                      f"operator error: {event.get('message','')}",
+                            _wire.log("outbound", "system", f"operator error: {event.get('message','')}",
                                       model=_op_model, conversation_id=_conv_id)
                     yield f"data: {_json.dumps(event)}\n\n"
 
                 final_answer = turn_answer
-                # Single-turn mode: stop if model answered without tools (expected behaviour)
-                if not _multi and not had_tool_call:
-                    yield f"data: {_json.dumps({'type': 'info', 'message': 'No tools used — operator answered directly'})}\n\n"
+                if turn_answer and "##DONE##" in turn_answer:
                     break
 
-                # Multi-turn mode: stop early only if model signals completion with ##DONE##
-                if _multi and turn_answer and "##DONE##" in turn_answer:
-                    break
+            _latency_ms = int((_time.time() - _start_time) * 1000)
+            try:
+                if sqlite_store:
+                    sqlite_store.store_operator_run(
+                        run_id=_run_id, query=question, history=initial_history,
+                        model=_op_model, status="completed",
+                        result=final_answer or "", latency_ms=_latency_ms,
+                    )
+            except Exception as store_err:
+                logger.warning("Failed to store autonomous run: %s", store_err)
 
-            # Store successful run to database
+        except Exception as e:
+            if _wire:
+                _wire.log("outbound", "system", f"autonomous exception: {e}", conversation_id=_conv_id)
+            import json as _json2
+            _latency_ms = int((_time.time() - _start_time) * 1000)
+            try:
+                if sqlite_store:
+                    sqlite_store.store_operator_run(
+                        run_id=_run_id, query=question, history=history or [],
+                        model=_op_model, status="error",
+                        result=str(e), latency_ms=_latency_ms,
+                    )
+            except Exception as store_err:
+                logger.warning("Failed to store autonomous error run: %s", store_err)
+            yield f"data: {_json2.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/v1/operator/stream")
+async def api_operator_stream(request: Request):
+    """
+    Run the operator agent (single-turn) with streaming progress events (SSE).
+
+    For multi-turn autonomous execution use POST /api/v1/harness/autonomous.
+
+    Body: {"query": "...", "history": [{role, content}, ...], "model": "..."}
+
+    SSE events:
+      {"type": "tool_call",   "tool": str, "input": str, "thought": str}
+      {"type": "tool_result", "tool": str, "result": str}
+      {"type": "answer",      "content": str}
+      {"type": "error",       "message": str}
+    """
+    cfg = get_config()
+    rt = get_runtime_config()
+    op_enabled = rt.get("operator_enabled", cfg.get("operator", {}).get("enabled", False))
+    if not op_enabled:
+        return JSONResponse(
+            {"error": "Operator is disabled. Set operator.enabled: true in config.yaml to enable LLM-driven tool execution."},
+            status_code=403,
+        )
+
+    try:
+        body = await request.json()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+    question = body.get("query", "").strip()
+    if not question:
+        return JSONResponse({"error": "query required"}, status_code=400)
+
+    history = body.get("history") or None
+    model_override = body.get("model", "").strip() or None
+
+    async def event_stream():
+        import json as _json
+        import uuid as _uuid
+        import time as _time
+        _run_id = _uuid.uuid4().hex[:8]
+        _conv_id = _uuid.uuid4().hex[:8]
+        _wire = proxy.wire if proxy else None
+        _start_time = _time.time()
+        _op_model = model_override or "unknown"
+        try:
+            from beigebox.storage.vector_store import VectorStore
+            from beigebox.storage.backends import make_backend as _mk2
+            from beigebox.agents.operator import Operator
+
+            cfg2 = get_config()
+            try:
+                _sc = cfg2["storage"]
+                _ec = cfg2["embedding"]
+                vs = VectorStore(
+                    embedding_model=_ec["model"],
+                    embedding_url=_ec.get("backend_url") or cfg2["backend"]["url"],
+                    backend=_mk2(
+                        _sc.get("vector_backend", "chromadb"),
+                        path=get_storage_paths(cfg2)[1],
+                    ),
+                )
+            except Exception:
+                vs = None
+
+            yield f"data: {_json.dumps({'type': 'start', 'run_id': _run_id})}\n\n"
+
+            _raw_history = list(history or [])
+            initial_history = _raw_history[-8:] if len(_raw_history) > 8 else _raw_history
+
+            op = Operator(vector_store=vs, model_override=model_override)
+            _op_model = op._model
+
+            if _wire:
+                _wire.log("inbound", "user", question, model=_op_model, conversation_id=_conv_id)
+
+            had_tool_call = False
+            final_answer = None
+
+            async for event in op.run_stream(question, initial_history):
+                if event.get("type") == "tool_call":
+                    had_tool_call = True
+                elif event.get("type") == "answer":
+                    final_answer = event.get("content", "")
+
+                if _wire:
+                    etype = event.get("type")
+                    if etype == "tool_call":
+                        _wire.log("internal", "tool",
+                                  f"{event.get('thought','')} → {event.get('input','')}",
+                                  tool_name=event.get("tool", ""),
+                                  model=_op_model, conversation_id=_conv_id)
+                    elif etype == "tool_result":
+                        _wire.log("internal", "tool",
+                                  event.get("result", ""),
+                                  tool_name=event.get("tool", ""),
+                                  model=_op_model, conversation_id=_conv_id)
+                    elif etype == "answer":
+                        _wire.log("outbound", "assistant",
+                                  event.get("content", ""),
+                                  model=_op_model, conversation_id=_conv_id)
+                    elif etype == "error":
+                        _wire.log("outbound", "system",
+                                  f"operator error: {event.get('message','')}",
+                                  model=_op_model, conversation_id=_conv_id)
+                yield f"data: {_json.dumps(event)}\n\n"
+
+            if not had_tool_call:
+                yield f"data: {_json.dumps({'type': 'info', 'message': 'No tools used — operator answered directly'})}\n\n"
+
             _latency_ms = int((_time.time() - _start_time) * 1000)
             try:
                 if sqlite_store:
@@ -2347,7 +2466,6 @@ async def api_operator_stream(request: Request):
                           conversation_id=_conv_id)
             import json as _json2
 
-            # Store failed run to database
             _latency_ms = int((_time.time() - _start_time) * 1000)
             try:
                 if sqlite_store:
@@ -2355,7 +2473,7 @@ async def api_operator_stream(request: Request):
                         run_id=_run_id,
                         query=question,
                         history=history or [],
-                        model=model_override or "unknown",
+                        model=_op_model,
                         status="error",
                         result=str(e),
                         latency_ms=_latency_ms,

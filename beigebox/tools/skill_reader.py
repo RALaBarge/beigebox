@@ -13,10 +13,11 @@ from pathlib import Path
 
 class SkillReaderTool:
     description = (
-        "Read a skill's full instructions. "
-        "Input: the skill name (from available_skills). "
-        "Returns the complete SKILL.md content and lists any bundled scripts "
-        "and reference files. Call this before following a skill's instructions."
+        "Read or search skills. "
+        "Pass a skill name to get full instructions. "
+        "Pass 'list' to see all available skill names. "
+        "Pass a partial name or keyword to search (e.g. 'pdf', 'slack', 'web'). "
+        "Always call this before following a skill's instructions."
     )
 
     def __init__(self, skills: list[dict]):
@@ -25,10 +26,23 @@ class SkillReaderTool:
 
     def run(self, input_str: str) -> str:
         name = input_str.strip()
+
+        # list mode — return all skill names
+        if not name or name.lower() == "list":
+            return "Available skills:\n" + "\n".join(sorted(self._skills))
+
+        # exact match
         skill = self._skills.get(name)
+
+        # fuzzy fallback — substring search on name
         if not skill:
-            available = ", ".join(sorted(self._skills)) or "none"
-            return f"Unknown skill: {name!r}. Available: {available}"
+            matches = [k for k in self._skills if name.lower() in k.lower()]
+            if len(matches) == 1:
+                skill = self._skills[matches[0]]
+            elif matches:
+                return f"Multiple skills match {name!r}: {', '.join(sorted(matches))}"
+            else:
+                return f"No skill found for {name!r}. Call read_skill('list') to see all available skills."
 
         skill_md_path = Path(skill["path"])
         if not skill_md_path.exists():

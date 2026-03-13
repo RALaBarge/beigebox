@@ -25,6 +25,7 @@ from beigebox.tools.pdf_reader import PdfReaderTool
 from beigebox.tools.browserbox import BrowserboxTool
 from beigebox.tools.connection_tool import ConnectionTool
 from beigebox.tools.python_interpreter import PythonInterpreterTool
+from beigebox.tools.workspace_file import WorkspaceFileTool
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,12 @@ class ToolRegistry:
         si_cfg = tools_cfg.get("system_info", {})
         if si_cfg.get("enabled", True):  # Enabled by default — no deps
             self.tools["system_info"] = SystemInfoTool()
+
+        # --- Workspace File (read/write /workspace/out/ — always enabled) ---
+        from pathlib import Path as _P
+        _ws_cfg = cfg.get("workspace", {})
+        _ws_out = _P(__file__).parent.parent.parent / _ws_cfg.get("path", "./workspace") / "out"
+        self.tools["workspace_file"] = WorkspaceFileTool(workspace_out=_ws_out)
 
         # --- Document Search (workspace document RAG) ---
         ds_cfg = tools_cfg.get("document_search", {})

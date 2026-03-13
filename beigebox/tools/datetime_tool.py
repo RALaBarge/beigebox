@@ -45,6 +45,8 @@ TIMEZONE_OFFSETS = {
 class DateTimeTool:
     """Current time and date information."""
 
+    description = 'Get current date/time. input = timezone name or empty string for local. Example: {"tool": "datetime", "input": "UTC"}'
+
     def __init__(self, local_tz_offset: float = -5.0):
         """
         Args:

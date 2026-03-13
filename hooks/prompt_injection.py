@@ -86,10 +86,12 @@ def _score_message(text: str) -> tuple[int, list[str]]:
 def _get_config(context: dict) -> dict:
     """Extract hook config from the context dict."""
     cfg = context.get("config", {})
-    # Hooks can be listed under hooks: or hook_config:
     hooks = cfg.get("hooks", [])
+    # hooks may be a dict (the whole hooks section) or a list of hook configs
+    if not isinstance(hooks, list):
+        return {}
     for h in hooks:
-        if h.get("name") == "prompt_injection":
+        if isinstance(h, dict) and h.get("name") == "prompt_injection":
             return h
     return {}
 

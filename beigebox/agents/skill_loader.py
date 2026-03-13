@@ -97,9 +97,7 @@ def skills_to_xml(skills: list[dict]) -> str:
     """
     if not skills:
         return ""
-    names = ", ".join(s["name"] for s in skills)
     return (
-        f"<available_skills count=\"{len(skills)}\">\n"
-        f"{names}\n"
-        f"</available_skills>"
+        f"You have {len(skills)} skills available. "
+        f"Call read_skill('list') to browse all names, or read_skill('<name>') to load instructions."
     )

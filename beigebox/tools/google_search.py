@@ -26,6 +26,8 @@ MOCK_RESULTS = [
 class GoogleSearchTool:
     """Google Custom Search. Mock mode when no API key is configured."""
 
+    description = 'Search Google. input = plain search query string. Example: {"tool": "google_search", "input": "python asyncio best practices 2024"}'
+
     def __init__(self, api_key: str = "", cse_id: str = "", max_results: int = 5):
         self.api_key = api_key
         self.cse_id = cse_id

@@ -43,36 +43,18 @@ backend:
     - "/var/lib/models"            # Fallback: system-wide location
 
 # Multi-backend routing (STEP 2 & 3: Retry logic + Generic OpenAI)
-backends_enabled: false  # Set to true to enable multi-backend routing
+backends_enabled: true  # Set to true to enable multi-backend routing
 
 backends:
-  # Primary: Local Ollama with retry logic
+  # Primary: Local Ollama
   - provider: ollama
     name: ollama-local
     url: http://localhost:11434
     timeout: 120
-    priority: 1
-    # STEP 2: Retry configuration for transient errors
-    max_retries: 2              # Retry transient errors (404, 429, 5xx) 2 times
-    backoff_base: 1.5           # Wait 1.5^attempt seconds
-    backoff_max: 10.0           # Cap backoff at 10 seconds
-    # latency_p95_threshold_ms: 3000  # Latency-aware routing: skip if rolling P95 > 3s (0 = disabled)
-    # traffic_split: 70         # A/B split weight (relative, e.g. 70/30 across two backends; 0 = priority order)
-    # allowed_models: []        # Restrict models available from this backend (empty = all models allowed)
-    #   # Examples:
-    #   # allowed_models: ["qwen3:4b", "llama3.2:3b"]  # Restrict to specific models
-    #   # allowed_models: ["qwen*"]  # Glob pattern (qwen3:4b, qwen2, qwen1.8b, etc.)
-
-  # Secondary: Generic OpenAI-compatible backend (llama.cpp, vLLM, etc)
-  # STEP 3: Uncomment to enable — change URL to your endpoint
-  # - provider: openai_compat
-  #   name: vLLM
-  #   url: http://localhost:8000
-  #   timeout: 120
-  #   priority: 2
-  #   max_retries: 2
-  #   backoff_base: 1.5
-  #   backoff_max: 10.0
+    priority: 2
+    max_retries: 2
+    backoff_base: 1.5
+    backoff_max: 10.0
 
   # Tertiary: OpenRouter API fallback (optional)
   # Uncomment and add API key if you want API fallback.
@@ -210,6 +192,7 @@ voice:
 
 harness:
   enabled: true
+  ralph_enabled: false   # Ralph mode (test-driven loop with shell test_cmd) — off by default
   retry:
     max_retries: 2
     backoff_base: 1.5
@@ -248,9 +231,11 @@ operator:
     enabled: true
     shell_binary: "/usr/local/bin/bb"  # Custom hardened binary (optional)
     allowed_commands:
+      - awk
       - cat
       - cut
       - df
+      - du
       - find
       - free
       - grep
@@ -259,7 +244,11 @@ operator:
       - nproc
       - nvidia-smi
       - ps
+      - sed
+      - sort
+      - stat
       - tail
+      - uniq
       - uptime
       - wc
     blocked_patterns:

@@ -39,21 +39,25 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _SYSTEM = """\
-You are BeigeBox Operator, an admin assistant for a local LLM proxy.
-You answer questions about conversations, system state, and anything the user needs.
+You are BeigeBox Operator, an intelligent assistant with access to tools.
+You can answer any question — coding, research, system tasks, general knowledge.
 
-You have access to tools. To use a tool, respond with ONLY this JSON (no markdown, no extra text):
-{{"thought": "why I'm calling this tool", "tool": "TOOL_NAME", "input": "what to pass"}}
+RESPONSE FORMAT — you must respond with EXACTLY one of these two JSON shapes, nothing else:
 
-When you have enough information to answer, respond with ONLY this JSON:
-{{"thought": "I have the answer", "answer": "your full answer here"}}
+To call a tool:
+{{"thought": "why I need this tool", "tool": "TOOL_NAME", "input": "the exact string to pass"}}
 
-RULES:
-- Respond with ONLY the JSON object. No markdown fences. No explanation outside the JSON.
-- Use one tool at a time.
-- If no tool is needed, go straight to the answer JSON.
+To give a final answer (use this when you have all the information needed):
+{{"thought": "I have the answer", "answer": "your complete response here"}}
+
+STRICT RULES:
+- Output ONLY the JSON object. No markdown fences, no prose before or after it.
+- The only valid top-level keys are: thought, tool, input, answer.
+- Do NOT output {{"plan": ...}}, {{"steps": ...}}, or any other custom structure — it will be rejected.
+- If the user asks you to plan or outline, put the entire plan text inside the "answer" field.
+- Use one tool at a time. Check the result before deciding to call another.
+- For web_search: "input" must be a specific search query string (e.g. "ALSA PulseAudio Linux audio stack comparison"), never empty, never {{}}.
 - If a tool returns an error, try a different approach or explain the limitation in your answer.
-- Never make up tool results.
 
 WORKSPACE:
 - Input files: /workspace/in/ (read-only) — files the user has provided for you to read.
@@ -77,6 +81,44 @@ WRONG — these will all fail:
   {{"tool": "browserbox.tabs.open", ...}} ← not a tool name, dot-notation doesn't work
   {{"tool": "browserbox.nav.go", ...}}    ← same mistake
   {{"tool": "browserbox", "input": {{"method": "open", "url": "..."}}}} ← wrong inner format
+
+AVAILABLE TOOLS:
+{tools_block}
+{skills_block}"""
+
+_SYSTEM_AUTONOMOUS = """\
+You are BeigeBox Operator running in autonomous multi-turn mode.
+Your job is to make CONCRETE PROGRESS on the task each turn — not plan, not summarise, not repeat.
+
+RESPONSE FORMAT — EXACTLY one of these two JSON shapes, nothing else:
+
+To call a tool (preferred — do real work this turn):
+{{"thought": "why I need this tool", "tool": "TOOL_NAME", "input": "the exact string to pass"}}
+
+To report progress and hand off to the next turn:
+{{"thought": "what I did this turn", "answer": "description of work done this turn"}}
+
+AUTONOMOUS RULES:
+- Output ONLY the JSON object. No markdown fences, no prose outside the JSON.
+- The only valid top-level keys are: thought, tool, input, answer.
+- Use as many tool calls as needed this turn before giving an answer — exhaust the iteration budget.
+- Every answer should represent REAL WORK DONE (code written, file saved, data retrieved).
+- Do NOT give an answer that is just a plan or intention — only answer after doing work.
+- Do NOT repeat work from previous turns — read plan.md first to see what's been done.
+- Use workspace_file to read and update plan.md so your progress persists across turns.
+- For web_search: "input" must be a specific search query string, never empty, never {{}}.
+- If a tool returns an error, try a different approach — never give up after one failure.
+
+CODE WRITING RULES (when the task involves writing a program or script):
+- ALWAYS save code to /workspace/out/ using workspace_file — do NOT put code in your "answer" field.
+- Each source file gets its own workspace_file write call: {{"action":"write","path":"main.py","content":"<full file content>"}}.
+- Write complete, runnable code — not snippets, not pseudocode, not placeholders.
+- Your "answer" field should only say what files you wrote and where, not contain the code itself.
+
+WORKSPACE:
+- Input files: /workspace/in/ (read-only) — files the user has provided.
+- Output files: /workspace/out/ — write all code and output here using workspace_file.
+- Progress tracking: keep /workspace/out/plan.md updated with what's done and what's next.
 
 AVAILABLE TOOLS:
 {tools_block}
@@ -137,7 +179,7 @@ def _build_tools_block(registry_tools: dict) -> str:
     # or skills change — there's no separate tools/list API call at runtime.
     lines = []
     for name, tool_obj in registry_tools.items():
-        desc = getattr(tool_obj, "description", f"Run the {name} tool")
+        desc = getattr(tool_obj, "description", None) or f'Call the {name} tool. input = string argument.'
         lines.append(f"  {name}: {desc}")
     return "\n".join(lines) if lines else "  (none)"
 
@@ -249,7 +291,8 @@ class Operator:
     def __init__(self, vector_store=None, blob_store=None,
                  model_override: str | None = None,
                  max_iterations_override: int | None = None,
-                 pre_hook: bool = False, post_hook: bool = False):
+                 pre_hook: bool = False, post_hook: bool = False,
+                 autonomous: bool = False):
         from beigebox.tools.registry import ToolRegistry
 
         self.cfg = get_config()
@@ -316,29 +359,25 @@ class Operator:
         tools = self._tools
         skills_block = ""
         if self._skills:
-            skills_xml = skills_to_xml(self._skills)
-            skills_block = (
-                f"\nAGENT SKILLS:\n"
-                f"You have access to skills that provide domain expertise and step-by-step\n"
-                f"instructions. Call read_skill with the skill name to load full instructions\n"
-                f"before following a skill.\n\n"
-                f"{skills_xml}\n"
-            )
+            skills_block = f"\n{skills_to_xml(self._skills)}"
+
+        _tools_block = _build_tools_block(tools) if tools else "(no tools available)"
 
         if pre_hook:
             self._system = _PRE_HOOK_SYSTEM.format(
-                tools_block=_build_tools_block(tools) if tools else "(no tools available)",
-                skills_block=skills_block,
+                tools_block=_tools_block, skills_block=skills_block,
             )
         elif post_hook:
             self._system = _POST_HOOK_SYSTEM.format(
-                tools_block=_build_tools_block(tools) if tools else "(no tools available)",
-                skills_block=skills_block,
+                tools_block=_tools_block, skills_block=skills_block,
+            )
+        elif autonomous and tools:
+            self._system = _SYSTEM_AUTONOMOUS.format(
+                tools_block=_tools_block, skills_block=skills_block,
             )
         elif tools:
             self._system = _SYSTEM.format(
-                tools_block=_build_tools_block(tools),
-                skills_block=skills_block,
+                tools_block=_tools_block, skills_block=skills_block,
             )
         else:
             self._system = _NO_TOOLS_SYSTEM
@@ -349,6 +388,29 @@ class Operator:
             list(tools.keys()),
             [s["name"] for s in self._skills],
         )
+
+    def _resolve_backend_url(self, model: str) -> str:
+        """Return the backend URL that should serve this model.
+
+        Mirrors the multi-backend router's allowed_models whitelist logic so the
+        operator routes to the correct backend rather than always hitting the
+        default Ollama URL.
+        """
+        import fnmatch as _fnmatch
+        rt = get_runtime_config() or {}
+        # Static backends live under cfg["backends"] (top-level of config.yaml).
+        # get_config() doesn't include this key in the returned dict — load it
+        # directly from the router or fall back to rt backends only.
+        rt_backends = rt.get("backends", [])
+        all_backends = sorted(
+            rt_backends,
+            key=lambda b: b.get("priority", 99),
+        )
+        for backend in all_backends:
+            allowed = backend.get("allowed_models", [])
+            if allowed and any(_fnmatch.fnmatch(model, pat) for pat in allowed):
+                return backend.get("url", self._backend_url).rstrip("/")
+        return self._backend_url
 
     # ------------------------------------------------------------------
     # Skills hot-reload
@@ -377,14 +439,7 @@ class Operator:
         # Rebuild system prompt
         skills_block = ""
         if self._skills:
-            skills_xml = skills_to_xml(self._skills)
-            skills_block = (
-                f"\nAGENT SKILLS:\n"
-                f"You have access to skills that provide domain expertise and step-by-step\n"
-                f"instructions. Call read_skill with the skill name to load full instructions\n"
-                f"before following a skill.\n\n"
-                f"{skills_xml}\n"
-            )
+            skills_block = f"\n{skills_to_xml(self._skills)}"
         if self._tools:
             self._system = _SYSTEM.format(
                 tools_block=_build_tools_block(self._tools),
@@ -442,15 +497,16 @@ class Operator:
                 opts: dict = {"num_ctx": 8192}
                 if _is_thinker:
                     opts["think"] = False
+                payload: dict = {
+                    "model": self._model,
+                    "messages": messages,
+                    "stream": False,
+                    "temperature": 0,
+                    "options": opts,
+                }
                 resp = client.post(
-                    f"{self._backend_url}/v1/chat/completions",
-                    json={
-                        "model": self._model,
-                        "messages": messages,
-                        "temperature": 0,
-                        "stream": False,
-                        "options": opts,
-                    },
+                    f"{self._resolve_backend_url(self._model)}/v1/chat/completions",
+                    json=payload,
                 )
                 resp.raise_for_status()
                 return resp.json()["choices"][0]["message"]["content"]
@@ -545,6 +601,10 @@ class Operator:
             messages.extend(history)
         messages.append({"role": "user", "content": question})
 
+        # Loop / failure guards
+        _recent_calls: list[tuple[str, str]] = []   # (tool_name, tool_input) ring buffer
+        _consec_fail: dict[str, int] = {}            # consecutive failure count per tool
+
         for iteration in range(self._max_iter):
             # Two iterations from the limit — nudge the model to wrap up rather
             # than burning the last step on another tool call with no answer.
@@ -596,13 +656,20 @@ class Operator:
                     logger.warning("Operator: could not parse output after nudge, returning raw")
                     return raw.strip()
 
-            # Final answer
-            if "answer" in parsed:
-                return str(parsed["answer"])
-
-            # Tool call
+            # Tool call (checked before answer — model may emit both; tool takes priority)
             if "tool" in parsed:
                 tool_name = parsed.get("tool", "")
+                if not tool_name:
+                    messages.append({"role": "assistant", "content": raw})
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            'The "tool" field was empty. Specify a tool name from the list. '
+                            "Example: {\"thought\": \"I need to search\", \"tool\": \"web_search\", \"input\": \"your query\"}\n"
+                            f"Available tools: {', '.join(self._tools.keys()) if self._tools else 'none'}"
+                        ),
+                    })
+                    continue
                 _inp = parsed.get("input", "")
                 # Re-serialise dict/list inputs to a JSON string so tools that
                 # call json.loads() on their input (e.g. browserbox) receive a
@@ -614,17 +681,66 @@ class Operator:
 
                 observation = self._run_tool(tool_name, tool_input)
 
+                # --- Loop detection ---
+                _recent_calls.append((tool_name, tool_input))
+                if len(_recent_calls) > 6:
+                    _recent_calls.pop(0)
+                _is_failure = observation.lower().startswith(
+                    ("no results", "error", "not found", "unknown tool", "file not found")
+                )
+                _consec_fail[tool_name] = (_consec_fail.get(tool_name, 0) + 1) if _is_failure else 0
+
+                _loop_nudge: str | None = None
+                if len(_recent_calls) >= 3 and _recent_calls[-3:].count(_recent_calls[-1]) >= 3:
+                    _loop_nudge = (
+                        f"You have called {tool_name!r} with the same input {3} times in a row "
+                        f"and are not making progress. Stop repeating this call. "
+                        f"Either try a different tool, a different input, or give your final answer now."
+                    )
+                elif _consec_fail.get(tool_name, 0) >= 3:
+                    _loop_nudge = (
+                        f"The {tool_name!r} tool has failed {_consec_fail[tool_name]} consecutive times. "
+                        f"Stop using it. Try a completely different approach or give your best answer based on what you already know."
+                    )
+
                 messages.append({"role": "assistant", "content": raw})
-                messages.append({
-                    "role": "user",
-                    "content": f"Tool result for {tool_name}:\n{observation}",
-                })
+                if _loop_nudge:
+                    messages.append({"role": "user", "content": _loop_nudge})
+                else:
+                    messages.append({
+                        "role": "user",
+                        "content": f"Tool result for {tool_name}:\n{observation}",
+                    })
                 continue
 
-            # JSON present but neither 'answer' nor 'tool'
+            # Final answer
+            if "answer" in parsed:
+                return str(parsed["answer"])
+
+            # JSON parsed but has no usable keys — covers {}, {"thought": "..."}-only, or wrong keys
+            bad_keys = [k for k in parsed if k not in ("thought", "tool", "input", "answer")]
+            if not parsed or (not bad_keys and "tool" not in parsed and "answer" not in parsed):
+                nudge = (
+                    "Your response was an empty or incomplete JSON object. "
+                    "You MUST include either \"tool\" (to call a tool) or \"answer\" (to give a final answer).\n"
+                    "Use one of these exact shapes:\n"
+                    '{"thought": "why I need this", "tool": "TOOL_NAME", "input": "..."}\n'
+                    'or {"thought": "I have the answer", "answer": "your full response here"}'
+                )
+            else:
+                nudge = (
+                    f"Invalid response — unexpected keys: {bad_keys}. "
+                    "You MUST respond with ONLY one of:\n"
+                    '{"thought": "...", "tool": "TOOL_NAME", "input": "..."}\n'
+                    'or {"thought": "...", "answer": "your full answer here"}\n'
+                    "Put any planning or explanation inside the \"answer\" field."
+                )
+            if iteration < self._max_iter - 1:
+                messages.append({"role": "assistant", "content": raw})
+                messages.append({"role": "user", "content": nudge})
+                continue
             content = parsed.get("thought", "") or str(parsed)
-            if content:
-                return content
+            return content
 
         return "Operator reached max iterations without a final answer. Try rephrasing your question."
 
@@ -657,6 +773,10 @@ class Operator:
         if history:
             messages.extend(history)
         messages.append({"role": "user", "content": question})
+
+        # Loop / failure guards (mirrors sync run())
+        _recent_calls: list[tuple[str, str]] = []
+        _consec_fail: dict[str, int] = {}
 
         for iteration in range(self._max_iter):
             if iteration == self._max_iter - 2:
@@ -708,12 +828,20 @@ class Operator:
                     yield {"type": "answer", "content": raw.strip()}
                     return
 
-            if "answer" in parsed:
-                yield {"type": "answer", "content": str(parsed["answer"])}
-                return
-
             if "tool" in parsed:
                 tool_name = parsed.get("tool", "")
+                if not tool_name:
+                    # Empty tool name — nudge the model to provide a real tool name
+                    messages.append({"role": "assistant", "content": raw})
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            'The "tool" field was empty. You must specify a tool name from the list. '
+                            "Example: {\"thought\": \"I need to search\", \"tool\": \"web_search\", \"input\": \"your query\"}\n"
+                            f"Available tools: {', '.join(self._tools.keys()) if self._tools else 'none'}"
+                        ),
+                    })
+                    continue
                 _inp = parsed.get("input", "")
                 tool_input = json.dumps(_inp) if isinstance(_inp, (dict, list)) else str(_inp)
                 thought = parsed.get("thought", "")
@@ -726,17 +854,67 @@ class Operator:
 
                 yield {"type": "tool_result", "tool": tool_name, "result": observation}
 
+                # --- Loop detection ---
+                _recent_calls.append((tool_name, tool_input))
+                if len(_recent_calls) > 6:
+                    _recent_calls.pop(0)
+                _is_failure = observation.lower().startswith(
+                    ("no results", "error", "not found", "unknown tool", "file not found")
+                )
+                _consec_fail[tool_name] = (_consec_fail.get(tool_name, 0) + 1) if _is_failure else 0
+
+                _loop_nudge: str | None = None
+                if len(_recent_calls) >= 3 and _recent_calls[-3:].count(_recent_calls[-1]) >= 3:
+                    _loop_nudge = (
+                        f"You have called {tool_name!r} with the same input {3} times in a row "
+                        f"and are not making progress. Stop repeating this call. "
+                        f"Either try a different tool, a different input, or give your final answer now."
+                    )
+                elif _consec_fail.get(tool_name, 0) >= 3:
+                    _loop_nudge = (
+                        f"The {tool_name!r} tool has failed {_consec_fail[tool_name]} consecutive times. "
+                        f"Stop using it. Try a completely different approach or give your best answer based on what you already know."
+                    )
+
                 messages.append({"role": "assistant", "content": raw})
-                messages.append({
-                    "role": "user",
-                    "content": f"Tool result for {tool_name}:\n{observation}",
-                })
+                if _loop_nudge:
+                    messages.append({"role": "user", "content": _loop_nudge})
+                else:
+                    messages.append({
+                        "role": "user",
+                        "content": f"Tool result for {tool_name}:\n{observation}",
+                    })
                 continue
 
-            # JSON present but neither 'answer' nor 'tool'
-            content = parsed.get("thought", "") or str(parsed)
-            if content:
-                yield {"type": "answer", "content": content}
+            if "answer" in parsed:
+                yield {"type": "answer", "content": str(parsed["answer"])}
                 return
+
+            # JSON parsed but has no usable keys — covers {}, {"thought": "..."}-only, or wrong keys
+            bad_keys = [k for k in parsed if k not in ("thought", "tool", "input", "answer")]
+            if not parsed or (not bad_keys and "tool" not in parsed and "answer" not in parsed):
+                nudge = (
+                    "Your response was an empty or incomplete JSON object. "
+                    "You MUST include either \"tool\" (to call a tool) or \"answer\" (to give a final answer).\n"
+                    "Use one of these exact shapes:\n"
+                    '{"thought": "why I need this", "tool": "TOOL_NAME", "input": "..."}\n'
+                    'or {"thought": "I have the answer", "answer": "your full response here"}'
+                )
+            else:
+                nudge = (
+                    f"Invalid response — unexpected keys: {bad_keys}. "
+                    "You MUST respond with ONLY one of:\n"
+                    '{"thought": "...", "tool": "TOOL_NAME", "input": "..."}\n'
+                    'or {"thought": "...", "answer": "your full answer here"}\n'
+                    "Put any planning or explanation inside the \"answer\" field."
+                )
+            if iteration < self._max_iter - 1:
+                messages.append({"role": "assistant", "content": raw})
+                messages.append({"role": "user", "content": nudge})
+                continue
+            # Last resort — surface the thought as the answer
+            content = parsed.get("thought", "") or str(parsed)
+            yield {"type": "answer", "content": content}
+            return
 
         yield {"type": "error", "message": "Operator reached max iterations without a final answer. Try rephrasing your question."}

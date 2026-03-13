@@ -22,7 +22,7 @@ Every command has a phreaker name and a standard alias:
 import argparse
 import sys
 
-__version__ = "1.0.3"
+from beigebox import __version__
 
 BANNER = r"""
     ╔══════════════════════════════════════════════════╗

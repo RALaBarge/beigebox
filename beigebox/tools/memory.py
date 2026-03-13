@@ -32,6 +32,8 @@ _PREPROCESS_TIMEOUT = 8.0   # seconds — fast model, should be well within this
 class MemoryTool:
     """Semantic search over stored conversation history."""
 
+    description = 'Search past conversations by meaning. input = natural language query. Example: {"tool": "memory", "input": "bluetooth audio setup last week"}'
+
     def __init__(
         self,
         vector_store=None,

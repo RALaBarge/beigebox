@@ -1153,9 +1153,7 @@
       cursor: not-allowed;
     }
 
-    /* Operator toolbar: hide the desktop Turns control, show the inline one */
-    #op-agent-controls > span:last-of-type { display: none; } /* hides "Turns:" span in toolbar */
-    #op-turns-mobile { display: flex !important; }
+
 
     .operator-output, #harness-output {
       flex: 1;
@@ -1442,11 +1440,6 @@
         <select id="op-target" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
           <option value="operator">operator (default)</option>
         </select>
-        <span style="margin-left:6px;padding-left:6px;border-left:1px solid var(--bg-border);display:flex;gap:4px;align-items:center">
-          <span class="toolbar-label">Turns:</span>
-          <input id="op-max-turns" type="number" min="1" max="20" value="1"
-            style="height:26px;font-size:12px;padding:2px 4px;width:40px" title="Max autonomous turns (1 = single-turn)">
-        </span>
       </span>
       <!-- Council controls -->
       <span id="op-council-controls" style="display:none;gap:6px;align-items:center">
@@ -1493,13 +1486,6 @@
       <div id="op-input-area">
         <input id="op-input" placeholder="Ask the operator anything…"
           onkeydown="if(event.key==='Enter'&&!_opAbort)runOp()">
-        <span id="op-turns-mobile" style="display:none;align-items:center;gap:4px;flex-shrink:0">
-          <span style="font-size:11px;color:var(--fg-dim)">Turns</span>
-          <input id="op-max-turns-mobile" type="number" min="1" max="20" value="1"
-            style="width:44px;height:32px;font-size:13px;padding:2px 4px;text-align:center"
-            title="Max autonomous turns"
-            oninput="document.getElementById('op-max-turns').value=this.value">
-        </span>
         <button class="primary" onclick="runOp()" id="op-btn">Run</button>
         <button onclick="stopOp()" id="op-stop-btn" style="display:none;background:var(--red,#c0392b);color:#fff" title="Stop current run">■ Stop</button>
       </div>
@@ -3990,10 +3976,7 @@ async function runOp() {
 
   try {
     const modelId = isModel ? target.slice(6) : null;
-    const _mobileInput = document.getElementById('op-max-turns-mobile');
-    const _turnsEl = (_mobileInput && _mobileInput.offsetParent !== null) ? _mobileInput : document.getElementById('op-max-turns');
-    const maxTurns = parseInt(_turnsEl.value, 10) || 1;
-    const reqBody = { query, history: _opHistory, max_turns: maxTurns };
+    const reqBody = { query, history: _opHistory };
     if (modelId) reqBody.model = modelId;
 
     const resp = await fetch('/api/v1/operator/stream', {
@@ -4997,7 +4980,7 @@ async function harnessAgenticRun() {
     const reqBody = { query: goal, max_turns: maxTurns };
     if (modelOverride) reqBody.model = modelOverride;
 
-    const resp = await fetch(BASE + '/api/v1/operator/stream', {
+    const resp = await fetch(BASE + '/api/v1/harness/autonomous', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(window._bbApiKey ? {'Authorization': `Bearer ${window._bbApiKey}`} : {}) },
       body: JSON.stringify(reqBody),
@@ -6959,6 +6942,12 @@ loadZHelp();
 
     // TTS autoplay config
     updateTTSConfig(d);
+
+    // Hide Ralph mode button if not enabled in config
+    if (!d.harness?.ralph_enabled) {
+      const ralphBtn = document.getElementById('harness-mode-ralph');
+      if (ralphBtn) ralphBtn.style.display = 'none';
+    }
 
   } catch {}
 

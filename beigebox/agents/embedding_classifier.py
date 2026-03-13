@@ -244,7 +244,7 @@ class EmbeddingClassifier:
             resp = httpx.post(
                 f"{self.embed_url}/api/embed",
                 json={"model": self.embed_model, "input": text},
-                timeout=5.0,
+                timeout=30.0,
             )
             resp.raise_for_status()
             data = resp.json()

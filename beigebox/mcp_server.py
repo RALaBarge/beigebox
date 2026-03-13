@@ -113,15 +113,21 @@ class McpServer:
     operator_factory: optional async callable (question: str) -> str
         When provided, adds operator/run as an MCP tool that external clients
         (Claude Desktop, AMF mesh workers, etc.) can invoke.
+
+    skills: optional list of skill dicts (name, description, path, dir, metadata)
+        When provided, exposed via resources/list and resources/read so MCP
+        clients can browse skills without injecting them into every prompt.
     """
 
     def __init__(
         self,
         tool_registry,
         operator_factory: Callable[[str], Awaitable[str]] | None = None,
+        skills: list | None = None,
     ):
         self._registry = tool_registry
         self._operator_factory = operator_factory
+        self._skills = skills or []
 
     async def handle(self, body: dict) -> dict | None:
         """
@@ -152,6 +158,10 @@ class McpServer:
                 return _ok(id_, self._tools_list())
             if method == "tools/call":
                 return _ok(id_, await self._tools_call(params))
+            if method == "resources/list":
+                return _ok(id_, self._resources_list())
+            if method == "resources/read":
+                return _ok(id_, self._resources_read(params))
             return _err(id_, -32601, f"Method not found: {method}")
         except ValueError as e:
             return _err(id_, -32602, str(e))
@@ -170,14 +180,18 @@ class McpServer:
             "MCP initialize: client=%s/%s protocolVersion=%s",
             client_info.get("name", "?"), client_info.get("version", "?"), client_version,
         )
+        caps: dict = {"tools": {}}
+        if self._skills:
+            caps["resources"] = {}
         return {
             "protocolVersion": MCP_PROTOCOL_VERSION,
             "serverInfo": _SERVER_INFO,
-            "capabilities": {"tools": {}},
+            "capabilities": caps,
             "instructions": (
                 "BeigeBox MCP server. Use tools/list to discover available tools "
                 "and tools/call to invoke them. All tools accept a single 'input' "
                 "string argument. See each tool's description for the expected format."
+                + (" Use resources/list to browse operator skills." if self._skills else "")
             ),
         }
 
@@ -187,6 +201,39 @@ class McpServer:
             tools.append(_OPERATOR_RUN_SCHEMA)
         logger.debug("MCP tools/list: %d tools", len(tools))
         return {"tools": tools}
+
+    def _resources_list(self) -> dict:
+        resources = [
+            {
+                "uri": f"skill://{s['name']}",
+                "name": s["name"],
+                "description": s.get("description", ""),
+                "mimeType": "text/markdown",
+            }
+            for s in self._skills
+        ]
+        logger.debug("MCP resources/list: %d skills", len(resources))
+        return {"resources": resources}
+
+    def _resources_read(self, params: dict) -> dict:
+        uri: str = params.get("uri", "").strip()
+        if not uri.startswith("skill://"):
+            raise ValueError(f"Unknown resource URI scheme: {uri!r}. Expected skill://<name>")
+        name = uri[len("skill://"):]
+        skill = next((s for s in self._skills if s["name"] == name), None)
+        if skill is None:
+            known = ", ".join(s["name"] for s in self._skills) or "(none)"
+            raise ValueError(f"Skill '{name}' not found. Available: {known}")
+        try:
+            from pathlib import Path as _Path
+            text = _Path(skill["path"]).read_text(encoding="utf-8")
+        except Exception as e:
+            raise ValueError(f"Failed to read skill '{name}': {e}") from e
+        return {
+            "contents": [
+                {"uri": uri, "mimeType": "text/markdown", "text": text}
+            ]
+        }
 
     async def _tools_call(self, params: dict) -> dict:
         name: str = params.get("name", "").strip()

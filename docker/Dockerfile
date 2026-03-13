@@ -18,7 +18,7 @@ RUN WRAPPER=/usr/local/bin/bb && \
         '# BeigeBox restricted busybox wrapper.' \
         'set -e' \
         '' \
-        'BLOCKED_APPLETS="rm rmdir mv cp chmod chown chroot ln mknod mkfifo mktemp dd truncate tee install shred sync mount umount su sudo su-exec adduser addgroup passwd pivot_root switch_root nsenter unshare ash sh bash csh tcsh nc netcat telnet tftp ftpget ftpput wget httpd inetd kill killall pkill reboot poweroff halt insmod rmmod modprobe awk sed xargs find"' \
+        'BLOCKED_APPLETS="rm rmdir mv cp chmod chown chroot ln mknod mkfifo mktemp dd truncate tee install shred sync mount umount su sudo su-exec adduser addgroup passwd pivot_root switch_root nsenter unshare ash sh bash csh tcsh nc netcat telnet tftp ftpget ftpput wget httpd inetd kill killall pkill reboot poweroff halt insmod rmmod modprobe xargs"' \
         '' \
         'APPLET="$1"' \
         'if [ -z "$APPLET" ]; then echo "Usage: bb <applet> [args...]" >&2; exit 1; fi' \
