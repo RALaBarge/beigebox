@@ -233,6 +233,10 @@ operator:
   autonomous:
     enabled: false       # Set true to enable multi-turn autonomous mode
     max_turns: 5         # Max consecutive autonomous turns (stops early if no tool calls)
+  reflection:
+    enabled: false       # Async fire-and-forget reflection; insight injected next turn
+    model: ""            # Defaults to operator model
+    timeout: 20          # Seconds before reflection task is abandoned
   pre_hook:
     enabled: false       # When true, operator enriches every chat message before it reaches the LLM
     model: "qwen3:4b"    # Model to use for enrichment (defaults to operator.model if blank)

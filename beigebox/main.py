@@ -2037,6 +2037,9 @@ async def api_operator_stream(request: Request):
                 # Use config or default to 1 (single-turn)
                 max_turns = auto_cfg.get("max_turns", 5) if auto_enabled else 1
 
+            from beigebox.agents.reflector import Reflector as _Reflector
+            _reflector = _Reflector.from_config()
+
             cur_question = question
             cur_history = list(history or [])
             final_answer = None
@@ -2045,9 +2048,14 @@ async def api_operator_stream(request: Request):
                 # Emit turn separator for turns after the first
                 if turn_n > 0:
                     yield f"data: {_json.dumps({'type': 'turn_start', 'turn': turn_n + 1, 'total': max_turns})}\n\n"
+                    # Inject reflector insight from previous turn if ready
+                    _insight = _reflector.consume_insight()
+                    _prev_answer_for_history = final_answer or ""
+                    if _insight:
+                        _prev_answer_for_history += f"\n\n[Reflection] {_insight}"
                     # Feed previous answer back as history context
                     cur_history.append({'role': 'user', 'content': cur_question})
-                    cur_history.append({'role': 'assistant', 'content': final_answer or ''})
+                    cur_history.append({'role': 'assistant', 'content': _prev_answer_for_history})
                     cur_question = "Continue."
 
                 op = Operator(vector_store=vs, blob_store=blob_store, model_override=model_override)
@@ -2095,6 +2103,12 @@ async def api_operator_stream(request: Request):
                     yield f"data: {_json.dumps(event)}\n\n"
 
                 final_answer = turn_answer
+
+                # Fire-and-forget reflection on completed turn
+                if _reflector.enabled and turn_answer:
+                    await _reflector.reflect_async(
+                        turn_answer, cur_question, f"turn {turn_n + 1}"
+                    )
 
                 # Stop early if operator gave an answer without any tool use
                 if not had_tool_call:
