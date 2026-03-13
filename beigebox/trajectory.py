@@ -98,7 +98,7 @@ def score_run(
     loop_detected = looped_pairs > 0
 
     # ── Flags ───────────────────────────────────────────────────────────────
-    hit_turn_cap = turns_used / max(max_turns, 1) >= 0.8
+    hit_turn_cap = max_turns > 1 and turns_used / max(max_turns, 1) >= 0.8
     coding_task = _is_coding_task(query)
     no_file_writes = coding_task and workspace_writes == 0
     flags = []
