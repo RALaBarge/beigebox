@@ -2037,6 +2037,9 @@ async def api_operator_stream(request: Request):
                 # Use config or default to 1 (single-turn)
                 max_turns = auto_cfg.get("max_turns", 5) if auto_enabled else 1
 
+            from beigebox.agents.pruner import ContextPruner as _ContextPruner
+            _pruner = _ContextPruner.from_config()
+
             cur_question = question
             cur_history = list(history or [])
             final_answer = None
@@ -2045,9 +2048,20 @@ async def api_operator_stream(request: Request):
                 # Emit turn separator for turns after the first
                 if turn_n > 0:
                     yield f"data: {_json.dumps({'type': 'turn_start', 'turn': turn_n + 1, 'total': max_turns})}\n\n"
+                    # Prune previous answer before appending to history
+                    _prev_answer = final_answer or ""
+                    if _pruner.enabled and _prev_answer:
+                        try:
+                            loop2 = asyncio.get_event_loop()
+                            _prev_answer = await asyncio.wait_for(
+                                loop2.run_in_executor(None, _pruner.prune, _prev_answer, f"turn {turn_n + 1}"),
+                                timeout=_pruner._timeout + 1,
+                            )
+                        except Exception:
+                            pass  # keep original on any failure
                     # Feed previous answer back as history context
                     cur_history.append({'role': 'user', 'content': cur_question})
-                    cur_history.append({'role': 'assistant', 'content': final_answer or ''})
+                    cur_history.append({'role': 'assistant', 'content': _prev_answer})
                     cur_question = "Continue."
 
                 op = Operator(vector_store=vs, blob_store=blob_store, model_override=model_override)
