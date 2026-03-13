@@ -2185,6 +2185,9 @@ async def api_harness_autonomous(request: Request):
             initial_history = _raw_history[-8:] if len(_raw_history) > 8 else _raw_history
             final_answer = None
 
+            from beigebox.agents.pruner import ContextPruner as _ContextPruner
+            _pruner = _ContextPruner.from_config()
+
             _ws_path_cfg = cfg2.get("workspace", {}).get("path", "./workspace")
             _workspace_out = (Path(__file__).parent.parent / _ws_path_cfg / "out").resolve()
 
@@ -2298,6 +2301,20 @@ async def api_harness_autonomous(request: Request):
                     yield f"data: {_json.dumps(event)}\n\n"
 
                 final_answer = turn_answer
+
+                # Context pruner: compress turn answer to reduce inter-turn token bloat
+                if _pruner.enabled and turn_answer and turn_n + 1 < max_turns:
+                    _next_step_name = f"turn {turn_n + 2}"
+                    try:
+                        _loop = asyncio.get_event_loop()
+                        _pruned = await asyncio.wait_for(
+                            _loop.run_in_executor(None, _pruner.prune, turn_answer, _next_step_name),
+                            timeout=_pruner._timeout + 1,
+                        )
+                        final_answer = _pruned
+                    except Exception:
+                        pass  # keep original
+
                 if turn_answer and "##DONE##" in turn_answer:
                     break
 
