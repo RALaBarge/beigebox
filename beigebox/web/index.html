@@ -425,6 +425,9 @@
   .op-query       { color: var(--cyan);    margin-bottom: 4px; }
   .op-answer      { color: var(--fg);      white-space: pre-wrap; word-break: break-word; margin-bottom: 12px; }
   .op-error       { color: var(--red);     margin-bottom: 12px; }
+  .op-alt-plan    { border-left: 2px solid var(--lavender); margin: 8px 0 12px; padding-left: 8px; }
+  .op-alt-plan summary { color: var(--lavender); font-size: 11px; cursor: pointer; user-select: none; }
+  .op-alt-plan-body { color: var(--fg-dim); font-size: 12px; white-space: pre-wrap; margin-top: 6px; }
   .op-info        { color: var(--blue);    font-size: 11px; margin: 4px 0; font-style: italic; }
   .op-pending     { color: var(--yellow);  font-style: italic; }
   .op-sep         { border-top: 1px solid var(--bg-border); margin: 8px 0; }
@@ -1438,6 +1441,10 @@
           <span class="toolbar-label">Turns:</span>
           <input id="op-max-turns" type="number" min="1" max="20" value="1"
             style="height:26px;font-size:12px;padding:2px 4px;width:40px" title="Max autonomous turns (1 = single-turn)">
+        </span>
+        <span style="margin-left:6px;padding-left:6px;border-left:1px solid var(--bg-border);display:flex;gap:4px;align-items:center" title="Shadow: counterfactual parallel run on turn 0 (requires server-side flag)">
+          <input type="checkbox" id="op-shadow" style="margin:0">
+          <span class="toolbar-label">Shadow</span>
         </span>
       </span>
       <!-- Council controls -->
@@ -3948,6 +3955,9 @@ async function runOp() {
             streamEl.insertAdjacentHTML('beforeend',
               `<div class="op-answer">${esc(evt.content)}</div>`);
             speakText(evt.content);
+          } else if (evt.type === 'alternative_plan') {
+            streamEl.insertAdjacentHTML('beforeend',
+              `<details class="op-alt-plan"><summary>↕ Alternative approach (shadow)</summary><div class="op-alt-plan-body">${esc(evt.content)}</div></details>`);
           } else if (evt.type === 'error') {
             streamEl.insertAdjacentHTML('beforeend',
               `<div class="op-error">✗ ${esc(evt.message)}</div>`);

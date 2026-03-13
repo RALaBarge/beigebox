@@ -2037,6 +2037,10 @@ async def api_operator_stream(request: Request):
                 # Use config or default to 1 (single-turn)
                 max_turns = auto_cfg.get("max_turns", 5) if auto_enabled else 1
 
+            from beigebox.agents.shadow import ShadowAgent as _ShadowAgent
+            _shadow = _ShadowAgent.from_config()
+            _shadow_task = None
+
             cur_question = question
             cur_history = list(history or [])
             final_answer = None
@@ -2049,6 +2053,10 @@ async def api_operator_stream(request: Request):
                     cur_history.append({'role': 'user', 'content': cur_question})
                     cur_history.append({'role': 'assistant', 'content': final_answer or ''})
                     cur_question = "Continue."
+
+                # Fire shadow agent on turn 0 only
+                if turn_n == 0 and _shadow.enabled:
+                    _shadow_task = asyncio.ensure_future(_shadow.run_shadow(question, vs))
 
                 op = Operator(vector_store=vs, blob_store=blob_store, model_override=model_override)
                 _op_model = op._model
@@ -2095,6 +2103,14 @@ async def api_operator_stream(request: Request):
                     yield f"data: {_json.dumps(event)}\n\n"
 
                 final_answer = turn_answer
+
+                # Collect shadow result on turn 0 and emit if it diverges
+                if turn_n == 0 and _shadow.enabled and _shadow_task is not None:
+                    _shadow_answer = await _shadow.collect(_shadow_task, wait=2.0)
+                    if _shadow_answer and _ShadowAgent.diverges(
+                        final_answer or "", _shadow_answer, _shadow._divergence_threshold
+                    ):
+                        yield f"data: {_json.dumps({'type': 'alternative_plan', 'content': _shadow_answer})}\n\n"
 
                 # Stop early if operator gave an answer without any tool use
                 if not had_tool_call:

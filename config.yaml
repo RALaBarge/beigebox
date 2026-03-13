@@ -210,6 +210,12 @@ voice:
 
 harness:
   enabled: true
+  shadow_agents:
+    enabled: false             # Counterfactual parallel run on turn 0
+    model: ""                  # Defaults to operator model
+    timeout: 30
+    max_tool_calls: 3          # Budget: shadow is cheap, primary is full
+    divergence_threshold: 0.3  # Jaccard: surface alternative if < 70% overlap
   retry:
     max_retries: 2
     backoff_base: 1.5

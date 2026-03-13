@@ -249,6 +249,7 @@ class Operator:
     def __init__(self, vector_store=None, blob_store=None,
                  model_override: str | None = None,
                  max_iterations_override: int | None = None,
+                 max_tool_calls: int | None = None,
                  pre_hook: bool = False, post_hook: bool = False):
         from beigebox.tools.registry import ToolRegistry
 
@@ -282,7 +283,7 @@ class Operator:
             self.cfg.get("embedding", {}).get("backend_url")
             or self.cfg.get("backend", {}).get("url", "http://localhost:11434")
         ).rstrip("/")
-        self._max_iter = max_iterations_override or self.cfg.get("operator", {}).get("max_iterations", 8)
+        self._max_iter = max_tool_calls or max_iterations_override or self.cfg.get("operator", {}).get("max_iterations", 8)
         self._timeout = self.cfg.get("operator", {}).get("timeout", 300)
 
         # Tool sandboxing: restrict which tools the LLM agent can call.
