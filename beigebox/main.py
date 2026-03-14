@@ -315,6 +315,9 @@ async def lifespan(app: FastAPI):
     logger.info("BeigeBox shutting down")
     if amf_advertiser:
         await amf_advertiser.stop()
+    from beigebox.payload_log import get_payload_log as _get_pl
+    _get_pl().close()
+    logger.info("Payload log flushed and closed")
 
 
 # ---------------------------------------------------------------------------
