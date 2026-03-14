@@ -58,7 +58,7 @@ def test_model_path_default(mock_backend):
         if "MODELS_PATH" in os.environ:
             del os.environ["MODELS_PATH"]
 
-        with patch("beigebox.backends.base.get_config", side_effect=Exception("No config")):
+        with patch("beigebox.config.get_config", side_effect=Exception("No config")):
             # Reinitialize to trigger path resolution
             backend = mock_backend.__class__(name="test", url="http://localhost:8000")
             assert backend.models_path == "/mnt/storage/models"
@@ -76,7 +76,7 @@ def test_model_path_ollama_data_env(mock_backend, temp_model_dir):
         if "MODELS_PATH" in os.environ:
             del os.environ["MODELS_PATH"]
 
-        with patch("beigebox.backends.base.get_config", side_effect=Exception("No config")):
+        with patch("beigebox.config.get_config", side_effect=Exception("No config")):
             backend = mock_backend.__class__(name="test", url="http://localhost:8000")
             assert backend.models_path == str(models_dir)
 
@@ -89,7 +89,7 @@ def test_model_path_models_path_env(mock_backend, temp_model_dir):
         if "OLLAMA_DATA" in os.environ:
             del os.environ["OLLAMA_DATA"]
 
-        with patch("beigebox.backends.base.get_config", side_effect=Exception("No config")):
+        with patch("beigebox.config.get_config", side_effect=Exception("No config")):
             backend = mock_backend.__class__(name="test", url="http://localhost:8000")
             assert backend.models_path == str(temp_model_dir)
 
@@ -115,7 +115,7 @@ def test_model_path_model_paths_list(mock_backend, temp_model_dir):
         if "MODELS_PATH" in os.environ:
             del os.environ["MODELS_PATH"]
 
-        with patch("beigebox.backends.base.get_config", return_value=config):
+        with patch("beigebox.config.get_config", return_value=config):
             backend = mock_backend.__class__(name="test", url="http://localhost:8000")
             # Should use path2 (first existing)
             assert backend.models_path == str(path2)
@@ -140,7 +140,7 @@ def test_model_path_model_paths_fallback(mock_backend, temp_model_dir):
         if "MODELS_PATH" in os.environ:
             del os.environ["MODELS_PATH"]
 
-        with patch("beigebox.backends.base.get_config", return_value=config):
+        with patch("beigebox.config.get_config", return_value=config):
             backend = mock_backend.__class__(name="test", url="http://localhost:8000")
             # Even if none exist, use first (user's responsibility)
             assert backend.models_path == str(path1)
@@ -162,7 +162,7 @@ def test_model_path_single_models_path(mock_backend, temp_model_dir):
         if "MODELS_PATH" in os.environ:
             del os.environ["MODELS_PATH"]
 
-        with patch("beigebox.backends.base.get_config", return_value=config):
+        with patch("beigebox.config.get_config", return_value=config):
             backend = mock_backend.__class__(name="test", url="http://localhost:8000")
             assert backend.models_path == str(temp_model_dir)
 
@@ -198,7 +198,7 @@ def test_model_path_priority_order(mock_backend, temp_model_dir):
         },
         clear=False,
     ):
-        with patch("beigebox.backends.base.get_config", return_value=config):
+        with patch("beigebox.config.get_config", return_value=config):
             backend = mock_backend.__class__(name="test", url="http://localhost:8000")
             assert backend.models_path == str(ollama_dir), "OLLAMA_DATA should win"
 
@@ -213,7 +213,7 @@ def test_model_path_priority_order(mock_backend, temp_model_dir):
         if "OLLAMA_DATA" in os.environ:
             del os.environ["OLLAMA_DATA"]
 
-        with patch("beigebox.backends.base.get_config", return_value=config):
+        with patch("beigebox.config.get_config", return_value=config):
             backend = mock_backend.__class__(name="test", url="http://localhost:8000")
             assert backend.models_path == str(models_env_dir), "MODELS_PATH should win"
 
@@ -224,7 +224,7 @@ def test_model_path_priority_order(mock_backend, temp_model_dir):
         if "MODELS_PATH" in os.environ:
             del os.environ["MODELS_PATH"]
 
-        with patch("beigebox.backends.base.get_config", return_value=config):
+        with patch("beigebox.config.get_config", return_value=config):
             backend = mock_backend.__class__(name="test", url="http://localhost:8000")
             assert backend.models_path == str(config_list_dir), "model_paths should win"
 
@@ -241,7 +241,7 @@ def test_model_path_priority_order(mock_backend, temp_model_dir):
         if "MODELS_PATH" in os.environ:
             del os.environ["MODELS_PATH"]
 
-        with patch("beigebox.backends.base.get_config", return_value=config_no_list):
+        with patch("beigebox.config.get_config", return_value=config_no_list):
             backend = mock_backend.__class__(name="test", url="http://localhost:8000")
             assert backend.models_path == str(config_single_dir), "models_path should win"
 
@@ -264,7 +264,7 @@ def test_model_path_with_home_expansion(mock_backend):
         if "MODELS_PATH" in os.environ:
             del os.environ["MODELS_PATH"]
 
-        with patch("beigebox.backends.base.get_config", return_value=config):
+        with patch("beigebox.config.get_config", return_value=config):
             backend = mock_backend.__class__(name="test", url="http://localhost:8000")
             # Should return the path as-is (config loader handles expansion)
             assert backend.models_path == "~/models"
@@ -281,7 +281,7 @@ def test_model_path_config_error_fallback(mock_backend):
             del os.environ["MODELS_PATH"]
 
         # Config loading raises an exception
-        with patch("beigebox.backends.base.get_config", side_effect=RuntimeError("DB error")):
+        with patch("beigebox.config.get_config", side_effect=RuntimeError("DB error")):
             backend = mock_backend.__class__(name="test", url="http://localhost:8000")
             # Should still return default
             assert backend.models_path == "/mnt/storage/models"
