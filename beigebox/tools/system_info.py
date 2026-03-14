@@ -321,7 +321,10 @@ class SystemInfoTool:
         logger.info("Shell allowlist: %d commands", len(allowed))
 
     def run(self, query: str = "") -> str:
-        """Gather and return system information."""
+        """Run a shell command or gather system information."""
+        if query and query.strip():
+            return _run(query.strip())
+
         sections = []
 
         # CPU

@@ -315,9 +315,11 @@ async def lifespan(app: FastAPI):
     logger.info("BeigeBox shutting down")
     if amf_advertiser:
         await amf_advertiser.stop()
+    if proxy and proxy.wire:
+        proxy.wire.close()
     from beigebox.payload_log import get_payload_log as _get_pl
     _get_pl().close()
-    logger.info("Payload log flushed and closed")
+    logger.info("Wiretap and payload log flushed and closed")
 
 
 # ---------------------------------------------------------------------------
@@ -1051,6 +1053,8 @@ async def api_reset_generation_params():
 
 
 
+@app.get("/api/v1/tools")
+async def api_tools():
     """List available tools."""
     if not tool_registry:
         return JSONResponse({"tools": []})

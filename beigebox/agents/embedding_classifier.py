@@ -370,6 +370,7 @@ class EmbeddingClassifier:
             path = os.path.join(_CENTROID_DIR, f"{route_name}_centroid.npy")
             os.makedirs(_CENTROID_DIR, exist_ok=True)
             np.save(path, centroid)
+            self._centroids[route_name] = centroid
             logger.info("Centroid saved: %s (dim=%d)", path, len(centroid))
 
         # Keep backward-compat aliases

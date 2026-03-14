@@ -3,7 +3,10 @@ Web scraper: fetch a URL and extract clean text content.
 Uses requests + BeautifulSoup. No API key needed.
 """
 
+import ipaddress
 import logging
+import re
+import urllib.parse
 
 import requests
 from bs4 import BeautifulSoup
@@ -27,8 +30,36 @@ class WebScraperTool:
         self.max_content_length = max_content_length
         logger.info("WebScraperTool initialized (max_chars=%d)", max_content_length)
 
+    def _validate_url(self, url: str) -> str | None:
+        """Return error string if URL is disallowed, else None."""
+        try:
+            parsed = urllib.parse.urlparse(url)
+        except Exception:
+            return "invalid URL"
+        if parsed.scheme not in ("http", "https"):
+            return f"scheme '{parsed.scheme}' not allowed (http/https only)"
+        host = parsed.hostname or ""
+        # Block localhost and loopback
+        if host in ("localhost", "127.0.0.1", "::1") or host.endswith(".localhost"):
+            return "private/localhost addresses not allowed"
+        # Block private IP ranges
+        try:
+            addr = ipaddress.ip_address(host)
+            if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+                return f"private IP address not allowed: {host}"
+        except ValueError:
+            pass  # hostname, not a raw IP — allow
+        # Block cloud metadata endpoints
+        if re.search(r"169\.254\.\d+\.\d+", host):
+            return "link-local/metadata addresses not allowed"
+        return None
+
     def run(self, url: str) -> str:
         """Fetch URL and extract text content."""
+        err = self._validate_url(url)
+        if err:
+            logger.warning("WebScraperTool blocked URL %s: %s", url, err)
+            return f"Blocked: {err}"
         try:
             resp = requests.get(url, headers=DEFAULT_HEADERS, timeout=15)
             resp.raise_for_status()

@@ -46,6 +46,8 @@ def _safe_eval(node):
             raise ValueError(f"Unsupported operator: {op_type.__name__}")
         left = _safe_eval(node.left)
         right = _safe_eval(node.right)
+        if op_type is ast.Pow and abs(right) > 10000:
+            raise ValueError("Exponent too large (max 10000)")
         return SAFE_OPS[op_type](left, right)
     elif isinstance(node, ast.UnaryOp):
         op_type = type(node.op)

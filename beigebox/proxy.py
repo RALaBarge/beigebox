@@ -925,6 +925,10 @@ class Proxy:
 
         # Strip any remaining internal BB keys that routing rules may have written
         body.pop(BB_SKIP_SEMANTIC_CACHE, None)
+        # Strip internal metadata keys — must not leak to backends
+        body.pop("_bb_auth_key", None)
+        body.pop("_beigebox_synthetic", None)
+        body.pop("_bb_injection_flag", None)
 
         # Auto-summarize if conversation exceeds token budget
         try:
@@ -1132,6 +1136,11 @@ class Proxy:
                     _rule_tool_results.append(f"[{_tool_name}]: {_result}")
             if _rule_tool_results:
                 body = self._inject_tool_context(body, "\n".join(_rule_tool_results))
+
+        # Strip internal metadata keys — must not leak to backends
+        body.pop("_bb_auth_key", None)
+        body.pop("_beigebox_synthetic", None)
+        body.pop("_bb_injection_flag", None)
 
         # Auto-summarize if conversation exceeds token budget
         try:

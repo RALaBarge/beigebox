@@ -607,7 +607,9 @@ All tools registered in BeigeBox's tool registry (web search, calculator, memory
 ## Security
 
 - **Operator sandboxing** — disabled by default; when enabled, tool access is restricted via `operator.allowed_tools` config
-- **Shell hardening** — Python allowlist → bwrap namespace sandbox → busybox wrapper fallback → audit logging (four layers)
+- **Shell hardening** — Python allowlist → bwrap namespace sandbox → busybox wrapper fallback → audit logging (four layers); `system_info` tool routes shell command strings directly when provided, falling back to a full system snapshot when called with no input
+- **SSRF protection** — `web_scraper` validates URLs before fetching: http/https only, private IPs blocked, loopback and link-local addresses (including cloud metadata endpoints) rejected
+- **Calculator DoS guard** — exponent operands capped at 10,000 to prevent unbounded bignum computation
 - **Prompt injection hooks** — configurable detection with scoring and blocking
 - **Multi-key API auth** — per-key model ACLs, endpoint ACLs, and rate limits; tokens stored in OS keychain via agentauth, never in config files
 - **Non-root container** — runs as `appuser` (UID 1000)
@@ -638,6 +640,7 @@ GET  /api/v1/stats                      Storage and usage statistics
 GET  /api/v1/costs                      Cost breakdown by model/day/conversation
 GET  /api/v1/search                     Semantic search grouped by conversation
 GET  /api/v1/tap                        Wiretap log stream
+GET  /api/v1/tools                      List registered tools and enabled status
 GET  /api/v1/backends                   Backend health, rolling P95, degraded status
 GET  /api/v1/model-performance          Tokens/sec, P50/P90/P95/P99 latency, TTFT, cache stats
 GET  /api/v1/routing-stats              Session cache hit rate
