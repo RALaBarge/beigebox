@@ -109,6 +109,7 @@ Three complementary cache layers, all in-process:
 ### Observability
 
 - **Wiretap** — structured JSONL log of every request, response, routing decision, tool call, WASM transform, timing breakdown, and all passthrough routes; operator tool calls and council member responses are also logged (operator and council call Ollama directly — wiretap coverage is added at the endpoint level in `main.py`); filterable by role (`user`, `assistant`, `system`, `decision`, `tool`, `proxy`, `wasm`) and direction in the Tap tab; click any `conv:` ID to highlight all entries from that conversation
+- **Payload logger** — full-fidelity JSONL dump of every raw LLM payload (complete messages array, model params, options) and response captured at every call site: proxy non-streaming, proxy streaming, and operator; hot-toggled via `runtime_config.yaml` (`payload_log_enabled: true`) — no restart needed; output written to `data/payload.jsonl`; sources tagged as `proxy`, `proxy_response`, `proxy_stream`, `proxy_stream_response`, `operator`, `operator_response`
 - **TTFT tracking** — time to first token captured on every streaming response, stored in SQLite
 - **Latency percentiles** — P50/P90/P95/P99 per model surfaced in the Dashboard performance table and latency chart
 - **Tokens/sec** — uses `tokens / (latency - TTFT)` for generation throughput (excludes prompt processing time)
@@ -712,7 +713,8 @@ beigebox/
 ├── summarizer.py           Auto-summarization
 ├── system_context.py       System prompt injection
 ├── wasm_runtime.py         WASM module loader and async transform runner
-├── wiretap.py              Structured wire logging
+├── wiretap.py              Structured wire logging (summaries, truncated)
+├── payload_log.py          Full-payload JSONL logger (complete LLM context, hot-toggled)
 ├── agents/
 │   ├── decision.py         Decision LLM (Tier 4 routing)
 │   ├── embedding_classifier.py  Centroid classifier (Tier 3)
