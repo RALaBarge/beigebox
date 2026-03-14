@@ -25,7 +25,7 @@ class TestUpdateRuntimeConfig:
         from beigebox import config as cfg_mod
         orig_path = cfg_mod._RUNTIME_CONFIG_PATH
         cfg_mod._RUNTIME_CONFIG_PATH = rt_path
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
 
         try:
             result = cfg_mod.update_runtime_config("web_ui_vi_mode", True)
@@ -42,7 +42,7 @@ class TestUpdateRuntimeConfig:
         from beigebox import config as cfg_mod
         orig_path = cfg_mod._RUNTIME_CONFIG_PATH
         cfg_mod._RUNTIME_CONFIG_PATH = rt_path
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
 
         try:
             cfg_mod.update_runtime_config("web_ui_vi_mode", True)
@@ -58,7 +58,7 @@ class TestUpdateRuntimeConfig:
         from beigebox import config as cfg_mod
         orig_path = cfg_mod._RUNTIME_CONFIG_PATH
         cfg_mod._RUNTIME_CONFIG_PATH = rt_path
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
 
         try:
             cfg_mod.update_runtime_config("web_ui_vi_mode", True)
@@ -102,7 +102,7 @@ class TestUpdateRuntimeConfig:
         from beigebox import config as cfg_mod
         orig_path = cfg_mod._RUNTIME_CONFIG_PATH
         cfg_mod._RUNTIME_CONFIG_PATH = rt_path
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
 
         try:
             cfg_mod.update_runtime_config("web_ui_vi_mode", True)
@@ -150,11 +150,12 @@ def client(tmp_path):
     orig_config = cfg_mod._config
     orig_rt_path = cfg_mod._RUNTIME_CONFIG_PATH
     orig_rt_mtime = cfg_mod._runtime_mtime
+    orig_rt_mtime_checked = cfg_mod._runtime_mtime_last_checked
     orig_rt_config = cfg_mod._runtime_config
 
     cfg_mod._config = cfg_data
     cfg_mod._RUNTIME_CONFIG_PATH = rt_path
-    cfg_mod._runtime_mtime = 0.0
+    cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
     cfg_mod._runtime_config = {}
 
     import beigebox.main  # ensure module is imported before patching
@@ -200,6 +201,7 @@ def client(tmp_path):
     cfg_mod._config = orig_config
     cfg_mod._RUNTIME_CONFIG_PATH = orig_rt_path
     cfg_mod._runtime_mtime = orig_rt_mtime
+    cfg_mod._runtime_mtime_last_checked = orig_rt_mtime_checked
     cfg_mod._runtime_config = orig_rt_config
 
 
@@ -225,7 +227,7 @@ class TestConfigEndpointWebUi:
         from beigebox import config as cfg_mod
         c, rt_path = client
         rt_path.write_text("runtime:\n  web_ui_vi_mode: true\n")
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
         cfg_mod._runtime_config = {}
 
         r = c.get("/api/v1/config")
@@ -246,7 +248,7 @@ class TestToggleViModeEndpoint:
         c, rt_path = client
         rt_path.write_text("runtime:\n  web_ui_vi_mode: false\n")
         from beigebox import config as cfg_mod
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
         cfg_mod._runtime_config = {}
 
         r = c.post("/api/v1/web-ui/toggle-vi-mode")
@@ -256,7 +258,7 @@ class TestToggleViModeEndpoint:
         c, rt_path = client
         rt_path.write_text("runtime:\n  web_ui_vi_mode: true\n")
         from beigebox import config as cfg_mod
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
         cfg_mod._runtime_config = {}
 
         r = c.post("/api/v1/web-ui/toggle-vi-mode")
@@ -266,7 +268,7 @@ class TestToggleViModeEndpoint:
         c, rt_path = client
         rt_path.write_text("runtime:\n  web_ui_vi_mode: false\n")
         from beigebox import config as cfg_mod
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
         cfg_mod._runtime_config = {}
 
         c.post("/api/v1/web-ui/toggle-vi-mode")
@@ -278,11 +280,11 @@ class TestToggleViModeEndpoint:
         rt_path.write_text("runtime:\n  web_ui_vi_mode: false\n")
         from beigebox import config as cfg_mod
 
-        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_config = {}
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0; cfg_mod._runtime_config = {}
         r1 = c.post("/api/v1/web-ui/toggle-vi-mode")
         assert r1.json()["vi_mode"] is True
 
-        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_config = {}
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0; cfg_mod._runtime_config = {}
         r2 = c.post("/api/v1/web-ui/toggle-vi-mode")
         assert r2.json()["vi_mode"] is False
 

@@ -102,6 +102,12 @@ wiretap:
   max_lines: 100000
   rotation_enabled: true
 
+# Full outbound payload logger — dumps complete context (messages, options, response)
+# for every LLM call. Hot-toggle via runtime_config.yaml: payload_log_enabled: true
+# Sources logged: proxy (non-stream), proxy_stream, proxy_stream_response, operator, operator_response
+payload_log:
+  path: ./data/payload.jsonl
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Decision LLM (Intelligent Routing)
 # ─────────────────────────────────────────────────────────────────────────────

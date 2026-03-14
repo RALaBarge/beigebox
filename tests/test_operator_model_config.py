@@ -27,7 +27,7 @@ class TestOperatorModelRuntimeConfig:
 
         orig_path = cfg_mod._RUNTIME_CONFIG_PATH
         cfg_mod._RUNTIME_CONFIG_PATH = rt_path
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
 
         try:
             result = cfg_mod.update_runtime_config("operator_model", "qwen3:7b")
@@ -46,7 +46,7 @@ class TestOperatorModelRuntimeConfig:
 
         orig_path = cfg_mod._RUNTIME_CONFIG_PATH
         cfg_mod._RUNTIME_CONFIG_PATH = rt_path
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
         cfg_mod._runtime_config = {}
 
         try:
@@ -64,7 +64,7 @@ class TestOperatorModelRuntimeConfig:
 
         orig_path = cfg_mod._RUNTIME_CONFIG_PATH
         cfg_mod._RUNTIME_CONFIG_PATH = rt_path
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
 
         try:
             cfg_mod.update_runtime_config("web_ui_vi_mode", True)
@@ -114,12 +114,12 @@ def client_with_operator(tmp_path):
 
     orig_config = cfg_mod._config
     orig_rt_path = cfg_mod._RUNTIME_CONFIG_PATH
-    orig_rt_mtime = cfg_mod._runtime_mtime
+    orig_rt_mtime = cfg_mod._runtime_mtime; orig_rt_mtime_checked = cfg_mod._runtime_mtime_last_checked
     orig_rt_config = cfg_mod._runtime_config
 
     cfg_mod._config = cfg_data
     cfg_mod._RUNTIME_CONFIG_PATH = rt_path
-    cfg_mod._runtime_mtime = 0.0
+    cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
     cfg_mod._runtime_config = {}
 
     import beigebox.main
@@ -163,6 +163,7 @@ def client_with_operator(tmp_path):
     cfg_mod._config = orig_config
     cfg_mod._RUNTIME_CONFIG_PATH = orig_rt_path
     cfg_mod._runtime_mtime = orig_rt_mtime
+    cfg_mod._runtime_mtime_last_checked = orig_rt_mtime_checked
     cfg_mod._runtime_config = orig_rt_config
 
 
@@ -183,7 +184,7 @@ class TestConfigEndpointOperatorModel:
         c, rt_path, cfg_mod = client_with_operator
         # Set runtime config
         rt_path.write_text("runtime:\n  operator_model: runtime_override_model\n")
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
         cfg_mod._runtime_config = {}
 
         r = c.get("/api/v1/config")
@@ -195,7 +196,7 @@ class TestConfigEndpointOperatorModel:
         """Runtime config operator_model should override static config."""
         c, rt_path, cfg_mod = client_with_operator
         rt_path.write_text("runtime:\n  operator_model: runtime_wins\n")
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
         cfg_mod._runtime_config = {}
 
         r = c.get("/api/v1/config")
@@ -230,7 +231,7 @@ class TestConfigPostOperatorModel:
         c.post("/api/v1/config", json={"operator_model": "new_post_model"})
 
         # Force cache invalidation
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
         cfg_mod._runtime_config = {}
 
         r = c.get("/api/v1/config")
@@ -292,12 +293,12 @@ class TestOperatorModelResolution:
 
         orig_cfg = cfg_mod._config
         orig_rt_path = cfg_mod._RUNTIME_CONFIG_PATH
-        orig_rt_mtime = cfg_mod._runtime_mtime
+        orig_rt_mtime = cfg_mod._runtime_mtime; orig_rt_mtime_checked = cfg_mod._runtime_mtime_last_checked
         orig_rt_config = cfg_mod._runtime_config
 
         cfg_mod._config = cfg_data
         cfg_mod._RUNTIME_CONFIG_PATH = rt_path
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
         cfg_mod._runtime_config = {}
 
         try:
@@ -325,12 +326,12 @@ class TestOperatorModelResolution:
 
         orig_cfg = cfg_mod._config
         orig_rt_path = cfg_mod._RUNTIME_CONFIG_PATH
-        orig_rt_mtime = cfg_mod._runtime_mtime
+        orig_rt_mtime = cfg_mod._runtime_mtime; orig_rt_mtime_checked = cfg_mod._runtime_mtime_last_checked
         orig_rt_config = cfg_mod._runtime_config
 
         cfg_mod._config = cfg_data
         cfg_mod._RUNTIME_CONFIG_PATH = rt_path
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
         cfg_mod._runtime_config = {}
 
         try:
@@ -358,12 +359,12 @@ class TestOperatorModelResolution:
 
         orig_cfg = cfg_mod._config
         orig_rt_path = cfg_mod._RUNTIME_CONFIG_PATH
-        orig_rt_mtime = cfg_mod._runtime_mtime
+        orig_rt_mtime = cfg_mod._runtime_mtime; orig_rt_mtime_checked = cfg_mod._runtime_mtime_last_checked
         orig_rt_config = cfg_mod._runtime_config
 
         cfg_mod._config = cfg_data
         cfg_mod._RUNTIME_CONFIG_PATH = rt_path
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
         cfg_mod._runtime_config = {}
 
         try:
@@ -391,12 +392,12 @@ class TestOperatorModelResolution:
 
         orig_cfg = cfg_mod._config
         orig_rt_path = cfg_mod._RUNTIME_CONFIG_PATH
-        orig_rt_mtime = cfg_mod._runtime_mtime
+        orig_rt_mtime = cfg_mod._runtime_mtime; orig_rt_mtime_checked = cfg_mod._runtime_mtime_last_checked
         orig_rt_config = cfg_mod._runtime_config
 
         cfg_mod._config = cfg_data
         cfg_mod._RUNTIME_CONFIG_PATH = rt_path
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
         cfg_mod._runtime_config = {}
 
         try:
@@ -410,14 +411,14 @@ class TestOperatorModelResolution:
 
             # Static wins when no runtime
             rt_path.write_text("runtime:\n")
-            cfg_mod._runtime_mtime = 0.0
+            cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
             cfg_mod._runtime_config = {}
             op3 = Operator()
             assert op3._model == "static_model"
 
             # Default wins when nothing else set
             cfg_data["operator"] = {}
-            cfg_mod._runtime_mtime = 0.0
+            cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
             cfg_mod._runtime_config = {}
             op4 = Operator()
             assert op4._model == "default_model"
@@ -451,12 +452,12 @@ class TestHarnessOrchestratorModelResolution:
 
         orig_cfg = cfg_mod._config
         orig_rt_path = cfg_mod._RUNTIME_CONFIG_PATH
-        orig_rt_mtime = cfg_mod._runtime_mtime
+        orig_rt_mtime = cfg_mod._runtime_mtime; orig_rt_mtime_checked = cfg_mod._runtime_mtime_last_checked
         orig_rt_config = cfg_mod._runtime_config
 
         cfg_mod._config = cfg_data
         cfg_mod._RUNTIME_CONFIG_PATH = rt_path
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
         cfg_mod._runtime_config = {}
 
         try:
@@ -484,12 +485,12 @@ class TestHarnessOrchestratorModelResolution:
 
         orig_cfg = cfg_mod._config
         orig_rt_path = cfg_mod._RUNTIME_CONFIG_PATH
-        orig_rt_mtime = cfg_mod._runtime_mtime
+        orig_rt_mtime = cfg_mod._runtime_mtime; orig_rt_mtime_checked = cfg_mod._runtime_mtime_last_checked
         orig_rt_config = cfg_mod._runtime_config
 
         cfg_mod._config = cfg_data
         cfg_mod._RUNTIME_CONFIG_PATH = rt_path
-        cfg_mod._runtime_mtime = 0.0
+        cfg_mod._runtime_mtime = 0.0; cfg_mod._runtime_mtime_last_checked = 0.0
         cfg_mod._runtime_config = {}
 
         try:

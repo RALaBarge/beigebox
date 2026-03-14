@@ -776,6 +776,11 @@ async def api_config():
         },
         # ── Wiretap ───────────────────────────────────────────────────
         "wiretap": cfg.get("wiretap", {}),
+        # ── Payload log ───────────────────────────────────────────────
+        "payload_log": {
+            "enabled": rt.get("payload_log_enabled", False),
+            "path":    cfg.get("payload_log", {}).get("path", "./data/payload.jsonl"),
+        },
         # ── Hooks ─────────────────────────────────────────────────────
         "hooks": cfg.get("hooks", []),
         # ── Web UI (runtime only) ─────────────────────────────────────
@@ -928,6 +933,8 @@ async def api_config_save(request: Request):
         "browserbox_enabled":           "browserbox_enabled",
         "browserbox_ws_url":            "browserbox_ws_url",
         "browserbox_timeout":           "browserbox_timeout",
+        # Payload logger
+        "payload_log_enabled":          "payload_log_enabled",
     }
 
     for key, rt_key in allowed.items():

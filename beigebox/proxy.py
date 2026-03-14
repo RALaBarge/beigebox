@@ -44,6 +44,7 @@ from beigebox.agents.routing_rules import (
 )
 from beigebox.backends.openrouter import _COST_SENTINEL_PREFIX
 from beigebox.cache import SemanticCache, ToolResultCache
+from beigebox.payload_log import get_payload_log
 logger = logging.getLogger(__name__)
 def _estimate_tokens(text: str) -> int:
     """Rough token estimate: ~4 chars per token for English text."""
@@ -82,6 +83,8 @@ class Proxy:
         # Wire log — structured tap of everything on the line
         wire_path = self.cfg.get("wiretap", {}).get("path", "./data/wire.jsonl")
         self.wire = WireLog(wire_path)
+        # Payload log — full context debug logger (hot-toggled via runtime_config)
+        self._payload_log = get_payload_log(self.cfg)
         # WASM transform runtime
         self.wasm_runtime = WasmRuntime(self.cfg)
         if self.wasm_runtime.enabled:
@@ -951,6 +954,16 @@ class Proxy:
         if not is_synthetic:
             self._log_messages(conversation_id, body.get("messages", []), model)
 
+        # Payload log — full context dump (hot-toggled, never blocks on error)
+        if get_runtime_config().get("payload_log_enabled", False):
+            self._payload_log.log(
+                source="proxy",
+                payload=body,
+                backend=self.backend_url,
+                model=model,
+                conversation_id=conversation_id,
+            )
+
         # Forward to backend — use router if available, otherwise direct
         cost_usd = None
         backend_name = "direct"
@@ -1001,6 +1014,17 @@ class Proxy:
                 assistant_content = choices[0].get("message", {}).get("content", "")
                 response_latency = response.latency_ms if self.backend_router and response.ok else None
                 self._log_response(conversation_id, assistant_content, model, cost_usd=cost_usd, latency_ms=response_latency)
+                # Payload log — capture response alongside the already-logged request
+                if get_runtime_config().get("payload_log_enabled", False):
+                    self._payload_log.log(
+                        source="proxy_response",
+                        payload={},
+                        response=assistant_content,
+                        backend=backend_name,
+                        model=model,
+                        conversation_id=conversation_id,
+                        latency_ms=round(_stages.get("backend", 0), 1),
+                    )
 
         # Post-response hooks
         _t_post = _time.monotonic()
@@ -1167,6 +1191,16 @@ class Proxy:
         if not is_synthetic:
             self._log_messages(conversation_id, body.get("messages", []), model)
 
+        # Payload log — full context dump before stream starts (hot-toggled)
+        if not is_synthetic and get_runtime_config().get("payload_log_enabled", False):
+            self._payload_log.log(
+                source="proxy_stream",
+                payload=body,
+                backend=self.backend_url,
+                model=model,
+                conversation_id=conversation_id,
+            )
+
         # full_response accumulates token deltas so we can log and cache the
         # complete assistant message after streaming. It's also the WASM input
         # buffer when a module is active.
@@ -1290,6 +1324,17 @@ class Proxy:
         # Log the complete response after streaming finishes (skip synthetic)
         if not is_synthetic:
             complete_text = "".join(full_response)
+            # Payload log — capture assembled response (hot-toggled)
+            if complete_text and get_runtime_config().get("payload_log_enabled", False):
+                self._payload_log.log(
+                    source="proxy_stream_response",
+                    payload={},
+                    response=complete_text,
+                    backend=backend_name,
+                    model=model,
+                    conversation_id=conversation_id,
+                    latency_ms=round(_stages.get("backend", 0), 1),
+                )
             # WASM transform — runs on assembled text in both modes.
             # In buffer mode the transformed text is re-emitted to the client below.
             if complete_text and wasm_mod:
