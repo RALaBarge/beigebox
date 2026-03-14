@@ -232,23 +232,20 @@ class SQLiteStore:
                 (ts_filter,),
             ).fetchall()
 
-            # Fetch per-row latency + ttft for percentiles and improved tok/s
+            # Fetch per-row latency + ttft for percentiles — single query, group in Python
+            detail_rows = conn.execute(
+                f"""SELECT model, latency_ms, ttft_ms, token_count FROM messages
+                   WHERE role = 'assistant'
+                     AND latency_ms IS NOT NULL
+                     {ts_clause}
+                   ORDER BY model, latency_ms""",
+                (ts_filter,),
+            ).fetchall()
             perf_by_model: dict[str, list[tuple[float, float | None, int]]] = {}
-            for row in rows:
-                model = row["model"]
-                detail_rows = conn.execute(
-                    f"""SELECT latency_ms, ttft_ms, token_count FROM messages
-                       WHERE role = 'assistant'
-                         AND model = ?
-                         AND latency_ms IS NOT NULL
-                         {ts_clause}
-                       ORDER BY latency_ms""",
-                    (model, ts_filter),
-                ).fetchall()
-                perf_by_model[model] = [
+            for r in detail_rows:
+                perf_by_model.setdefault(r["model"], []).append(
                     (r["latency_ms"], r["ttft_ms"], r["token_count"] or 0)
-                    for r in detail_rows
-                ]
+                )
 
             # Requests per day (all models combined)
             req_day_rows = conn.execute(

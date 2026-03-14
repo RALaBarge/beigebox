@@ -293,7 +293,8 @@ class Operator:
                  max_iterations_override: int | None = None,
                  max_tool_calls: int | None = None,
                  pre_hook: bool = False, post_hook: bool = False,
-                 autonomous: bool = False):
+                 autonomous: bool = False,
+                 tool_registry=None):
         from beigebox.tools.registry import ToolRegistry
 
         self.cfg = get_config()
@@ -315,7 +316,7 @@ class Operator:
         else:
             self._dump_dir = None
 
-        self._registry = ToolRegistry(vector_store=vector_store)
+        self._registry = tool_registry or ToolRegistry(vector_store=vector_store)
         self._model = (
             model_override
             or (self.rt and self.rt.get("operator_model"))
@@ -487,73 +488,73 @@ class Operator:
     # LLM call
     # ------------------------------------------------------------------
 
-    def _chat(self, messages: list[dict], _attempt: int = 0) -> str:
+    def _chat(self, messages: list[dict]) -> str:
         """Send messages to Ollama and return the assistant content string.
         Retries up to 2 times with exponential backoff on transient errors."""
-        try:
-            with httpx.Client(timeout=self._timeout) as client:
-                # Disable thinking mode for models that support it (Qwen3, DeepSeek-R1, etc.)
-                # Thinking tokens bloat the context and break JSON-only output parsing.
-                _is_thinker = any(t in self._model.lower() for t in ("qwen3", "r1", "deepseek-r"))
-                opts: dict = {"num_ctx": 8192}
-                if _is_thinker:
-                    opts["think"] = False
-                payload: dict = {
-                    "model": self._model,
-                    "messages": messages,
-                    "stream": False,
-                    "temperature": 0,
-                    "options": opts,
-                }
-                _backend_url = self._resolve_backend_url(self._model)
+        _is_thinker = any(t in self._model.lower() for t in ("qwen3", "r1", "deepseek-r"))
+        opts: dict = {"num_ctx": 8192}
+        if _is_thinker:
+            opts["think"] = False
+        payload: dict = {
+            "model": self._model,
+            "messages": messages,
+            "stream": False,
+            "temperature": 0,
+            "options": opts,
+        }
+        _backend_url = self._resolve_backend_url(self._model)
 
-                # Payload log — full operator context dump (hot-toggled)
-                try:
-                    from beigebox.config import get_runtime_config as _grc
-                    from beigebox.payload_log import get_payload_log as _gpl
-                    if _grc().get("payload_log_enabled", False):
-                        _gpl(self.cfg).log(
-                            source="operator",
-                            payload=payload,
-                            backend=_backend_url,
-                            model=self._model,
-                        )
-                except Exception:
-                    pass  # never block on logging
-
-                resp = client.post(
-                    f"{_backend_url}/v1/chat/completions",
-                    json=payload,
-                )
-                resp.raise_for_status()
-                result = resp.json()["choices"][0]["message"]["content"]
-
-                # Payload log — capture operator response
-                try:
-                    from beigebox.config import get_runtime_config as _grc2
-                    from beigebox.payload_log import get_payload_log as _gpl2
-                    if _grc2().get("payload_log_enabled", False):
-                        _gpl2(self.cfg).log(
-                            source="operator_response",
-                            payload={},
-                            response=result,
-                            backend=_backend_url,
-                            model=self._model,
-                        )
-                except Exception:
-                    pass
-
-                return result
-        except Exception as e:
-            if _attempt < 2:
-                delay = 1.5 ** (_attempt + 1)
+        last_exc: Exception | None = None
+        for _attempt in range(3):
+            if _attempt > 0:
+                delay = 1.5 ** _attempt
                 logger.warning(
                     "Operator _chat attempt %d failed (%s), retrying in %.1fs",
-                    _attempt + 1, e, delay,
+                    _attempt, last_exc, delay,
                 )
                 time.sleep(delay)
-                return self._chat(messages, _attempt + 1)
-            raise
+            try:
+                with httpx.Client(timeout=self._timeout) as client:
+                    # Payload log — full operator context dump (hot-toggled)
+                    try:
+                        from beigebox.config import get_runtime_config as _grc
+                        from beigebox.payload_log import get_payload_log as _gpl
+                        if _grc().get("payload_log_enabled", False):
+                            _gpl(self.cfg).log(
+                                source="operator",
+                                payload=payload,
+                                backend=_backend_url,
+                                model=self._model,
+                            )
+                    except Exception:
+                        pass  # never block on logging
+
+                    resp = client.post(
+                        f"{_backend_url}/v1/chat/completions",
+                        json=payload,
+                    )
+                    resp.raise_for_status()
+                    result = resp.json()["choices"][0]["message"]["content"]
+
+                    # Payload log — capture operator response
+                    try:
+                        from beigebox.config import get_runtime_config as _grc2
+                        from beigebox.payload_log import get_payload_log as _gpl2
+                        if _grc2().get("payload_log_enabled", False):
+                            _gpl2(self.cfg).log(
+                                source="operator_response",
+                                payload={},
+                                response=result,
+                                backend=_backend_url,
+                                model=self._model,
+                            )
+                    except Exception:
+                        pass
+
+                    return result
+            except Exception as e:
+                last_exc = e
+        raise last_exc  # type: ignore[misc]
 
     # ------------------------------------------------------------------
     # Tool execution

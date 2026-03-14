@@ -181,10 +181,11 @@ class Proxy:
         """Check if this request was tagged as synthetic by a hook."""
         return body.get("_beigebox_synthetic", False)
 
-    def _log_messages(self, conversation_id: str, messages: list[dict], model: str):
+    async def _log_messages(self, conversation_id: str, messages: list[dict], model: str):
         """Store the user messages from the request."""
         if not self.log_enabled:
             return
+        loop = asyncio.get_event_loop()
         for msg in messages:
             role = msg.get("role", "")
             content = msg.get("content", "")
@@ -202,7 +203,7 @@ class Proxy:
                 model=model,
                 token_count=tokens,
             )
-            self.sqlite.store_message(message)
+            await loop.run_in_executor(None, self.sqlite.store_message, message)
             # Wire tap
             self.wire.log(
                 direction="inbound",
@@ -225,10 +226,11 @@ class Proxy:
                 lambda t: t.exception() and logger.warning("vector embed failed: %s", t.exception())
             )
 
-    def _log_response(self, conversation_id: str, content: str, model: str, cost_usd: float | None = None, latency_ms: float | None = None, ttft_ms: float | None = None):
+    async def _log_response(self, conversation_id: str, content: str, model: str, cost_usd: float | None = None, latency_ms: float | None = None, ttft_ms: float | None = None):
         """Store the assistant response."""
         if not self.log_enabled or not content.strip():
             return
+        loop = asyncio.get_event_loop()
         tokens = _estimate_tokens(content)
         message = Message(
             conversation_id=conversation_id,
@@ -237,7 +239,10 @@ class Proxy:
             model=model,
             token_count=tokens,
         )
-        self.sqlite.store_message(message, cost_usd=cost_usd, latency_ms=latency_ms, ttft_ms=ttft_ms)
+        await loop.run_in_executor(
+            None,
+            lambda: self.sqlite.store_message(message, cost_usd=cost_usd, latency_ms=latency_ms, ttft_ms=ttft_ms),
+        )
         # Wire tap
         cost_info = f" cost=${cost_usd:.6f}" if cost_usd else ""
         self.wire.log(
@@ -757,6 +762,7 @@ class Proxy:
             model_override=pre_hook_cfg.get("model"),
             max_iterations_override=pre_hook_cfg.get("max_iterations", 3),
             pre_hook=True,
+            tool_registry=self.tool_registry,
         )
 
         loop = asyncio.get_event_loop()
@@ -807,6 +813,7 @@ class Proxy:
             model_override=post_hook_cfg.get("model"),
             max_iterations_override=post_hook_cfg.get("max_iterations", 3),
             post_hook=True,
+            tool_registry=self.tool_registry,
         )
 
         # Compose context: user question + assistant response
@@ -962,7 +969,7 @@ class Proxy:
 
         # Log incoming user messages (skip synthetic)
         if not is_synthetic:
-            self._log_messages(conversation_id, body.get("messages", []), model)
+            await self._log_messages(conversation_id, body.get("messages", []), model)
 
         # Payload log — full context dump (hot-toggled, never blocks on error)
         if get_runtime_config().get("payload_log_enabled", False):
@@ -1023,7 +1030,7 @@ class Proxy:
             if choices:
                 assistant_content = choices[0].get("message", {}).get("content", "")
                 response_latency = response.latency_ms if self.backend_router and response.ok else None
-                self._log_response(conversation_id, assistant_content, model, cost_usd=cost_usd, latency_ms=response_latency)
+                await self._log_response(conversation_id, assistant_content, model, cost_usd=cost_usd, latency_ms=response_latency)
                 # Payload log — capture response alongside the already-logged request
                 if get_runtime_config().get("payload_log_enabled", False):
                     self._payload_log.log(
@@ -1204,7 +1211,7 @@ class Proxy:
 
         # Log incoming user messages (skip synthetic)
         if not is_synthetic:
-            self._log_messages(conversation_id, body.get("messages", []), model)
+            await self._log_messages(conversation_id, body.get("messages", []), model)
 
         # Payload log — full context dump before stream starts (hot-toggled)
         if not is_synthetic and get_runtime_config().get("payload_log_enabled", False):
@@ -1370,7 +1377,7 @@ class Proxy:
                 yield f"data: {emit_chunk}\n"
                 yield "data: [DONE]\n"
             if complete_text:
-                self._log_response(
+                await self._log_response(
                     conversation_id,
                     complete_text,
                     model,
