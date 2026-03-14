@@ -213,7 +213,7 @@ class Proxy:
                 token_count=tokens,
             )
             # Embed async in background — avoids blocking the event loop
-            asyncio.create_task(self.vector.store_message_async(
+            _t = asyncio.create_task(self.vector.store_message_async(
                 message_id=message.id,
                 conversation_id=conversation_id,
                 role=role,
@@ -221,6 +221,9 @@ class Proxy:
                 model=model,
                 timestamp=message.timestamp,
             ))
+            _t.add_done_callback(
+                lambda t: t.exception() and logger.warning("vector embed failed: %s", t.exception())
+            )
 
     def _log_response(self, conversation_id: str, content: str, model: str, cost_usd: float | None = None, latency_ms: float | None = None, ttft_ms: float | None = None):
         """Store the assistant response."""
@@ -254,7 +257,7 @@ class Proxy:
                 conversation_id=conversation_id,
             )
         # Embed async in background — avoids blocking the event loop
-        asyncio.create_task(self.vector.store_message_async(
+        _t = asyncio.create_task(self.vector.store_message_async(
             message_id=message.id,
             conversation_id=conversation_id,
             role="assistant",
@@ -262,6 +265,9 @@ class Proxy:
             model=model,
             timestamp=message.timestamp,
         ))
+        _t.add_done_callback(
+            lambda t: t.exception() and logger.warning("vector embed failed: %s", t.exception())
+        )
 
     def _build_hook_context(
         self,

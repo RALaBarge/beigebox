@@ -679,12 +679,6 @@ async def api_config():
     cfg = get_config()
     rt = get_runtime_config()
 
-    def _redact(v):
-        """Redact anything that looks like an API key or password."""
-        if isinstance(v, str) and len(v) > 8 and any(k in v.lower() for k in ("key", "secret", "token", "password")):
-            return "***redacted***"
-        return v
-
     # Merge runtime overrides onto config values
     return JSONResponse({
         # ── Backend ──────────────────────────────────────────────────

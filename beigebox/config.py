@@ -303,8 +303,22 @@ def update_runtime_config(key: str, value) -> bool:
 
         if not _RUNTIME_CONFIG_PATH.parent.exists():
             return False
-        with open(_RUNTIME_CONFIG_PATH, "w") as f:
-            yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        # Atomic write — write to a temp file then rename so a crash mid-write
+        # never leaves a truncated/corrupt runtime_config.yaml.
+        import tempfile as _tempfile
+        tmp_fd, tmp_path = _tempfile.mkstemp(
+            dir=_RUNTIME_CONFIG_PATH.parent, suffix=".tmp"
+        )
+        try:
+            with os.fdopen(tmp_fd, "w") as f:
+                yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+            os.replace(tmp_path, _RUNTIME_CONFIG_PATH)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+            raise
 
         # Reset mtime so the next get_runtime_config() call triggers a reload
         # even if the OS mtime resolution is coarser than the write interval.
