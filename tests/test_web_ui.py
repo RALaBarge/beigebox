@@ -340,7 +340,7 @@ class TestWebFileServing:
         if not html_path.exists():
             pytest.skip("index.html not found")
         content = html_path.read_text()
-        assert "vi-toggle" in content
+        assert "vi-pill" in content
         assert "toggleViMode" in content
         assert "π" in content
 
