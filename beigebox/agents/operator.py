@@ -17,6 +17,7 @@ No TUI dependency. Works from CLI, HTTP API, or any caller.
 """
 from __future__ import annotations
 
+import asyncio
 import gzip
 import json
 import logging
@@ -562,6 +563,64 @@ class Operator:
                 last_exc = e
         raise last_exc  # type: ignore[misc]
 
+    async def _chat_async(self, messages: list[dict]) -> str:
+        """Async version of _chat using httpx.AsyncClient — used by run_stream()
+        so the event loop is never blocked waiting for Ollama."""
+        _is_thinker = any(t in self._model.lower() for t in ("qwen3", "r1", "deepseek-r"))
+        opts: dict = {"num_ctx": 8192}
+        if _is_thinker:
+            opts["think"] = False
+        payload: dict = {
+            "model": self._model,
+            "messages": messages,
+            "stream": False,
+            "temperature": 0,
+            "options": opts,
+        }
+        _backend_url = self._resolve_backend_url(self._model)
+
+        last_exc: Exception | None = None
+        for _attempt in range(3):
+            if _attempt > 0:
+                delay = 1.5 ** _attempt
+                logger.warning(
+                    "Operator _chat_async attempt %d failed (%s), retrying in %.1fs",
+                    _attempt, last_exc, delay,
+                )
+                await asyncio.sleep(delay)
+            try:
+                async with httpx.AsyncClient(timeout=self._timeout) as client:
+                    try:
+                        from beigebox.config import get_runtime_config as _grc
+                        from beigebox.payload_log import get_payload_log as _gpl
+                        if _grc().get("payload_log_enabled", False):
+                            _gpl(self.cfg).log(source="operator", payload=payload,
+                                               backend=_backend_url, model=self._model)
+                    except Exception:
+                        pass
+
+                    resp = await client.post(
+                        f"{_backend_url}/v1/chat/completions",
+                        json=payload,
+                    )
+                    resp.raise_for_status()
+                    result = resp.json()["choices"][0]["message"]["content"]
+
+                    try:
+                        from beigebox.config import get_runtime_config as _grc2
+                        from beigebox.payload_log import get_payload_log as _gpl2
+                        if _grc2().get("payload_log_enabled", False):
+                            _gpl2(self.cfg).log(source="operator_response", payload={},
+                                                response=result, backend=_backend_url,
+                                                model=self._model)
+                    except Exception:
+                        pass
+
+                    return result
+            except Exception as e:
+                last_exc = e
+        raise last_exc  # type: ignore[misc]
+
     # ------------------------------------------------------------------
     # Tool execution
     # ------------------------------------------------------------------
@@ -800,9 +859,6 @@ class Operator:
           {"type": "answer",      "content": str}
           {"type": "error",       "message": str}
         """
-        import asyncio as _asyncio
-        loop = _asyncio.get_running_loop()
-
         self._reload_skills_if_changed()
         if not question.strip():
             yield {"type": "error", "message": "No question provided."}
@@ -823,8 +879,14 @@ class Operator:
         # Loop / failure guards (mirrors sync run())
         _recent_calls: list[tuple[str, str]] = []
         _consec_fail: dict[str, int] = {}
+        _run_deadline = time.monotonic() + self._run_timeout
 
         for iteration in range(self._max_iter):
+            if time.monotonic() > _run_deadline:
+                logger.warning("Operator run_stream timeout (%ds) exceeded after %d iterations", self._run_timeout, iteration)
+                yield {"type": "error", "message": f"Operator stopped: run_timeout of {self._run_timeout}s exceeded."}
+                return
+
             if iteration == self._max_iter - 2:
                 messages.append({
                     "role": "user",
@@ -836,10 +898,7 @@ class Operator:
                 })
 
             try:
-                # _chat uses httpx's synchronous client (blocking). run_in_executor
-                # offloads it to a thread pool so the asyncio event loop stays free
-                # while waiting for Ollama to respond token by token.
-                raw = await loop.run_in_executor(None, self._chat, messages)
+                raw = await self._chat_async(messages)
             except Exception as e:
                 logger.error("Operator LLM call failed: %s", e)
                 yield {"type": "error", "message": f"LLM unavailable: {e}"}

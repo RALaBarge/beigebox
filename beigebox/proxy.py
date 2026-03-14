@@ -838,6 +838,83 @@ class Proxy:
             return body
 
     # ------------------------------------------------------------------
+    # Shared request pipeline
+    # ------------------------------------------------------------------
+
+    async def _run_request_pipeline(
+        self,
+        body: dict,
+        zcmd,
+        conversation_id: str,
+        model: str,
+        stages: dict,
+    ) -> tuple[dict, object, bool, str]:
+        """
+        Shared pipeline for both streaming and non-streaming paths.
+
+        Runs from synthetic-check through window-config application:
+          z-command tools → hybrid routing → rule tools → key stripping →
+          auto-summarize → operator pre-hook → system context → generation
+          params → model options → window config
+
+        Returns (body, decision, is_synthetic, model).
+        Caller is responsible for timing stages before this call.
+        """
+        import time as _time
+
+        is_synthetic = self._is_synthetic(body)
+
+        # Run forced tools from z-command
+        if zcmd.active and zcmd.tools:
+            tool_results = self._run_forced_tools(zcmd, self._get_latest_user_message(body))
+            if tool_results:
+                body = self._inject_tool_context(body, tool_results)
+
+        # Hybrid routing: session cache → z-command → routing rules → embedding classifier → decision LLM
+        _t_route = _time.monotonic()
+        body, decision = await self._hybrid_route(body, zcmd, conversation_id)
+        model = body.get("model", model)
+        stages["routing"] = (_time.monotonic() - _t_route) * 1000
+
+        # Run tools forced by routing rules
+        _rule_tools = body.pop(BB_FORCED_TOOLS, None)
+        if _rule_tools and self.tool_registry:
+            _user_msg = self._get_latest_user_message(body)
+            _rule_tool_results = []
+            for _tool_name in _rule_tools:
+                _result = self.tool_registry.run_tool(_tool_name, _user_msg)
+                if _result:
+                    _rule_tool_results.append(f"[{_tool_name}]: {_result}")
+            if _rule_tool_results:
+                body = self._inject_tool_context(body, "\n".join(_rule_tool_results))
+
+        # Strip internal metadata keys — must not reach backends
+        body.pop(BB_SKIP_SEMANTIC_CACHE, None)
+        body.pop("_bb_auth_key", None)
+        body.pop("_beigebox_synthetic", None)
+        body.pop("_bb_injection_flag", None)
+
+        # Auto-summarize if conversation exceeds token budget
+        try:
+            from beigebox.summarizer import maybe_summarize
+            body["messages"] = await maybe_summarize(body.get("messages", []), self.cfg)
+        except Exception as _e:
+            logger.debug("auto_summarizer skipped: %s", _e)
+
+        # Operator pre-hook — enrich/modify message before it reaches the LLM
+        body = await self._run_operator_pre_hook(body)
+
+        # Inject system context, generation params, per-model options, window config
+        body = self._inject_system_context(body)
+        body = self._inject_generation_params(body)
+        body = self._inject_model_options(body)
+        body, _force_reload = self._apply_window_config(body)
+        if _force_reload:
+            await self._evict_model(body.get("model", ""))
+
+        return body, decision, is_synthetic, model
+
+    # ------------------------------------------------------------------
     # ------------------------------------------------------------------
 
     async def forward_chat_completion(self, body: dict) -> dict:
@@ -909,63 +986,9 @@ class Proxy:
                 "model": "beigebox",
             }
 
-        # Check if synthetic (tagged by hook)
-        is_synthetic = self._is_synthetic(body)
-
-        # Run forced tools from z-command
-        if zcmd.active and zcmd.tools:
-            tool_results = self._run_forced_tools(zcmd, self._get_latest_user_message(body))
-            if tool_results:
-                body = self._inject_tool_context(body, tool_results)
-
-        # Hybrid routing: session cache → z-command → routing rules → embedding classifier → decision LLM
-        _t_route = _time.monotonic()
-        body, decision = await self._hybrid_route(body, zcmd, conversation_id)
-        model = body.get("model", model)  # Update model after routing
-        _stages["routing"] = (_time.monotonic() - _t_route) * 1000
-
-        # Run tools forced by routing rules
-        _rule_tools = body.pop(BB_FORCED_TOOLS, None)
-        if _rule_tools and self.tool_registry:
-            _user_msg = self._get_latest_user_message(body)
-            _rule_tool_results = []
-            for _tool_name in _rule_tools:
-                _result = self.tool_registry.run_tool(_tool_name, _user_msg)
-                if _result:
-                    _rule_tool_results.append(f"[{_tool_name}]: {_result}")
-            if _rule_tool_results:
-                body = self._inject_tool_context(body, "\n".join(_rule_tool_results))
-
-        # Strip any remaining internal BB keys that routing rules may have written
-        body.pop(BB_SKIP_SEMANTIC_CACHE, None)
-        # Strip internal metadata keys — must not leak to backends
-        body.pop("_bb_auth_key", None)
-        body.pop("_beigebox_synthetic", None)
-        body.pop("_bb_injection_flag", None)
-
-        # Auto-summarize if conversation exceeds token budget
-        try:
-            from beigebox.summarizer import maybe_summarize
-            body["messages"] = await maybe_summarize(body.get("messages", []), self.cfg)
-        except Exception as _e:
-            logger.debug("auto_summarizer skipped: %s", _e)
-
-        # Operator pre-hook — enrich/modify message before it reaches the LLM
-        body = await self._run_operator_pre_hook(body)
-
-        # Inject system context (hot-reloaded from system_context.md)
-        body = self._inject_system_context(body)
-
-        # Inject runtime generation parameters (temperature, top_p, etc.)
-        body = self._inject_generation_params(body)
-
-        # Inject per-model Ollama options (num_gpu, num_ctx, etc.)
-        body = self._inject_model_options(body)
-
-        # Apply per-pane window config (highest priority — overrides all other layers)
-        body, _force_reload = self._apply_window_config(body)
-        if _force_reload:
-            await self._evict_model(body.get("model", ""))
+        body, decision, is_synthetic, model = await self._run_request_pipeline(
+            body, zcmd, conversation_id, model, _stages
+        )
 
         # Log incoming user messages (skip synthetic)
         if not is_synthetic:
@@ -1123,61 +1146,9 @@ class Proxy:
             yield "data: [DONE]\n"
             return
 
-        # Check if synthetic
-        is_synthetic = self._is_synthetic(body)
-
-        # Run forced tools from z-command
-        if zcmd.active and zcmd.tools:
-            tool_results = self._run_forced_tools(zcmd, self._get_latest_user_message(body))
-            if tool_results:
-                body = self._inject_tool_context(body, tool_results)
-
-        # Hybrid routing
-        _t_route = _time.monotonic()
-        body, decision = await self._hybrid_route(body, zcmd, conversation_id)
-        model = body.get("model", model)
-        _stages["routing"] = (_time.monotonic() - _t_route) * 1000
-
-        # Run tools forced by routing rules (after routing so model is resolved)
-        _rule_tools = body.pop(BB_FORCED_TOOLS, None)
-        if _rule_tools and self.tool_registry:
-            _user_msg = self._get_latest_user_message(body)
-            _rule_tool_results = []
-            for _tool_name in _rule_tools:
-                _result = self.tool_registry.run_tool(_tool_name, _user_msg)
-                if _result:
-                    _rule_tool_results.append(f"[{_tool_name}]: {_result}")
-            if _rule_tool_results:
-                body = self._inject_tool_context(body, "\n".join(_rule_tool_results))
-
-        # Strip internal metadata keys — must not leak to backends
-        body.pop("_bb_auth_key", None)
-        body.pop("_beigebox_synthetic", None)
-        body.pop("_bb_injection_flag", None)
-
-        # Auto-summarize if conversation exceeds token budget
-        try:
-            from beigebox.summarizer import maybe_summarize
-            body["messages"] = await maybe_summarize(body.get("messages", []), self.cfg)
-        except Exception as _e:
-            logger.debug("auto_summarizer skipped: %s", _e)
-
-        # Operator pre-hook — enrich/modify message before it reaches the LLM
-        body = await self._run_operator_pre_hook(body)
-
-        # Inject system context (hot-reloaded from system_context.md)
-        body = self._inject_system_context(body)
-
-        # Inject runtime generation parameters (temperature, top_p, etc.)
-        body = self._inject_generation_params(body)
-
-        # Inject per-model Ollama options (num_gpu, num_ctx, etc.)
-        body = self._inject_model_options(body)
-
-        # Apply per-pane window config (highest priority — overrides all other layers)
-        body, _force_reload = self._apply_window_config(body)
-        if _force_reload:
-            await self._evict_model(body.get("model", ""))
+        body, decision, is_synthetic, model = await self._run_request_pipeline(
+            body, zcmd, conversation_id, model, _stages
+        )
 
         # Emit a routing metadata chunk before the real stream starts. The
         # frontend reads bb_type=="routing" and updates the model badge in the

@@ -93,7 +93,7 @@ class ToolResultCache:
 
     @staticmethod
     def _key(tool: str, query: str) -> str:
-        return hashlib.sha256(f"{tool}:{query}".encode()).hexdigest()[:16]
+        return hashlib.sha256(f"{tool}:{query}".encode()).hexdigest()[:32]
 
     def get(self, tool: str, query: str) -> Optional[str]:
         k = self._key(tool, query)

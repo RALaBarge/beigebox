@@ -300,7 +300,9 @@ async def lifespan(app: FastAPI):
         async def _auto_build_centroids():
             logger.info("Embedding centroids not found — auto-building in background…")
             try:
-                success = embedding_classifier.build_centroids()
+                import asyncio as _asyncio2
+                loop = _asyncio2.get_running_loop()
+                success = await loop.run_in_executor(None, embedding_classifier.build_centroids)
                 if success:
                     logger.info("Embedding centroids auto-built successfully")
                 else:
@@ -2912,7 +2914,9 @@ async def api_build_centroids():
     if not embedding_classifier:
         return JSONResponse({"success": False, "error": "Embedding classifier not initialized"}, status_code=503)
     try:
-        success = embedding_classifier.build_centroids()
+        import asyncio as _asyncio
+        loop = _asyncio.get_running_loop()
+        success = await loop.run_in_executor(None, embedding_classifier.build_centroids)
         if success:
             return JSONResponse({"success": True, "message": "Centroids built successfully"})
         else:
