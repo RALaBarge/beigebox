@@ -12,6 +12,8 @@ runtime:
   border_threshold: null     # null = use config.yaml value (default 0.04)
   # Agentic scorer threshold (0.0-1.0)
   agentic_threshold: null    # null = 0.5 default
+  # Operator total wall-clock timeout across all iterations (1–999s); overrides config.yaml
+  operator_run_timeout: null # null = use config.yaml value (default 600)
   # Force a route for all requests this session (overrides classifier)
   force_route: ""            # "simple" | "complex" | "code" | "large" | "" = off
   # Disable specific tools for this session

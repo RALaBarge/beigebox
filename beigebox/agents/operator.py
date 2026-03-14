@@ -329,6 +329,12 @@ class Operator:
         ).rstrip("/")
         self._max_iter = max_tool_calls or max_iterations_override or self.cfg.get("operator", {}).get("max_iterations", 8)
         self._timeout = self.cfg.get("operator", {}).get("timeout", 300)
+        # Total wall-clock cap across all iterations. Capped at 3 digits (999s max via config).
+        _wall = (
+            (self.rt and self.rt.get("operator_run_timeout"))
+            or self.cfg.get("operator", {}).get("run_timeout", 600)
+        )
+        self._run_timeout = max(1, min(int(_wall), 999))
 
         # Tool sandboxing: restrict which tools the LLM agent can call.
         # When allowed_tools is set, silently drop every other entry from the
@@ -622,6 +628,7 @@ class Operator:
         if not question.strip():
             return "No question provided."
 
+        _run_deadline = time.monotonic() + self._run_timeout
         messages = [{"role": "system", "content": self._system}]
 
         # Inject-then-acknowledge: prepend persistent notes from previous sessions.
@@ -641,6 +648,10 @@ class Operator:
         _consec_fail: dict[str, int] = {}            # consecutive failure count per tool
 
         for iteration in range(self._max_iter):
+            if time.monotonic() > _run_deadline:
+                logger.warning("Operator run_timeout (%ds) exceeded after %d iterations", self._run_timeout, iteration)
+                return f"Operator stopped: run_timeout of {self._run_timeout}s exceeded."
+
             # Two iterations from the limit — nudge the model to wrap up rather
             # than burning the last step on another tool call with no answer.
             if iteration == self._max_iter - 2:

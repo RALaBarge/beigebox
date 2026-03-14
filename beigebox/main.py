@@ -726,6 +726,7 @@ async def api_config():
             "enabled":        rt.get("operator_enabled", cfg.get("operator", {}).get("enabled", False)),
             "model":          rt.get("operator_model") or cfg.get("operator", {}).get("model", ""),
             "max_iterations": cfg.get("operator", {}).get("max_iterations", 10),
+            "run_timeout":    rt.get("operator_run_timeout") or cfg.get("operator", {}).get("run_timeout", 600),
             "shell_enabled":  cfg.get("operator", {}).get("shell", {}).get("enabled", False),
         },
         # ── Model advertising ─────────────────────────────────────────

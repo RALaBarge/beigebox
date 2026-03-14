@@ -245,7 +245,8 @@ operator:
     model: "qwen3:4b"    # Model to use (defaults to operator.model if blank)
     max_iterations: 3
   max_iterations: 10
-  timeout: 300           # seconds before an operator run is abandoned
+  timeout: 300           # seconds per LLM call before it is abandoned
+  run_timeout: 600       # total wall-clock cap across ALL iterations (1–999s); default 10 min
   allowed_tools: []                     # Empty = all registered tools. Set explicitly to restrict: ["system_info", "memory", "calculator", "datetime"]
   shell:
     enabled: true
