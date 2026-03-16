@@ -54,16 +54,20 @@ class WireLog:
     """
     Structured JSONL logger for the wire.
     Each line is one event: a message going through the proxy.
-    
+
     Format:
-        {"ts": "...", "dir": "inbound|outbound", "role": "...", 
+        {"ts": "...", "dir": "inbound|outbound", "role": "...",
          "model": "...", "conv": "...", "len": 123, "content": "..."}
+
+    If sqlite_store is provided, every log() call also writes a structured row
+    to the wire_events table so the web UI can cross-link by conv_id / run_id.
     """
 
-    def __init__(self, log_path: str):
+    def __init__(self, log_path: str, sqlite_store=None):
         self.log_path = Path(log_path)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self._file = None
+        self._db = sqlite_store  # optional SQLiteStore for dual-write
 
     def _ensure_open(self):
         if self._file is None:
@@ -114,6 +118,25 @@ class WireLog:
             entry["content"] = content[:1000] + f"\n\n[... {len(content) - 2000} chars truncated ...]\n\n" + content[-1000:]
 
         self._file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+        # Dual-write to SQLite for web UI cross-linking
+        if self._db is not None:
+            meta: dict = {}
+            if latency_ms is not None:
+                meta["latency_ms"] = round(latency_ms, 1)
+            if timing:
+                meta["timing"] = {k: round(v, 1) for k, v in timing.items()}
+            if token_count:
+                meta["tokens"] = token_count
+            self._db.log_wire_event(
+                event_type="message",
+                source="proxy",
+                content=entry.get("content", ""),
+                role=role,
+                model=model,
+                conv_id=conversation_id or None,
+                meta=meta if meta else None,
+            )
 
     def close(self):
         if self._file:

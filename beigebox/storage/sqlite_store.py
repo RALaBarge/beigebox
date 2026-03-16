@@ -63,11 +63,29 @@ CREATE TABLE IF NOT EXISTS harness_runs (
     events_jsonl TEXT               -- newline-delimited JSON event log for replay
 );
 
+CREATE TABLE IF NOT EXISTS wire_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT NOT NULL,
+    event_type  TEXT NOT NULL,   -- message, tool_call, routing_decision, cache_hit, op_thought, etc.
+    source      TEXT NOT NULL,   -- proxy, operator, harness, router, cache, classifier
+    conv_id     TEXT,
+    run_id      TEXT,
+    turn_id     TEXT,
+    tool_id     TEXT,
+    model       TEXT,
+    role        TEXT,
+    content     TEXT,            -- truncated to 2000 chars
+    meta        TEXT,            -- JSON blob for event-specific fields (score, elapsed_ms, etc.)
+    misc1       TEXT,
+    misc2       TEXT
+);
+
 -- Indexes chosen for the most common access patterns:
 -- conversation_id: fetching all messages in a conversation (very frequent)
 -- timestamp: recent conversations list, date-range queries for metrics
 -- role: filtering assistant messages for latency/cost stats
 -- harness/operator created_at: sorting runs list by recency
+-- wire_events: cross-linking by conv/run/type
 CREATE INDEX IF NOT EXISTS idx_messages_conversation
     ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp
@@ -78,6 +96,14 @@ CREATE INDEX IF NOT EXISTS idx_operator_runs_created
     ON operator_runs(created_at);
 CREATE INDEX IF NOT EXISTS idx_harness_runs_created
     ON harness_runs(created_at);
+CREATE INDEX IF NOT EXISTS idx_wire_events_conv
+    ON wire_events(conv_id);
+CREATE INDEX IF NOT EXISTS idx_wire_events_run
+    ON wire_events(run_id);
+CREATE INDEX IF NOT EXISTS idx_wire_events_type
+    ON wire_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_wire_events_ts
+    ON wire_events(ts);
 """
 
 # Migrations: append-only ALTER TABLE statements that add new columns to
@@ -94,6 +120,10 @@ MIGRATIONS = [
     "ALTER TABLE messages ADD COLUMN ttft_ms REAL DEFAULT NULL",
     # v0.8 — trajectory evaluation scores for operator runs
     "ALTER TABLE operator_runs ADD COLUMN score_json TEXT DEFAULT NULL",
+    # v0.9 — structured wire events table (tap redesign)
+    # CREATE TABLE is in CREATE_TABLES (IF NOT EXISTS), migrations only needed for
+    # existing DBs that don't have the table yet — handled by _init_db CREATE_TABLES.
+    # Index migrations are also safe (CREATE INDEX IF NOT EXISTS in CREATE_TABLES).
 ]
 
 
@@ -642,4 +672,85 @@ class SQLiteStore:
                 (_json.dumps(score_dict), run_id),
             )
         logger.debug("Stored trajectory score for run %s (score=%.1f)", run_id, score_dict.get("score", 0))
+
+    # ─ Wire events (structured tap) ───────────────────────────────────────
+
+    def log_wire_event(
+        self,
+        event_type: str,
+        source: str,
+        content: str = "",
+        role: str = "",
+        model: str = "",
+        conv_id: str | None = None,
+        run_id: str | None = None,
+        turn_id: str | None = None,
+        tool_id: str | None = None,
+        meta: dict | None = None,
+        misc1: str | None = None,
+        misc2: str | None = None,
+    ) -> None:
+        """Write a structured wire event to the wire_events table."""
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat()
+        if len(content) > 2000:
+            content = content[:1000] + f"\n\n[...{len(content) - 2000} chars truncated...]\n\n" + content[-1000:]
+        meta_str = json.dumps(meta, ensure_ascii=False) if meta else None
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    """INSERT INTO wire_events
+                       (ts, event_type, source, conv_id, run_id, turn_id, tool_id,
+                        model, role, content, meta, misc1, misc2)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (ts, event_type, source, conv_id, run_id, turn_id, tool_id,
+                     model, role, content, meta_str, misc1, misc2),
+                )
+        except Exception as e:
+            logger.warning("log_wire_event failed (%s/%s): %s", source, event_type, e)
+
+    def get_wire_events(
+        self,
+        n: int = 100,
+        event_type: str | None = None,
+        source: str | None = None,
+        conv_id: str | None = None,
+        run_id: str | None = None,
+        role: str | None = None,
+    ) -> list[dict]:
+        """Query wire events with optional filters. Returns newest-first."""
+        clauses = []
+        params: list = []
+        if event_type:
+            clauses.append("event_type = ?")
+            params.append(event_type)
+        if source:
+            clauses.append("source = ?")
+            params.append(source)
+        if conv_id:
+            clauses.append("conv_id = ?")
+            params.append(conv_id)
+        if run_id:
+            clauses.append("run_id = ?")
+            params.append(run_id)
+        if role:
+            clauses.append("role = ?")
+            params.append(role)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(n)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM wire_events {where} ORDER BY id DESC LIMIT ?",
+                params,
+            ).fetchall()
+        events = []
+        for row in rows:
+            e = dict(row)
+            if e.get("meta"):
+                try:
+                    e["meta"] = json.loads(e["meta"])
+                except Exception:
+                    pass
+            events.append(e)
+        return events
 

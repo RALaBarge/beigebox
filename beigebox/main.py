@@ -1518,24 +1518,49 @@ async def api_tap(
     n: int = 50,
     role: str | None = None,
     dir: str | None = None,
+    source: str | None = None,
+    event_type: str | None = None,
+    conv_id: str | None = None,
+    run_id: str | None = None,
 ):
     """
-    Return recent wire log entries with optional filters.
+    Return recent wire events with optional filters.
 
     Query params:
-        n     int    — max entries to return (default 50, max 500)
-        role  str    — filter by role: user|assistant|system|decision|tool
-        dir   str    — filter by direction: inbound|outbound|internal
+        n           int — max entries (default 50, max 500)
+        role        str — user|assistant|system|tool|decision
+        dir         str — inbound|outbound|internal  (JSONL compat, ignored for SQLite)
+        source      str — proxy|operator|harness|router|cache|classifier
+        event_type  str — message|tool_call|routing_decision|op_thought|…
+        conv_id     str — filter to one conversation
+        run_id      str — filter to one operator/harness run
     """
     import json as _json
     from pathlib import Path as _P
-    cfg = get_config()
-    wire_path = _P(cfg.get("wiretap", {}).get("path", "./data/wire.jsonl"))
-
-    if not wire_path.exists():
-        return JSONResponse({"entries": [], "total": 0, "filtered": 0})
 
     n = min(max(1, n), 500)
+    st = sqlite_store
+
+    # Primary path: query SQLite wire_events table
+    if st is not None:
+        try:
+            rows = st.get_wire_events(
+                n=n,
+                event_type=event_type or None,
+                source=source or None,
+                conv_id=conv_id or None,
+                run_id=run_id or None,
+                role=role or None,
+            )
+            return JSONResponse({"entries": rows, "total": len(rows), "filtered": len(rows)})
+        except Exception as e:
+            logger.warning("api_tap SQLite query failed, falling back to JSONL: %s", e)
+
+    # Fallback: parse JSONL (old behaviour, cold-start before any events written)
+    cfg = get_config()
+    wire_path = _P(cfg.get("wiretap", {}).get("path", "./data/wire.jsonl"))
+    if not wire_path.exists():
+        return JSONResponse({"entries": [], "total": 0, "filtered": 0})
     entries = []
     try:
         with open(wire_path) as f:
@@ -1554,7 +1579,6 @@ async def api_tap(
                     pass
     except OSError as e:
         return JSONResponse({"error": str(e)}, status_code=500)
-
     total = len(entries)
     entries = entries[-n:]
     return JSONResponse({"entries": entries, "total": total, "filtered": len(entries)})
