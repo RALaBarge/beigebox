@@ -90,12 +90,17 @@ class OllamaBackend(BaseBackend):
             return False
 
     def supports_model(self, model: str) -> bool:
-        """Ollama never handles provider/model style IDs (those belong to API backends).
+        """Route model to Ollama if it appears in Ollama's own model list.
 
-        A "/" in the model name signals an OpenRouter-style ID like "openai/gpt-4o".
-        Ollama only knows bare names like "llama3.2:3b", so we reject qualified IDs
-        here so the router falls through to an API backend.
+        If _available_models is populated (populated by list_models()), an exact
+        match always wins — this covers hf.co/... and other non-standard IDs that
+        Ollama itself advertises.  Only fall back to the slash heuristic when the
+        model list is empty (cold start / health-check not yet run), where a "/"
+        still reliably signals an OpenRouter-style ID like "openai/gpt-4o".
         """
+        if self._available_models:
+            return model in self._available_models
+        # Cold-start fallback: reject provider/model IDs (OpenRouter-style).
         if "/" in model:
             return False
         return super().supports_model(model)
