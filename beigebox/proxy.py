@@ -607,6 +607,17 @@ class Proxy:
         """
         rt = get_runtime_config()
 
+        # Normalize missing/empty model to the configured default so the router
+        # always has a non-empty model name to match against backend model lists.
+        if not body.get("model"):
+            default = (
+                rt.get("default_model")
+                or self.cfg.get("backend", {}).get("default_model", "")
+            )
+            if default:
+                body["model"] = default
+                logger.debug("model not set by client — defaulting to '%s'", default)
+
         force = rt.get("gen_force", False)
 
         param_map = {

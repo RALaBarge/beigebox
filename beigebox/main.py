@@ -2661,8 +2661,10 @@ async def api_council_propose(request: Request):
     if not query:
         return JSONResponse({"error": "query required"}, status_code=400)
 
+    _rt = get_runtime_config()
     operator_model = (
         body.get("model", "").strip()
+        or _rt.get("operator_model")
         or cfg.get("operator", {}).get("model")
         or cfg.get("backend", {}).get("default_model", "")
     )

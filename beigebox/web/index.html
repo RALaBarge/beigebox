@@ -3066,7 +3066,20 @@ function renderPaneSettingsDrawer(pane) {
       <div class="pane-cfg-pair"><label>Seed</label>${numField('seed','random',0,2147483647,1)}</div>
     </div>
     <div class="pane-cfg-section-label">System prompt <span style="opacity:0.5">(overrides global — blank = inherit)</span></div>
-    <textarea placeholder="e.g. You are a concise coding assistant…"
+    <div style="display:flex;gap:4px;margin-bottom:4px;align-items:center">
+      <select style="font-size:11px;flex:1;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:3px;padding:2px 4px"
+        onchange="if(this.value){setPaneConfig(${pane.id},'system_prompt',this.value);document.getElementById('pane-sysprompt-${pane.id}').value=this.value;this.selectedIndex=0}">
+        <option value="">— load preset —</option>
+        <option value="You have a generous internal reasoning budget for this task.\nDo not stop at the first acceptable answer.\nUse the full available reasoning budget to:\n1. explore multiple candidate interpretations,\n2. test alternative approaches,\n3. look for failure modes,\n4. compare the top options,\n5. only then produce the final answer.\n\nTreat early confidence as suspicious.\nIf an answer seems obvious, spend additional effort trying to disprove it before committing.">🧠 Deep reasoning budget</option>
+        <option value="You are a concise assistant. Answer in as few words as possible. No preamble, no summary, no filler.">✂ Ultra-concise</option>
+        <option value="You are a step-by-step reasoning assistant. For every problem, write out your reasoning process explicitly before giving a final answer. Label each step.">📋 Step-by-step reasoning</option>
+        <option value="You are a Socratic assistant. Instead of giving answers directly, ask clarifying questions to help the user think through the problem themselves. Only provide a direct answer when explicitly asked.">🤔 Socratic</option>
+        <option value="You are a critical analyst. For every claim or proposal, identify the strongest counterarguments and failure modes before endorsing anything. Default to skepticism.">🔍 Devil's advocate</option>
+        <option value="You are a research assistant. Always cite your reasoning. When uncertain, say so explicitly with a confidence level (high/medium/low). Prefer precision over confidence.">📚 Research / cite uncertainty</option>
+        <option value="You are a code assistant. Respond only with code unless asked to explain. No prose wrapping. Use comments sparingly for non-obvious logic only.">💻 Code-only</option>
+      </select>
+    </div>
+    <textarea id="pane-sysprompt-${pane.id}" placeholder="e.g. You are a concise coding assistant…"
       onchange="setPaneConfig(${pane.id},'system_prompt',this.value)">${esc(c.system_prompt || '')}</textarea>
     <div style="text-align:right;margin-top:5px">
       <button style="font-size:10px;padding:2px 8px;height:20px;opacity:0.7"
@@ -6618,8 +6631,10 @@ function _renderBackendCard(b, i) {
       </div>
     </div>
     <div style="margin-top:6px">
-      <button class="action-btn" onclick="removeBackend(${i})"
-        style="color:var(--warn,#f66);border-color:var(--warn,#f66)">✕ Remove</button>
+      ${(b.name === 'ollama-local' || b.provider === 'openrouter')
+        ? `<span style="font-size:10px;color:var(--muted);opacity:0.6">⚑ protected backend</span>`
+        : `<button class="action-btn" onclick="removeBackend(${i})"
+            style="color:var(--warn,#f66);border-color:var(--warn,#f66)">✕ Remove</button>`}
     </div>
   </div>`;
 }
