@@ -955,7 +955,7 @@ class Operator:
 
                 yield {"type": "tool_call", "tool": tool_name, "input": tool_input, "thought": thought}
 
-                observation = await loop.run_in_executor(None, self._run_tool, tool_name, tool_input)
+                observation = await asyncio.get_running_loop().run_in_executor(None, self._run_tool, tool_name, tool_input)
 
                 yield {"type": "tool_result", "tool": tool_name, "result": observation}
 

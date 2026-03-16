@@ -65,8 +65,16 @@ class ToolRegistry:
         # --- Web Scraper ---
         sc_cfg = tools_cfg.get("web_scraper", {})
         if sc_cfg.get("enabled", False):
+            # Derive the data directory from the SQLite path so scraped HTML
+            # lands in the same volume as the rest of persistent storage.
+            from beigebox.config import get_storage_paths
+            sqlite_path, _ = get_storage_paths()
+            import os
+            save_dir = os.path.dirname(os.path.abspath(sqlite_path))
             self.tools["web_scraper"] = WebScraperTool(
-                max_content_length=sc_cfg.get("max_content_length", 10000)
+                max_content_length=sc_cfg.get("max_content_length", 10000),
+                save_dir=save_dir,
+                vector_store=vector_store,
             )
 
         # --- Google Search (as separate tool even when DDG is primary) ---

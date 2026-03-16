@@ -1368,10 +1368,14 @@ async def api_backends_apply(request: Request):
 
         # Rebuild the router in-place so existing requests using the old router
         # finish cleanly while new requests immediately see the updated config.
+        # Use get_effective_backends_config() so the ollama fallback injection
+        # runs — same logic as startup, prevents "No backends available" when
+        # the UI saves a list that contains no ollama provider.
         new_router = None
         if enabled and resolved:
             try:
-                new_router = MultiBackendRouter(resolved)
+                _, effective_backends = get_effective_backends_config()
+                new_router = MultiBackendRouter(effective_backends)
             except Exception as e:
                 logger.error("Router build failed: %s", e, exc_info=True)
                 return JSONResponse({"error": f"Router build failed: {e}"}, status_code=500)

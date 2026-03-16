@@ -3305,6 +3305,7 @@ async function sendToPane(pane, text, forceOp) {
         body: JSON.stringify({ query: typeof userContent === 'string' ? userContent : text, history: opHistory }),
       });
       document.getElementById(typingId)?.remove();
+      if (_loadHintId) { document.getElementById(_loadHintId)?.remove(); _seenModels.add(_modelKey); _loadHintId = null; }
       const answer = d.success ? d.answer : `Error: ${d.error}`;
       pane.history.push({ role: 'assistant', content: answer, model: 'operator' });
       appendMsgToPane(pane.id, 'assistant', answer, 'operator', area);
@@ -3334,7 +3335,7 @@ async function sendToPane(pane, text, forceOp) {
       // Show a one-time load hint on first use of this model
       const _modelKey = model || '__default__';
       let _loadHintId = null;
-      if (!isOp && !_seenModels.has(_modelKey)) {
+      if (!_seenModels.has(_modelKey)) {
         _loadHintId = `load-hint-${pane.id}-${Date.now()}`;
         area.insertAdjacentHTML('beforeend',
           `<div id="${_loadHintId}" style="font-size:10px;color:var(--fg-muted);padding:3px 8px;margin:2px 0;border-left:2px solid var(--bg-border);opacity:0.8">
@@ -3442,6 +3443,15 @@ async function sendToPane(pane, text, forceOp) {
       if (fullText) {
         delete pane._streaming;
         if (assistantDiv) delete assistantDiv.dataset.streaming;
+        // Stamp the token estimate on the message meta line
+        if (assistantDiv) {
+          const meta = assistantDiv.querySelector('.meta');
+          if (meta) {
+            const tok = Math.round(fullText.length / 4);
+            const tokLabel = tok >= 1000 ? `~${(tok/1000).toFixed(1)}k tok` : `~${tok} tok`;
+            meta.textContent += ` · ${tokLabel}`;
+          }
+        }
         pane.history.push({ role: 'assistant', content: fullText, model: model || 'assistant' });
         updateCtxUsage(pane);
         // force_reload is one-shot — clear after use so next send doesn't re-evict
@@ -3782,8 +3792,8 @@ function tapHighlightConv(conv) {
   // Re-apply highlight in place without a full reload (fast path for live mode)
   document.querySelectorAll('#tap-body [data-conv]').forEach(el => {
     const match = el.dataset.conv === conv;
-    el.style.background  = (match && _tapSelectedConv) ? 'rgba(137,180,250,0.07)' : '';
-    el.style.borderColor = (match && _tapSelectedConv) ? 'rgba(137,180,250,0.35)' : '';
+    el.style.background  = (match && _tapSelectedConv) ? 'rgba(137,180,250,0.22)' : '';
+    el.style.borderColor = (match && _tapSelectedConv) ? 'rgba(137,180,250,0.60)' : '';
   });
 }
 
@@ -3860,7 +3870,7 @@ function _renderTapEntry(e) {
     </div>`;
   }
 
-  const rowBg = isHighlighted ? 'background:rgba(137,180,250,0.07);border-color:rgba(137,180,250,0.35);' : '';
+  const rowBg = isHighlighted ? 'background:rgba(137,180,250,0.22);border-color:rgba(137,180,250,0.60);' : '';
   return `<div data-conv="${esc(conv)}" style="margin-bottom:6px;border-bottom:1px solid var(--bg-border);padding-bottom:5px;${rowBg}">
     <span style="color:var(--fg-muted)">${esc(ts)}</span>
     <span style="color:var(--fg-dim)">${esc(arrow)}</span>
@@ -4253,6 +4263,9 @@ function setOpMode(mode) {
   const poolEl = document.getElementById('council-model-pool');
   if (poolEl) poolEl.style.display = isCouncil ? '' : 'none';
   if (isCouncil) councilPopulateModels();
+  // Remove focus so the clicked button doesn't retain a browser focus ring
+  // that makes it look permanently highlighted.
+  document.activeElement?.blur();
 }
 
 // ── Council mode ──────────────────────────────────────────────────────────────
@@ -4597,6 +4610,7 @@ function setHarnessMode(mode) {
   // ── Populate model selects on first switch ──
   if (isEns)   harnessEnsemblePopulateModels();
   if (isRalph) harnessRalphPopulateModel();
+  document.activeElement?.blur();
 }
 
 // ── Orchestrated target pool ──────────────────────────────────────────────────
