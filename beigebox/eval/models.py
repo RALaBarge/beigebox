@@ -10,8 +10,9 @@ from dataclasses import dataclass, field
 class EvalCase:
     id: str
     input: str                              # User message sent to the proxy
-    scorer: str = "contains"               # contains | exact | regex | not_contains | llm_judge
+    scorer: str = "contains"               # contains | exact | regex | not_contains | llm_judge | route_check
     expect: dict = field(default_factory=dict)  # scorer-specific criteria
+    route: str = ""                         # Expected routing category (used by route_check scorer)
     model: str = ""                         # Override model for this case (falls back to suite default)
     system: str = ""                        # Optional system prompt
     tags: list[str] = field(default_factory=list)

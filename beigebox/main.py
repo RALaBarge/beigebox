@@ -482,7 +482,10 @@ async def chat_completions(request: Request):
         )
     else:
         data = await _st.proxy.forward_chat_completion(body)
-        return JSONResponse(data)
+        from beigebox.proxy import _request_route as _rr
+        _route_val = _rr.get("")
+        extra = {"X-BeigeBox-Route": _route_val} if _route_val else {}
+        return JSONResponse(data, headers=extra)
 
 
 @app.get("/v1/models")
@@ -490,6 +493,46 @@ async def list_models():
     """Forward model listing to backend."""
     data = await get_state().proxy.list_models()
     return JSONResponse(data)
+
+
+@app.post("/api/v1/route-check")
+async def api_route_check(request: Request):
+    """
+    Return the routing decision for a prompt without running inference.
+    Used by eval suites to verify classifier accuracy without token cost.
+
+    Body: {"input": "plain text"} or {"messages": [...]}
+    Returns: {"route": "simple|complex|code|creative|...", "model": "...", "confidence": 0.0}
+    """
+    try:
+        body = await request.json()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+    # Accept "input" shorthand used by eval suites
+    if "input" in body and "messages" not in body:
+        body["messages"] = [{"role": "user", "content": body["input"]}]
+
+    _st = get_state()
+    if not _st.proxy:
+        return JSONResponse({"error": "proxy not available"}, status_code=503)
+
+    from beigebox.agents.zcommand import parse_z_command
+    from beigebox.proxy import _request_route as _rr
+
+    user_msg = body.get("messages", [{}])[-1].get("content", "") if body.get("messages") else ""
+    zcmd = parse_z_command(user_msg)
+
+    # Run only the routing stage — no backend call
+    body_copy = dict(body)
+    body_copy, decision = await _st.proxy._hybrid_route(body_copy, zcmd, "route-check")
+
+    route = _rr.get("default")
+    model = body_copy.get("model", "")
+    result = {"route": route, "model": model}
+    if decision:
+        result["decision_llm"] = True
+    return JSONResponse(result)
 
 
 # ---------------------------------------------------------------------------

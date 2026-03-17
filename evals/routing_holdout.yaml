@@ -1,0 +1,362 @@
+# Routing classifier holdout set — admin/dev prompts, all four routes
+#
+# Run:  beigebox eval evals/routing_holdout.yaml --url http://localhost:1337
+#
+# Each case uses scorer: route_check which calls /api/v1/route-check.
+# No inference runs — only the routing pipeline executes. Fast and cheap.
+#
+# REVIEW INSTRUCTIONS:
+#   Scan the "route:" labels below. Change any you disagree with.
+#   "simple"   → small/fast model (quick facts, one-liners, status checks)
+#   "complex"  → large model (architecture, analysis, multi-step reasoning)
+#   "code"     → code model (write/fix/explain specific code)
+#   "creative" → creative model (writing, brainstorming, explanations for humans)
+# -------------------------------------------------------------------
+
+name: "routing_holdout"
+
+cases:
+
+  # ── SIMPLE ───────────────────────────────────────────────────────────────
+
+  - id: "s01"
+    route: simple
+    input: "How much free disk space do I have?"
+    scorer: route_check
+    expect:
+      route: simple
+
+  - id: "s02"
+    route: simple
+    input: "What processes are using the most CPU right now?"
+    scorer: route_check
+    expect:
+      route: simple
+
+  - id: "s03"
+    route: simple
+    input: "What port is nginx listening on?"
+    scorer: route_check
+    expect:
+      route: simple
+
+  - id: "s04"
+    route: simple
+    input: "How do I check if a service is running on Linux?"
+    scorer: route_check
+    expect:
+      route: simple
+
+  - id: "s05"
+    route: simple
+    input: "What's the difference between TCP and UDP?"
+    scorer: route_check
+    expect:
+      route: simple
+
+  - id: "s06"
+    route: simple
+    input: "List all Docker containers including stopped ones"
+    scorer: route_check
+    expect:
+      route: simple
+
+  - id: "s07"
+    route: simple
+    input: "What does the chmod 755 command do?"
+    scorer: route_check
+    expect:
+      route: simple
+
+  - id: "s08"
+    route: simple
+    input: "How do I tail a log file in real time?"
+    scorer: route_check
+    expect:
+      route: simple
+
+  - id: "s09"
+    route: simple
+    input: "What is a cron job?"
+    scorer: route_check
+    expect:
+      route: simple
+
+  - id: "s10"
+    route: simple
+    input: "How do I kill a process by port number?"
+    scorer: route_check
+    expect:
+      route: simple
+
+  - id: "s11"
+    route: simple
+    input: "What does SIGTERM mean?"
+    scorer: route_check
+    expect:
+      route: simple
+
+  - id: "s12"
+    route: simple
+    input: "How do I check memory usage on Linux?"
+    scorer: route_check
+    expect:
+      route: simple
+
+  - id: "s13"
+    route: simple
+    input: "What is the difference between a process and a thread?"
+    scorer: route_check
+    expect:
+      route: simple
+
+  - id: "s14"
+    route: simple
+    input: "How do I recursively change ownership of a directory?"
+    scorer: route_check
+    expect:
+      route: simple
+
+  - id: "s15"
+    route: simple
+    input: "What is an SSH key and why do I need one?"
+    scorer: route_check
+    expect:
+      route: simple
+
+  # ── COMPLEX ──────────────────────────────────────────────────────────────
+
+  - id: "c01"
+    route: complex
+    input: "Design a backup strategy for a home lab running Proxmox, TrueNAS, and several LXC containers with services that need to stay available during backup"
+    scorer: route_check
+    expect:
+      route: complex
+
+  - id: "c02"
+    route: complex
+    input: "Explain the trade-offs between running local LLMs on CPU vs GPU and when each makes sense for a homelab setup"
+    scorer: route_check
+    expect:
+      route: complex
+
+  - id: "c03"
+    route: complex
+    input: "I'm getting intermittent packet loss only to one specific host on my network. Walk me through a systematic diagnosis process."
+    scorer: route_check
+    expect:
+      route: complex
+
+  - id: "c04"
+    route: complex
+    input: "What are the security implications of running containers as root and what are the alternatives?"
+    scorer: route_check
+    expect:
+      route: complex
+
+  - id: "c05"
+    route: complex
+    input: "Compare self-hosting Ollama vs using OpenRouter for an LLM proxy — cost, latency, privacy, reliability trade-offs"
+    scorer: route_check
+    expect:
+      route: complex
+
+  - id: "c06"
+    route: complex
+    input: "Walk me through how to harden a fresh Ubuntu server that will be exposed to the internet"
+    scorer: route_check
+    expect:
+      route: complex
+
+  - id: "c07"
+    route: complex
+    input: "Analyze the memory fragmentation issue in this Python service that runs for days and gradually uses more RAM before OOM-killing"
+    scorer: route_check
+    expect:
+      route: complex
+
+  - id: "c08"
+    route: complex
+    input: "I need to set up a local certificate authority for my homelab. What are the options and what are the pros and cons of each?"
+    scorer: route_check
+    expect:
+      route: complex
+
+  - id: "c09"
+    route: complex
+    input: "Design a monitoring and alerting strategy for a homelab with 10+ services where I want to be paged only for things that actually need my attention"
+    scorer: route_check
+    expect:
+      route: complex
+
+  - id: "c10"
+    route: complex
+    input: "Explain why my LLM inference is bottlenecked and what I can do about it — I have a 3090 with 24GB VRAM and a Ryzen 9 CPU"
+    scorer: route_check
+    expect:
+      route: complex
+
+  # ── CODE ─────────────────────────────────────────────────────────────────
+
+  - id: "k01"
+    route: code
+    input: "Write a Python script that watches a directory for new files and prints their names as they appear"
+    scorer: route_check
+    expect:
+      route: code
+
+  - id: "k02"
+    route: code
+    input: "Write a bash one-liner that finds all files larger than 1GB and sorts them by size"
+    scorer: route_check
+    expect:
+      route: code
+
+  - id: "k03"
+    route: code
+    input: "Fix this Python function — it's supposed to retry on failure but it retries forever"
+    scorer: route_check
+    expect:
+      route: code
+
+  - id: "k04"
+    route: code
+    input: "Write a FastAPI health check endpoint that returns 200 if the service is healthy and 503 otherwise"
+    scorer: route_check
+    expect:
+      route: code
+
+  - id: "k05"
+    route: code
+    input: "Write a Python context manager that times a block of code and logs the duration"
+    scorer: route_check
+    expect:
+      route: code
+
+  - id: "k06"
+    route: code
+    input: "Write a shell script that creates a daily rotating log directory structure under /var/log/myapp/"
+    scorer: route_check
+    expect:
+      route: code
+
+  - id: "k07"
+    route: code
+    input: "Show me how to use asyncio.gather to run three tasks concurrently in Python"
+    scorer: route_check
+    expect:
+      route: code
+
+  - id: "k08"
+    route: code
+    input: "Write a Python function that parses a YAML config file and returns a dict with defaults merged in"
+    scorer: route_check
+    expect:
+      route: code
+
+  - id: "k09"
+    route: code
+    input: "Write a docker-compose snippet for a service that restarts on failure and has a health check"
+    scorer: route_check
+    expect:
+      route: code
+
+  - id: "k10"
+    route: code
+    input: "How do I write a Python decorator that caches the result of a function call for 60 seconds?"
+    scorer: route_check
+    expect:
+      route: code
+
+  - id: "k11"
+    route: code
+    input: "Write a SQL query that finds all users who haven't logged in in the last 30 days"
+    scorer: route_check
+    expect:
+      route: code
+
+  - id: "k12"
+    route: code
+    input: "Write a Python script that reads a CSV, deduplicates rows by email, and writes the result"
+    scorer: route_check
+    expect:
+      route: code
+
+  - id: "k13"
+    route: code
+    input: "Implement a simple rate limiter in Python using a token bucket algorithm"
+    scorer: route_check
+    expect:
+      route: code
+
+  - id: "k14"
+    route: code
+    input: "Write a Python script that sends a Slack notification when a file appears in a directory"
+    scorer: route_check
+    expect:
+      route: code
+
+  - id: "k15"
+    route: code
+    input: "Write a systemd service unit file for a Python FastAPI app that auto-restarts and logs to journald"
+    scorer: route_check
+    expect:
+      route: code
+
+  # ── CREATIVE ─────────────────────────────────────────────────────────────
+
+  - id: "r01"
+    route: creative
+    input: "Help me write a README intro for my homelab automation project — it manages LLM routing and proxying"
+    scorer: route_check
+    expect:
+      route: creative
+
+  - id: "r02"
+    route: creative
+    input: "Suggest five names for a local AI assistant project that runs entirely offline"
+    scorer: route_check
+    expect:
+      route: creative
+
+  - id: "r03"
+    route: creative
+    input: "Write a brief explanation of what a reverse proxy is for someone who has never heard of it"
+    scorer: route_check
+    expect:
+      route: creative
+
+  - id: "r04"
+    route: creative
+    input: "Write a short internal wiki entry describing what BeigeBox does and why we use it"
+    scorer: route_check
+    expect:
+      route: creative
+
+  - id: "r05"
+    route: creative
+    input: "Come up with a fun analogy to explain to a non-technical person how an LLM router works"
+    scorer: route_check
+    expect:
+      route: creative
+
+  - id: "r06"
+    route: creative
+    input: "Draft a short runbook section for 'what to do when the LLM proxy goes down'"
+    scorer: route_check
+    expect:
+      route: creative
+
+  - id: "r07"
+    route: creative
+    input: "Write three different commit message styles for a change that adds retry logic to an HTTP client"
+    scorer: route_check
+    expect:
+      route: creative
+
+  - id: "r08"
+    route: creative
+    input: "Brainstorm five ways to reduce alert fatigue in a homelab monitoring setup"
+    scorer: route_check
+    expect:
+      route: creative

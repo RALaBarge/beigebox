@@ -17,12 +17,19 @@ Now with:
   - Streaming latency tracking — wall-clock duration stored as latency_ms (v0.8)
   - Streaming cost capture via OpenRouter sentinel (v0.8)
 """
+import contextvars
 import json
 import logging
 import asyncio
 import time
 from datetime import datetime, timezone
 from uuid import uuid4
+
+# Per-request routing decision — set by _hybrid_route(), read by main.py to
+# populate the X-BeigeBox-Route response header and /api/v1/route-check.
+_request_route: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "_request_route", default=""
+)
 import httpx
 from beigebox.config import get_config, get_runtime_config
 from beigebox.storage.models import Message
@@ -451,6 +458,7 @@ class Proxy:
                 if not requested_model or requested_model == self.default_model:
                     # No explicit selection — apply sticky routing
                     body["model"] = cached_model
+                    _request_route.set("session_cache")
                     self.wire.log(
                         direction="internal",
                         role="decision",
@@ -465,6 +473,7 @@ class Proxy:
                 elif requested_model != cached_model:
                     # User switched models — update cache and let the request through
                     self._set_session_model(conversation_id, requested_model)
+                    _request_route.set("session_cache")
                     self.wire.log(
                         direction="internal",
                         role="decision",
@@ -477,6 +486,7 @@ class Proxy:
         # 1. Z-command takes absolute priority
         if zcmd.active and (zcmd.route or zcmd.model):
             body = self._apply_z_command(body, zcmd)
+            _request_route.set(zcmd.route or "zcommand")
             # Z-command overrides are not cached — user is being explicit
             return body, None
 
@@ -517,6 +527,7 @@ class Proxy:
                 if rule_tag:
                     body[BB_RULE_TAG] = rule_tag  # restore for wiretap downstream
                 if not pass_through:
+                    _request_route.set("rules")
                     if not skip_sc:
                         self._set_session_model(conversation_id, body.get("model", self.default_model))
                     return body, None
@@ -571,6 +582,7 @@ class Proxy:
                     # Clear classification — use it, skip decision LLM
                     if emb_result.model:
                         body["model"] = emb_result.model
+                    _request_route.set(emb_result.route or emb_result.tier)
                     self._set_session_model(conversation_id, body.get("model", self.default_model))
                     return body, None
                 # Borderline — fall through to decision LLM
@@ -583,6 +595,9 @@ class Proxy:
         decision = await self._run_decision(body)
         if decision and not decision.fallback:
             body = await self._apply_decision(body, decision)
+            _request_route.set("decision_llm")
+        else:
+            _request_route.set("default")
 
         # Cache whatever model we landed on
         final_model = body.get("model", self.default_model)

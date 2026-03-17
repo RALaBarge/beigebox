@@ -98,9 +98,38 @@ def score_llm_judge(
         return False, 0.0, f"llm_judge error: {e}"
 
 
+def score_route_check(
+    output: str,
+    expect: dict,
+    meta: dict | None = None,
+) -> tuple[bool, float, str]:
+    """Check that the proxy chose the expected routing category.
+
+    Reads the route from meta["route"] (set by EvalRunner from the
+    /api/v1/route-check response) and compares against expect["route"].
+
+    meta keys populated by EvalRunner:
+      route     — actual route chosen ("simple", "complex", "code", "creative", …)
+      model     — actual model chosen
+      decision_llm — True if decision LLM was invoked
+    """
+    expected_route = expect.get("route", "")
+    if not expected_route:
+        return False, 0.0, "no expected route in expect dict"
+
+    actual_route = (meta or {}).get("route", "")
+    if not actual_route:
+        return False, 0.0, "route-check metadata missing — is the proxy running?"
+
+    passed = actual_route.lower() == expected_route.lower()
+    reason = f"route={actual_route!r} expected={expected_route!r}"
+    return passed, 1.0 if passed else 0.0, reason
+
+
 SCORERS: dict[str, callable] = {
     "contains":     score_contains,
     "exact":        score_exact,
     "regex":        score_regex,
     "not_contains": score_not_contains,
+    "route_check":  score_route_check,
 }

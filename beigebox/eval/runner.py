@@ -47,7 +47,7 @@ from uuid import uuid4
 import httpx
 
 from beigebox.eval.models import EvalCase, EvalResult, EvalSuite
-from beigebox.eval.scorer import SCORERS, score_llm_judge
+from beigebox.eval.scorer import SCORERS, score_llm_judge, score_route_check
 
 logger = logging.getLogger(__name__)
 
@@ -92,19 +92,24 @@ class EvalRunner:
         else:
             data = json.loads(text)
 
-        cases = [
-            EvalCase(
+        cases = []
+        for c in data.get("cases", []):
+            expect = c.get("expect", {})
+            route = c.get("route", "")
+            # Allow route: at the case level — merge into expect for route_check
+            if route and "route" not in expect:
+                expect = dict(expect, route=route)
+            cases.append(EvalCase(
                 id=c["id"],
                 input=c["input"],
                 scorer=c.get("scorer", "contains"),
-                expect=c.get("expect", {}),
+                expect=expect,
+                route=route,
                 model=c.get("model", ""),
                 system=c.get("system", ""),
                 tags=c.get("tags", []),
                 meta=c.get("meta", {}),
-            )
-            for c in data.get("cases", [])
-        ]
+            ))
         return EvalSuite(
             name=data.get("name", p.stem),
             cases=cases,
@@ -160,23 +165,43 @@ class EvalRunner:
         t0 = time.monotonic()
         output = ""
         error = ""
-        try:
-            resp = httpx.post(
-                f"{base_url}/v1/chat/completions",
-                json=body,
-                headers=self._headers,
-                timeout=120.0,
-            )
-            resp.raise_for_status()
-            output = resp.json()["choices"][0]["message"]["content"]
-        except Exception as e:
-            error = str(e)
+        route_meta: dict = {}
+
+        if case.scorer == "route_check":
+            # Cheap path — call /api/v1/route-check instead of running full inference.
+            # No model is loaded; only the routing pipeline runs.
+            try:
+                rc_resp = httpx.post(
+                    f"{base_url}/api/v1/route-check",
+                    json={"input": case.input},
+                    headers=self._headers,
+                    timeout=30.0,
+                )
+                rc_resp.raise_for_status()
+                route_meta = rc_resp.json()
+                output = f"route={route_meta.get('route', '')} model={route_meta.get('model', '')}"
+            except Exception as e:
+                error = str(e)
+        else:
+            try:
+                resp = httpx.post(
+                    f"{base_url}/v1/chat/completions",
+                    json=body,
+                    headers=self._headers,
+                    timeout=120.0,
+                )
+                resp.raise_for_status()
+                output = resp.json()["choices"][0]["message"]["content"]
+            except Exception as e:
+                error = str(e)
 
         latency_ms = round((time.monotonic() - t0) * 1000, 1)
 
         # Score
         if error:
             passed, score, reason = False, 0.0, f"request failed: {error}"
+        elif case.scorer == "route_check":
+            passed, score, reason = score_route_check(output, case.expect, meta=route_meta)
         elif case.scorer == "llm_judge":
             judge_model = case.expect.get("judge_model") or self.judge_model or model
             passed, score, reason = score_llm_judge(

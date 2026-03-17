@@ -63,11 +63,12 @@ _CENTROID_DIR = _get_centroid_dir()
 @dataclass
 class EmbeddingDecision:
     """Result of embedding-based classification."""
-    tier: str = "default"          # "simple" or "complex"
+    tier: str = "default"          # "simple" or "complex" (backward-compat two-way)
     confidence: float = 0.0        # Distance between centroid similarities
     model: str = ""                # Resolved model string
     latency_ms: int = 0            # Classification time
     borderline: bool = False       # True if confidence below threshold
+    route: str = ""                # Full route name: "simple", "complex", "code", "creative"
 
 
 # ---------------------------------------------------------------------------
@@ -337,6 +338,7 @@ class EmbeddingClassifier:
             confidence=confidence,
             model=model,
             latency_ms=latency_ms,
+            route=best_route,
             borderline=borderline,
         )
 
