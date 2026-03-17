@@ -516,6 +516,34 @@ logging:
 #       num_ctx: 8192
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Model Aliases — virtual names that resolve to real model IDs
+# ─────────────────────────────────────────────────────────────────────────────
+# Use anywhere a model name is accepted: request body, z-commands, routing rules.
+# aliases:
+#   fast: "llama3.2:3b"
+#   smart: "qwen3:30b"
+#   cheap: "llama3.2:1b"
+#   code: "qwen2.5-coder:7b"
+#   balanced: "qwen3:4b"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Guardrails — input/output content filtering
+# ─────────────────────────────────────────────────────────────────────────────
+guardrails:
+  enabled: false
+  input:
+    block_keywords: []          # exact word/phrase blocklist (case-insensitive)
+    block_patterns: []          # regex patterns — match = block request
+    pii_detection: false        # block requests containing email/phone/SSN/card numbers
+    prompt_injection: false     # block common jailbreak and injection phrases
+    max_length: 0               # 0 = no limit; N = block if user message > N chars
+    topic_blocklist: []         # e.g. ["weapons", "gambling"] — keyword groups
+  output:
+    pii_redaction: false        # redact PII from responses before sending to client
+    block_patterns: []          # regex patterns — match = replace response with block_message
+    block_message: "[Response blocked by guardrails]"
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Auth — Single API Key
 # ─────────────────────────────────────────────────────────────────────────────
 # Set api_key to a non-empty string to require authentication on all endpoints.
