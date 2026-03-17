@@ -295,13 +295,15 @@ class Operator:
                  max_tool_calls: int | None = None,
                  pre_hook: bool = False, post_hook: bool = False,
                  autonomous: bool = False,
-                 tool_registry=None):
+                 tool_registry=None,
+                 sqlite_store=None):
         from beigebox.tools.registry import ToolRegistry
 
         self.cfg = get_config()
         self.rt = get_runtime_config()
         self.vector_store = vector_store
         self._blob_store = blob_store
+        self._wire_db = sqlite_store  # optional SQLiteStore for structured tap events
         self._session_id: str | None = None
         self._pre_hook = pre_hook
         self._post_hook = post_hook
@@ -622,6 +624,30 @@ class Operator:
         raise last_exc  # type: ignore[misc]
 
     # ------------------------------------------------------------------
+    # Tap event helper
+    # ------------------------------------------------------------------
+
+    def _wire(self, event_type: str, run_id: str, content: str = "",
+              turn_id: str | None = None, tool_id: str | None = None,
+              meta: dict | None = None) -> None:
+        """Write a structured wire event to SQLite tap if available. Never raises."""
+        if self._wire_db is None:
+            return
+        try:
+            self._wire_db.log_wire_event(
+                event_type=event_type,
+                source="operator",
+                content=content,
+                model=self._model,
+                run_id=run_id,
+                turn_id=turn_id,
+                tool_id=tool_id,
+                meta=meta,
+            )
+        except Exception as e:
+            logger.debug("_wire event failed (%s): %s", event_type, e)
+
+    # ------------------------------------------------------------------
     # Tool execution
     # ------------------------------------------------------------------
 
@@ -864,6 +890,12 @@ class Operator:
             yield {"type": "error", "message": "No question provided."}
             return
 
+        _run_id = uuid.uuid4().hex[:12]
+        _t_run_start = time.monotonic()
+        self._wire("op_start", _run_id, content=question[:500],
+                   meta={"model": self._model, "max_iter": self._max_iter,
+                         "question_len": len(question)})
+
         messages = [{"role": "system", "content": self._system}]
 
         # Inject-then-acknowledge persistent notes (same as sync run())
@@ -884,6 +916,9 @@ class Operator:
         for iteration in range(self._max_iter):
             if time.monotonic() > _run_deadline:
                 logger.warning("Operator run_stream timeout (%ds) exceeded after %d iterations", self._run_timeout, iteration)
+                self._wire("op_error", _run_id,
+                           content=f"run_timeout of {self._run_timeout}s exceeded",
+                           meta={"iteration": iteration, "elapsed_ms": round((time.monotonic() - _t_run_start) * 1000, 1)})
                 yield {"type": "error", "message": f"Operator stopped: run_timeout of {self._run_timeout}s exceeded."}
                 return
 
@@ -950,12 +985,34 @@ class Operator:
                 _inp = parsed.get("input", "")
                 tool_input = json.dumps(_inp) if isinstance(_inp, (dict, list)) else str(_inp)
                 thought = parsed.get("thought", "")
+                _turn_id = f"{_run_id}:{iteration}"
+                _tool_id = f"{_turn_id}:{tool_name}"
 
                 logger.info("Operator stream tool call: %s(%r) — %s", tool_name, tool_input, thought)
 
+                if thought:
+                    self._wire("op_thought", _run_id, content=thought,
+                               turn_id=_turn_id,
+                               meta={"iteration": iteration, "tool_next": tool_name})
+
+                self._wire("op_tool_call", _run_id, content=tool_input[:500],
+                           turn_id=_turn_id, tool_id=_tool_id,
+                           meta={"tool_name": tool_name, "iteration": iteration,
+                                 "input_len": len(tool_input)})
+
                 yield {"type": "tool_call", "tool": tool_name, "input": tool_input, "thought": thought}
 
+                _t_tool = time.monotonic()
                 observation = await asyncio.get_running_loop().run_in_executor(None, self._run_tool, tool_name, tool_input)
+                _tool_elapsed = round((time.monotonic() - _t_tool) * 1000, 1)
+
+                self._wire("op_tool_result", _run_id, content=observation[:500],
+                           turn_id=_turn_id, tool_id=_tool_id,
+                           meta={"tool_name": tool_name, "iteration": iteration,
+                                 "elapsed_ms": _tool_elapsed,
+                                 "result_len": len(observation),
+                                 "is_failure": observation.lower().startswith(
+                                     ("no results", "error", "not found", "unknown tool", "file not found"))})
 
                 yield {"type": "tool_result", "tool": tool_name, "result": observation}
 
@@ -983,6 +1040,10 @@ class Operator:
 
                 messages.append({"role": "assistant", "content": raw})
                 if _loop_nudge:
+                    self._wire("op_loop_nudge", _run_id, content=_loop_nudge,
+                               turn_id=_turn_id,
+                               meta={"iteration": iteration, "tool_name": tool_name,
+                                     "consec_fail": _consec_fail.get(tool_name, 0)})
                     messages.append({"role": "user", "content": _loop_nudge})
                 else:
                     messages.append({
@@ -992,7 +1053,12 @@ class Operator:
                 continue
 
             if "answer" in parsed:
-                yield {"type": "answer", "content": str(parsed["answer"])}
+                _answer = str(parsed["answer"])
+                self._wire("op_answer", _run_id, content=_answer[:500],
+                           meta={"iteration": iteration,
+                                 "total_elapsed_ms": round((time.monotonic() - _t_run_start) * 1000, 1),
+                                 "answer_len": len(_answer)})
+                yield {"type": "answer", "content": _answer}
                 return
 
             # JSON parsed but has no usable keys — covers {}, {"thought": "..."}-only, or wrong keys
