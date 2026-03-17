@@ -45,6 +45,8 @@ from beigebox.agents.routing_rules import (
 from beigebox.backends.openrouter import _COST_SENTINEL_PREFIX
 from beigebox.cache import SemanticCache, ToolResultCache
 from beigebox.payload_log import get_payload_log
+from beigebox.aliases import AliasResolver
+from beigebox.guardrails import Guardrails
 logger = logging.getLogger(__name__)
 def _estimate_tokens(text: str) -> int:
     """Rough token estimate: ~4 chars per token for English text."""
@@ -98,6 +100,10 @@ class Proxy:
         self.tool_cache = ToolResultCache(
             ttl=self.cfg.get("semantic_cache", {}).get("tool_ttl_seconds", 300.0),
         )
+        # Model alias resolver — virtual names like "fast", "smart" → real model IDs
+        self.alias_resolver = AliasResolver(self.cfg)
+        # Guardrails — input/output content filtering
+        self.guardrails = Guardrails(self.cfg)
 
     # ------------------------------------------------------------------
     # Session cache helpers
@@ -163,8 +169,9 @@ class Proxy:
         return conv_id
 
     def _get_model(self, body: dict) -> str:
-        """Extract model from request, fall back to config default."""
-        return body.get("model") or self.default_model
+        """Extract model from request, resolve any alias, fall back to config default."""
+        raw = body.get("model") or self.default_model
+        return self.alias_resolver.resolve(raw)
 
     def _get_latest_user_message(self, body: dict) -> str:
         """Extract the last user message from the request."""
@@ -924,6 +931,25 @@ class Proxy:
 
         is_synthetic = self._is_synthetic(body)
 
+        # Guardrail — input check (runs before routing; bypassed for synthetic requests)
+        if not is_synthetic:
+            _gr = self.guardrails.check_input(body.get("messages", []))
+            if not _gr.allowed:
+                logger.warning(
+                    "Guardrail blocked input: rule=%s reason=%s", _gr.rule_name, _gr.reason
+                )
+                self.wire.log(
+                    direction="internal",
+                    role="guardrails",
+                    content=_gr.reason,
+                    model="guardrails",
+                    conversation_id=conversation_id,
+                    event_type="guardrail_block",
+                    source="guardrails",
+                    meta={"direction": "input", "rule": _gr.rule_name, "reason": _gr.reason},
+                )
+                raise ValueError(f"Request blocked by guardrails: {_gr.reason}")
+
         # Run forced tools from z-command
         if zcmd.active and zcmd.tools:
             tool_results = self._run_forced_tools(zcmd, self._get_latest_user_message(body))
@@ -1049,9 +1075,16 @@ class Proxy:
                 "model": "beigebox",
             }
 
-        body, decision, is_synthetic, model = await self._run_request_pipeline(
-            body, zcmd, conversation_id, model, _stages
-        )
+        try:
+            body, decision, is_synthetic, model = await self._run_request_pipeline(
+                body, zcmd, conversation_id, model, _stages
+            )
+        except ValueError as _gr_err:
+            # Guardrail block — surface as a normal assistant response
+            return {
+                "choices": [{"message": {"role": "assistant", "content": str(_gr_err)}}],
+                "model": "beigebox",
+            }
 
         # Log incoming user messages (skip synthetic)
         if not is_synthetic:
@@ -1209,9 +1242,19 @@ class Proxy:
             yield "data: [DONE]\n"
             return
 
-        body, decision, is_synthetic, model = await self._run_request_pipeline(
-            body, zcmd, conversation_id, model, _stages
-        )
+        try:
+            body, decision, is_synthetic, model = await self._run_request_pipeline(
+                body, zcmd, conversation_id, model, _stages
+            )
+        except ValueError as _gr_err:
+            # Guardrail block — yield as a single streamed assistant chunk
+            chunk = json.dumps({
+                "choices": [{"delta": {"content": str(_gr_err)}, "index": 0}],
+                "model": "beigebox",
+            })
+            yield f"data: {chunk}\n"
+            yield "data: [DONE]\n"
+            return
 
         # Emit a routing metadata chunk before the real stream starts. The
         # frontend reads bb_type=="routing" and updates the model badge in the
@@ -1405,6 +1448,25 @@ class Proxy:
                     model=model,
                     conversation_id=conversation_id,
                 )
+            # Guardrail — output check (after WASM transform, before logging/cache)
+            if complete_text:
+                _gr_out, complete_text = self.guardrails.check_output(complete_text)
+                if not _gr_out.allowed:
+                    logger.warning(
+                        "Guardrail blocked output: rule=%s reason=%s",
+                        _gr_out.rule_name, _gr_out.reason,
+                    )
+                    self.wire.log(
+                        direction="internal",
+                        role="guardrails",
+                        content=_gr_out.reason,
+                        model="guardrails",
+                        conversation_id=conversation_id,
+                        event_type="guardrail_block",
+                        source="guardrails",
+                        meta={"direction": "output", "rule": _gr_out.rule_name, "reason": _gr_out.reason},
+                    )
+
             # Re-emit transformed content to client (WASM buffer mode only)
             if _wasm_buffer_mode and complete_text:
                 emit_chunk = json.dumps({

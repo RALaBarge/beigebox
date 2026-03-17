@@ -475,6 +475,76 @@ def cmd_operator(args):
         print("\\n  [line disconnected]")
 
 
+def cmd_eval(args):
+    """Run an eval suite against a running BeigeBox instance."""
+    import json as _json
+    from beigebox.config import get_config
+    from beigebox.eval.runner import EvalRunner
+
+    cfg = get_config()
+    port = cfg.get("server", {}).get("port", 1337)
+    base_url = args.url or f"http://localhost:{port}"
+    api_key = cfg.get("auth", {}).get("api_key", "")
+
+    runner = EvalRunner(
+        base_url=base_url,
+        judge_model=args.judge_model or cfg.get("backend", {}).get("default_model", ""),
+        api_key=api_key,
+    )
+
+    try:
+        suite = runner.load_suite(args.suite)
+    except Exception as e:
+        print(f"  ✗  Failed to load suite: {e}")
+        return
+
+    print(BANNER)
+    print(f"  Eval suite: {suite.name}")
+    print(f"  Cases: {len(suite.cases)}")
+    print(f"  Target: {base_url}")
+    print()
+
+    results = runner.run_suite(suite)
+
+    passed = [r for r in results if r.passed]
+    failed = [r for r in results if not r.passed]
+
+    print(f"\n  {'─' * 56}")
+    for r in results:
+        icon = "✓" if r.passed else "✗"
+        print(f"  {icon}  [{r.case_id}]  score={r.score:.2f}  {r.latency_ms:.0f}ms  {r.reason}")
+
+    print(f"\n  {'─' * 56}")
+    print(f"  Result: {len(passed)}/{len(results)} passed")
+
+    if failed and args.verbose:
+        print("\n  Failures:")
+        for r in failed:
+            print(f"\n  [{r.case_id}]")
+            print(f"    Input:  {r.input[:120]}")
+            print(f"    Output: {r.output[:200]}")
+            print(f"    Reason: {r.reason}")
+            if r.error:
+                print(f"    Error:  {r.error}")
+
+    if args.output:
+        out = [
+            {
+                "case_id": r.case_id, "passed": r.passed, "score": r.score,
+                "scorer": r.scorer, "reason": r.reason, "latency_ms": r.latency_ms,
+                "model": r.model, "run_id": r.run_id, "error": r.error,
+            }
+            for r in results
+        ]
+        import pathlib
+        pathlib.Path(args.output).write_text(_json.dumps(out, indent=2))
+        print(f"\n  Results written to {args.output}")
+
+    # Exit 1 if any failures (useful for CI)
+    if failed:
+        sys.exit(1)
+
+
 def cmd_tone(args):
     """Print the banner."""
     print(BANNER)
@@ -592,6 +662,16 @@ def main():
                         help="Days of cost history to show (default: 30)")
     _add_command(sub, ["flash", "info", "config", "stats"],
                  "Show stats and config at a glance", cmd_flash, setup_flash)
+
+    # eval / test / score
+    def setup_eval(p):
+        p.add_argument("suite", help="Path to eval suite file (.yaml or .json)")
+        p.add_argument("--url", "-u", default=None, help="BeigeBox URL (default: from config)")
+        p.add_argument("--judge-model", default=None, help="Model for llm_judge scorer")
+        p.add_argument("--output", "-o", default=None, help="Write results to JSON file")
+        p.add_argument("--verbose", "-v", action="store_true", help="Show full failure details")
+    _add_command(sub, ["eval", "test", "score"],
+                 "Run an eval suite against a BeigeBox instance", cmd_eval, setup_eval)
 
     # tone / banner
     _add_command(sub, ["tone", "banner"],

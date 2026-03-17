@@ -1,0 +1,34 @@
+# BeigeBox smoke test suite
+# Run: beigebox eval evals/smoke.yaml
+name: "smoke"
+
+cases:
+  - id: "hello"
+    input: "Say hello in one word"
+    scorer: contains
+    expect:
+      contains: ["hello", "hi", "hey", "greetings"]
+
+  - id: "math_basic"
+    input: "What is 2 + 2? Reply with just the number."
+    scorer: contains
+    expect:
+      contains: ["4"]
+
+  - id: "no_refusal_basic"
+    input: "What is the capital of France?"
+    scorer: contains
+    expect:
+      contains: ["paris", "Paris"]
+
+  - id: "no_hallucinated_links"
+    input: "What time is it right now?"
+    scorer: not_contains
+    expect:
+      not_contains: ["http://", "https://", "www."]
+
+  - id: "json_output"
+    input: 'Return a JSON object with a single key "status" set to the string "ok". Return only the JSON.'
+    scorer: regex
+    expect:
+      regex: '"status"\s*:\s*"ok"'

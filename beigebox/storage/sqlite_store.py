@@ -104,6 +104,31 @@ CREATE INDEX IF NOT EXISTS idx_wire_events_type
     ON wire_events(event_type);
 CREATE INDEX IF NOT EXISTS idx_wire_events_ts
     ON wire_events(ts);
+
+CREATE TABLE IF NOT EXISTS eval_results (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    suite_name  TEXT NOT NULL,
+    case_id     TEXT NOT NULL,
+    run_id      TEXT NOT NULL,
+    input       TEXT NOT NULL,
+    output      TEXT,
+    passed      INTEGER NOT NULL,
+    score       REAL,
+    scorer      TEXT,
+    model       TEXT,
+    latency_ms  REAL,
+    reason      TEXT,
+    error       TEXT,
+    ts          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    misc1       TEXT,
+    misc2       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_eval_results_suite
+    ON eval_results(suite_name);
+CREATE INDEX IF NOT EXISTS idx_eval_results_run
+    ON eval_results(run_id);
+CREATE INDEX IF NOT EXISTS idx_eval_results_ts
+    ON eval_results(ts);
 """
 
 # Migrations: append-only ALTER TABLE statements that add new columns to
@@ -753,4 +778,56 @@ class SQLiteStore:
                     pass
             events.append(e)
         return events
+
+    # ─ Eval results ───────────────────────────────────────────────────────────
+
+    def store_eval_result(self, suite_name: str, result) -> None:
+        """Persist one EvalResult row. result is an EvalResult dataclass."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO eval_results
+                    (suite_name, case_id, run_id, input, output, passed, score,
+                     scorer, model, latency_ms, reason, error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    suite_name,
+                    result.case_id,
+                    result.run_id,
+                    result.input,
+                    result.output or "",
+                    1 if result.passed else 0,
+                    result.score,
+                    result.scorer,
+                    result.model or "",
+                    result.latency_ms,
+                    result.reason or "",
+                    result.error or "",
+                ),
+            )
+
+    def get_eval_results(
+        self,
+        suite_name: str | None = None,
+        run_id: str | None = None,
+        n: int = 100,
+    ) -> list[dict]:
+        """Fetch recent eval results, optionally filtered by suite or run."""
+        clauses: list[str] = []
+        params: list = []
+        if suite_name:
+            clauses.append("suite_name = ?")
+            params.append(suite_name)
+        if run_id:
+            clauses.append("run_id = ?")
+            params.append(run_id)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(n)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM eval_results {where} ORDER BY id DESC LIMIT ?",
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
 
