@@ -52,30 +52,22 @@ from beigebox.costs import CostTracker
 from beigebox.auth import MultiKeyAuthRegistry
 from beigebox.mcp_server import McpServer
 from beigebox.amf_mesh import AmfMeshAdvertiser
+from beigebox.app_state import AppState
 
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Globals — initialized at startup
+# Application state — initialized during lifespan startup
 # ---------------------------------------------------------------------------
-proxy: Proxy | None = None
-tool_registry: ToolRegistry | None = None
-sqlite_store: SQLiteStore | None = None
-vector_store: VectorStore | None = None
-blob_store = None
-decision_agent: DecisionAgent | None = None
-hook_manager: HookManager | None = None
-backend_router: MultiBackendRouter | None = None
-cost_tracker: CostTracker | None = None
-# Live map of run_id → asyncio.Queue for steering message injection.
-# An active harness/ralph run registers its queue on start and removes it
-# in the finally block; the /inject endpoint looks up the queue by run_id.
-_harness_injection_queues: dict[str, asyncio.Queue] = {}
-embedding_classifier = None
-auth_registry: MultiKeyAuthRegistry | None = None
-mcp_server: McpServer | None = None
-amf_advertiser: AmfMeshAdvertiser | None = None
+_app_state: AppState | None = None
+
+
+def get_state() -> AppState:
+    """Return the initialized AppState. Raises if called before startup."""
+    if _app_state is None:
+        raise RuntimeError("AppState not initialized — server not started yet")
+    return _app_state
 
 
 def _setup_logging(cfg: dict):
@@ -138,9 +130,7 @@ async def _preload_embedding_model(cfg: dict):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
-    global proxy, tool_registry, sqlite_store, vector_store, blob_store
-    global decision_agent, hook_manager, backend_router, cost_tracker
-    global embedding_classifier, auth_registry, mcp_server, amf_advertiser
+    global _app_state
 
     cfg = get_config()
     _setup_logging(cfg)
@@ -258,6 +248,22 @@ async def lifespan(app: FastAPI):
         blob_store=blob_store,
     )
 
+    _app_state = AppState(
+        proxy=proxy,
+        tool_registry=tool_registry,
+        sqlite_store=sqlite_store,
+        vector_store=vector_store,
+        blob_store=blob_store,
+        decision_agent=decision_agent,
+        hook_manager=hook_manager,
+        backend_router=backend_router,
+        cost_tracker=cost_tracker,
+        embedding_classifier=embedding_classifier,
+        auth_registry=auth_registry,
+        mcp_server=mcp_server,
+        amf_advertiser=amf_advertiser,
+    )
+
     logger.info(
         "BeigeBox started — listening on %s:%s, backend %s",
         cfg["server"]["host"],
@@ -315,10 +321,10 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("BeigeBox shutting down")
-    if amf_advertiser:
-        await amf_advertiser.stop()
-    if proxy and proxy.wire:
-        proxy.wire.close()
+    if _app_state and _app_state.amf_advertiser:
+        await _app_state.amf_advertiser.stop()
+    if _app_state and _app_state.proxy and _app_state.proxy.wire:
+        _app_state.proxy.wire.close()
     from beigebox.payload_log import get_payload_log as _get_pl
     _get_pl().close()
     logger.info("Wiretap and payload log flushed and closed")
@@ -352,9 +358,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        global auth_registry
-
-        if auth_registry is None or not auth_registry.is_enabled():
+        if _app_state is None or _app_state.auth_registry is None or not _app_state.auth_registry.is_enabled():
             return await call_next(request)
 
         path = request.url.path
@@ -371,7 +375,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                 or request.query_params.get("api_key", "")
             )
 
-        meta = auth_registry.validate(token)
+        meta = _app_state.auth_registry.validate(token)
         if meta is None:
             return JSONResponse(
                 {
@@ -388,7 +392,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             )
 
         # Rate limit
-        if not auth_registry.check_rate_limit(meta):
+        if not _app_state.auth_registry.check_rate_limit(meta):
             return JSONResponse(
                 {
                     "error": {
@@ -401,7 +405,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             )
 
         # Endpoint ACL
-        if not auth_registry.check_endpoint(meta, path):
+        if not _app_state.auth_registry.check_endpoint(meta, path):
             return JSONResponse(
                 {
                     "error": {
@@ -446,7 +450,8 @@ async def chat_completions(request: Request):
     # Model ACL — check here where the body is already parsed
     model = body.get("model", "")
     _auth_key = getattr(request.state, "auth_key", None)
-    if _auth_key is not None and model and auth_registry and not auth_registry.check_model(_auth_key, model):
+    _st = get_state()
+    if _auth_key is not None and model and _st.auth_registry and not _st.auth_registry.check_model(_auth_key, model):
         return JSONResponse(
             {
                 "error": {
@@ -467,7 +472,7 @@ async def chat_completions(request: Request):
 
     if stream:
         return StreamingResponse(
-            proxy.forward_chat_completion_stream(body),
+            _st.proxy.forward_chat_completion_stream(body),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -476,14 +481,14 @@ async def chat_completions(request: Request):
             },
         )
     else:
-        data = await proxy.forward_chat_completion(body)
+        data = await _st.proxy.forward_chat_completion(body)
         return JSONResponse(data)
 
 
 @app.get("/v1/models")
 async def list_models():
     """Forward model listing to backend."""
-    data = await proxy.list_models()
+    data = await get_state().proxy.list_models()
     return JSONResponse(data)
 
 
@@ -494,10 +499,11 @@ async def list_models():
 @app.get("/beigebox/stats")
 async def stats():
     """Return storage and usage statistics."""
-    sqlite_stats = sqlite_store.get_stats() if sqlite_store else {}
-    vector_stats = vector_store.get_stats() if vector_store else {}
-    tools = tool_registry.list_tools() if tool_registry else []
-    hooks = hook_manager.list_hooks() if hook_manager else []
+    _st = get_state()
+    sqlite_stats = _st.sqlite_store.get_stats() if _st.sqlite_store else {}
+    vector_stats = _st.vector_store.get_stats() if _st.vector_store else {}
+    tools = _st.tool_registry.list_tools() if _st.tool_registry else []
+    hooks = _st.hook_manager.list_hooks() if _st.hook_manager else []
 
     return JSONResponse({
         "sqlite": sqlite_stats,
@@ -505,9 +511,9 @@ async def stats():
         "tools": tools,
         "hooks": hooks,
         "decision_llm": {
-            "enabled": decision_agent.enabled if decision_agent else False,
-            "model": decision_agent.model if decision_agent else "",
-            **(decision_agent.fallback_stats() if decision_agent else {}),
+            "enabled": _st.decision_agent.enabled if _st.decision_agent else False,
+            "model": _st.decision_agent.model if _st.decision_agent else "",
+            **(_st.decision_agent.fallback_stats() if _st.decision_agent else {}),
         },
     })
 
@@ -515,9 +521,10 @@ async def stats():
 @app.get("/beigebox/search")
 async def search_conversations(q: str, n: int = 5, role: str | None = None):
     """Semantic search over stored conversations (raw message hits)."""
-    if not vector_store:
+    _st = get_state()
+    if not _st.vector_store:
         return JSONResponse({"error": "Vector store not initialized"}, status_code=503)
-    results = vector_store.search(q, n_results=n, role_filter=role)
+    results = _st.vector_store.search(q, n_results=n, role_filter=role)
     return JSONResponse({"query": q, "results": results})
 
 
@@ -530,8 +537,8 @@ async def mcp_endpoint(request: Request):
     Supported methods: initialize, tools/list, tools/call
     Auth: governed by the same ApiKeyMiddleware as all other endpoints.
     """
-    global mcp_server
-    if mcp_server is None:
+    _st = get_state()
+    if _st.mcp_server is None:
         return JSONResponse(
             {"jsonrpc": "2.0", "id": None, "error": {"code": -32603, "message": "MCP server not initialised"}},
             status_code=503,
@@ -543,7 +550,7 @@ async def mcp_endpoint(request: Request):
             {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
             status_code=400,
         )
-    result = await mcp_server.handle(body)
+    result = await _st.mcp_server.handle(body)
     if result is None:
         # Notification — no response body
         from starlette.responses import Response as _Response
@@ -593,9 +600,10 @@ async def api_search_conversations(q: str, n: int = 5, role: str | None = None):
     Semantic search grouped by conversation.
     Returns conversations ranked by best message match, with excerpt.
     """
-    if not vector_store:
+    _st = get_state()
+    if not _st.vector_store:
         return JSONResponse({"error": "Vector store not initialized"}, status_code=503)
-    results = vector_store.search_grouped(q, n_conversations=n, role_filter=role)
+    results = _st.vector_store.search_grouped(q, n_conversations=n, role_filter=role)
     return JSONResponse({"query": q, "results": results, "count": len(results)})
 
 
@@ -603,9 +611,10 @@ async def api_search_conversations(q: str, n: int = 5, role: str | None = None):
 async def agent_card():
     """A2A agent card — describes this node to the AMF mesh and any A2A client."""
     cfg = get_config()
+    _st = get_state()
     port = cfg["server"]["port"]
     endpoint = f"http://localhost:{port}"
-    tools = tool_registry.list_tools() if tool_registry else []
+    tools = _st.tool_registry.list_tools() if _st.tool_registry else []
     skills = [
         {"id": t, "name": t, "description": f"BeigeBox tool: {t}", "tags": [t]}
         for t in tools
@@ -620,7 +629,7 @@ async def agent_card():
         "defaultInputModes": ["application/json"],
         "defaultOutputModes": ["application/json", "text/event-stream"],
         "x-amf": {
-            "agent_id": amf_advertiser._agent_id if amf_advertiser else "spiffe://local/beigebox/unknown",
+            "agent_id": _st.amf_advertiser._agent_id if _st.amf_advertiser else "spiffe://local/beigebox/unknown",
             "trust_domain": cfg.get("amf_mesh", {}).get("trust_domain", "local"),
             "protocols": ["MCP/2024-11-05"],
             "mcp_endpoint": f"{endpoint}/mcp",
@@ -631,10 +640,11 @@ async def agent_card():
 @app.get("/beigebox/health")
 async def health():
     """Health check."""
+    _st = get_state()
     return JSONResponse({
         "status": "ok",
         "version": _BB_VERSION,
-        "decision_llm": decision_agent.enabled if decision_agent else False,
+        "decision_llm": _st.decision_agent.enabled if _st.decision_agent else False,
     })
 
 
@@ -646,6 +656,7 @@ async def health():
 async def api_info():
     """System info — what features are available."""
     cfg = get_config()
+    _st = get_state()
     return JSONResponse({
         "version": _BB_VERSION,
         "name": "BeigeBox",
@@ -660,11 +671,11 @@ async def api_info():
         },
         "features": {
             "routing": True,
-            "decision_llm": decision_agent.enabled if decision_agent else False,
-            "embedding_classifier": embedding_classifier.ready if embedding_classifier else False,
-            "storage": sqlite_store is not None and vector_store is not None,
-            "tools": tool_registry is not None and cfg.get("tools", {}).get("enabled", False),
-            "hooks": hook_manager is not None,
+            "decision_llm": _st.decision_agent.enabled if _st.decision_agent else False,
+            "embedding_classifier": _st.embedding_classifier.ready if _st.embedding_classifier else False,
+            "storage": _st.sqlite_store is not None and _st.vector_store is not None,
+            "tools": _st.tool_registry is not None and cfg.get("tools", {}).get("enabled", False),
+            "hooks": _st.hook_manager is not None,
             "operator": True,  # Always available if Operator can init
         },
         "model_advertising": cfg.get("model_advertising", {}).get("mode", "hidden"),
@@ -718,8 +729,8 @@ async def api_config():
         },
         # ── Decision LLM ─────────────────────────────────────────────
         "decision_llm": {
-            "enabled":     rt.get("decision_llm_enabled", decision_agent.enabled if decision_agent else False),
-            "model":       decision_agent.model if decision_agent else cfg.get("decision_llm", {}).get("model", ""),
+            "enabled":     rt.get("decision_llm_enabled", get_state().decision_agent.enabled if get_state().decision_agent else False),
+            "model":       get_state().decision_agent.model if get_state().decision_agent else cfg.get("decision_llm", {}).get("model", ""),
             "timeout":     rt.get("decision_llm_timeout") or cfg.get("decision_llm", {}).get("timeout", 5),
             "max_tokens":  cfg.get("decision_llm", {}).get("max_tokens", 256),
         },
@@ -813,10 +824,10 @@ async def api_config():
         },
         # ── WASM ──────────────────────────────────────────────────────────────
         "wasm": {
-            "enabled":        rt.get("wasm_enabled", proxy.wasm_runtime.enabled if proxy else cfg.get("wasm", {}).get("enabled", False)),
+            "enabled":        rt.get("wasm_enabled", get_state().proxy.wasm_runtime.enabled if get_state().proxy else cfg.get("wasm", {}).get("enabled", False)),
             "timeout_ms":     rt.get("wasm_timeout_ms", cfg.get("wasm", {}).get("timeout_ms", 500)),
-            "modules":        proxy.wasm_runtime.list_modules() if proxy else [],
-            "default_module": rt.get("wasm_default_module") or (proxy.wasm_runtime.default_module if proxy else cfg.get("wasm", {}).get("default_module", "")),
+            "modules":        get_state().proxy.wasm_runtime.list_modules() if get_state().proxy else [],
+            "default_module": rt.get("wasm_default_module") or (get_state().proxy.wasm_runtime.default_module if get_state().proxy else cfg.get("wasm", {}).get("default_module", "")),
             "modules_cfg": {
                 name: {
                     "description": mcfg.get("description", ""),
@@ -949,25 +960,26 @@ async def api_config_save(request: Request):
 
     # Apply live changes that don't need restart
     rt = get_runtime_config()
+    _st = get_state()
 
-    if "decision_llm_enabled" in updated and decision_agent:
-        decision_agent.enabled = rt.get("decision_llm_enabled", decision_agent.enabled)
+    if "decision_llm_enabled" in updated and _st.decision_agent:
+        _st.decision_agent.enabled = rt.get("decision_llm_enabled", _st.decision_agent.enabled)
 
-    if "default_model" in updated and proxy:
-        proxy.default_model = rt.get("default_model", proxy.default_model)
+    if "default_model" in updated and _st.proxy:
+        _st.proxy.default_model = rt.get("default_model", _st.proxy.default_model)
 
-    if "log_conversations" in updated and proxy:
-        proxy.log_enabled = rt.get("log_conversations", proxy.log_enabled)
+    if "log_conversations" in updated and _st.proxy:
+        _st.proxy.log_enabled = rt.get("log_conversations", _st.proxy.log_enabled)
 
-    if "wasm_default_module" in updated and proxy:
-        proxy.wasm_runtime.default_module = rt.get("wasm_default_module", "")
+    if "wasm_default_module" in updated and _st.proxy:
+        _st.proxy.wasm_runtime.default_module = rt.get("wasm_default_module", "")
 
-    if "wasm_enabled" in updated and proxy:
+    if "wasm_enabled" in updated and _st.proxy:
         new_wasm_enabled = rt.get("wasm_enabled")
         if new_wasm_enabled is True:
-            proxy.wasm_runtime.enable(get_config())
+            _st.proxy.wasm_runtime.enable(get_config())
         elif new_wasm_enabled is False:
-            proxy.wasm_runtime.disable()
+            _st.proxy.wasm_runtime.disable()
 
     if errors:
         return JSONResponse({"saved": updated, "errors": errors}, status_code=207)
@@ -981,9 +993,10 @@ async def api_wasm_reload():
     Re-reads config.yaml for updated paths and enabled flags.
     Returns the list of successfully loaded module names.
     """
-    if not proxy:
+    _st = get_state()
+    if not _st.proxy:
         return JSONResponse({"error": "proxy not initialized"}, status_code=503)
-    loaded = proxy.wasm_runtime.reload()
+    loaded = _st.proxy.wasm_runtime.reload()
     return JSONResponse({"ok": True, "modules": loaded})
 
 
@@ -1053,9 +1066,10 @@ async def api_reset_generation_params():
 @app.get("/api/v1/tools")
 async def api_tools():
     """List available tools."""
-    if not tool_registry:
+    _st = get_state()
+    if not _st.tool_registry:
         return JSONResponse({"tools": []})
-    tools = tool_registry.list_tools()
+    tools = _st.tool_registry.list_tools()
     return JSONResponse({
         "tools": tools,
         "enabled": get_config().get("tools", {}).get("enabled", False),
@@ -1066,37 +1080,38 @@ async def api_tools():
 async def api_status():
     """Detailed status of all subsystems."""
     cfg = get_config()
+    _st = get_state()
     return JSONResponse({
         "proxy": {
-            "running": proxy is not None,
-            "backend_url": proxy.backend_url if proxy else "",
-            "default_model": proxy.default_model if proxy else "",
+            "running": _st.proxy is not None,
+            "backend_url": _st.proxy.backend_url if _st.proxy else "",
+            "default_model": _st.proxy.default_model if _st.proxy else "",
         },
         "storage": {
-            "sqlite": sqlite_store is not None,
-            "vector": vector_store is not None,
-            "stats": sqlite_store.get_stats() if sqlite_store else {},
+            "sqlite": _st.sqlite_store is not None,
+            "vector": _st.vector_store is not None,
+            "stats": _st.sqlite_store.get_stats() if _st.sqlite_store else {},
         },
         "routing": {
             "decision_llm": {
-                "enabled": decision_agent.enabled if decision_agent else False,
-                "model": decision_agent.model if decision_agent else "",
+                "enabled": _st.decision_agent.enabled if _st.decision_agent else False,
+                "model": _st.decision_agent.model if _st.decision_agent else "",
             },
             "embedding_classifier": {
-                "ready": embedding_classifier.ready if embedding_classifier else False,
+                "ready": _st.embedding_classifier.ready if _st.embedding_classifier else False,
             },
         },
         "tools": {
             "enabled": cfg.get("tools", {}).get("enabled", False),
-            "available": tool_registry.list_tools() if tool_registry else [],
+            "available": _st.tool_registry.list_tools() if _st.tool_registry else [],
         },
         "operator": {
             "model": cfg.get("operator", {}).get("model", ""),
             "shell_enabled": cfg.get("operator", {}).get("shell", {}).get("enabled", False),
         },
         "wasm": {
-            "enabled": proxy.wasm_runtime.enabled if proxy else False,
-            "modules": proxy.wasm_runtime.list_modules() if proxy else [],
+            "enabled": _st.proxy.wasm_runtime.enabled if _st.proxy else False,
+            "modules": _st.proxy.wasm_runtime.list_modules() if _st.proxy else [],
         },
     })
 
@@ -1104,8 +1119,9 @@ async def api_status():
 @app.get("/api/v1/stats")
 async def api_stats():
     """Statistics about conversations and usage."""
-    sqlite_stats = sqlite_store.get_stats() if sqlite_store else {}
-    vector_stats = vector_store.get_stats() if vector_store else {}
+    _st = get_state()
+    sqlite_stats = _st.sqlite_store.get_stats() if _st.sqlite_store else {}
+    vector_stats = _st.vector_store.get_stats() if _st.vector_store else {}
     return JSONResponse({
         "conversations": sqlite_stats,
         "embeddings": vector_stats,
@@ -1120,12 +1136,13 @@ async def api_costs(days: int = 30):
     Query params: ?days=30 (default 30)
     Returns total, by_model, by_day, by_conversation breakdown.
     """
-    if not cost_tracker:
+    _st = get_state()
+    if not _st.cost_tracker:
         return JSONResponse({
             "enabled": False,
             "message": "Cost tracking is disabled. Set cost_tracking.enabled: true in config.",
         })
-    stats = cost_tracker.get_stats(days=days)
+    stats = _st.cost_tracker.get_stats(days=days)
     stats["enabled"] = True
     return JSONResponse(stats)
 
@@ -1149,7 +1166,8 @@ async def api_export(
         alpaca     — {"instruction": ..., "input": "", "output": ...} per turn pair
         sharegpt   — {"id": ..., "conversations": [{"from": "human"|"gpt", "value": ...}]}
     """
-    if not sqlite_store:
+    _st = get_state()
+    if not _st.sqlite_store:
         return JSONResponse({"error": "Storage not initialized"}, status_code=503)
 
     fmt = format.lower().strip()
@@ -1162,18 +1180,18 @@ async def api_export(
     model_filter = model or None
 
     if fmt == "jsonl":
-        data = sqlite_store.export_jsonl(model_filter)
+        data = _st.sqlite_store.export_jsonl(model_filter)
         filename = "conversations.jsonl"
         # True JSONL: one JSON object per line
         content = "\n".join(json.dumps(r, ensure_ascii=False) for r in data) + "\n"
         media_type = "application/x-ndjson"
     elif fmt == "alpaca":
-        data = sqlite_store.export_alpaca(model_filter)
+        data = _st.sqlite_store.export_alpaca(model_filter)
         filename = "conversations_alpaca.json"
         content = json.dumps(data, ensure_ascii=False, indent=2)
         media_type = "application/json"
     else:  # sharegpt
-        data = sqlite_store.export_sharegpt(model_filter)
+        data = _st.sqlite_store.export_sharegpt(model_filter)
         filename = "conversations_sharegpt.json"
         content = json.dumps(data, ensure_ascii=False, indent=2)
         media_type = "application/json"
@@ -1189,11 +1207,12 @@ async def api_export(
 @app.get("/api/v1/model-performance")
 async def api_model_performance(days: int = 30):
     """Per-model latency and throughput stats."""
-    if not sqlite_store:
+    _st = get_state()
+    if not _st.sqlite_store:
         return JSONResponse({"error": "Storage not initialized"}, status_code=503)
     rt = get_runtime_config()
     since = rt.get("perf_stats_since") or None
-    data = sqlite_store.get_model_performance(days=days, since=since)
+    data = _st.sqlite_store.get_model_performance(days=days, since=since)
     data["enabled"] = True
     data["since"] = since
     return JSONResponse(data)
@@ -1310,14 +1329,15 @@ async def api_routing_stats(lines: int = 10000):
 @app.get("/api/v1/backends")
 async def api_backends():
     """Health and status of all configured backends, with rolling latency stats."""
-    if not backend_router:
+    _st = get_state()
+    if not _st.backend_router:
         cfg = get_config()
         return JSONResponse({
             "enabled": False,
             "message": "Multi-backend routing is disabled. Set backends_enabled: true in config.",
             "primary_backend": cfg.get("backend", {}).get("url", ""),
         })
-    backends_list = await backend_router.health()
+    backends_list = await _st.backend_router.health()
     return JSONResponse({
         "enabled": True,
         "backends": backends_list,  # list, not dict
@@ -1333,8 +1353,6 @@ async def api_backends_apply(request: Request):
 
     API keys set to "***" (the UI masked placeholder) are preserved from the existing config.
     """
-    global backend_router
-
     try:
         body = await request.json()
     except Exception:
@@ -1380,9 +1398,10 @@ async def api_backends_apply(request: Request):
                 logger.error("Router build failed: %s", e, exc_info=True)
                 return JSONResponse({"error": f"Router build failed: {e}"}, status_code=500)
 
-        backend_router = new_router
-        if proxy:
-            proxy.backend_router = new_router
+        _st = get_state()
+        _st.backend_router = new_router
+        if _st.proxy:
+            _st.proxy.backend_router = new_router
 
         logger.info(
             "Backends reloaded via API: enabled=%s, %d backend(s)",
@@ -1403,10 +1422,11 @@ async def api_backend_models(backend_name: str):
     Used by the web UI to populate model picker when configuring backend restrictions.
     Returns {"models": ["model1", "model2", ...]} or falls back to empty list on error.
     """
-    if not backend_router:
+    _st = get_state()
+    if not _st.backend_router:
         return JSONResponse({"models": []})
 
-    backend = backend_router.get_backend(backend_name)
+    backend = _st.backend_router.get_backend(backend_name)
     if not backend:
         return JSONResponse({"models": []})
 
@@ -1440,12 +1460,13 @@ async def api_conversation_replay(conv_id: str):
             "enabled": False,
             "message": "Conversation replay is disabled. Enable it in Config tab or set conversation_replay.enabled: true in config.yaml.",
         })
-    if not sqlite_store:
+    _st = get_state()
+    if not _st.sqlite_store:
         return JSONResponse({"error": "Storage not initialized"}, status_code=503)
 
     from beigebox.replay import ConversationReplayer
     wire_path = cfg.get("wiretap", {}).get("path", "./data/wire.jsonl")
-    replayer = ConversationReplayer(sqlite_store, wiretap_path=wire_path)
+    replayer = ConversationReplayer(_st.sqlite_store, wiretap_path=wire_path)
     result = replayer.replay(conv_id)
     return JSONResponse(result)
 
@@ -1468,7 +1489,8 @@ async def api_conversation_fork(conv_id: str, request: Request):
         messages_copied      int
         source_conversation  str
     """
-    if not sqlite_store:
+    _st = get_state()
+    if not _st.sqlite_store:
         return JSONResponse({"error": "Storage not initialized"}, status_code=503)
 
     try:
@@ -1487,7 +1509,7 @@ async def api_conversation_fork(conv_id: str, request: Request):
     new_conv_id = uuid4().hex
 
     try:
-        copied = sqlite_store.fork_conversation(
+        copied = _st.sqlite_store.fork_conversation(
             source_conv_id=conv_id,
             new_conv_id=new_conv_id,
             branch_at=branch_at,
@@ -1669,7 +1691,7 @@ async def api_harness_orchestrate(request: Request):
         model=model_override,
         max_rounds=max_rounds,
         task_stagger_seconds=task_stagger,
-        backend_router=backend_router,
+        backend_router=get_state().backend_router,
         injection_queue=inj_queue,
         sqlite_store=sqlite_store,
     )
@@ -1687,7 +1709,7 @@ async def api_harness_orchestrate(request: Request):
                     error_count += 1
                 if event.get("type") == "start":
                     run_id = event.get("run_id")
-                    _harness_injection_queues[run_id] = inj_queue
+                    get_state().harness_injection_queues[run_id] = inj_queue
                 yield f"data: {_json.dumps(event)}\n\n"
         except Exception as e:
             error_event = {'type':'error','message':str(e)}
@@ -1695,8 +1717,8 @@ async def api_harness_orchestrate(request: Request):
             error_count += 1
             yield f"data: {_json.dumps(error_event)}\n\n"
         finally:
-            if run_id and run_id in _harness_injection_queues:
-                del _harness_injection_queues[run_id]
+            if run_id and run_id in get_state().harness_injection_queues:
+                del get_state().harness_injection_queues[run_id]
             # Persist the completed run in the finally block so it's always stored
         # even if the SSE stream was interrupted mid-run by the client.
         if orch.store_runs:
@@ -1790,7 +1812,7 @@ async def api_harness_wiggam(request: Request):
         wiggam_model=wiggam_model,
         officer_models=officer_models,
         max_rounds=max_rounds,
-        backend_router=backend_router,
+        backend_router=get_state().backend_router,
     )
 
     async def _event_stream():
@@ -1856,20 +1878,20 @@ async def api_harness_ralph(request: Request):
         working_dir=working_dir,
         max_iterations=max_iterations,
         model=model_override,
-        backend_router=backend_router,
+        backend_router=get_state().backend_router,
         injection_queue=inj_queue,
     )
 
     async def _event_stream():
         run_id = ralph.run_id
-        _harness_injection_queues[run_id] = inj_queue
+        get_state().harness_injection_queues[run_id] = inj_queue
         try:
             async for event in ralph.run():
                 yield f"data: {_json.dumps(event)}\n\n"
         except Exception as e:
             yield f"data: {_json.dumps({'type':'error','message':str(e)})}\n\n"
         finally:
-            _harness_injection_queues.pop(run_id, None)
+            get_state().harness_injection_queues.pop(run_id, None)
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(
@@ -1892,7 +1914,7 @@ async def api_harness_inject(run_id: str, request: Request):
     # Queue lookup is O(1) and safe under concurrent async tasks because
     # Python's GIL serialises dict mutations. The put() is non-blocking since
     # the injection queue is unbounded — the run loop drains it at each round.
-    queue = _harness_injection_queues.get(run_id)
+    queue = get_state().harness_injection_queues.get(run_id)
     if queue is None:
         return JSONResponse({"error": "run not found or already completed"}, status_code=404)
     await queue.put(message)
@@ -2038,8 +2060,9 @@ async def api_operator(request: Request):
         try:
             import uuid as _uuid
             _conv_id = _uuid.uuid4().hex[:8]
-            _wire = proxy.wire if proxy else None
-            op = Operator(vector_store=vs, blob_store=blob_store, model_override=model_override, sqlite_store=sqlite_store)
+            _st = get_state()
+            _wire = _st.proxy.wire if _st.proxy else None
+            op = Operator(vector_store=vs, blob_store=_st.blob_store, model_override=model_override)
             _op_model = op._model
             if _wire:
                 _wire.log("inbound", "user", question,
@@ -2195,7 +2218,8 @@ async def api_harness_autonomous(request: Request):
         import time as _time
         _run_id = _uuid.uuid4().hex[:8]
         _conv_id = _uuid.uuid4().hex[:8]
-        _wire = proxy.wire if proxy else None
+        _st = _app_state
+        _wire = _st.proxy.wire if (_st and _st.proxy) else None
         _start_time = _time.time()
         _op_model = model_override or "unknown"
         try:
@@ -2386,8 +2410,8 @@ async def api_harness_autonomous(request: Request):
 
             _latency_ms = int((_time.time() - _start_time) * 1000)
             try:
-                if sqlite_store:
-                    sqlite_store.store_operator_run(
+                if _st and _st.sqlite_store:
+                    _st.sqlite_store.store_operator_run(
                         run_id=_run_id, query=question, history=initial_history,
                         model=_op_model, status="completed",
                         result=final_answer or "", latency_ms=_latency_ms,
@@ -2401,8 +2425,8 @@ async def api_harness_autonomous(request: Request):
             import json as _json2
             _latency_ms = int((_time.time() - _start_time) * 1000)
             try:
-                if sqlite_store:
-                    sqlite_store.store_operator_run(
+                if _st and _st.sqlite_store:
+                    _st.sqlite_store.store_operator_run(
                         run_id=_run_id, query=question, history=history or [],
                         model=_op_model, status="error",
                         result=str(e), latency_ms=_latency_ms,
@@ -2460,7 +2484,8 @@ async def api_operator_stream(request: Request):
         import time as _time
         _run_id = _uuid.uuid4().hex[:8]
         _conv_id = _uuid.uuid4().hex[:8]
-        _wire = proxy.wire if proxy else None
+        _st = _app_state
+        _wire = _st.proxy.wire if (_st and _st.proxy) else None
         _start_time = _time.time()
         _op_model = model_override or "unknown"
         try:
@@ -2542,8 +2567,8 @@ async def api_operator_stream(request: Request):
             # Store successful run to database
             _latency_ms = int((_time.time() - _start_time) * 1000)
             try:
-                if sqlite_store:
-                    sqlite_store.store_operator_run(
+                if _st and _st.sqlite_store:
+                    _st.sqlite_store.store_operator_run(
                         run_id=_run_id,
                         query=question,
                         history=initial_history,
@@ -2553,7 +2578,7 @@ async def api_operator_stream(request: Request):
                         latency_ms=_latency_ms,
                     )
                     if _score:
-                        sqlite_store.store_run_score(_run_id, _score)
+                        _st.sqlite_store.store_run_score(_run_id, _score)
             except Exception as store_err:
                 logger.warning("Failed to store operator run: %s", store_err)
 
@@ -2565,8 +2590,8 @@ async def api_operator_stream(request: Request):
 
             _latency_ms = int((_time.time() - _start_time) * 1000)
             try:
-                if sqlite_store:
-                    sqlite_store.store_operator_run(
+                if _st and _st.sqlite_store:
+                    _st.sqlite_store.store_operator_run(
                         run_id=_run_id,
                         query=question,
                         history=history or [],
@@ -2645,14 +2670,27 @@ async def api_operator_list_runs():
 @app.get("/api/v1/operator/{run_id}")
 async def api_operator_get_run(run_id: str):
     """Retrieve a completed operator run by ID."""
-    if not sqlite_store:
+    _st = get_state()
+    if not _st.sqlite_store:
         return JSONResponse({"error": "storage not available"}, status_code=503)
 
-    run = sqlite_store.get_operator_run(run_id)
+    run = _st.sqlite_store.get_operator_run(run_id)
     if not run:
         return JSONResponse({"error": f"Run '{run_id}' not found"}, status_code=404)
 
     return JSONResponse(run)
+
+
+@app.get("/api/v1/operator/runs")
+async def api_operator_list_runs():
+    """List recent operator runs."""
+    _st = get_state()
+    if not _st.sqlite_store:
+        return JSONResponse({"error": "storage not available"}, status_code=503)
+
+    runs = _st.sqlite_store.list_operator_runs(limit=50)
+    return JSONResponse({"runs": runs})
+
 
 
 # ---------------------------------------------------------------------------
@@ -2713,13 +2751,14 @@ async def api_council_propose(request: Request):
     }
 
     # Wiretap: log the incoming query and the proposed council lineup
-    if proxy and proxy.wire:
-        proxy.wire.log("inbound", "user", query,
+    _st = get_state()
+    if _st.proxy and _st.proxy.wire:
+        _st.proxy.wire.log("inbound", "user", query,
                        model=operator_model, conversation_id=run_id)
         member_summary = ", ".join(
             f"{m['name']}({m['model']})" for m in council
         )
-        proxy.wire.log("internal", "decision",
+        _st.proxy.wire.log("internal", "decision",
                        f"council proposed: {member_summary}",
                        model=operator_model, conversation_id=run_id)
 
@@ -2763,7 +2802,8 @@ async def api_council_engage(run_id: str, request: Request):
     operator_model = session["operator_model"]
     backend_url    = session["backend_url"]
 
-    _wire = proxy.wire if proxy else None
+    _st = get_state()
+    _wire = _st.proxy.wire if _st.proxy else None
 
     async def _stream():
         from pathlib import Path as _Path
@@ -2855,7 +2895,7 @@ async def api_ensemble(request: Request):
 
     from beigebox.agents.ensemble_voter import EnsembleVoter
 
-    voter = EnsembleVoter(models=models, judge_model=judge_model, backend_router=backend_router)
+    voter = EnsembleVoter(models=models, judge_model=judge_model, backend_router=get_state().backend_router)
 
     async def event_generator():
         try:
@@ -2942,12 +2982,13 @@ async def api_build_centroids():
     Equivalent to `beigebox build-centroids` CLI command.
     Runs synchronously — may take 10-30s depending on embedding model speed.
     """
-    if not embedding_classifier:
+    _st = get_state()
+    if not _st.embedding_classifier:
         return JSONResponse({"success": False, "error": "Embedding classifier not initialized"}, status_code=503)
     try:
         import asyncio as _asyncio
         loop = _asyncio.get_running_loop()
-        success = await loop.run_in_executor(None, embedding_classifier.build_centroids)
+        success = await loop.run_in_executor(None, _st.embedding_classifier.build_centroids)
         if success:
             return JSONResponse({"success": True, "message": "Centroids built successfully"})
         else:
@@ -3025,9 +3066,10 @@ async def api_workspace_delete(filename: str):
 @app.get("/api/v1/openrouter/models")
 async def openrouter_models_browse():
     """Fetch all OR models for the browser (rich data: name, context, pricing)."""
-    if not backend_router:
+    _st = get_state()
+    if not _st.backend_router:
         return JSONResponse({"error": "backends not enabled"}, status_code=400)
-    or_backend = backend_router.get_openrouter_backend()
+    or_backend = _st.backend_router.get_openrouter_backend()
     if not or_backend:
         return JSONResponse({"error": "no OpenRouter backend configured"}, status_code=404)
     models = await or_backend.list_models_details()
@@ -3058,7 +3100,7 @@ async def openrouter_pinned_save(request: Request):
 @app.get("/api/v1/openrouter/balance")
 async def openrouter_balance():
     """Fetch remaining credit balance from OpenRouter account API."""
-    or_backend = backend_router.get_openrouter_backend() if backend_router else None
+    or_backend = get_state().backend_router.get_openrouter_backend() if get_state().backend_router else None
     if not or_backend:
         return JSONResponse({"balance": None, "error": "no OpenRouter backend configured"}, status_code=404)
     if not or_backend.api_key:
@@ -3148,9 +3190,10 @@ async def api_workspace_upload(file: UploadFile):
     # Chunk and embed the file in a background thread — keeps the upload
     # response fast even for large PDFs. The file is already saved to disk
     # so if indexing fails the file is still accessible via workspace/in.
-    if vector_store and blob_store:
+    _st = get_state()
+    if _st.vector_store and _st.blob_store:
         loop = asyncio.get_event_loop()
-        loop.run_in_executor(None, _index_document, target, vector_store, blob_store)
+        loop.run_in_executor(None, _index_document, target, _st.vector_store, _st.blob_store)
 
     return JSONResponse({"ok": True, "name": filename, "size": len(content)})
 
@@ -3163,7 +3206,8 @@ async def api_transform_pdf(file: UploadFile):
 
     Response: {"ok": true, "text": "...", "chars": N, "filename": "..."}
     """
-    if not proxy:
+    _st = get_state()
+    if not _st.proxy:
         return JSONResponse({"ok": False, "error": "proxy not initialized"}, status_code=503)
 
     filename = Path(file.filename or "upload.pdf").name
@@ -3171,7 +3215,7 @@ async def api_transform_pdf(file: UploadFile):
     if not raw:
         return JSONResponse({"ok": False, "error": "empty file"}, status_code=400)
 
-    text = await proxy.wasm_runtime.transform_input("pdf_oxide", raw)
+    text = await _st.proxy.wasm_runtime.transform_input("pdf_oxide", raw)
     if not text:
         return JSONResponse(
             {"ok": False, "error": "pdf_oxide WASM module not loaded or returned empty"},
@@ -3258,12 +3302,13 @@ async def _wire_and_forward(request: Request, route_label: str, override_base_ur
     }
 
     # Wire log entry via proxy.wire (WireLog)
-    if proxy and proxy.wire:
+    _st = get_state()
+    if _st.proxy and _st.proxy.wire:
         try:
             body_preview = body[:400].decode("utf-8", errors="replace") if body else ""
         except Exception:
             body_preview = ""
-        proxy.wire.log(
+        _st.proxy.wire.log(
             direction="internal",
             role="proxy",
             content=f"[{request.method}] {route_label} → {target}\n{body_preview}",
@@ -3287,8 +3332,8 @@ async def _wire_and_forward(request: Request, route_label: str, override_base_ur
                         total_bytes += len(chunk)
                         yield chunk
         finally:
-            if proxy and proxy.wire:
-                proxy.wire.log(
+            if _st.proxy and _st.proxy.wire:
+                _st.proxy.wire.log(
                     direction="outbound",
                     role="proxy",
                     content=f"[{request.method}] {route_label} ← HTTP {resp_status} ({total_bytes} bytes)",
