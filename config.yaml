@@ -225,6 +225,39 @@ harness:
 operator:
   enabled: true                         # CAUTION: enables LLM-driven tool execution. Review allowed_tools before enabling.
   model: "qwen3:4b"
+
+  # ── Tool profiles — restrict tool set based on model tier ─────────────────
+  # browser_meta_tool: swap BrowserboxTool for the lazy-loading BrowserMetaTool.
+  # The meta-tool shows a stub description in the system prompt (saves tokens)
+  # and returns the full capability list when the model calls {"action": "discover"}.
+  browser_meta_tool: false
+
+  # Tool profiles define named subsets of the full tool registry.
+  # Empty list [] for a profile = allow all tools (equivalent to "full").
+  tool_profiles:
+    minimal:
+      - web_search
+      - calculator
+      - datetime
+    standard:
+      - web_search
+      - web_scraper
+      - calculator
+      - datetime
+      - memory
+
+  # Map fnmatch patterns (against model name) to a profile name.
+  # Patterns are checked in order; first match wins.
+  # Use "default" as a fallback (applied when no pattern matches).
+  # "full" or absent default = all tools.
+  model_tool_profiles: {}
+  # Example:
+  #   "*:1b": minimal
+  #   "*:3b": minimal
+  #   "*:7b": standard
+  #   "*:8b": standard
+  #   default: full
+
   autonomous:
     enabled: false       # Set true to enable multi-turn autonomous mode
     max_turns: 5         # Max consecutive autonomous turns (stops early if no tool calls)

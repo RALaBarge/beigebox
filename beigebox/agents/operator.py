@@ -185,6 +185,42 @@ def _build_tools_block(registry_tools: dict) -> str:
     return "\n".join(lines) if lines else "  (none)"
 
 
+def _build_tool_rubric(tool_names: list[str]) -> str:
+    """Generate a tool selection rubric based on which tools are available.
+
+    Injected into the system prompt so the model knows when to use each tool
+    rather than guessing from the description alone.
+    """
+    _RUBRIC: dict[str, str] = {
+        "web_search":      "current events, docs, facts — use a specific query string",
+        "web_scraper":     "read a specific URL's full content after web_search finds it",
+        "browser":         "interact with pages: click, fill forms, navigate (call discover first)",
+        "browserbox":      "interact with pages: click, fill forms, navigate",
+        "calculator":      "arithmetic and math expressions",
+        "datetime":        "current date/time or date arithmetic",
+        "memory":          "recall facts stored from previous sessions",
+        "workspace_file":  "read/write local files in /workspace/",
+        "shell":           "run shell commands — use sparingly",
+        "system_info":     "system stats: CPU, memory, disk",
+        "read_skill":      "read a skill document for detailed guidance on a task",
+    }
+    lines = []
+    for name in tool_names:
+        if name in _RUBRIC:
+            lines.append(f"  {name}: {_RUBRIC[name]}")
+    return "\n".join(lines) if lines else ""
+
+
+_SMALL_MODEL_ADDENDUM = """\
+
+SMALL MODEL MODE — STRICT RULES:
+- Use ONLY ONE tool per turn. Never plan multi-step sequences.
+- Prefer the simplest tool that answers the question.
+- If unsure which tool to use, call web_search first.
+- Give your final answer as soon as you have enough information.
+"""
+
+
 # ---------------------------------------------------------------------------
 # Output extraction helpers (JSON primary, ReAct fallback)
 # ---------------------------------------------------------------------------
@@ -274,6 +310,57 @@ def _extract_react(text: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# Tool profile helpers
+# ---------------------------------------------------------------------------
+
+import fnmatch as _fnmatch
+
+
+def _resolve_tool_profile(model: str, cfg: dict) -> str | None:
+    """Return the tool profile name for a given model, or None for 'use all tools'.
+
+    Checks operator.model_tool_profiles in config.yaml using fnmatch patterns.
+    Example config::
+
+        operator:
+          model_tool_profiles:
+            "*:1b": minimal
+            "*:3b": minimal
+            "*:7b": standard
+            "*:8b": standard
+            default: full
+    """
+    op_cfg = cfg.get("operator", {})
+    profile_map: dict = op_cfg.get("model_tool_profiles", {})
+    if not profile_map:
+        return None
+    model_lower = model.lower()
+    for pattern, profile in profile_map.items():
+        if pattern == "default":
+            continue
+        if _fnmatch.fnmatch(model_lower, pattern.lower()):
+            return profile if profile != "full" else None
+    default = profile_map.get("default")
+    if not default or default == "full":
+        return None
+    return default
+
+
+def _is_small_model(model: str, cfg: dict) -> bool:
+    """Return True when model is classified as small-tier.
+
+    Uses the same model_tool_profiles map — if the model resolves to "minimal"
+    it is considered small. Falls back to heuristic parameter-count suffixes.
+    """
+    profile = _resolve_tool_profile(model, cfg)
+    if profile is not None:
+        return profile == "minimal"
+    # Heuristic: param-count suffixes typical of small models
+    model_lower = model.lower()
+    return any(model_lower.endswith(s) for s in (":1b", ":3b", "-1b", "-3b", "1b", "3b"))
+
+
+# ---------------------------------------------------------------------------
 # Operator
 # ---------------------------------------------------------------------------
 
@@ -350,7 +437,31 @@ class Operator:
             blocked = set(self._registry.tools.keys()) - set(tools.keys())
             if blocked:
                 logger.info("Operator tool sandbox: blocked %s", sorted(blocked))
+
+        # Tool profile: further filter tools based on model tier.
+        # Profiles are defined in config.yaml under operator.tool_profiles.
+        # model_tool_profiles maps fnmatch patterns to profile names.
+        _profile_name = _resolve_tool_profile(self._model, self.cfg)
+        if _profile_name:
+            _profile_tools = self.cfg.get("operator", {}).get(
+                "tool_profiles", {}
+            ).get(_profile_name, [])
+            if _profile_tools:
+                tools = {k: v for k, v in tools.items() if k in _profile_tools}
+                logger.info("Operator tool profile '%s': tools=%s", _profile_name, list(tools.keys()))
+
+        # BrowserMetaTool: swap in the lazy-loading wrapper when config requests it.
+        # The meta-tool shows a stub description and serves discover on demand
+        # instead of inlining the full namespace list in the system prompt.
+        if self.cfg.get("operator", {}).get("browser_meta_tool", False):
+            if "browserbox" in tools:
+                from beigebox.tools.browser_meta import BrowserMetaTool
+                tools = dict(tools)  # don't mutate registry dict
+                tools["browser"] = BrowserMetaTool(tools.pop("browserbox"))
+                logger.info("Operator: browserbox replaced with BrowserMetaTool (lazy loading)")
+
         self._tools = tools
+        self._is_small_model = _is_small_model(self._model, self.cfg)
 
         # ── Agent Skills ──────────────────────────────────────────────────
         from pathlib import Path as _Path
@@ -374,6 +485,11 @@ class Operator:
 
         _tools_block = _build_tools_block(tools) if tools else "(no tools available)"
 
+        # Build rubric and small-model addendum dynamically.
+        _rubric = _build_tool_rubric(list(tools.keys()))
+        _rubric_block = f"\nTOOL SELECTION GUIDE:\n{_rubric}" if _rubric else ""
+        _small_addendum = _SMALL_MODEL_ADDENDUM if self._is_small_model else ""
+
         if pre_hook:
             self._system = _PRE_HOOK_SYSTEM.format(
                 tools_block=_tools_block, skills_block=skills_block,
@@ -385,11 +501,11 @@ class Operator:
         elif autonomous and tools:
             self._system = _SYSTEM_AUTONOMOUS.format(
                 tools_block=_tools_block, skills_block=skills_block,
-            )
+            ) + _rubric_block + _small_addendum
         elif tools:
             self._system = _SYSTEM.format(
                 tools_block=_tools_block, skills_block=skills_block,
-            )
+            ) + _rubric_block + _small_addendum
         else:
             self._system = _NO_TOOLS_SYSTEM
 
@@ -452,10 +568,13 @@ class Operator:
         if self._skills:
             skills_block = f"\n{skills_to_xml(self._skills)}"
         if self._tools:
+            _rubric = _build_tool_rubric(list(self._tools.keys()))
+            _rubric_block = f"\nTOOL SELECTION GUIDE:\n{_rubric}" if _rubric else ""
+            _small_addendum = _SMALL_MODEL_ADDENDUM if self._is_small_model else ""
             self._system = _SYSTEM.format(
                 tools_block=_build_tools_block(self._tools),
                 skills_block=skills_block,
-            )
+            ) + _rubric_block + _small_addendum
         logger.info(
             "Skills reloaded: %s",
             [s["name"] for s in self._skills] if self._skills else [],
@@ -652,14 +771,22 @@ class Operator:
     # ------------------------------------------------------------------
 
     def _run_tool(self, name: str, input_str: str) -> str:
+        from beigebox.tools.result import ToolResult
+
         tool = self._tools.get(name)
         if tool is None:
             available = ", ".join(self._tools.keys()) or "none"
             return f"Error: unknown tool '{name}'. Available: {available}"
         try:
-            raw_result = str(tool.run(input_str))
+            result = tool.run(input_str)
         except Exception as e:
             return f"Error running {name}: {e}"
+
+        # ToolResult: use structured observation; plain strings pass through as-is.
+        if isinstance(result, ToolResult):
+            raw_result = result.to_observation()
+        else:
+            raw_result = str(result)
 
         ts = datetime.now(timezone.utc).isoformat()
 
@@ -817,7 +944,8 @@ class Operator:
                 if len(_recent_calls) > 6:
                     _recent_calls.pop(0)
                 _is_failure = observation.lower().startswith(
-                    ("no results", "error", "not found", "unknown tool", "file not found")
+                    ("no results", "error", "not found", "unknown tool", "file not found",
+                     "[status: error]")
                 )
                 _consec_fail[tool_name] = (_consec_fail.get(tool_name, 0) + 1) if _is_failure else 0
 
@@ -1021,7 +1149,8 @@ class Operator:
                 if len(_recent_calls) > 6:
                     _recent_calls.pop(0)
                 _is_failure = observation.lower().startswith(
-                    ("no results", "error", "not found", "unknown tool", "file not found")
+                    ("no results", "error", "not found", "unknown tool", "file not found",
+                     "[status: error]")
                 )
                 _consec_fail[tool_name] = (_consec_fail.get(tool_name, 0) + 1) if _is_failure else 0
 
