@@ -5,7 +5,7 @@ overview; this file has the "where exactly is X" detail.
 
 ---
 
-## main.py layout (large file — ~2500 lines)
+## main.py layout (large file — ~2700 lines)
 
 Global singletons (module-level):
 ```
@@ -22,11 +22,15 @@ Startup: `lifespan()` — initialises all singletons in this order:
 Key endpoints (in file order, approximate):
 - `POST /v1/chat/completions` — main proxy passthrough
 - `GET  /v1/models` — list models (parallel gather across backends)
+- `GET  /api/v1/operator/runs` — list recent operator runs (**must be before `/{run_id}`**)
+- `GET  /api/v1/operator/{run_id}` — get specific run
+- `POST /api/v1/operator` — blocking operator call (used by @op in chat pane)
 - `POST /api/v1/operator/stream` — **single-turn** operator SSE
 - `POST /api/v1/harness/autonomous` — **multi-turn** operator loop (state reducer)
 - `POST /api/v1/harness/ralph` — spec-driven dev loop (test-driven)
 - `POST /api/v1/harness/orchestrated` — multi-pane orchestration
 - `POST /api/v1/harness/ensemble` — parallel ensemble run
+- `GET  /api/v1/tap` — wire events (SQLite first, JSONL fallback); params: n, source, event_type, conv_id, run_id, role
 - `POST /mcp` — MCP server (JSON-RPC 2.0, streamable HTTP)
 - `GET  /beigebox/stats` — metrics, decision LLM counters
 - `GET/POST /api/v1/operator/notes` — persistent operator context
@@ -45,7 +49,7 @@ Helper functions in main.py:
 Constructor kwargs:
 ```python
 Operator(vector_store=vs, model_override=None, autonomous=False,
-         pre_hook=False, post_hook=False, blob_store=None)
+         pre_hook=False, post_hook=False, blob_store=None, sqlite_store=None)
 ```
 
 Key instance attributes:
@@ -54,10 +58,12 @@ Key instance attributes:
 - `self._tools` — dict of {name: tool_obj}
 - `self._skills` — list of skill dicts
 - `self._skills_dir` / `self._skills_fp` — for hot-reload detection
+- `self._wire_db` — optional SQLiteStore for structured tap events
 
 Key methods:
-- `run(question, history)` → str — blocking single-turn run
-- `run_stream(question, history)` → AsyncGenerator[dict] — SSE-friendly events
+- `run(question, history)` → str — blocking single-turn run (used by `POST /api/v1/operator`)
+- `run_stream(question, history)` → AsyncGenerator[dict] — SSE-friendly events (used by `/operator/stream`)
+- `_wire(event_type, run_id, content, turn_id, tool_id, meta)` — fire-and-forget tap event, never raises
 - `_reload_skills_if_changed()` — compares fingerprint, rebuilds system prompt
 - `_resolve_backend_url(model)` — picks Ollama vs OpenRouter URL
 
@@ -113,6 +119,29 @@ operator_factory is an async closure that creates a VectorStore + Operator per c
 
 ---
 
+## HarnessOrchestrator (beigebox/agents/harness_orchestrator.py)
+
+**Class:** `HarnessOrchestrator`
+
+Constructor kwargs:
+```python
+HarnessOrchestrator(available_targets=None, model=None, max_rounds=8,
+                    task_stagger_seconds=0.4, backend_router=None,
+                    injection_queue=None, sqlite_store=None)
+```
+
+Key instance attributes:
+- `self.run_id` — set at start of `run()`, hex[:16]
+- `self._wire_db` — optional SQLiteStore for structured tap events
+
+Key methods:
+- `run(goal)` → AsyncGenerator[dict] — full plan→dispatch→evaluate loop; yields `start`, `plan`, `dispatch`, `result`, `evaluate`, `finish`, `injected`, `error` events
+- `_wire(event_type, run_id, content, turn_id, meta)` — fire-and-forget tap event, never raises
+
+Wire events emitted: `harness_start`, `harness_plan`, `harness_dispatch`, `harness_turn`, `harness_evaluate`, `harness_inject`, `harness_end`, `harness_error`
+
+turn_id format: `{run_id}:r{round}` (plan/dispatch/evaluate); `{run_id}:r{round}:{task_id}` (turn results)
+
 ## Harness subsystem
 
 Three endpoints in main.py, all return SSE streams:
@@ -137,13 +166,13 @@ Three endpoints in main.py, all return SSE streams:
 
 ## Web UI (beigebox/web/index.html)
 
-Single file, all JS/CSS inline. No build step. ~5000 lines.
+Single file, all JS/CSS inline. No build step. ~6500 lines.
 
 **Tab panels** (id → mode):
 - `#panel-chat` — main chat
 - `#panel-operator` — operator tab (single-turn since 2026-03-13)
 - `#panel-harness` — harness tab (modes: orchestrated, ensemble, ralph, agentic)
-- `#panel-tap` — wiretap/log viewer
+- `#panel-tap` — wiretap/log viewer (v1.3.4: source/event/run/role filters, group-by-run, meta expand)
 - `#panel-settings` — settings
 
 **Operator tab JS functions:**
@@ -168,8 +197,13 @@ Models list fetched from `GET /v1/models`.
 `tool_call`, `tool_result`, `answer`, `error`, `turn_start`, `info`.
 
 **Tap (wiretap) panel:**
-- `loadTapConvs()` — fetch conversation list
-- Click conv ID → highlight in place (in-live mode too)
+- `loadTap()` — fetch from `/api/v1/tap` with all active filters
+- `_tapSelectedConv` / `_tapSelectedRun` — highlight state; `_reapplyTapHighlights()` re-applies without reload
+- `tapHighlightConv(conv)` / `tapHighlightRun(runId)` — toggle highlight; run highlight also sets run input field
+- `_renderTapEntry(e)` — renders one event row with source chip, event chip (clickable to filter), conv/run chips (clickable to highlight)
+- `_renderTapGrouped(entries)` — groups by run_id into collapsible accordion blocks
+- Filters: `#tap-source`, `#tap-event`, `#tap-role`, `#tap-run` (debounced), `#tap-n`, `#tap-group-run`
+- All filter state persisted to localStorage
 
 ---
 
@@ -374,12 +408,15 @@ Prototype sets (module-level): `SIMPLE_PROTOTYPES` (40), `COMPLEX_PROTOTYPES` (3
 - `messages(id PK, conversation_id FK, role, content, model, timestamp, token_count, cost_usd, latency_ms, ttft_ms, custom_field_1, custom_field_2)`
 - `operator_runs(id PK, created_at, query, history JSON, model, status, result, latency_ms, updated_at)`
 - `harness_runs(id PK, created_at, goal, targets JSON, model, max_rounds, final_answer, total_rounds, was_capped, total_latency_ms, error_count, events_jsonl)`
+- `wire_events(id PK, ts, event_type, source, conv_id, run_id, turn_id, tool_id, model, role, content, meta TEXT JSON, misc1, misc2)` — structured tap events from all subsystems; indexes on conv_id, run_id, event_type, ts
 
 **Key methods:**
 - `ensure_conversation(conversation_id, created_at)` — INSERT OR IGNORE
 - `store_message(msg, cost_usd, latency_ms, ttft_ms)` — INSERT OR REPLACE
 - `get_model_performance(days=30)` — P50/90/95/99 latency, TTFT, tokens/sec, total cost per model
 - `export_conversations(output_path)` — JSON export
+- `log_wire_event(event_type, source, content, role, model, conv_id, run_id, turn_id, tool_id, meta, misc1, misc2)` — structured tap write; content truncated to 2k chars; has try/except, never raises
+- `get_wire_events(n, event_type, source, conv_id, run_id, role)` — filtered tap query, newest-first; meta JSON auto-parsed
 - WAL mode (PRAGMA journal_mode=WAL) — concurrent readers during writes
 - Migrations via ALTER TABLE (append-only, safe to re-run; duplicate column errors silently swallowed)
 - Tokens/sec subtracts TTFT from total latency (generation time only)

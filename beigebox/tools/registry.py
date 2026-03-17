@@ -218,7 +218,11 @@ class ToolRegistry:
             return None
 
         start = time.monotonic()
-        result = tool.run(input_text)
+        try:
+            result = tool.run(input_text)
+        except Exception as e:
+            logger.warning("Tool '%s' raised during run: %s", name, e)
+            return f"Error: tool '{name}' failed: {e}"
         elapsed_ms = (time.monotonic() - start) * 1000
 
         # Notify webhook

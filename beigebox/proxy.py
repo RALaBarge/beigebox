@@ -203,16 +203,23 @@ class Proxy:
                 model=model,
                 token_count=tokens,
             )
-            await loop.run_in_executor(None, self.sqlite.store_message, message)
+            try:
+                await loop.run_in_executor(None, self.sqlite.store_message, message)
+            except Exception as e:
+                logger.warning("_log_messages: SQLite store_message failed (conv=%s role=%s): %s",
+                               conversation_id, role, e)
             # Wire tap
-            self.wire.log(
-                direction="inbound",
-                role=role,
-                content=message.content,
-                model=model,
-                conversation_id=conversation_id,
-                token_count=tokens,
-            )
+            try:
+                self.wire.log(
+                    direction="inbound",
+                    role=role,
+                    content=message.content,
+                    model=model,
+                    conversation_id=conversation_id,
+                    token_count=tokens,
+                )
+            except Exception as e:
+                logger.debug("_log_messages: wire.log failed: %s", e)
             # Embed async in background — avoids blocking the event loop
             _t = asyncio.create_task(self.vector.store_message_async(
                 message_id=message.id,
@@ -239,20 +246,27 @@ class Proxy:
             model=model,
             token_count=tokens,
         )
-        await loop.run_in_executor(
-            None,
-            lambda: self.sqlite.store_message(message, cost_usd=cost_usd, latency_ms=latency_ms, ttft_ms=ttft_ms),
-        )
+        try:
+            await loop.run_in_executor(
+                None,
+                lambda: self.sqlite.store_message(message, cost_usd=cost_usd, latency_ms=latency_ms, ttft_ms=ttft_ms),
+            )
+        except Exception as e:
+            logger.warning("_log_response: SQLite store_message failed (conv=%s model=%s): %s",
+                           conversation_id, model, e)
         # Wire tap
         cost_info = f" cost=${cost_usd:.6f}" if cost_usd else ""
-        self.wire.log(
-            direction="outbound",
-            role="assistant",
-            content=content,
-            model=model,
-            conversation_id=conversation_id,
-            token_count=tokens,
-        )
+        try:
+            self.wire.log(
+                direction="outbound",
+                role="assistant",
+                content=content,
+                model=model,
+                conversation_id=conversation_id,
+                token_count=tokens,
+            )
+        except Exception as e:
+            logger.debug("_log_response: wire.log failed: %s", e)
         if cost_usd:
             self.wire.log(
                 direction="internal",
@@ -928,9 +942,12 @@ class Proxy:
             _user_msg = self._get_latest_user_message(body)
             _rule_tool_results = []
             for _tool_name in _rule_tools:
-                _result = self.tool_registry.run_tool(_tool_name, _user_msg)
-                if _result:
-                    _rule_tool_results.append(f"[{_tool_name}]: {_result}")
+                try:
+                    _result = self.tool_registry.run_tool(_tool_name, _user_msg)
+                    if _result:
+                        _rule_tool_results.append(f"[{_tool_name}]: {_result}")
+                except Exception as _te:
+                    logger.warning("Routing rule tool '%s' failed: %s", _tool_name, _te)
             if _rule_tool_results:
                 body = self._inject_tool_context(body, "\n".join(_rule_tool_results))
 

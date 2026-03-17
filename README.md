@@ -20,7 +20,7 @@ flowchart LR
   BB --> DB
 ```
 
-**Current version: 1.3.3.1**
+**Current version: 1.3.4**
 
 ---
 
@@ -108,7 +108,7 @@ Three complementary cache layers, all in-process:
 
 ### Observability
 
-- **Wiretap** — structured JSONL log of every request, response, routing decision, tool call, WASM transform, timing breakdown, and all passthrough routes; operator tool calls and council member responses are also logged (operator and council call Ollama directly — wiretap coverage is added at the endpoint level in `main.py`); filterable by role (`user`, `assistant`, `system`, `decision`, `tool`, `proxy`, `wasm`) and direction in the Tap tab; click any `conv:` ID to highlight all entries from that conversation
+- **Wiretap** — structured JSONL + SQLite dual-write log of every request, response, routing decision, tool call, operator loop step, and harness orchestration event; event types: `message`, `session_hit`, `routing_decision`, `classify_result`, `decision_result`, `cache_hit`, `op_start/thought/tool_call/tool_result/answer/error`, `harness_start/plan/dispatch/turn/evaluate/inject/end/error`; filterable by source (proxy/router/classifier/cache/operator/harness), event_type, role, run_id, and direction; clickable `conv:` and `run:` chips cross-link related entries; group-by-run accordion collapses a full operator or harness trace under one header; expandable meta field shows structured per-event data
 - **Payload logger** — full-fidelity JSONL dump of every raw LLM payload (complete messages array, model params, options) and response captured at every call site: proxy non-streaming, proxy streaming, and operator; hot-toggled via `runtime_config.yaml` (`payload_log_enabled: true`) — no restart needed; output written to `data/payload.jsonl`; sources tagged as `proxy`, `proxy_response`, `proxy_stream`, `proxy_stream_response`, `operator`, `operator_response`
 - **TTFT tracking** — time to first token captured on every streaming response, stored in SQLite
 - **Latency percentiles** — P50/P90/P95/P99 per model surfaced in the Dashboard performance table and latency chart
@@ -197,7 +197,7 @@ BeigeBox includes a built-in single-file web interface at `http://localhost:1337
 | **Dashboard** | Storage stats, model performance charts (P50/P90/P99, TTFT), cost breakdown, backend health with rolling P95 |
 | **Chat** | Multi-pane streaming chat — fan out to N models simultaneously, per-pane settings |
 | **Conversations** | Semantic search, replay, fork, export |
-| **Tap** | Live wiretap stream with role/direction filters; click any conv ID to highlight that conversation across all visible entries |
+| **Tap** | Live wiretap stream with source/event_type/run_id/role filters; clickable chips for conv and run cross-linking; group-by-run accordion; expandable meta panel; all operator and harness events written to SQLite |
 | **Operator** | Interactive agent with tool execution |
 | **Harness** | Parallel model comparison + orchestrated goal-driven mode + ensemble voting + group chat |
 | **Config** | Full config editor with collapsible sections, hot-reload — every setting, feature flag, and generation parameter |
