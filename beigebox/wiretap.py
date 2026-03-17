@@ -86,6 +86,13 @@ class WireLog:
         tool_name: str = "",
         latency_ms: float | None = None,
         timing: dict | None = None,
+        # Structured fields for SQLite — do not affect JSONL output
+        event_type: str = "message",
+        source: str = "proxy",
+        run_id: str | None = None,
+        turn_id: str | None = None,
+        tool_id: str | None = None,
+        meta: dict | None = None,
     ):
         """Write a wire log entry.
 
@@ -121,21 +128,26 @@ class WireLog:
 
         # Dual-write to SQLite for web UI cross-linking
         if self._db is not None:
-            meta: dict = {}
+            _meta: dict = meta.copy() if meta else {}
             if latency_ms is not None:
-                meta["latency_ms"] = round(latency_ms, 1)
+                _meta["latency_ms"] = round(latency_ms, 1)
             if timing:
-                meta["timing"] = {k: round(v, 1) for k, v in timing.items()}
+                _meta["timing"] = {k: round(v, 1) for k, v in timing.items()}
             if token_count:
-                meta["tokens"] = token_count
+                _meta["tokens"] = token_count
+            if tool_name:
+                _meta["tool_name"] = tool_name
             self._db.log_wire_event(
-                event_type="message",
-                source="proxy",
+                event_type=event_type,
+                source=source,
                 content=entry.get("content", ""),
                 role=role,
                 model=model,
                 conv_id=conversation_id or None,
-                meta=meta if meta else None,
+                run_id=run_id,
+                turn_id=turn_id,
+                tool_id=tool_id,
+                meta=_meta if _meta else None,
             )
 
     def close(self):

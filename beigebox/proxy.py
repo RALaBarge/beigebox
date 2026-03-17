@@ -310,6 +310,16 @@ class Proxy:
                         f"rag={decision.needs_rag} tools={decision.tools} — {decision.reasoning}",
                 model=self.decision_agent.model,
                 conversation_id="",
+                event_type="decision_result",
+                source="classifier",
+                meta={
+                    "tier": "decision_llm",
+                    "model_chosen": decision.model,
+                    "needs_search": decision.needs_search,
+                    "needs_rag": decision.needs_rag,
+                    "tools": decision.tools or [],
+                    "reasoning": decision.reasoning,
+                },
             )
         return decision
 
@@ -426,6 +436,9 @@ class Proxy:
                         content=f"session cache hit: model={cached_model}",
                         model="session-cache",
                         conversation_id=conversation_id,
+                        event_type="session_hit",
+                        source="proxy",
+                        meta={"model": cached_model},
                     )
                     return body, None
                 elif requested_model != cached_model:
@@ -457,18 +470,28 @@ class Proxy:
             )
             if matched_rules:
                 rule_tag = body.pop(BB_RULE_TAG, None)
+                _forced_backend = body.get(BB_FORCE_BACKEND, "")
                 self.wire.log(
                     direction="internal",
                     role="decision",
                     content=(
                         f"routing_rules: matched {matched_rules} → "
                         f"model={body.get('model', self.default_model)}"
-                        + (f" backend={body.get(BB_FORCE_BACKEND, '')}" if BB_FORCE_BACKEND in body else "")
+                        + (f" backend={_forced_backend}" if _forced_backend else "")
                         + (f" tag={rule_tag}" if rule_tag else "")
                         + (" [pass_through]" if pass_through else "")
                     ),
                     model="routing-rules",
                     conversation_id=conversation_id,
+                    event_type="routing_decision",
+                    source="router",
+                    meta={
+                        "tier": "rules",
+                        "matched_rules": matched_rules,
+                        "model_chosen": body.get("model", self.default_model),
+                        "forced_backend": _forced_backend or None,
+                        "pass_through": pass_through,
+                    },
                 )
                 if rule_tag:
                     body[BB_RULE_TAG] = rule_tag  # restore for wiretap downstream
@@ -490,7 +513,10 @@ class Proxy:
                     role="decision",
                     content=f"agentic_scorer: score={agentic.score:.2f} matched={agentic.matched}",
                     model="agentic-scorer",
-                    conversation_id="",
+                    conversation_id=conversation_id,
+                    event_type="classify_result",
+                    source="classifier",
+                    meta={"tier": "agentic", "score": round(agentic.score, 4), "matched": agentic.matched},
                 )
 
         # 2. Try embedding classifier first (fast path) — skipped when force_decision
@@ -509,7 +535,16 @@ class Proxy:
                             f"confidence={emb_result.confidence:.4f} "
                             f"borderline={emb_result.borderline} ({emb_result.latency_ms}ms)",
                     model="embedding-classifier",
-                    conversation_id="",
+                    conversation_id=conversation_id,
+                    event_type="classify_result",
+                    source="classifier",
+                    meta={
+                        "tier": emb_result.tier,
+                        "confidence": round(emb_result.confidence, 4),
+                        "borderline": emb_result.borderline,
+                        "model_chosen": emb_result.model or None,
+                        "latency_ms": emb_result.latency_ms,
+                    },
                 )
                 if not emb_result.borderline:
                     # Clear classification — use it, skip decision LLM
@@ -1182,6 +1217,9 @@ class Proxy:
                     direction="internal", role="system",
                     content=f"semantic cache hit — serving cached response (model={cached_model})",
                     model=cached_model, conversation_id=conversation_id,
+                    event_type="cache_hit",
+                    source="cache",
+                    meta={"model": cached_model, "chars": len(cached_text)},
                 )
                 chunk = json.dumps({
                     "choices": [{"delta": {"content": cached_text}, "finish_reason": "stop", "index": 0}],
