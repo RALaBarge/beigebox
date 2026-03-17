@@ -26,6 +26,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from typing import AsyncGenerator
 from uuid import uuid4
 
@@ -68,6 +69,7 @@ class HarnessOrchestrator:
         task_stagger_seconds: float = 0.4,
         backend_router=None,
         injection_queue: asyncio.Queue | None = None,
+        sqlite_store=None,
     ):
         cfg = get_config()
         rt = get_runtime_config()
@@ -110,6 +112,36 @@ class HarnessOrchestrator:
         self.run_id: str | None = None
         self.run_start_time: float | None = None
 
+        # Tap / wire observability
+        self._wire_db = sqlite_store
+
+    # ── Wire tap ──────────────────────────────────────────────────────────────
+
+    def _wire(
+        self,
+        event_type: str,
+        run_id: str,
+        content: str = "",
+        turn_id: str | None = None,
+        meta: dict | None = None,
+    ) -> None:
+        """Fire-and-forget structured tap event. Never raises."""
+        if self._wire_db is None:
+            return
+        try:
+            self._wire_db.log_wire_event(
+                event_type=event_type,
+                source="harness",
+                content=content,
+                role="harness",
+                model=self.model or "",
+                run_id=run_id,
+                turn_id=turn_id,
+                meta=meta,
+            )
+        except Exception as e:
+            logger.debug("_wire event failed (%s): %s", event_type, e)
+
     # ── Public entry point ────────────────────────────────────────────────────
 
     async def run(self, goal: str) -> AsyncGenerator[dict, None]:
@@ -127,19 +159,25 @@ class HarnessOrchestrator:
         # Initialize run tracking
         self.run_id = uuid4().hex[:16]
         self.run_start_time = time.time()
-        
+        _run_id = self.run_id
+
         # history accumulates every task result across all rounds. The planner
         # and evaluator receive the full history so they can build on prior work
         # rather than re-discovering the same facts each round.
         history: list[dict] = []
         round_num = 0
 
-        yield _ev("start", run_id=self.run_id, goal=goal, model=self.model, targets=self.available_targets)
+        self._wire("harness_start", _run_id, content=goal,
+                   meta={"model": self.model, "targets": self.available_targets})
+
+        yield _ev("start", run_id=_run_id, goal=goal, model=self.model, targets=self.available_targets)
 
         injections: list[str] = []
 
-        while round_num < self.max_rounds:
+        try:
+          while round_num < self.max_rounds:
             round_num += 1
+            _turn_id = f"{_run_id}:r{round_num}"
 
             # Drain any user-injected steering messages before planning
             if self.injection_queue:
@@ -147,6 +185,8 @@ class HarnessOrchestrator:
                     try:
                         msg = self.injection_queue.get_nowait()
                         injections.append(msg)
+                        self._wire("harness_inject", _run_id, content=msg,
+                                   turn_id=_turn_id, meta={"round": round_num})
                         yield _ev("injected", message=msg, round=round_num)
                     except asyncio.QueueEmpty:
                         break
@@ -156,13 +196,18 @@ class HarnessOrchestrator:
                 plan_result = await self._plan(goal, history, round_num, injections=injections)
                 injections.clear()
             except Exception as e:
+                self._wire("harness_error", _run_id, content=str(e),
+                           turn_id=_turn_id, meta={"phase": "plan", "round": round_num})
                 yield _ev("error", message=f"Planning failed: {e}")
                 return
 
             action = plan_result.get("action", "dispatch")
 
             if action == "finish":
-                yield _ev("finish", answer=plan_result.get("answer", ""), rounds=round_num - 1)
+                answer = plan_result.get("answer", "")
+                self._wire("harness_end", _run_id, content=answer,
+                           meta={"rounds": round_num - 1, "capped": False, "via": "plan_finish"})
+                yield _ev("finish", answer=answer, rounds=round_num - 1)
                 return
 
             tasks = plan_result.get("tasks", [])
@@ -174,17 +219,32 @@ class HarnessOrchestrator:
             for i, t in enumerate(tasks):
                 t.setdefault("task_id", f"r{round_num}-t{i}")
 
+            self._wire("harness_plan", _run_id, content=reasoning,
+                       turn_id=_turn_id,
+                       meta={"round": round_num, "task_count": len(tasks),
+                             "tasks": [{"target": t.get("target"), "task_id": t.get("task_id")} for t in tasks]})
             yield _ev("plan", round=round_num, reasoning=reasoning, tasks=tasks)
 
             if not tasks:
+                self._wire("harness_end", _run_id, content="No tasks generated.",
+                           meta={"rounds": round_num, "capped": False, "via": "empty_plan"})
                 yield _ev("finish", answer="No tasks generated — goal may be too vague.", rounds=round_num)
                 return
 
             # ── 2. Dispatch ───────────────────────────────────────────────────
+            self._wire("harness_dispatch", _run_id,
+                       turn_id=_turn_id,
+                       meta={"round": round_num, "task_count": len(tasks)})
             yield _ev("dispatch", round=round_num, task_count=len(tasks))
 
             results = []
             async for r in self._dispatch(tasks):
+                self._wire("harness_turn", _run_id,
+                           content=r.get("content", "")[:500],
+                           turn_id=f"{_turn_id}:{r.get('task_id', '')}",
+                           meta={"round": round_num, "target": r.get("target"),
+                                 "status": r.get("status"), "latency_ms": r.get("latency_ms"),
+                                 "attempts": r.get("attempts", 1)})
                 yield _ev("result", round=round_num, **r)
                 history.append({"round": round_num, **r})
                 results.append(r)
@@ -193,24 +253,39 @@ class HarnessOrchestrator:
             try:
                 eval_result = await self._evaluate(goal, history, round_num)
             except Exception as e:
+                self._wire("harness_error", _run_id, content=str(e),
+                           turn_id=_turn_id, meta={"phase": "evaluate", "round": round_num})
                 yield _ev("error", message=f"Evaluation failed: {e}")
                 return
 
             eval_action = eval_result.get("action", "continue")
             assessment = eval_result.get("assessment", "")
 
+            self._wire("harness_evaluate", _run_id, content=assessment,
+                       turn_id=_turn_id,
+                       meta={"round": round_num, "action": eval_action})
             yield _ev("evaluate", round=round_num, assessment=assessment,
                       action=eval_action)
 
             if eval_action == "finish":
-                yield _ev("finish", answer=eval_result.get("answer", ""), rounds=round_num)
+                answer = eval_result.get("answer", "")
+                self._wire("harness_end", _run_id, content=answer,
+                           meta={"rounds": round_num, "capped": False, "via": "evaluate_finish"})
+                yield _ev("finish", answer=answer, rounds=round_num)
                 return
+
+        except Exception as e:
+            self._wire("harness_error", _run_id, content=str(e),
+                       meta={"phase": "run_loop", "round": round_num})
+            raise
 
         # Hit round cap — synthesize best-effort answer
         try:
             final = await self._synthesize(goal, history)
         except Exception:
             final = "Round limit reached. See intermediate results above."
+        self._wire("harness_end", _run_id, content=final[:500],
+                   meta={"rounds": round_num, "capped": True})
         yield _ev("finish", answer=final, rounds=round_num, capped=True)
 
     # ── LLM calls ─────────────────────────────────────────────────────────────
@@ -530,7 +605,6 @@ class HarnessOrchestrator:
             )
         return "\n\n".join(parts)
 
-    @staticmethod
     @staticmethod
     def _parse_json(raw: str, fallback: dict) -> dict:
         """

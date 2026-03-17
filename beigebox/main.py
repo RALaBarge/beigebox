@@ -1671,6 +1671,7 @@ async def api_harness_orchestrate(request: Request):
         task_stagger_seconds=task_stagger,
         backend_router=backend_router,
         injection_queue=inj_queue,
+        sqlite_store=sqlite_store,
     )
 
     async def _event_stream():
@@ -2631,6 +2632,16 @@ async def api_operator_notes_set(request: Request):
 # Operator Run Retrieval & History
 # ---------------------------------------------------------------------------
 
+@app.get("/api/v1/operator/runs")
+async def api_operator_list_runs():
+    """List recent operator runs."""
+    if not sqlite_store:
+        return JSONResponse({"error": "storage not available"}, status_code=503)
+
+    runs = sqlite_store.list_operator_runs(limit=50)
+    return JSONResponse({"runs": runs})
+
+
 @app.get("/api/v1/operator/{run_id}")
 async def api_operator_get_run(run_id: str):
     """Retrieve a completed operator run by ID."""
@@ -2642,16 +2653,6 @@ async def api_operator_get_run(run_id: str):
         return JSONResponse({"error": f"Run '{run_id}' not found"}, status_code=404)
 
     return JSONResponse(run)
-
-
-@app.get("/api/v1/operator/runs")
-async def api_operator_list_runs():
-    """List recent operator runs."""
-    if not sqlite_store:
-        return JSONResponse({"error": "storage not available"}, status_code=503)
-
-    runs = sqlite_store.list_operator_runs(limit=50)
-    return JSONResponse({"runs": runs})
 
 
 # ---------------------------------------------------------------------------

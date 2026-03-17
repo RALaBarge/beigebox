@@ -1396,29 +1396,72 @@
 
   <!-- 4. Tap -->
   <div class="panel" id="panel-tap">
-    <div class="toolbar">
+    <div class="toolbar" style="flex-wrap:wrap;gap:4px">
       <button onclick="loadTap()">↺ Refresh</button>
-      <span class="toolbar-label" style="margin-left:8px">Role:</span>
-      <select id="tap-role" onchange="loadTap()" style="width:110px">
+      <span class="toolbar-label" style="margin-left:4px">Source:</span>
+      <select id="tap-source" onchange="loadTap()" style="width:100px">
+        <option value="">all</option>
+        <option value="proxy">proxy</option>
+        <option value="router">router</option>
+        <option value="classifier">classifier</option>
+        <option value="cache">cache</option>
+        <option value="operator">operator</option>
+        <option value="harness">harness</option>
+      </select>
+      <span class="toolbar-label" style="margin-left:4px">Event:</span>
+      <select id="tap-event" onchange="loadTap()" style="width:150px">
+        <option value="">all</option>
+        <optgroup label="proxy">
+          <option value="message">message</option>
+          <option value="cache_hit">cache_hit</option>
+        </optgroup>
+        <optgroup label="routing">
+          <option value="session_hit">session_hit</option>
+          <option value="routing_decision">routing_decision</option>
+          <option value="classify_result">classify_result</option>
+          <option value="decision_result">decision_result</option>
+        </optgroup>
+        <optgroup label="operator">
+          <option value="op_start">op_start</option>
+          <option value="op_thought">op_thought</option>
+          <option value="op_tool_call">op_tool_call</option>
+          <option value="op_tool_result">op_tool_result</option>
+          <option value="op_loop_nudge">op_loop_nudge</option>
+          <option value="op_answer">op_answer</option>
+          <option value="op_error">op_error</option>
+        </optgroup>
+        <optgroup label="harness">
+          <option value="harness_start">harness_start</option>
+          <option value="harness_plan">harness_plan</option>
+          <option value="harness_dispatch">harness_dispatch</option>
+          <option value="harness_turn">harness_turn</option>
+          <option value="harness_evaluate">harness_evaluate</option>
+          <option value="harness_inject">harness_inject</option>
+          <option value="harness_end">harness_end</option>
+          <option value="harness_error">harness_error</option>
+        </optgroup>
+      </select>
+      <span class="toolbar-label" style="margin-left:4px">Role:</span>
+      <select id="tap-role" onchange="loadTap()" style="width:95px">
         <option value="">all</option>
         <option value="user">user</option>
         <option value="assistant">assistant</option>
         <option value="system">system</option>
         <option value="decision">decision</option>
         <option value="tool">tool</option>
+        <option value="harness">harness</option>
+        <option value="operator">operator</option>
         <option value="proxy">proxy</option>
         <option value="wasm">wasm</option>
       </select>
-      <span class="toolbar-label" style="margin-left:8px">Direction:</span>
-      <select id="tap-dir" onchange="loadTap()" style="width:110px">
-        <option value="">all</option>
-        <option value="inbound">inbound</option>
-        <option value="outbound">outbound</option>
-        <option value="internal">internal</option>
-      </select>
-      <span class="toolbar-label" style="margin-left:8px">Lines:</span>
-      <input id="tap-n" type="number" value="50" min="10" max="500" style="width:60px" onchange="loadTap()">
-      <label style="margin-left:8px;color:var(--fg-dim);font-size:11px;cursor:pointer">
+      <span class="toolbar-label" style="margin-left:4px">Run:</span>
+      <input id="tap-run" type="text" placeholder="run_id…" style="width:110px;font-family:monospace;font-size:11px" oninput="_debounceTapLoad()">
+      <span class="toolbar-label" style="margin-left:4px">Lines:</span>
+      <input id="tap-n" type="number" value="50" min="10" max="500" style="width:55px" onchange="loadTap()">
+      <label style="margin-left:4px;color:var(--fg-dim);font-size:11px;cursor:pointer">
+        <input type="checkbox" id="tap-group-run" onchange="loadTap()"> group
+      </label>
+      <label style="margin-left:4px;color:var(--fg-dim);font-size:11px;cursor:pointer">
         <input type="checkbox" id="tap-live" onchange="toggleTapLive()"> live
       </label>
       <span class="toolbar-spacer"></span>
@@ -3076,7 +3119,7 @@ function renderPaneSettingsDrawer(pane) {
         <option value="You are a Socratic assistant. Instead of giving answers directly, ask clarifying questions to help the user think through the problem themselves. Only provide a direct answer when explicitly asked.">🤔 Socratic</option>
         <option value="You are a critical analyst. For every claim or proposal, identify the strongest counterarguments and failure modes before endorsing anything. Default to skepticism.">🔍 Devil's advocate</option>
         <option value="You are a research assistant. Always cite your reasoning. When uncertain, say so explicitly with a confidence level (high/medium/low). Prefer precision over confidence.">📚 Research / cite uncertainty</option>
-        <option value="You are a code assistant. Respond only with code unless asked to explain. No prose wrapping. Use comments sparingly for non-obvious logic only.">💻 Code-only</option>
+        <option value="You are a code assistant. Respond only with code unless asked to explain. No prose wrapping. Use comments sparingly for non-obvious logic only.\n\nDo not consider a task complete until you have handled at least the obvious failure cases: network errors, empty/null inputs, missing permissions, and unexpected response shapes. A happy path with no error handling is an incomplete deliverable.">💻 Code-only</option>
       </select>
     </div>
     <textarea id="pane-sysprompt-${pane.id}" placeholder="e.g. You are a concise coding assistant…"
@@ -3308,6 +3351,7 @@ async function sendToPane(pane, text, forceOp) {
     `<div class="typing-indicator" id="${typingId}"><span></span><span></span><span></span></div>`);
   _scrollNearBottom(area);
 
+  let _loadHintId = null;
   try {
     if (isOp) {
       // Route to operator — pass pane history so operator has conversation context
@@ -3347,7 +3391,6 @@ async function sendToPane(pane, text, forceOp) {
 
       // Show a one-time load hint on first use of this model
       const _modelKey = model || '__default__';
-      let _loadHintId = null;
       if (!_seenModels.has(_modelKey)) {
         _loadHintId = `load-hint-${pane.id}-${Date.now()}`;
         area.insertAdjacentHTML('beforeend',
@@ -3480,7 +3523,7 @@ async function sendToPane(pane, text, forceOp) {
   } catch(e) {
     delete pane._streaming;
     document.getElementById(typingId)?.remove();
-    if (typeof _loadHintId !== 'undefined' && _loadHintId) document.getElementById(_loadHintId)?.remove();
+    if (_loadHintId) document.getElementById(_loadHintId)?.remove();
     appendMsgToPane(pane.id, 'assistant', `Error: ${e.message}`, 'error', area);
   }
 }
@@ -3799,14 +3842,37 @@ async function forkConversation(convId, branchAt) {
 
 let _tapLiveTimer = null;
 let _tapSelectedConv = null;
+let _tapSelectedRun  = null;
+let _tapDebounceTimer = null;
+
+function _debounceTapLoad() {
+  clearTimeout(_tapDebounceTimer);
+  _tapDebounceTimer = setTimeout(loadTap, 350);
+}
 
 function tapHighlightConv(conv) {
   _tapSelectedConv = (_tapSelectedConv === conv) ? null : conv;
-  // Re-apply highlight in place without a full reload (fast path for live mode)
+  _tapSelectedRun  = null;
+  _reapplyTapHighlights();
+}
+
+function tapHighlightRun(runId) {
+  _tapSelectedRun  = (_tapSelectedRun === runId) ? null : runId;
+  _tapSelectedConv = null;
+  // also fill the run filter input for convenience
+  const inp = document.getElementById('tap-run');
+  if (inp) inp.value = _tapSelectedRun || '';
+  _reapplyTapHighlights();
+  if (_tapSelectedRun) loadTap();
+}
+
+function _reapplyTapHighlights() {
   document.querySelectorAll('#tap-body [data-conv]').forEach(el => {
-    const match = el.dataset.conv === conv;
-    el.style.background  = (match && _tapSelectedConv) ? 'rgba(137,180,250,0.22)' : '';
-    el.style.borderColor = (match && _tapSelectedConv) ? 'rgba(137,180,250,0.60)' : '';
+    const convMatch = _tapSelectedConv && el.dataset.conv === _tapSelectedConv;
+    const runMatch  = _tapSelectedRun  && el.dataset.run  === _tapSelectedRun;
+    const hit = convMatch || runMatch;
+    el.style.background  = hit ? 'rgba(137,180,250,0.22)' : '';
+    el.style.borderColor = hit ? 'rgba(137,180,250,0.60)' : '';
   });
 }
 
@@ -3817,63 +3883,132 @@ const TAP_ROLE_COLOR = {
   decision:  'var(--lavender)',
   tool:      'var(--green)',
   proxy:     'var(--fg-dim)',
+  harness:   'var(--peach)',
+  operator:  'var(--teal)',
   wasm:      'var(--peach)',
   error:     'var(--red)',
 };
 const TAP_DIR_ARROW = { inbound: '──▶', outbound: '◀──', internal: '─●─' };
-const TAP_ROLE_ICON = { user:'▶', assistant:'◀', system:'●', decision:'⚖', tool:'⚡', proxy:'⇄', wasm:'⬡', error:'✗' };
+const TAP_ROLE_ICON = { user:'▶', assistant:'◀', system:'●', decision:'⚖', tool:'⚡', proxy:'⇄', wasm:'⬡', harness:'⬡', operator:'⊛', error:'✗' };
+
+// Source chip colors
+const TAP_SOURCE_COLOR = {
+  proxy:      'var(--fg-dim)',
+  router:     'var(--blue)',
+  classifier: 'var(--mauve)',
+  cache:      'var(--green)',
+  operator:   'var(--teal)',
+  harness:    'var(--peach)',
+};
+
+// Event type chip colors (grouped by category)
+const TAP_EVENT_COLOR = {
+  message:          'var(--fg-dim)',
+  cache_hit:        'var(--green)',
+  session_hit:      'var(--green)',
+  routing_decision: 'var(--blue)',
+  classify_result:  'var(--mauve)',
+  decision_result:  'var(--lavender)',
+  op_start:         'var(--teal)',
+  op_thought:       'var(--teal)',
+  op_tool_call:     'var(--green)',
+  op_tool_result:   'var(--yellow)',
+  op_loop_nudge:    'var(--peach)',
+  op_answer:        'var(--cyan)',
+  op_error:         'var(--red)',
+  harness_start:    'var(--peach)',
+  harness_plan:     'var(--peach)',
+  harness_dispatch: 'var(--peach)',
+  harness_turn:     'var(--yellow)',
+  harness_evaluate: 'var(--lavender)',
+  harness_inject:   'var(--blue)',
+  harness_end:      'var(--cyan)',
+  harness_error:    'var(--red)',
+};
 
 const TIMING_COLORS = { fast: '#a5d6a7', medium: '#fff176', slow: '#ffcc80', crit: '#ef9a9a' };
 
 function _renderTapEntry(e) {
-  const ts    = e.ts ? new Date(e.ts).toLocaleTimeString() : '?';
-  const role  = e.role || '?';
-  const dir   = e.dir  || '?';
-  const model = e.model || '';
-  const conv  = e.conv  || '';
+  const ts      = e.ts ? new Date(e.ts).toLocaleTimeString() : '?';
+  const role    = e.role  || '?';
+  const dir     = e.dir   || '';
+  const model   = e.model || '';
+  const conv    = e.conv  || (e.conv_id ? e.conv_id.slice(0, 16) : '');
+  const runId   = e.run_id  || '';
+  const source  = e.source  || '';
+  const evType  = e.event_type || '';
   const content = e.content || '';
-  const len   = e.len  || 0;
+  const len     = e.len || (content ? content.length : 0);
+  const meta    = e.meta || null;
 
-  const color = TAP_ROLE_COLOR[role] || 'var(--fg)';
-  const arrow = TAP_DIR_ARROW[dir]   || '───';
-  const icon  = TAP_ROLE_ICON[role]  || '?';
+  const color = TAP_ROLE_COLOR[role]   || 'var(--fg)';
+  const arrow = TAP_DIR_ARROW[dir]     || '   ';
+  const icon  = TAP_ROLE_ICON[role]    || '?';
 
-  const modelPart = model ? ` <span style="color:var(--lavender)">[${esc(model)}]</span>` : '';
-  const isHighlighted = conv && _tapSelectedConv === conv;
-  const convPart  = conv
-    ? ` <span style="color:${isHighlighted ? 'var(--blue)' : 'var(--fg-muted)'};cursor:pointer;text-decoration:underline dotted"
-          onclick="tapHighlightConv('${esc(conv)}')"
-          title="${isHighlighted ? 'Click to deselect' : 'Click to highlight this conversation'}">conv:${esc(conv.slice(0,12))}</span>`
+  const modelPart = model
+    ? ` <span style="color:var(--lavender)">[${esc(model)}]</span>`
     : '';
-  const lenPart   = ` <span style="color:var(--fg-muted)">(${len}c)</span>`;
 
-  // Latency badge for entries with timing data
+  // Source chip
+  const srcColor = TAP_SOURCE_COLOR[source] || 'var(--fg-dim)';
+  const sourcePart = source
+    ? ` <span style="color:${srcColor};font-size:10px;opacity:0.8;font-family:monospace">${esc(source)}</span>`
+    : '';
+
+  // Event type chip — clickable to filter
+  const evColor = TAP_EVENT_COLOR[evType] || 'var(--fg-dim)';
+  const evPart = evType
+    ? ` <span style="color:${evColor};cursor:pointer;font-size:10px;font-family:monospace;border:1px solid ${evColor};border-radius:2px;padding:0 3px"
+            onclick="document.getElementById('tap-event').value='${esc(evType)}';loadTap()"
+            title="Filter by event_type: ${esc(evType)}">${esc(evType)}</span>`
+    : '';
+
+  // conv_id chip — clickable to highlight
+  const isConvHighlighted = conv && _tapSelectedConv === conv;
+  const convPart = conv
+    ? ` <span style="color:${isConvHighlighted ? 'var(--blue)' : 'var(--fg-muted)'};cursor:pointer;font-size:10px;text-decoration:underline dotted"
+            onclick="tapHighlightConv('${esc(conv)}')"
+            title="${isConvHighlighted ? 'Click to deselect' : 'Highlight conversation'}">conv:${esc(conv.slice(0,10))}</span>`
+    : '';
+
+  // run_id chip — clickable to filter
+  const isRunHighlighted = runId && _tapSelectedRun === runId;
+  const runPart = runId
+    ? ` <span style="color:${isRunHighlighted ? 'var(--peach)' : 'var(--fg-muted)'};cursor:pointer;font-size:10px;text-decoration:underline dotted"
+            onclick="tapHighlightRun('${esc(runId)}')"
+            title="${isRunHighlighted ? 'Click to deselect' : 'Filter by run'}">run:${esc(runId.slice(0,10))}</span>`
+    : '';
+
+  const lenPart = ` <span style="color:var(--fg-muted)">(${len}c)</span>`;
+
+  // Latency badge
   let latencyBadge = '';
-  if (e.latency_ms != null) {
-    const lc = latencyClass(e.latency_ms);
+  const latMs = e.latency_ms ?? (meta && meta.latency_ms) ?? null;
+  if (latMs != null) {
+    const lc = latencyClass(latMs);
     const lcolor = TIMING_COLORS[lc];
-    latencyBadge = ` <span style="font-family:'VT323',monospace;font-size:14px;color:${lcolor}">${e.latency_ms.toFixed(0)}ms</span>`;
+    latencyBadge = ` <span style="font-family:'VT323',monospace;font-size:14px;color:${lcolor}">${(+latMs).toFixed(0)}ms</span>`;
   }
 
   const preview = content.length > 300 ? content.slice(0, 300) + '…' : content;
   const contentLines = esc(preview).replace(/\n/g, '<br>    ');
 
-  // Timing breakdown bars (expandable)
+  // Timing breakdown bars
   let timingHtml = '';
-  if (e.timing && Object.keys(e.timing).length) {
-    const total = e.latency_ms || 1;
+  const timing = e.timing || (meta && meta.timing);
+  if (timing && Object.keys(timing).length) {
+    const total = latMs || 1;
     const uid = 'tap-timing-' + Math.random().toString(36).slice(2, 8);
     let bars = '';
-    Object.entries(e.timing).forEach(([stage, ms]) => {
+    Object.entries(timing).forEach(([stage, ms]) => {
       const pct = Math.min(100, (ms / total) * 100);
-      const lc = latencyClass(ms);
-      const bcolor = TIMING_COLORS[lc];
+      const bcolor = TIMING_COLORS[latencyClass(ms)];
       bars += `<div style="display:flex;gap:8px;align-items:center;padding:1px 0;font-size:10px">
         <span style="color:var(--fg-muted);min-width:100px">${esc(stage)}</span>
         <div style="flex:1;height:5px;background:var(--bg-border);border-radius:1px;overflow:hidden">
           <div style="width:${pct.toFixed(1)}%;height:100%;background:${bcolor};border-radius:1px"></div>
         </div>
-        <span style="color:var(--fg-dim);min-width:70px;text-align:right">${ms.toFixed(0)}ms (${pct.toFixed(0)}%)</span>
+        <span style="color:var(--fg-dim);min-width:70px;text-align:right">${(+ms).toFixed(0)}ms (${pct.toFixed(0)}%)</span>
       </div>`;
     });
     timingHtml = `<div style="margin-top:3px;padding-left:16px">
@@ -3883,35 +4018,113 @@ function _renderTapEntry(e) {
     </div>`;
   }
 
+  // Meta expand (for op/harness structured fields)
+  let metaHtml = '';
+  if (meta && typeof meta === 'object' && Object.keys(meta).length) {
+    const uid = 'tap-meta-' + Math.random().toString(36).slice(2, 8);
+    // skip timing/latency — already shown above
+    const filtered = Object.fromEntries(
+      Object.entries(meta).filter(([k]) => k !== 'timing' && k !== 'latency_ms')
+    );
+    if (Object.keys(filtered).length) {
+      const rows = Object.entries(filtered).map(([k, v]) =>
+        `<div style="display:flex;gap:8px;font-size:10px;padding:1px 0">
+          <span style="color:var(--fg-muted);min-width:110px">${esc(String(k))}</span>
+          <span style="color:var(--fg-dim);word-break:break-all">${esc(typeof v === 'object' ? JSON.stringify(v) : String(v))}</span>
+        </div>`
+      ).join('');
+      metaHtml = `<div style="margin-top:3px;padding-left:16px">
+        <span onclick="const el=document.getElementById('${uid}');el.style.display=el.style.display==='none'?'block':'none'"
+              style="cursor:pointer;color:var(--fg-muted);font-size:10px;user-select:none">▸ meta (${Object.keys(filtered).length})</span>
+        <div id="${uid}" style="display:none;margin-top:3px">${rows}</div>
+      </div>`;
+    }
+  }
+
+  const isHighlighted = (conv && _tapSelectedConv === conv) || (runId && _tapSelectedRun === runId);
   const rowBg = isHighlighted ? 'background:rgba(137,180,250,0.22);border-color:rgba(137,180,250,0.60);' : '';
-  return `<div data-conv="${esc(conv)}" style="margin-bottom:6px;border-bottom:1px solid var(--bg-border);padding-bottom:5px;${rowBg}">
+
+  return `<div data-conv="${esc(conv)}" data-run="${esc(runId)}" style="margin-bottom:6px;border-bottom:1px solid var(--bg-border);padding-bottom:5px;${rowBg}">
     <span style="color:var(--fg-muted)">${esc(ts)}</span>
-    <span style="color:var(--fg-dim)">${esc(arrow)}</span>
+    ${dir ? `<span style="color:var(--fg-dim)">${esc(arrow)}</span>` : ''}
     <span style="color:${color};font-weight:500">${esc(icon)} ${esc(role.toUpperCase())}</span>
-    ${modelPart}${lenPart}${latencyBadge}${convPart}
+    ${sourcePart}${evPart}${modelPart}${lenPart}${latencyBadge}${convPart}${runPart}
     <div style="margin-top:3px;padding-left:16px;color:var(--fg-dim)">${contentLines}</div>
-    ${timingHtml}
+    ${timingHtml}${metaHtml}
   </div>`;
 }
 
+function _renderTapGrouped(entries) {
+  // Group entries by run_id; ungrouped entries (no run_id) go at the top
+  const groups = new Map();   // run_id → [entries]
+  const ungrouped = [];
+  for (const e of entries) {
+    const r = e.run_id || '';
+    if (!r) { ungrouped.push(e); continue; }
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r).push(e);
+  }
+  let html = '';
+  // Ungrouped first (most recent on top — they are already reversed in caller)
+  if (ungrouped.length) {
+    html += ungrouped.map(_renderTapEntry).join('');
+  }
+  // Each run as a collapsible block
+  for (const [runId, evs] of groups) {
+    const uid = 'tap-run-grp-' + Math.random().toString(36).slice(2, 8);
+    const startEv  = evs.find(e => e.event_type === 'harness_start' || e.event_type === 'op_start');
+    const endEv    = evs.find(e => e.event_type === 'harness_end'   || e.event_type === 'op_answer');
+    const src      = evs[0]?.source || '';
+    const srcColor = TAP_SOURCE_COLOR[src] || 'var(--fg-dim)';
+    const ts0      = evs[0]?.ts ? new Date(evs[0].ts).toLocaleTimeString() : '';
+    const goal     = startEv?.content || '';
+    const answer   = endEv?.content   || '';
+    html += `<div style="margin-bottom:8px;border:1px solid var(--bg-border);border-radius:4px;overflow:hidden">
+      <div onclick="const b=document.getElementById('${uid}');b.style.display=b.style.display==='none'?'block':'none'"
+           style="cursor:pointer;padding:5px 10px;background:var(--bg-elevated);display:flex;gap:8px;align-items:center;user-select:none">
+        <span style="color:${srcColor};font-size:11px;font-weight:500">⬡ ${esc(src)}</span>
+        <span style="color:var(--peach);font-family:monospace;font-size:10px;cursor:pointer"
+              onclick="event.stopPropagation();tapHighlightRun('${esc(runId)}')"
+              title="Filter to this run">run:${esc(runId.slice(0,12))}</span>
+        <span style="color:var(--fg-muted);font-size:10px">${evs.length} events</span>
+        <span style="color:var(--fg-dim);font-size:10px">${esc(ts0)}</span>
+        ${goal ? `<span style="color:var(--fg);font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(goal.slice(0,80))}</span>` : ''}
+      </div>
+      <div id="${uid}" style="padding:6px 10px">
+        ${evs.map(_renderTapEntry).join('')}
+        ${answer ? `<div style="margin-top:4px;padding:4px 8px;background:rgba(137,230,180,0.08);border-left:2px solid var(--cyan);color:var(--fg-dim);font-size:10px">${esc(answer.slice(0,300))}</div>` : ''}
+      </div>
+    </div>`;
+  }
+  return html;
+}
+
 async function loadTap() {
-  const el   = document.getElementById('tap-body');
-  const role = document.getElementById('tap-role').value;
-  const dir  = document.getElementById('tap-dir').value;
-  const n    = parseInt(document.getElementById('tap-n').value) || 50;
+  const el      = document.getElementById('tap-body');
+  const source  = document.getElementById('tap-source').value;
+  const evType  = document.getElementById('tap-event').value;
+  const role    = document.getElementById('tap-role').value;
+  const runId   = (document.getElementById('tap-run').value || '').trim();
+  const n       = parseInt(document.getElementById('tap-n').value) || 50;
+  const grouped = document.getElementById('tap-group-run').checked;
 
   // Persist filters
   try {
-    localStorage.setItem('bb_tap_role', role);
-    localStorage.setItem('bb_tap_dir', dir);
-    localStorage.setItem('bb_tap_n', String(n));
+    localStorage.setItem('bb_tap_source',  source);
+    localStorage.setItem('bb_tap_event',   evType);
+    localStorage.setItem('bb_tap_role',    role);
+    localStorage.setItem('bb_tap_run',     runId);
+    localStorage.setItem('bb_tap_n',       String(n));
+    localStorage.setItem('bb_tap_grouped', grouped ? '1' : '0');
   } catch {}
 
   el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
   try {
     let url = `/api/v1/tap?n=${n}`;
-    if (role) url += `&role=${encodeURIComponent(role)}`;
-    if (dir)  url += `&dir=${encodeURIComponent(dir)}`;
+    if (source) url += `&source=${encodeURIComponent(source)}`;
+    if (evType) url += `&event_type=${encodeURIComponent(evType)}`;
+    if (role)   url += `&role=${encodeURIComponent(role)}`;
+    if (runId)  url += `&run_id=${encodeURIComponent(runId)}`;
     const d = await api(url);
 
     document.getElementById('tap-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
@@ -3921,8 +4134,22 @@ async function loadTap() {
       return;
     }
 
-    const html = d.entries.slice().reverse().map(_renderTapEntry).join('');
-    el.innerHTML = `<div style="color:var(--fg-muted);font-size:10px;padding-bottom:8px">${d.total} total · showing ${d.entries.length}${role ? ' · role=' + esc(role) : ''}${dir ? ' · dir=' + esc(dir) : ''}</div>` + html;
+    // Build active filter summary chips
+    const chips = [];
+    if (source) chips.push(`source=${esc(source)}`);
+    if (evType) chips.push(`event=${esc(evType)}`);
+    if (role)   chips.push(`role=${esc(role)}`);
+    if (runId)  chips.push(`run=${esc(runId)}`);
+
+    const reversed = d.entries.slice().reverse();
+    const body = grouped ? _renderTapGrouped(reversed) : reversed.map(_renderTapEntry).join('');
+
+    el.innerHTML =
+      `<div style="color:var(--fg-muted);font-size:10px;padding-bottom:8px">${d.total} total · showing ${d.entries.length}` +
+      (chips.length ? ' · ' + chips.join(' · ') : '') +
+      `</div>` + body;
+
+    _reapplyTapHighlights();
   } catch(e) {
     el.innerHTML = apiErrorMsg(e, 'Tap', 'log_conversations',
       'The tap streams all messages on the wire. Make sure <code>log_conversations</code> is enabled.');
@@ -6957,13 +7184,18 @@ loadOpHistory();  // Restore operator history from previous sessions
 
 // Restore tap filters from localStorage
 try {
-  const savedRole = localStorage.getItem('bb_tap_role');
-
-  const savedDir  = localStorage.getItem('bb_tap_dir');
-  const savedN    = localStorage.getItem('bb_tap_n');
-  if (savedRole !== null) document.getElementById('tap-role').value = savedRole;
-  if (savedDir  !== null) document.getElementById('tap-dir').value  = savedDir;
-  if (savedN    !== null) document.getElementById('tap-n').value    = savedN;
+  const savedSource  = localStorage.getItem('bb_tap_source');
+  const savedEvent   = localStorage.getItem('bb_tap_event');
+  const savedRole    = localStorage.getItem('bb_tap_role');
+  const savedRun     = localStorage.getItem('bb_tap_run');
+  const savedN       = localStorage.getItem('bb_tap_n');
+  const savedGrouped = localStorage.getItem('bb_tap_grouped');
+  if (savedSource  !== null) document.getElementById('tap-source').value = savedSource;
+  if (savedEvent   !== null) document.getElementById('tap-event').value  = savedEvent;
+  if (savedRole    !== null) document.getElementById('tap-role').value   = savedRole;
+  if (savedRun     !== null) document.getElementById('tap-run').value    = savedRun;
+  if (savedN       !== null) document.getElementById('tap-n').value      = savedN;
+  if (savedGrouped !== null) document.getElementById('tap-group-run').checked = savedGrouped === '1';
 } catch {}
 
 // Initialize multi-pane chat (creates first pane, no history restore needed — per-pane history is in memory only)
