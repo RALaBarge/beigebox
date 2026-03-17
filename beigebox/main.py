@@ -2348,7 +2348,8 @@ async def api_harness_autonomous(request: Request):
                 if turn_n == 0 and _shadow.enabled:
                     _shadow_task = asyncio.ensure_future(_shadow.run_shadow(question, vs))
 
-                op = Operator(vector_store=vs, model_override=model_override, autonomous=True, sqlite_store=sqlite_store)
+                op = Operator(vector_store=vs, model_override=model_override, autonomous=True,
+                              sqlite_store=_st.sqlite_store if _st else None)
                 _op_model = op._model
 
                 if _wire and turn_n == 0:
@@ -2513,7 +2514,8 @@ async def api_operator_stream(request: Request):
             _raw_history = list(history or [])
             initial_history = _raw_history[-8:] if len(_raw_history) > 8 else _raw_history
 
-            op = Operator(vector_store=vs, model_override=model_override, sqlite_store=sqlite_store)
+            op = Operator(vector_store=vs, model_override=model_override,
+                          sqlite_store=_st.sqlite_store if _st else None)
             _op_model = op._model
 
             if _wire:
