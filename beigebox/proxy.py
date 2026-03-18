@@ -102,6 +102,9 @@ class Proxy:
         # {conversation_id: (model_string, timestamp)}
         self._session_cache: dict[str, tuple[str, float]] = {}
         self._session_ttl: int = self.cfg.get("routing", {}).get("session_ttl_seconds", 1800)
+        # Lock serialises all _session_cache reads and writes; prevents
+        # check-then-delete KeyError (H1) and sorted()-then-delete races (H2).
+        self._session_cache_lock = asyncio.Lock()
         # Semantic response cache + tool result cache
         self.semantic_cache = SemanticCache(self.cfg)
         self.tool_cache = ToolResultCache(
@@ -116,37 +119,55 @@ class Proxy:
     # Session cache helpers
     # ------------------------------------------------------------------
 
-    def _get_session_model(self, conversation_id: str) -> str | None:
-        """Return cached model for this conversation if still fresh."""
-        if not conversation_id or conversation_id not in self._session_cache:
-            return None
-        model, ts = self._session_cache[conversation_id]
-        if time.time() - ts > self._session_ttl:
-            del self._session_cache[conversation_id]
-            return None
-        return model
+    async def _get_session_model(self, conversation_id: str) -> str | None:
+        """Return cached model for this conversation if still fresh.
 
-    def _set_session_model(self, conversation_id: str, model: str):
+        Holds _session_cache_lock for the full check-then-possibly-delete
+        sequence so a concurrent coroutine cannot delete the key between the
+        membership test and the value read (H1).
+        """
+        if not conversation_id:
+            return None
+        async with self._session_cache_lock:
+            if conversation_id not in self._session_cache:
+                return None
+            model, ts = self._session_cache[conversation_id]
+            if time.time() - ts > self._session_ttl:
+                del self._session_cache[conversation_id]
+                return None
+            return model
+
+    async def _set_session_model(self, conversation_id: str, model: str):
         """Cache the routing decision for this conversation.
 
         Proactive eviction at every ~100 writes keeps memory bounded without
         paying the TTL sweep cost on every single write. The hard cap (1000 → 800)
         is a safety net for when sessions expire very slowly.
+
+        Holds _session_cache_lock for the entire write + eviction sequence so
+        the sorted()-then-delete hard-cap path cannot race with another coroutine
+        mutating the dict between the snapshot and the deletions (H2).
         """
         if conversation_id and model:
-            self._session_cache[conversation_id] = (model, time.time())
-            # Proactive eviction: sweep stale entries every ~100 writes
-            if len(self._session_cache) % 100 == 0:
-                self._evict_session_cache()
-            # Hard cap: if still over limit after TTL eviction, drop oldest by timestamp
-            if len(self._session_cache) > 1000:
-                oldest = sorted(self._session_cache.items(), key=lambda x: x[1][1])
-                for k, _ in oldest[:len(self._session_cache) - 800]:
-                    del self._session_cache[k]
-                logger.debug("Session cache hard-capped: trimmed to %d entries", len(self._session_cache))
+            async with self._session_cache_lock:
+                self._session_cache[conversation_id] = (model, time.time())
+                # Proactive eviction: sweep stale entries every ~100 writes
+                if len(self._session_cache) % 100 == 0:
+                    self._evict_session_cache_locked()
+                # Hard cap: if still over limit after TTL eviction, drop oldest by timestamp
+                if len(self._session_cache) > 1000:
+                    oldest = sorted(self._session_cache.items(), key=lambda x: x[1][1])
+                    for k, _ in oldest[:len(self._session_cache) - 800]:
+                        del self._session_cache[k]
+                    logger.debug("Session cache hard-capped: trimmed to %d entries", len(self._session_cache))
 
-    def _evict_session_cache(self):
-        """Remove all expired entries from the session cache."""
+    def _evict_session_cache_locked(self):
+        """Remove all expired entries from the session cache.
+
+        Must be called with _session_cache_lock already held — the list
+        comprehension snapshot and subsequent deletes are not atomic and would
+        race if called without the lock (H2).
+        """
         cutoff = time.time() - self._session_ttl
         stale = [k for k, (_, ts) in self._session_cache.items() if ts < cutoff]
         for k in stale:
@@ -453,7 +474,7 @@ class Proxy:
         # the cache so the new selection sticks going forward.
         if not force_decision:
             requested_model = body.get("model", "")
-            cached_model = self._get_session_model(conversation_id)
+            cached_model = await self._get_session_model(conversation_id)
             if cached_model:
                 if not requested_model or requested_model == self.default_model:
                     # No explicit selection — apply sticky routing
@@ -472,7 +493,7 @@ class Proxy:
                     return body, None
                 elif requested_model != cached_model:
                     # User switched models — update cache and let the request through
-                    self._set_session_model(conversation_id, requested_model)
+                    await self._set_session_model(conversation_id, requested_model)
                     _request_route.set("session_cache")
                     self.wire.log(
                         direction="internal",
@@ -529,7 +550,7 @@ class Proxy:
                 if not pass_through:
                     _request_route.set("rules")
                     if not skip_sc:
-                        self._set_session_model(conversation_id, body.get("model", self.default_model))
+                        await self._set_session_model(conversation_id, body.get("model", self.default_model))
                     return body, None
 
         # 1.5. Agentic pre-filter — near-zero cost, runs before embedding classifier
@@ -583,7 +604,7 @@ class Proxy:
                     if emb_result.model:
                         body["model"] = emb_result.model
                     _request_route.set(emb_result.route or emb_result.tier)
-                    self._set_session_model(conversation_id, body.get("model", self.default_model))
+                    await self._set_session_model(conversation_id, body.get("model", self.default_model))
                     return body, None
                 # Borderline — fall through to decision LLM
                 logger.debug(
@@ -601,7 +622,7 @@ class Proxy:
 
         # Cache whatever model we landed on
         final_model = body.get("model", self.default_model)
-        self._set_session_model(conversation_id, final_model)
+        await self._set_session_model(conversation_id, final_model)
 
         return body, decision
 
@@ -1116,6 +1137,10 @@ class Proxy:
             )
 
         # Forward to backend — use router if available, otherwise direct
+        # H3: response is only assigned inside the router branch; initialise to
+        # None here so any future code that references it outside that branch
+        # gets a clear NameError rather than a silent undefined-variable crash.
+        response = None
         cost_usd = None
         backend_name = "direct"
         _t_backend = _time.monotonic()
