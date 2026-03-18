@@ -3518,6 +3518,20 @@ async def catch_all(path: str, request: Request):
     if path.startswith("beigebox/") or path.startswith("api/v1/"):
         return JSONResponse({"error": "not found", "path": path}, status_code=404)
 
+    # Silently reject common browser noise (don't log to wiretap, don't forward to backend)
+    noise_paths = {
+        "favicon.ico",
+        ".well-known/appspecific/com.chrome.devtools.json",
+        ".well-known/webfinger",
+        "robots.txt",
+        "sitemap.xml",
+        ".git/config",
+        ".env",
+        "web.config",
+    }
+    if path in noise_paths or path.startswith(".well-known/") and "chrome" in path.lower():
+        return JSONResponse({"error": "not found"}, status_code=404)
+
     return await _wire_and_forward(request, f"passthrough/{path}")
 
 
