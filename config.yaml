@@ -165,7 +165,7 @@ auto_summarization:
 
 system_context:
   enabled: false
-  path: ./system_context.md
+  path: ./data/system_context.md
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Generation Parameters — Global Inference Overrides

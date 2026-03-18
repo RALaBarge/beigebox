@@ -260,6 +260,34 @@ beigebox dial</code></pre>
       </div>
     </section>
 
+    <!-- ── Deployment Options ────────────────────────────────────────────────── -->
+    <section class="section">
+      <h2>Deploy anywhere</h2>
+      <p class="section-sub">BeigeBox is self-hosted and portable. Choose your platform:</p>
+
+      <div class="grid3">
+        <div class="panel">
+          <h3>🐳 Docker Compose</h3>
+          <p>The simplest path. Includes Ollama, BeigeBox, and all dependencies. <code>.env</code> controls everything — GPU, ports, model pulls.</p>
+          <p style="margin-top:8px; font-size:.9rem; color:var(--muted);">See <code>deploy/docker/</code> for production variant with volume mounts.</p>
+        </div>
+        <div class="panel">
+          <h3>☸ Kubernetes</h3>
+          <p>Deployments, Services, ConfigMaps, PVCs ready to go. Includes resource requests/limits, liveness + readiness probes, and security context.</p>
+          <p style="margin-top:8px; font-size:.9rem; color:var(--muted);">See <code>deploy/k8s/</code> for YAML manifests.</p>
+        </div>
+        <div class="panel">
+          <h3>🖥 Bare Metal</h3>
+          <p>Systemd unit file for Linux servers. Virtual environment support, security hardening, and environment variable overrides included.</p>
+          <p style="margin-top:8px; font-size:.9rem; color:var(--muted);">See <code>deploy/systemd/</code> for unit template.</p>
+        </div>
+      </div>
+
+      <div style="margin-top: 20px; padding: 12px; background: rgba(17,19,26,.4); border-radius: var(--radius); font-size: .9rem; color: var(--muted);">
+        <strong style="color: var(--fg);">Your data, local-first.</strong> All conversations, embeddings, and metrics stay in SQLite + ChromaDB — no cloud dependency, no vendor lock-in. Portable files across machines.
+      </div>
+    </section>
+
     <!-- ── Who is this for ────────────────────────────────────────────────── -->
     <section class="section">
       <h2>Who is this for</h2>
@@ -405,6 +433,18 @@ beigebox dial</code></pre>
         <div class="panel">
           <h3>Voice (optional profile)</h3>
           <p>Whisper (STT) + Kokoro (TTS) via Docker Compose voice profile. Push-to-talk with configurable hotkey. Auto-play TTS after each response. No changes to core proxy required.</p>
+        </div>
+        <div class="panel">
+          <h3>Per-endpoint timeouts</h3>
+          <p>Configure <code>timeout_ms</code> per backend. Ollama on slow hardware? Use 120s. OpenRouter? 60s. Prevents one slow backend from stalling the router. Overrides per-backend, hot-reloadable.</p>
+        </div>
+        <div class="panel">
+          <h3>Response format validation</h3>
+          <p>Optional JSON/XML/YAML schema enforcement. Validates final responses before caching. Non-blocking — validation failures logged but responses still forwarded. Helps catch malformed outputs early.</p>
+        </div>
+        <div class="panel">
+          <h3>Browser automation (CDP)</h3>
+          <p>Operator agent can control Chrome via DevTools Protocol. Navigate pages, take screenshots, click elements, read DOM, type text. Full I/O captured for cross-task context. Phase 1 live, more coming.</p>
         </div>
       </div>
     </section>

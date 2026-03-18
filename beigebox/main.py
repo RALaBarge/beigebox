@@ -1617,7 +1617,7 @@ async def api_tap(
     from pathlib import Path as _P
 
     n = min(max(1, n), 500)
-    st = sqlite_store
+    st = get_state().sqlite_store
 
     # Primary path: query SQLite wire_events table
     if st is not None:
@@ -1750,7 +1750,7 @@ async def api_harness_orchestrate(request: Request):
         task_stagger_seconds=task_stagger,
         backend_router=_st.backend_router,
         injection_queue=inj_queue,
-        sqlite_store=sqlite_store,
+        sqlite_store=_st.sqlite_store,
         wire_log=_st.proxy.wire if _st.proxy else None,
     )
 
