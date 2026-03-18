@@ -1729,14 +1729,16 @@ async def api_harness_orchestrate(request: Request):
     from datetime import datetime, timezone
 
     inj_queue: asyncio.Queue = asyncio.Queue()
+    _st = get_state()
     orch = HarnessOrchestrator(
         available_targets=targets,
         model=model_override,
         max_rounds=max_rounds,
         task_stagger_seconds=task_stagger,
-        backend_router=get_state().backend_router,
+        backend_router=_st.backend_router,
         injection_queue=inj_queue,
         sqlite_store=sqlite_store,
+        wire_log=_st.proxy.wire if _st.proxy else None,
     )
 
     async def _event_stream():

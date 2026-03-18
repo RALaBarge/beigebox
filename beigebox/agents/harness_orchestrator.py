@@ -70,6 +70,7 @@ class HarnessOrchestrator:
         backend_router=None,
         injection_queue: asyncio.Queue | None = None,
         sqlite_store=None,
+        wire_log=None,
     ):
         cfg = get_config()
         rt = get_runtime_config()
@@ -114,6 +115,7 @@ class HarnessOrchestrator:
 
         # Tap / wire observability
         self._wire_db = sqlite_store
+        self._wire_log = wire_log  # WireLog instance for JSONL output
 
     # ── Wire tap ──────────────────────────────────────────────────────────────
 
@@ -125,22 +127,50 @@ class HarnessOrchestrator:
         turn_id: str | None = None,
         meta: dict | None = None,
     ) -> None:
-        """Fire-and-forget structured tap event. Never raises."""
-        if self._wire_db is None:
-            return
-        try:
-            self._wire_db.log_wire_event(
-                event_type=event_type,
-                source="harness",
-                content=content,
-                role="harness",
-                model=self.model or "",
-                run_id=run_id,
-                turn_id=turn_id,
-                meta=meta,
-            )
-        except Exception as e:
-            logger.debug("_wire event failed (%s): %s", event_type, e)
+        """Fire-and-forget structured tap event. Never raises.
+
+        Writes to both SQLite (wire_events table) and the WireLog JSONL file
+        so events appear in /api/v1/tap regardless of which backend is active.
+        """
+        # Build shared fields used by both sinks
+        _meta = meta or {}
+        elapsed_ms = _meta.get("latency_ms")
+        token_estimate = max(1, len(content) // 4) if content else 0
+
+        # SQLite sink
+        if self._wire_db is not None:
+            try:
+                self._wire_db.log_wire_event(
+                    event_type=event_type,
+                    source="harness",
+                    content=content,
+                    role="harness",
+                    model=self.model or "",
+                    run_id=run_id,
+                    turn_id=turn_id,
+                    meta=meta,
+                )
+            except Exception as e:
+                logger.debug("_wire SQLite failed (%s): %s", event_type, e)
+
+        # JSONL sink — mirrors the WireLog.log() call pattern used by proxy.py
+        if self._wire_log is not None:
+            try:
+                self._wire_log.log(
+                    direction="internal",
+                    role="harness",
+                    content=content,
+                    model=self.model or "",
+                    token_count=token_estimate,
+                    latency_ms=elapsed_ms,
+                    event_type=event_type,
+                    source="harness",
+                    run_id=run_id,
+                    turn_id=turn_id,
+                    meta=meta,
+                )
+            except Exception as e:
+                logger.debug("_wire JSONL failed (%s): %s", event_type, e)
 
     # ── Public entry point ────────────────────────────────────────────────────
 
@@ -206,7 +236,8 @@ class HarnessOrchestrator:
             if action == "finish":
                 answer = plan_result.get("answer", "")
                 self._wire("harness_end", _run_id, content=answer,
-                           meta={"rounds": round_num - 1, "capped": False, "via": "plan_finish"})
+                           meta={"rounds": round_num - 1, "capped": False, "via": "plan_finish",
+                                 "latency_ms": round((time.time() - self.run_start_time) * 1000, 1)})
                 yield _ev("finish", answer=answer, rounds=round_num - 1)
                 return
 
@@ -227,7 +258,8 @@ class HarnessOrchestrator:
 
             if not tasks:
                 self._wire("harness_end", _run_id, content="No tasks generated.",
-                           meta={"rounds": round_num, "capped": False, "via": "empty_plan"})
+                           meta={"rounds": round_num, "capped": False, "via": "empty_plan",
+                                 "latency_ms": round((time.time() - self.run_start_time) * 1000, 1)})
                 yield _ev("finish", answer="No tasks generated — goal may be too vague.", rounds=round_num)
                 return
 
@@ -270,7 +302,8 @@ class HarnessOrchestrator:
             if eval_action == "finish":
                 answer = eval_result.get("answer", "")
                 self._wire("harness_end", _run_id, content=answer,
-                           meta={"rounds": round_num, "capped": False, "via": "evaluate_finish"})
+                           meta={"rounds": round_num, "capped": False, "via": "evaluate_finish",
+                                 "latency_ms": round((time.time() - self.run_start_time) * 1000, 1)})
                 yield _ev("finish", answer=answer, rounds=round_num)
                 return
 
@@ -285,7 +318,8 @@ class HarnessOrchestrator:
         except Exception:
             final = "Round limit reached. See intermediate results above."
         self._wire("harness_end", _run_id, content=final[:500],
-                   meta={"rounds": round_num, "capped": True})
+                   meta={"rounds": round_num, "capped": True,
+                         "latency_ms": round((time.time() - self.run_start_time) * 1000, 1)})
         yield _ev("finish", answer=final, rounds=round_num, capped=True)
 
     # ── LLM calls ─────────────────────────────────────────────────────────────
