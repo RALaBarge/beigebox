@@ -472,5 +472,9 @@ class MultiBackendRouter:
                 ok = False
             entry = {"healthy": ok}
             entry.update(latency_stats.get(backend.name, {"name": backend.name}))
+            # Attach Ollama hardware stats if available
+            inner = self._unwrap(backend)
+            if isinstance(inner, OllamaBackend):
+                entry["hw_stats"] = inner.get_hw_stats()
             results.append(entry)
         return results

@@ -2339,6 +2339,20 @@ async function loadDashboard() {
           b.healthy && !b.degraded,
           `priority ${b.priority} · ${p95str}${thresholdStr}`
         );
+        // Hardware stats (Ollama /api/ps — shown when models are loaded)
+        if (b.hw_stats && b.hw_stats.length > 0) {
+          html += `<div style="margin:2px 0 6px 24px;font-size:11px;color:var(--fg-muted)">`;
+          b.hw_stats.forEach(m => {
+            const gpuStr = m.total_layers > 0
+              ? `${m.gpu_layers}/${m.total_layers} layers on GPU`
+              : `${m.gpu_layers} layers on GPU`;
+            const vramStr = m.vram_used_mb > 0 ? ` · ${m.vram_used_mb} MB VRAM` : '';
+            const ctxStr  = m.context_window > 0 ? ` · ctx ${m.context_window}` : '';
+            html += `<div style="padding:1px 0"><span style="color:var(--fg)">${esc(m.model)}</span>` +
+              ` — ${gpuStr}${vramStr}${ctxStr}</div>`;
+          });
+          html += `</div>`;
+        }
       });
     } else {
       const inf = info.status === 'fulfilled' ? info.value : {};
