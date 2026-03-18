@@ -6414,7 +6414,7 @@ async function loadConfig() {
 
     // ── Backends ──────────────────────────────────────────────────────────
     const hasOrBackend = (c.backends || []).some(b => b.provider === 'openrouter');
-    const mbActive = c.backends_enabled;
+    const mbActive = c.backends_enabled ?? false;  // Default to false if undefined
     const mbStyle = mbActive
       ? 'border:1px solid var(--lavender);border-radius:4px;padding:0 8px 8px;box-shadow:0 0 6px var(--lavender)33'
       : '';
