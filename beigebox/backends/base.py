@@ -38,10 +38,20 @@ class BaseBackend(abc.ABC):
     Each backend knows how to forward requests and report health.
     """
 
-    def __init__(self, name: str, url: str, timeout: int = 120, priority: int = 1):
+    def __init__(self, name: str, url: str, timeout: int = 120, priority: int = 1,
+                 timeout_ms: int | None = None):
         self.name = name
         self.url = url.rstrip("/")
-        self.timeout = timeout
+        # timeout_ms (per-backend, ms) takes precedence over timeout (global, seconds).
+        # timeout_ms=None means "use the global timeout passed as `timeout`".
+        if timeout_ms is not None:
+            self.timeout = timeout_ms / 1000.0
+            logger.debug(
+                "Backend '%s': using per-endpoint timeout %.1fs (timeout_ms=%d)",
+                name, self.timeout, timeout_ms,
+            )
+        else:
+            self.timeout = timeout
         self.priority = priority
         self._available_models: list[str] = []
         self.models_path = self._resolve_models_path()

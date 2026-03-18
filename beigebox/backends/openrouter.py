@@ -32,10 +32,13 @@ class OpenRouterBackend(BaseBackend):
         api_key: str = "",
         timeout: int = 60,
         priority: int = 2,
+        timeout_ms: int | None = None,
     ):
-        super().__init__(name=name, url=url, timeout=timeout, priority=priority)
+        super().__init__(name=name, url=url, timeout=timeout, priority=priority,
+                         timeout_ms=timeout_ms)
         # Resolve env var references like ${OPENROUTER_API_KEY}
         self.api_key = self._resolve_env(api_key)
+        logger.debug("OpenRouterBackend '%s': effective timeout=%.1fs", self.name, self.timeout)
 
     @staticmethod
     def _resolve_env(value: str) -> str:

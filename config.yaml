@@ -50,7 +50,8 @@ backends:
   - provider: ollama
     name: ollama-local
     url: http://localhost:11434
-    timeout: 120
+    timeout: 120         # global fallback (seconds) — used if timeout_ms absent
+    timeout_ms: 120000   # per-backend override (ms) — e.g. 2 min for slow 70B models
     priority: 2
     max_retries: 2
     backoff_base: 1.5
@@ -66,6 +67,7 @@ backends:
   #   url: https://openrouter.io/api/v1
   #   api_key: ${OPENROUTER_API_KEY}
   #   timeout: 120
+  #   timeout_ms: 60000  # 1 minute for API calls
   #   priority: 3
 
 # ─────────────────────────────────────────────────────────────────────────────

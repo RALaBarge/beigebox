@@ -25,6 +25,7 @@ class OllamaBackend(BaseBackend):
         super().__init__(*args, **kwargs)
         self._ps_cache: list[dict[str, Any]] = []
         self._ps_fetched_at: float = 0.0
+        logger.debug("OllamaBackend '%s': effective timeout=%.1fs", self.name, self.timeout)
 
     async def forward(self, body: dict) -> BackendResponse:
         """Forward a non-streaming request to Ollama."""

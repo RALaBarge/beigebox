@@ -36,9 +36,11 @@ class OpenAICompatibleBackend(BaseBackend):
         timeout: int = 120,
         priority: int = 1,
         api_key: str = "",
+        timeout_ms: int | None = None,
     ):
-        super().__init__(name, url, timeout, priority)
+        super().__init__(name, url, timeout, priority, timeout_ms=timeout_ms)
         self.api_key = api_key
+        logger.debug("OpenAICompatibleBackend '%s': effective timeout=%.1fs", self.name, self.timeout)
 
     async def forward(self, body: dict) -> BackendResponse:
         """Forward a non-streaming request."""

@@ -164,12 +164,27 @@ class MultiBackendRouter:
             logger.warning("Backend '%s' has no url, skipping", name)
             return None
 
+        global_timeout_s = cfg.get("timeout", 120)
+        timeout_ms: int | None = cfg.get("timeout_ms")
+
         kwargs = {
             "name": name,
             "url": url,
-            "timeout": cfg.get("timeout", 120),
+            "timeout": global_timeout_s,
             "priority": cfg.get("priority", 99),
         }
+
+        if timeout_ms is not None:
+            kwargs["timeout_ms"] = int(timeout_ms)
+            logger.info(
+                "Backend '%s': per-endpoint timeout_ms=%d (%.1fs)",
+                name, timeout_ms, timeout_ms / 1000.0,
+            )
+        else:
+            logger.debug(
+                "Backend '%s': using global timeout %ds",
+                name, global_timeout_s,
+            )
 
         if provider == "openrouter":
             kwargs["api_key"] = cfg.get("api_key", "")
