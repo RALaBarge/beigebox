@@ -23,6 +23,7 @@ from beigebox.tools.ensemble import EnsembleTool
 from beigebox.tools.notifier import ToolNotifier
 from beigebox.tools.pdf_reader import PdfReaderTool
 from beigebox.tools.browserbox import BrowserboxTool
+from beigebox.tools.cdp import CDPTool
 from beigebox.tools.connection_tool import ConnectionTool
 from beigebox.tools.python_interpreter import PythonInterpreterTool
 from beigebox.tools.workspace_file import WorkspaceFileTool
@@ -163,6 +164,16 @@ class ToolRegistry:
                 timeout=bb_cfg.get("timeout", 10.0),
                 workspace_in=_ws_in,
             )
+
+        # --- CDP (Chrome DevTools Protocol — disabled by default) ---
+        # Operator can call: {"tool": "cdp.navigate", "input": "https://example.com"}
+        cdp_cfg = tools_cfg.get("cdp", {})
+        if cdp_cfg.get("enabled", False):
+            self.tools["cdp"] = CDPTool(
+                ws_url=cdp_cfg.get("ws_url", "ws://localhost:9222"),
+                timeout=float(cdp_cfg.get("timeout", 10)),
+            )
+            logger.info("CDP tool registered (ws_url=%s)", cdp_cfg.get("ws_url"))
 
         # --- Python Interpreter (TIR — disabled by default, requires bwrap) ---
         # Registered under the key "python" (not "python_interpreter") so the

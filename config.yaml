@@ -349,6 +349,23 @@ tools:
     ws_url: ${BROWSERBOX_WS_URL:-ws://localhost:9009}
     timeout: 10   # seconds
 
+  # ── CDP (Chrome DevTools Protocol — direct browser automation) ────────────
+  # Requires: Chrome/Chromium running with --remote-debugging-port=9222
+  #   google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/beigebox-cdp
+  # pip install websockets httpx
+  # Operator calls: {"tool": "cdp.navigate", "input": "https://example.com"}
+  #                 {"tool": "cdp.screenshot", "input": ""}
+  #                 {"tool": "cdp.dom_snapshot", "input": ""}
+  #                 {"tool": "cdp.click", "input": "#submit"}
+  #                 {"tool": "cdp.type", "input": {"selector": "#q", "text": "hello"}}
+  #                 {"tool": "cdp.scroll", "input": {"x": 0, "y": 500}}
+  #                 {"tool": "cdp.eval", "input": "document.title"}
+  #                 {"tool": "cdp.list_tabs", "input": ""}
+  cdp:
+    enabled: false
+    ws_url: ws://localhost:9222
+    timeout: 10   # seconds per CDP command
+
   # ── Memory (conversation recall + RAG) ────────────────────────────────────
   memory:
     enabled: true
