@@ -9,6 +9,7 @@ The wire log is separate from the debug log. It's a clean, structured record
 of exactly what went over the line — who said what, when, to which model.
 """
 
+import asyncio
 import json
 import os
 import sys
@@ -63,11 +64,12 @@ class WireLog:
     to the wire_events table so the web UI can cross-link by conv_id / run_id.
     """
 
-    def __init__(self, log_path: str, sqlite_store=None):
+    def __init__(self, log_path: str, sqlite_store=None, egress_hooks=None):
         self.log_path = Path(log_path)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self._file = None
-        self._db = sqlite_store  # optional SQLiteStore for dual-write
+        self._db = sqlite_store        # optional SQLiteStore for dual-write
+        self._egress = egress_hooks or []  # list[EgressHook] — fire-and-forget
 
     def _ensure_open(self):
         if self._file is None:
@@ -125,6 +127,18 @@ class WireLog:
             entry["content"] = content[:1000] + f"\n\n[... {len(content) - 2000} chars truncated ...]\n\n" + content[-1000:]
 
         self._file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+        # Fire-and-forget to observability egress hooks (non-blocking)
+        if self._egress:
+            _egress_event = dict(entry)
+            # Preserve full content in the egress payload (not truncated for display)
+            _egress_event["content"] = content
+            try:
+                loop = asyncio.get_running_loop()
+                from beigebox.observability.egress import emit_all as _emit_all
+                loop.create_task(_emit_all(self._egress, _egress_event))
+            except RuntimeError:
+                pass  # No running event loop (e.g. during tests) — skip silently
 
         # Dual-write to SQLite for web UI cross-linking
         if self._db is not None:

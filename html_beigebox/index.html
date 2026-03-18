@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
+  <title>BeigeBox — LLM Middleware Control Plane</title>
+  <meta name="description" content="BeigeBox: OpenAI-compatible LLM middleware with 4-tier intelligent routing, semantic response caching, WASM post-processing, multi-model harness, and local-first conversation history." />
+  <meta property="og:title" content="BeigeBox — LLM Middleware Control Plane" />
+  <meta property="og:description" content="4-tier routing, semantic cache, WASM transforms, latency-aware multi-backend, and durable local history. One proxy, your models, your rules." />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="beigebox-ui.png" />
+  <link rel="preload" as="image" href="beigebox-ui.png" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .standout  { border-left: 3px solid var(--accent);  padding-left: 13px; }
+    .standout h3 { color: var(--accent); }
+    .standout2 { border-left: 3px solid var(--accent2); padding-left: 13px; }
+    .standout2 h3 { color: var(--accent2); }
+    .diff-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .stat-strip { display: flex; gap: 12px; flex-wrap: wrap; margin: 0 0 20px; }
+    .stat { padding: 16px 14px; border-radius: var(--radius); border: 1px solid rgba(34,38,53,.95); background: rgba(17,19,26,.58); flex: 1; min-width: 130px; text-align: center; }
+    .stat-num   { font-size: 1.8rem; font-weight: 700; color: var(--accent); line-height: 1.1; }
+    .stat-label { font-size: .82rem; color: var(--muted); margin-top: 4px; }
+    .section-sub { font-size: .95rem; color: var(--muted); margin: 0 0 16px; }
+    .tier-list { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-direction: column; gap: 6px; }
+    .tier-list li { display: flex; gap: 10px; align-items: baseline; font-size: .9rem; color: var(--muted); }
+    .tier-badge { font-family: var(--mono); font-size: .76rem; background: rgba(182,155,255,.1); border: 1px solid rgba(182,155,255,.25); color: var(--accent); border-radius: 6px; padding: 1px 6px; flex-shrink: 0; }
+    .z-showcase { background: rgba(17,19,26,.72); border: 1px solid rgba(34,38,53,.95); border-radius: var(--radius); padding: 4px 18px; }
+    .z-row { display: flex; gap: 14px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid rgba(34,38,53,.55); }
+    .z-row:last-child { border-bottom: none; }
+    .z-cmd  { font-family: var(--mono); color: var(--accent); font-size: .9rem; min-width: 200px; flex-shrink: 0; }
+    .z-desc { color: var(--muted); font-size: .9rem; }
+    @media (max-width: 980px) {
+      .diff-grid { grid-template-columns: 1fr; }
+      .z-cmd { min-width: 150px; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="top">
+    <div class="wrap">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">▣</div>
+        <div>
+          <div class="name">BeigeBox</div>
+          <div class="tagline">OpenAI-compatible LLM middleware • routing • observability • local history</div>
+        </div>
+      </div>
+
+      <nav class="nav" aria-label="Primary">
+        <a href="#unique-features">Unique Features</a>
+        <a href="#how-it-works">How it works</a>
+        <a href="#quickstart">Quick start</a>
+        <a href="#different">What's different</a>
+        <a href="#features">Features</a>
+        <a href="#zcommands">Z-commands</a>
+        <a href="#ui">UI</a>
+        <a class="btn" href="https://github.com/ralabarge/beigebox" rel="noopener noreferrer">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="wrap">
+
+    <!-- ── Hero ─────────────────────────────────────────────────────────── -->
+    <section class="hero">
+      <div class="hero-copy">
+        <h1>Stop rebuilding LLM integrations.<br>Smart routing. Local. Open.</h1>
+        <p class="lede">
+          BeigeBox sits between your app and any language model—automatically routing to cheaper models,
+          caching expensive responses, and switching backends without touching your code.
+          <strong>Zero frontend changes.</strong> Transparent to clients, invisible to backends.
+        </p>
+
+        <div class="cta">
+          <a class="btn primary" href="#quickstart">Try it now (2 minutes)</a>
+          <a class="btn ghost" href="#different">Why BeigeBox</a>
+        </div>
+
+        <ul class="pills" aria-label="Highlights">
+          <li>🎯 Smart routing · automatic model selection</li>
+          <li>💾 Response cache · no redundant API calls</li>
+          <li>🧩 Multi-backend support · OpenRouter + Ollama + OpenAI-compatible</li>
+          <li>⚡ Local-first storage · SQLite + ChromaDB</li>
+          <li>🚀 One HTML file UI · no build step</li>
+          <li>✅ Production-ready · Apache 2.0 license</li>
+        </ul>
+      </div>
+
+      <div class="hero-card" role="img" aria-label="BeigeBox UI screenshot">
+        <img
+          src="beigebox-ui.png"
+          width="1400"
+          height="906"
+          loading="eager"
+          decoding="async"
+          alt="BeigeBox dashboard UI screenshot"
+        />
+      </div>
+    </section>
+
+    <!-- ── Unique Features ───────────────────────────────────────────────── -->
+    <section id="unique-features" class="section">
+      <h2>Unique Features</h2>
+      <p class="section-sub">Capabilities you won't find assembled anywhere else.</p>
+
+      <div class="diff-grid">
+        <div class="standout">
+          <h3>Semantic response cache</h3>
+          <p>Responses are cached by <em>meaning</em> using cosine similarity, not by exact string or TTL. Near-identical questions return instantly — no backend round-trip, no model load.</p>
+        </div>
+        <div class="standout">
+          <h3>WASM post-processing pipeline</h3>
+          <p>Drop any WASI-compiled module into <code>wasm_modules/</code>. BeigeBox buffers the stream, pipes it through your transform (stdin → stdout), and re-emits the clean result. Any language, zero Python deps.</p>
+        </div>
+        <div class="standout">
+          <h3>Council mode with model affinity batching</h3>
+          <p>Fan a single prompt out to multiple models simultaneously, then vote, merge, or surface the best answer. Model-affinity ensures each council member stays on the backend it performs best on.</p>
+        </div>
+        <div class="standout">
+          <h3>Trajectory evaluation scoring</h3>
+          <p>Every agentic run is scored end-to-end: tool selection, reasoning chain, and final answer quality. Scores surface in the dashboard so you can compare models on real tasks, not synthetic benchmarks.</p>
+        </div>
+        <div class="standout">
+          <h3>Session-sticky multi-turn routing</h3>
+          <p>The routing decision for turn 1 is cached for the whole conversation. A code session stays on the code model; a chat session stays on the fast model — no mid-conversation backend flips.</p>
+        </div>
+        <div class="standout">
+          <h3>Operator with persistent notes</h3>
+          <p>The operator agent writes structured notes to a persistent memory store between runs. Across sessions it recalls context, tool results, and prior reasoning — no re-discovery from scratch each time.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── How it works ──────────────────────────────────────────────────── -->
+    <section id="how-it-works" class="section">
+      <h2>How it works</h2>
+
+      <figure class="flow-figure" aria-label="BeigeBox request flow">
+        <svg viewBox="0 0 760 88" xmlns="http://www.w3.org/2000/svg"
+             role="img" aria-label="Request flows from Client through BeigeBox to Providers, with async writes to SQLite and ChromaDB"
+             style="width:100%;display:block;max-width:760px;margin:0 auto 6px">
+          <defs>
+            <marker id="ah" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L7,3 z" fill="#b69bff" opacity="0.6"/>
+            </marker>
+            <marker id="ahd" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L7,3 z" fill="#8bd5ff" opacity="0.5"/>
+            </marker>
+          </defs>
+          <rect x="2"   y="26" width="110" height="36" rx="6" fill="#11131a" stroke="#222635" stroke-width="1.2"/>
+          <rect x="162" y="20" width="148" height="48" rx="6" fill="#11131a" stroke="rgba(182,155,255,0.35)" stroke-width="1.4"/>
+          <rect x="378" y="2"  width="110" height="36" rx="6" fill="#11131a" stroke="#222635" stroke-width="1.2"/>
+          <rect x="378" y="50" width="110" height="36" rx="6" fill="#11131a" stroke="#222635" stroke-width="1.2"/>
+          <rect x="554" y="2"  width="110" height="36" rx="6" fill="#11131a" stroke="#222635" stroke-width="1.2"/>
+          <rect x="554" y="50" width="110" height="36" rx="6" fill="#11131a" stroke="#222635" stroke-width="1.2"/>
+          <rect x="162" y="20" width="4"   height="48" rx="3" fill="#b69bff" opacity="0.55"/>
+          <g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" text-anchor="middle" fill="#e8eaf0">
+            <text x="57"  y="47" font-size="11">Client / UI</text>
+            <text x="237" y="38" font-size="11" font-weight="600" fill="#b69bff">BeigeBox</text>
+            <text x="237" y="53" font-size="9.5" fill="#a8adbd">route · cache · log · transform</text>
+            <text x="433" y="18" font-size="10" fill="#a8adbd">SQLite</text>
+            <text x="433" y="31" font-size="10">history</text>
+            <text x="433" y="66" font-size="10" fill="#a8adbd">ChromaDB</text>
+            <text x="433" y="79" font-size="10">vectors</text>
+            <text x="609" y="18" font-size="10" fill="#a8adbd">Ollama</text>
+            <text x="609" y="31" font-size="10">local</text>
+            <text x="609" y="66" font-size="10" fill="#a8adbd">OpenRouter</text>
+            <text x="609" y="79" font-size="10">cloud</text>
+          </g>
+          <line x1="113" y1="44" x2="159" y2="44" stroke="#b69bff" stroke-width="1.5" stroke-opacity="0.6" marker-end="url(#ah)"/>
+          <line x1="311" y1="34" x2="551" y2="20" stroke="#b69bff" stroke-width="1.4" stroke-opacity="0.5" marker-end="url(#ah)"/>
+          <line x1="311" y1="54" x2="551" y2="68" stroke="#b69bff" stroke-width="1.4" stroke-opacity="0.5" marker-end="url(#ah)"/>
+          <line x1="311" y1="38" x2="375" y2="22" stroke="#8bd5ff" stroke-width="1.2" stroke-opacity="0.45" stroke-dasharray="5 3" marker-end="url(#ahd)"/>
+          <line x1="311" y1="50" x2="375" y2="66" stroke="#8bd5ff" stroke-width="1.2" stroke-opacity="0.45" stroke-dasharray="5 3" marker-end="url(#ahd)"/>
+        </svg>
+        <figcaption style="text-align:center;font-size:.82rem;color:#a8adbd;margin-bottom:20px">
+          Solid — request path &nbsp;·&nbsp; Dashed — async writes
+        </figcaption>
+      </figure>
+
+      <ol class="how-steps">
+        <li>
+          <strong>Ingest.</strong>
+          Any OpenAI-compatible client hits <code>localhost:1337/v1</code>. No changes to your client, frontend, or tools required.
+        </li>
+        <li>
+          <strong>Cache check.</strong>
+          The request is embedded and checked against the semantic cache. A sufficiently similar previous query returns the cached response immediately — no backend round-trip, no model load.
+        </li>
+        <li>
+          <strong>Classify &amp; route.</strong>
+          A 4-tier pipeline picks the right model: Z-command overrides → agentic keyword scorer → embedding classifier (~50 ms) → decision LLM for borderline cases. Session-sticky so conversations stay on one model.
+        </li>
+        <li>
+          <strong>Execute.</strong>
+          The request forwards to the chosen provider — Ollama, OpenRouter, or any OpenAI-compatible endpoint. BeigeBox streams the response back transparently with latency-aware failover.
+        </li>
+        <li>
+          <strong>Transform.</strong>
+          If a WASM module is active, BeigeBox buffers the full stream, runs the transform, and re-emits. The client always sees the final output — not raw intermediate fragments.
+        </li>
+        <li>
+          <strong>Log, embed &amp; measure.</strong>
+          Every event writes to a structured JSONL wire log and SQLite. Responses embed into ChromaDB for semantic memory. Latency, TTFT, token counts, and cost surface in the dashboard.
+        </li>
+      </ol>
+    </section>
+
+    <!-- ── Quick start ───────────────────────────────────────────────────── -->
+    <section id="quickstart" class="section">
+      <h2>Quick start</h2>
+
+      <div class="panel" style="margin-bottom: 20px; border: 2px solid rgba(182,155,255,.4); padding: 20px;">
+        <h3 style="margin-top: 0;">Get running in 2 minutes</h3>
+        <p>Full stack with Ollama + BeigeBox — Docker Compose does the rest.</p>
+        <div class="codebox" style="margin: 12px 0;">
+          <pre><code>git clone https://github.com/ralabarge/beigebox.git
+cd beigebox/docker
+docker compose up -d</code></pre>
+        </div>
+        <p style="margin: 12px 0 0;">
+          Open <code style="background: rgba(17,19,26,.6); padding: 1px 4px;">localhost:1337</code> and start chatting.
+          Watch the routing, caching, and latency in real time.
+        </p>
+      </div>
+
+      <p class="section-sub">Other setups:</p>
+
+      <div class="grid2">
+
+        <div class="panel qs-panel">
+          <h3>Already have Ollama/another provider?</h3>
+          <p>Run just BeigeBox in front of it. Set <code>backend.url</code> in <code>config.yaml</code> to your existing provider.</p>
+          <div class="codebox" style="margin-top:10px">
+            <pre><code>git clone https://github.com/ralabarge/beigebox.git
+cd beigebox/docker
+docker compose up -d beigebox</code></pre>
+          </div>
+        </div>
+
+        <div class="panel qs-panel">
+          <h3>Dev mode (hot-reload)</h3>
+          <p>Edit <code>config.yaml</code> or <code>runtime_config.yaml</code> — changes take effect immediately, no restart.</p>
+          <div class="codebox" style="margin-top:10px">
+            <pre><code>pip install -e .
+cp config.yaml.example config.yaml
+beigebox dial</code></pre>
+          </div>
+          <p style="margin-top:10px">API on <code>localhost:8000</code></p>
+        </div>
+
+      </div>
+
+      <div style="margin-top: 20px; padding: 12px; background: rgba(17,19,26,.4); border-radius: var(--radius); font-size: .9rem; color: var(--muted);">
+        <strong style="color: var(--fg);">Any OpenAI-compatible client works.</strong> Point your tools (ChatGPT UI, LM Studio, Cursor, Aider, Continue) at <code style="background: rgba(0,0,0,.2); padding: 1px 4px;">http://localhost:1337/v1</code> — zero code changes needed.
+      </div>
+    </section>
+
+    <!-- ── Who is this for ────────────────────────────────────────────────── -->
+    <section class="section">
+      <h2>Who is this for</h2>
+
+      <div class="grid2">
+        <div class="panel standout">
+          <h3>Perfect for you if:</h3>
+          <ul style="list-style: none; padding: 0; margin: 10px 0; display: flex; flex-direction: column; gap: 8px;">
+            <li style="color: var(--muted);">✓ Running Ollama or multiple LLM providers</li>
+            <li style="color: var(--muted);">✓ Building LLM-powered features in an app</li>
+            <li style="color: var(--muted);">✓ Want to reduce LLM API costs (route to cheaper models)</li>
+            <li style="color: var(--muted);">✓ Need observability into LLM usage (latency, cost, tokens)</li>
+            <li style="color: var(--muted);">✓ Self-hosted teams keeping data on-prem</li>
+            <li style="color: var(--muted);">✓ Evaluating how different models perform on your workload</li>
+          </ul>
+        </div>
+
+        <div class="panel standout2">
+          <h3>Not for you if:</h3>
+          <ul style="list-style: none; padding: 0; margin: 10px 0; display: flex; flex-direction: column; gap: 8px;">
+            <li style="color: var(--muted);">✗ You only use OpenAI (no multi-model benefit)</li>
+            <li style="color: var(--muted);">✗ Your only concern is latency (caching helps but isn't the main goal)</li>
+            <li style="color: var(--muted);">✗ You prefer managed cloud solutions (BeigeBox is self-hosted)</li>
+            <li style="color: var(--muted);">✗ You have minimal LLM usage (overhead of routing > gains)</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── What's different ──────────────────────────────────────────────── -->
+    <section id="different" class="section">
+      <h2>What makes it different</h2>
+      <p class="section-sub">Most LLM proxies do passthrough and load balancing. BeigeBox goes further.</p>
+
+      <div class="stat-strip" aria-label="Key numbers">
+        <div class="stat"><div class="stat-num">4</div><div class="stat-label">routing tiers</div></div>
+        <div class="stat"><div class="stat-num">3</div><div class="stat-label">cache layers</div></div>
+        <div class="stat"><div class="stat-num">3</div><div class="stat-label">multi-model modes</div></div>
+        <div class="stat"><div class="stat-num">~50ms</div><div class="stat-label">classifier latency</div></div>
+        <div class="stat"><div class="stat-num">0</div><div class="stat-label">JS dependencies</div></div>
+        <div class="stat"><div class="stat-num">1</div><div class="stat-label">HTML file for the UI</div></div>
+      </div>
+
+      <div class="diff-grid">
+
+        <div class="panel standout">
+          <h3>An LLM that routes to other LLMs</h3>
+          <p>The routing pipeline has four tiers. Simple cases never touch a model. Borderline cases get evaluated by a small, fast decision LLM before dispatch. Session-sticky so a conversation stays on one model.</p>
+          <ul class="tier-list">
+            <li><span class="tier-badge">tier 1</span> Z-command user overrides (instant, inline)</li>
+            <li><span class="tier-badge">tier 2</span> Agentic keyword scorer (zero-cost pre-filter)</li>
+            <li><span class="tier-badge">tier 3</span> Embedding classifier (~50 ms cosine distance)</li>
+            <li><span class="tier-badge">tier 4</span> Decision LLM for borderline cases</li>
+          </ul>
+        </div>
+
+        <div class="panel standout">
+          <h3>Semantic response cache</h3>
+          <p>Not a TTL cache. Every query is embedded with <code>nomic-embed-text</code> and checked against stored responses by cosine similarity. A sufficiently similar question gets an instant answer — no model load, no backend round-trip.</p>
+          <p style="margin-top:8px">Combined with an embedding dedup cache (avoids redundant embeds) and a tool result cache (SHA-256 keyed, short TTL for deterministic tools).</p>
+        </div>
+
+        <div class="panel standout">
+          <h3>WASM post-processing pipeline</h3>
+          <p>Drop a compiled <code>.wasm</code> (WASI target) into <code>wasm_modules/</code>. BeigeBox buffers the full response stream, runs the transform (stdin → stdout), and re-emits. The client always sees the transformed output.</p>
+          <p style="margin-top:8px">Any WASI-targeting language: Rust, C, Go, AssemblyScript. Timeout-enforced — if the module hangs, the original response passes through unmodified. Included: <code>opener_strip</code> removes sycophantic openers.</p>
+        </div>
+
+        <div class="panel standout2">
+          <h3>Latency-aware multi-backend routing</h3>
+          <p>Each backend tracks a rolling P95 latency window over 100 samples. Backends that exceed a configurable threshold are automatically deprioritised to second-pass fallback — traffic returns when they recover.</p>
+          <p style="margin-top:8px">A/B traffic splitting via <code>traffic_split</code> weights. Weighted random selection among healthy backends for percentage-based distribution.</p>
+        </div>
+
+        <div class="panel standout2">
+          <h3>Three multi-model orchestration modes</h3>
+          <p>Run the same prompt across N models simultaneously and compare, vote, or iterate:</p>
+          <ul class="tier-list">
+            <li><span class="tier-badge">harness</span> Side-by-side comparison, no arbiter</li>
+            <li><span class="tier-badge">ensemble</span> LLM judge picks the best response with reasoning</li>
+            <li><span class="tier-badge">orchestrate</span> Goal-driven loop: plan → dispatch → evaluate → iterate (SSE stream)</li>
+          </ul>
+        </div>
+
+        <div class="panel standout2">
+          <h3>Built-in UI — one HTML file</h3>
+          <p>Seven-tab interface with no build step, no JavaScript framework, no dependencies. Dashboard, multi-pane Chat, Conversations, Tap (live wire log), Operator, Harness, Config.</p>
+          <p style="margin-top:8px">Per-pane chat settings: temperature, top-p/k, context window, repeat penalty, GPU layer count, force-reload (evicts model from VRAM for immediate effect), and per-pane system prompt.</p>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ── Full feature set ──────────────────────────────────────────────── -->
+    <section id="features" class="section">
+      <h2>Full feature set</h2>
+
+      <div class="grid3">
+        <div class="panel">
+          <h3>Routing &amp; delegation</h3>
+          <p>4-tier pipeline with session-sticky assignment. Per-backend priority ordering with automatic health-check failover. Force a route with a Z-command at any time.</p>
+        </div>
+        <div class="panel">
+          <h3>Semantic + tool caching</h3>
+          <p>Semantic cache (cosine similarity), embedding dedup cache, and SHA-256 tool result cache. Three layers, all in-process, zero extra services.</p>
+        </div>
+        <div class="panel">
+          <h3>Multi-backend with A/B splitting</h3>
+          <p>Ollama, OpenRouter, or any OpenAI-compatible endpoint. Weighted traffic distribution. Rolling P95 auto-deprioritization with automatic recovery.</p>
+        </div>
+        <div class="panel">
+          <h3>Observability</h3>
+          <p>Structured JSONL wire log (TTFT, P50/P90/P95/P99, tokens/sec, cost), SQLite conversation history, per-model hardware stats (GPU layers, VRAM, context window), verbose agentic logging (thoughts, tool calls, iterations), and live backend health dashboard with latency tracking.</p>
+        </div>
+        <div class="panel">
+          <h3>Harness + ensemble + orchestration</h3>
+          <p>Three multi-model modes. Ensemble voting with an LLM arbiter that returns reasoning. Goal-driven orchestration via SSE stream for long-running tasks.</p>
+        </div>
+        <div class="panel">
+          <h3>Operator agent</h3>
+          <p>JSON tool-loop agent with web search, calculator, datetime, system info, memory recall, and ensemble. Shell execution through a 4-layer bubblewrap sandbox (no network, no home dir).</p>
+        </div>
+        <div class="panel">
+          <h3>Conversation replay &amp; fork</h3>
+          <p>Any stored conversation reconstructed and re-run against a different model or config. Fork a conversation mid-thread without affecting the original branch.</p>
+        </div>
+        <div class="panel">
+          <h3>Local-first storage</h3>
+          <p>SQLite for conversations, metrics, and cost. ChromaDB (embedded, no separate service) for vectors. Portable files — your data, no cloud dependency.</p>
+        </div>
+        <div class="panel">
+          <h3>Per-model GPU options</h3>
+          <p>Set <code>options.num_gpu</code> per model in <code>config.yaml</code>. Override per chat pane. Force-reload evicts from VRAM and reloads immediately — no restart required.</p>
+        </div>
+        <div class="panel">
+          <h3>Hooks &amp; plugins</h3>
+          <p>Pre/post request interceptors for prompt injection detection, RAG injection, and custom policy. Drop a <code>*Tool</code> class in <code>plugins/</code> to auto-register a new tool.</p>
+        </div>
+        <div class="panel">
+          <h3>System context injection</h3>
+          <p>Hot-reloaded <code>system_context.md</code> prepended to every request. Override per chat pane with a window-specific system prompt — the ⚙ button glows when active.</p>
+        </div>
+        <div class="panel">
+          <h3>Voice (optional profile)</h3>
+          <p>Whisper (STT) + Kokoro (TTS) via Docker Compose voice profile. Push-to-talk with configurable hotkey. Auto-play TTS after each response. No changes to core proxy required.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Z-commands ────────────────────────────────────────────────────── -->
+    <section id="zcommands" class="section">
+      <h2>Z-commands</h2>
+      <p class="section-sub">Prefix any message with <code>z:</code> to override routing, force tools, or branch a conversation — without leaving the chat.</p>
+
+      <div class="z-showcase">
+        <div class="z-row"><span class="z-cmd">z: simple</span><span class="z-desc">Route this message to the fast model</span></div>
+        <div class="z-row"><span class="z-cmd">z: complex</span><span class="z-desc">Route to the large / capable model</span></div>
+        <div class="z-row"><span class="z-cmd">z: code</span><span class="z-desc">Route to the code-specialist model</span></div>
+        <div class="z-row"><span class="z-cmd">z: llama3.2:3b</span><span class="z-desc">Route to an exact model by name</span></div>
+        <div class="z-row"><span class="z-cmd">z: search</span><span class="z-desc">Force web search and inject results before sending</span></div>
+        <div class="z-row"><span class="z-cmd">z: memory</span><span class="z-desc">Search past conversations and inject relevant context</span></div>
+        <div class="z-row"><span class="z-cmd">z: calc 2^32</span><span class="z-desc">Evaluate a math expression inline (sandboxed)</span></div>
+        <div class="z-row"><span class="z-cmd">z: sysinfo</span><span class="z-desc">Inject current system resource stats</span></div>
+        <div class="z-row"><span class="z-cmd">z: fork</span><span class="z-desc">Branch this conversation into a new thread</span></div>
+        <div class="z-row"><span class="z-cmd">z: complex,search</span><span class="z-desc">Chain multiple directives in one prefix</span></div>
+        <div class="z-row"><span class="z-cmd">z: help</span><span class="z-desc">Show all available commands</span></div>
+      </div>
+    </section>
+
+    <!-- ── UI ────────────────────────────────────────────────────────────── -->
+    <section id="ui" class="section">
+      <h2>UI snapshots</h2>
+      <p>Built-in seven-tab web interface. No build step, no framework, one HTML file.</p>
+      <figure class="figure" style="margin-bottom:12px">
+        <img
+          src="beigebox-ui.png"
+          width="1400"
+          height="906"
+          loading="lazy"
+          decoding="async"
+          alt="BeigeBox dashboard UI screenshot"
+        />
+        <figcaption>Dashboard — storage stats, P50/P90/P99 latency charts, TTFT, cost breakdown, backend health.</figcaption>
+      </figure>
+      <figure class="figure">
+        <img
+          src="multichat.png"
+          width="1400"
+          height="906"
+          loading="lazy"
+          decoding="async"
+          alt="BeigeBox multi-pane chat screenshot"
+        />
+        <figcaption>Chat — multi-pane view, fan out to N models simultaneously, per-pane settings with GPU layer control and force-reload.</figcaption>
+      </figure>
+    </section>
+
+    <!-- ── Licensing ──────────────────────────────────────────────────────── -->
+    <section class="section">
+      <h2>Licensing</h2>
+      <p class="section-sub">BeigeBox is dual-licensed to support both open-source and commercial use.</p>
+
+      <div class="grid2">
+        <div class="panel standout">
+          <h3>AGPL-3.0 (Free)</h3>
+          <p style="margin: 10px 0;">Use, modify, and distribute freely.</p>
+          <ul style="list-style: none; padding: 0; margin: 10px 0; display: flex; flex-direction: column; gap: 8px; font-size: .9rem;">
+            <li style="color: var(--muted);">✓ Open-source projects</li>
+            <li style="color: var(--muted);">✓ Internal use</li>
+            <li style="color: var(--muted);">✓ Non-commercial use</li>
+            <li style="color: var(--muted);">✓ Public modifications required</li>
+          </ul>
+          <p style="margin-top: 12px; font-size: .85rem; color: var(--muted);">If you modify BeigeBox and run it as a service, you must share your modifications.</p>
+          <a href="https://github.com/ralabarge/beigebox/blob/main/LICENSE.md" style="display: inline-block; margin-top: 12px; color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent);">Read full AGPL terms →</a>
+        </div>
+
+        <div class="panel standout2">
+          <h3>Commercial License (Paid)</h3>
+          <p style="margin: 10px 0;">Use in proprietary products.</p>
+          <ul style="list-style: none; padding: 0; margin: 10px 0; display: flex; flex-direction: column; gap: 8px; font-size: .9rem;">
+            <li style="color: var(--muted);">✓ Proprietary/closed-source use</li>
+            <li style="color: var(--muted);">✓ SaaS & managed services</li>
+            <li style="color: var(--muted);">✓ Keep modifications private</li>
+            <li style="color: var(--muted);">✓ No open-source obligations</li>
+          </ul>
+          <p style="margin-top: 12px; font-size: .85rem; color: var(--muted);">For enterprise deployments, commercial products, or proprietary modifications.</p>
+          <a href="https://github.com/ralabarge/beigebox/blob/main/COMMERCIAL_LICENSE.md" style="display: inline-block; margin-top: 12px; color: var(--accent);">Learn more about commercial licensing →</a>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div class="footer-grid">
+        <div>
+          <div class="name">BeigeBox</div>
+          <div class="muted">LLM middleware control plane • local-first • OpenAI-compatible • dual-licensed</div>
+        </div>
+        <div class="links">
+          <a href="https://beigeboxoss.com/" rel="noopener noreferrer">beigeboxoss.com</a>
+          <a href="https://github.com/ralabarge/beigebox" rel="noopener noreferrer">GitHub</a>
+          <a href="https://github.com/ralabarge/beigebox/blob/main/LICENSE.md" rel="noopener noreferrer">AGPL License</a>
+          <a href="https://github.com/ralabarge/beigebox/blob/main/COMMERCIAL_LICENSE.md" rel="noopener noreferrer">Commercial</a>
+        </div>
+      </div>
+      <div class="fineprint">Built for fast loads: no JS, one CSS file, semantic HTML, responsive images. Open-source by default, commercial licensing available.</div>
+    </footer>
+
+  </main>
+</body>
+</html>

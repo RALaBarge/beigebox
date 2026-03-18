@@ -26,6 +26,7 @@ from typing import AsyncIterator
 import httpx
 
 from beigebox.backends.base import BaseBackend, BackendResponse
+from beigebox.utils.retry import RetryConfig, is_retryable, backoff_seconds as _backoff_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,12 @@ class RetryableBackendWrapper:
         backoff_max: float = 10.0,
     ):
         self.backend = backend
+        self._retry_config = RetryConfig(
+            max_retries=max_retries,
+            backoff_base=backoff_base,
+            backoff_max=backoff_max,
+        )
+        # Keep flat attributes for external callers that read them directly
         self.max_retries = max_retries
         self.backoff_base = backoff_base
         self.backoff_max = backoff_max
@@ -83,19 +90,11 @@ class RetryableBackendWrapper:
 
     def _is_retryable(self, status_code: int) -> bool:
         """Determine if a failure is retryable (transient)."""
-        # 429: rate limit, 500/502/503/504: transient server errors
-        return status_code in (429, 500, 502, 503, 504)
+        return is_retryable(status_code)
 
     def _backoff_seconds(self, attempt: int, retry_after: float | None = None) -> float:
-        """Calculate backoff time for attempt N, respecting Retry-After if present.
-
-        `attempt` is passed as `attempt + 1` from the retry loop so the first
-        retry gets base^1 (e.g. 1.5s) rather than base^0 (1.0s flat).
-        """
-        if retry_after is not None and retry_after > 0:
-            return min(retry_after, self.backoff_max)
-        delay = self.backoff_base ** attempt
-        return min(delay, self.backoff_max)
+        """Calculate backoff time for attempt N, respecting Retry-After if present."""
+        return _backoff_seconds(attempt, retry_after, self._retry_config)
 
     @staticmethod
     def _retry_after(response: httpx.Response) -> float | None:

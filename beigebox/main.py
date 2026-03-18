@@ -53,6 +53,7 @@ from beigebox.auth import MultiKeyAuthRegistry
 from beigebox.mcp_server import McpServer
 from beigebox.amf_mesh import AmfMeshAdvertiser
 from beigebox.app_state import AppState
+from beigebox.observability.egress import build_egress_hooks, start_egress_hooks, stop_egress_hooks
 
 
 logger = logging.getLogger(__name__)
@@ -236,6 +237,14 @@ async def lifespan(app: FastAPI):
     amf_advertiser = AmfMeshAdvertiser(cfg, tool_names=tool_registry.list_tools())
     await amf_advertiser.start()
 
+    # Observability egress hooks (webhook batching, fire-and-forget)
+    egress_hooks = build_egress_hooks(cfg)
+    await start_egress_hooks(egress_hooks)
+    if egress_hooks:
+        logger.info("Observability egress: %d hook(s) active", len(egress_hooks))
+    else:
+        logger.debug("Observability egress: no webhooks configured")
+
     # Proxy (with decision agent, hooks, embedding classifier, tools, and router)
     proxy = Proxy(
         sqlite=sqlite_store,
@@ -246,6 +255,7 @@ async def lifespan(app: FastAPI):
         tool_registry=tool_registry,
         backend_router=backend_router,
         blob_store=blob_store,
+        egress_hooks=egress_hooks,
     )
 
     _app_state = AppState(
@@ -262,6 +272,7 @@ async def lifespan(app: FastAPI):
         auth_registry=auth_registry,
         mcp_server=mcp_server,
         amf_advertiser=amf_advertiser,
+        egress_hooks=egress_hooks,
     )
 
     logger.info(
@@ -323,6 +334,8 @@ async def lifespan(app: FastAPI):
     logger.info("BeigeBox shutting down")
     if _app_state and _app_state.amf_advertiser:
         await _app_state.amf_advertiser.stop()
+    if _app_state and _app_state.egress_hooks:
+        await stop_egress_hooks(_app_state.egress_hooks)
     if _app_state and _app_state.proxy and _app_state.proxy.wire:
         _app_state.proxy.wire.close()
     from beigebox.payload_log import get_payload_log as _get_pl

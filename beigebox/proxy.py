@@ -70,6 +70,7 @@ class Proxy:
         tool_registry=None,
         backend_router=None,
         blob_store=None,
+        egress_hooks=None,
     ):
         self.sqlite = sqlite
         self.vector = vector
@@ -91,7 +92,7 @@ class Proxy:
         self.routes = d_cfg.get("routes", {})
         # Wire log — structured tap of everything on the line
         wire_path = self.cfg.get("wiretap", {}).get("path", "./data/wire.jsonl")
-        self.wire = WireLog(wire_path, sqlite_store=sqlite)
+        self.wire = WireLog(wire_path, sqlite_store=sqlite, egress_hooks=egress_hooks or [])
         # Payload log — full context debug logger (hot-toggled via runtime_config)
         self._payload_log = get_payload_log(self.cfg)
         # WASM transform runtime
