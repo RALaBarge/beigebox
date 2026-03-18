@@ -569,6 +569,96 @@ def cmd_build_centroids(args):
         print("     Make sure Ollama is running with the embedding model loaded.")
 
 
+def cmd_index_docs(args):
+    """Index markdown/text files into ChromaDB for semantic search."""
+    import os
+    import hashlib
+    from pathlib import Path
+    from beigebox.config import get_config, get_storage_paths
+    from beigebox.storage.vector_store import VectorStore
+    from beigebox.storage.backends import make_backend
+    from beigebox.storage.chunker import chunk_text
+
+    doc_path = Path(args.path).resolve()
+    if not doc_path.exists():
+        print(f"  ✗  Path not found: {doc_path}")
+        return
+
+    cfg = get_config()
+    _, vector_store_path = get_storage_paths(cfg)
+    _sc = cfg["storage"]
+    _ec = cfg["embedding"]
+
+    store = VectorStore(
+        embedding_model=_ec["model"],
+        embedding_url=_ec.get("backend_url") or cfg["backend"]["url"],
+        backend=make_backend(
+            _sc.get("vector_backend", "chromadb"),
+            path=vector_store_path,
+        ),
+    )
+
+    print(BANNER)
+    print(f"  Indexing documents from: {doc_path}")
+    print()
+
+    total_files = 0
+    total_chunks = 0
+
+    # If indexing 2600/, also include 2600/2599/ (archived docs)
+    index_paths = [doc_path]
+    if doc_path.name == "2600" and (doc_path / "2599").exists():
+        index_paths.append(doc_path / "2599")
+        print("  (also including archived docs in 2600/2599/)")
+        print()
+
+    # Walk directories for .md and .txt files
+    for search_path in index_paths:
+        for root, _, files in os.walk(search_path):
+            for filename in sorted(files):
+                if not filename.endswith((".md", ".txt")):
+                    continue
+
+                filepath = Path(root) / filename
+                rel_path = filepath.relative_to(doc_path)
+
+                try:
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        text = f.read()
+
+                    # Compute SHA-256 of file content for deduplication
+                    blob_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+                    # Chunk the text
+                    chunks = chunk_text(text, source_file=str(rel_path))
+
+                    if not chunks:
+                        continue
+
+                    # Store each chunk
+                    for chunk in chunks:
+                        store.store_document_chunk(
+                            source_file=str(rel_path),
+                            chunk_index=chunk["chunk_index"],
+                            char_offset=chunk["char_offset"],
+                            blob_hash=blob_hash,
+                            text=chunk["text"],
+                        )
+
+                    total_files += 1
+                    total_chunks += len(chunks)
+                    print(f"  ✓  {rel_path} ({len(chunks)} chunks)")
+
+                except Exception as e:
+                    print(f"  ✗  {rel_path} — {e}")
+
+    print()
+    print(f"  Indexed {total_files} files, {total_chunks} chunks")
+    print(f"  ChromaDB: {vector_store_path}")
+    print()
+    print("  Operator can now search these docs via 'document_search' tool.")
+
+
 # ---------------------------------------------------------------------------
 # Parser with aliases
 # ---------------------------------------------------------------------------
@@ -680,6 +770,13 @@ def main():
     # build-centroids
     _add_command(sub, ["build-centroids", "centroids"],
                  "Build embedding classifier centroids from seed prompts", cmd_build_centroids)
+
+    # index-docs / index
+    def setup_index_docs(p):
+        p.add_argument("path", help="Directory path containing .md/.txt files to index")
+
+    _add_command(sub, ["index-docs", "index"],
+                 "Index markdown/text docs into ChromaDB for semantic search", cmd_index_docs, setup_index_docs)
 
     # operator / op
     def setup_operator(p):
