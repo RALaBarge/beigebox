@@ -54,6 +54,7 @@ from beigebox.cache import SemanticCache, ToolResultCache
 from beigebox.payload_log import get_payload_log
 from beigebox.aliases import AliasResolver
 from beigebox.guardrails import Guardrails
+from beigebox.validation.format import ResponseValidator
 logger = logging.getLogger(__name__)
 def _estimate_tokens(text: str) -> int:
     """Rough token estimate: ~4 chars per token for English text."""
@@ -115,6 +116,8 @@ class Proxy:
         self.alias_resolver = AliasResolver(self.cfg)
         # Guardrails — input/output content filtering
         self.guardrails = Guardrails(self.cfg)
+        # Response format validator — optional, non-blocking
+        self.response_validator = ResponseValidator(self.cfg)
 
     # ------------------------------------------------------------------
     # Session cache helpers
@@ -1203,6 +1206,22 @@ class Proxy:
                         latency_ms=round(_stages.get("backend", 0), 1),
                     )
 
+        # Response format validation (non-blocking, log-only)
+        if not is_synthetic:
+            _val = self.response_validator.validate_response(data, model=model)
+            if not _val.valid:
+                self.wire.log(
+                    direction="internal",
+                    role="validation",
+                    content=f"format validation failed: fmt={_val.format} error={_val.error}",
+                    model=model,
+                    conversation_id=conversation_id,
+                    event_type="validation_warn",
+                    source="response_validator",
+                    meta={"format": _val.format, "error": _val.error,
+                          "schema_errors": _val.schema_errors},
+                )
+
         # Post-response hooks
         _t_post = _time.monotonic()
         if self.hook_manager and not is_synthetic:
@@ -1507,6 +1526,21 @@ class Proxy:
                         source="guardrails",
                         meta={"direction": "output", "rule": _gr_out.rule_name, "reason": _gr_out.reason},
                     )
+
+            # Response format validation on assembled stream buffer (non-blocking)
+            _val = self.response_validator.validate_stream_buffer(complete_text, model=model)
+            if complete_text and not _val.valid:
+                self.wire.log(
+                    direction="internal",
+                    role="validation",
+                    content=f"stream format validation failed: fmt={_val.format} error={_val.error}",
+                    model=model,
+                    conversation_id=conversation_id,
+                    event_type="validation_warn",
+                    source="response_validator",
+                    meta={"format": _val.format, "error": _val.error,
+                          "schema_errors": _val.schema_errors},
+                )
 
             # Re-emit transformed content to client (WASM buffer mode only)
             if _wasm_buffer_mode and complete_text:

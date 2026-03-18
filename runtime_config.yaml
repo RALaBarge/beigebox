@@ -31,3 +31,8 @@ runtime:
   # Full payload logger — dumps complete LLM context to data/payload.jsonl
   # Sources: proxy, proxy_stream, proxy_stream_response, operator, operator_response
   payload_log_enabled: false # flip to true to capture everything; no restart needed
+  # Response format validation — optional, non-blocking (logs warnings only)
+  # response_validation:
+  #   enabled: false
+  #   schemas:
+  #     openai: { "type": "object", "properties": { "choices": { "type": "array" } } }
