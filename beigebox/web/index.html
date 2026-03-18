@@ -1720,12 +1720,13 @@
 
     <!-- Orchestrated layout: master pane + worker grid -->
     <div id="harness-orch-layout" style="display:none;flex:1;overflow:hidden;flex-direction:column;min-height:0">
-      <div id="harness-master-pane" style="flex-shrink:0;max-height:45%;overflow-y:auto;border-bottom:2px solid var(--cyan);padding:10px 14px;background:var(--bg-deep)">
+      <div id="harness-master-pane" style="height:45%;overflow-y:auto;padding:10px 14px;background:var(--bg-deep);border-bottom:2px solid var(--cyan)">
         <div style="font-size:10px;color:var(--cyan);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">◈ Orchestrator</div>
         <div id="harness-master-body" style="font-size:12px;line-height:1.6;color:var(--fg)">
           <span style="color:var(--fg-muted)">Waiting for goal…</span>
         </div>
       </div>
+      <div id="harness-orch-splitter" style="height:4px;background:var(--cyan);cursor:row-resize;flex-shrink:0;user-select:none" onmousedown="startOrchSplitterDrag(event)"></div>
       <div id="harness-orch-grid" style="flex:1;overflow-y:auto;padding:8px;display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start">
         <div class="empty">Worker results will appear here.</div>
       </div>
@@ -1738,12 +1739,13 @@
 
     <!-- Ralph: iteration log + agent panes -->
     <div id="harness-ralph-layout" style="display:none;flex:1;overflow:hidden;flex-direction:column;min-height:0">
-      <div id="harness-ralph-log-pane" style="flex-shrink:0;max-height:40%;overflow-y:auto;border-bottom:2px solid var(--green);padding:8px 14px;background:var(--bg-deep)">
+      <div id="harness-ralph-log-pane" style="height:40%;overflow-y:auto;padding:8px 14px;background:var(--bg-deep);border-bottom:2px solid var(--green)">
         <div style="font-size:10px;color:var(--green);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">⚡ Ralph Loop</div>
         <div id="harness-ralph-log-body" style="font-size:12px;line-height:1.6;color:var(--fg)">
           <span style="color:var(--fg-muted)">Configure spec and test command, then run.</span>
         </div>
       </div>
+      <div id="harness-ralph-splitter" style="height:4px;background:var(--green);cursor:row-resize;flex-shrink:0;user-select:none" onmousedown="startRalphSplitterDrag(event)"></div>
       <div id="harness-ralph-grid" style="flex:1;overflow-y:auto;padding:8px;display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start">
         <div class="empty">Iteration agent output will appear here.</div>
       </div>
@@ -4797,6 +4799,82 @@ async function councilEngage() {
 }
 
 // ── 7. Harness — parallel agent runner ────────────────────────────────────────
+// ── Orchestrated layout splitter (draggable divider) ─────────────────────────
+let orchSplitterActive = false;
+let orchSplitterStartY = 0;
+
+function startOrchSplitterDrag(event) {
+  event.preventDefault();
+  orchSplitterActive = true;
+  orchSplitterStartY = event.clientY;
+  document.addEventListener('mousemove', orchSplitterDrag);
+  document.addEventListener('mouseup', endOrchSplitterDrag);
+}
+
+function orchSplitterDrag(event) {
+  if (!orchSplitterActive) return;
+  const layout = document.getElementById('harness-orch-layout');
+  const masterPane = document.getElementById('harness-master-pane');
+  if (!layout || !masterPane) return;
+
+  const deltaY = event.clientY - orchSplitterStartY;
+  const containerHeight = layout.offsetHeight;
+  const currentHeight = masterPane.offsetHeight;
+  const newHeight = currentHeight + deltaY;
+
+  // Minimum 80px for master pane, maximum 80% of container
+  const minHeight = 80;
+  const maxHeight = containerHeight * 0.8;
+  const constrainedHeight = Math.max(minHeight, Math.min(newHeight, maxHeight));
+
+  masterPane.style.height = constrainedHeight + 'px';
+  orchSplitterStartY = event.clientY;
+}
+
+function endOrchSplitterDrag(event) {
+  orchSplitterActive = false;
+  document.removeEventListener('mousemove', orchSplitterDrag);
+  document.removeEventListener('mouseup', endOrchSplitterDrag);
+}
+
+// ── Ralph layout splitter (draggable divider) ────────────────────────────────
+let ralphSplitterActive = false;
+let ralphSplitterStartY = 0;
+
+function startRalphSplitterDrag(event) {
+  event.preventDefault();
+  ralphSplitterActive = true;
+  ralphSplitterStartY = event.clientY;
+  document.addEventListener('mousemove', ralphSplitterDrag);
+  document.addEventListener('mouseup', endRalphSplitterDrag);
+}
+
+function ralphSplitterDrag(event) {
+  if (!ralphSplitterActive) return;
+  const layout = document.getElementById('harness-ralph-layout');
+  const logPane = document.getElementById('harness-ralph-log-pane');
+  if (!layout || !logPane) return;
+
+  const deltaY = event.clientY - ralphSplitterStartY;
+  const containerHeight = layout.offsetHeight;
+  const currentHeight = logPane.offsetHeight;
+  const newHeight = currentHeight + deltaY;
+
+  // Minimum 60px for log pane, maximum 80% of container
+  const minHeight = 60;
+  const maxHeight = containerHeight * 0.8;
+  const constrainedHeight = Math.max(minHeight, Math.min(newHeight, maxHeight));
+
+  logPane.style.height = constrainedHeight + 'px';
+  ralphSplitterStartY = event.clientY;
+}
+
+function endRalphSplitterDrag(event) {
+  ralphSplitterActive = false;
+  document.removeEventListener('mousemove', ralphSplitterDrag);
+  document.removeEventListener('mouseup', endRalphSplitterDrag);
+}
+
 // ── Harness mode switching ────────────────────────────────────────────────────
 let harnessMode = 'orchestrated';
 let harnessOrchTargets = []; // targets the master can use: [{id, key, label}]
