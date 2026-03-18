@@ -383,7 +383,8 @@ class Operator:
                  pre_hook: bool = False, post_hook: bool = False,
                  autonomous: bool = False,
                  tool_registry=None,
-                 sqlite_store=None):
+                 sqlite_store=None,
+                 wire_log=None):
         from beigebox.tools.registry import ToolRegistry
 
         self.cfg = get_config()
@@ -391,6 +392,7 @@ class Operator:
         self.vector_store = vector_store
         self._blob_store = blob_store
         self._wire_db = sqlite_store  # optional SQLiteStore for structured tap events
+        self._wire_log = wire_log      # optional WireLog for JSONL dual-write
         self._session_id: str | None = None
         self._pre_hook = pre_hook
         self._post_hook = post_hook
@@ -749,22 +751,43 @@ class Operator:
     def _wire(self, event_type: str, run_id: str, content: str = "",
               turn_id: str | None = None, tool_id: str | None = None,
               meta: dict | None = None) -> None:
-        """Write a structured wire event to SQLite tap if available. Never raises."""
-        if self._wire_db is None:
-            return
-        try:
-            self._wire_db.log_wire_event(
-                event_type=event_type,
-                source="operator",
-                content=content,
-                model=self._model,
-                run_id=run_id,
-                turn_id=turn_id,
-                tool_id=tool_id,
-                meta=meta,
-            )
-        except Exception as e:
-            logger.debug("_wire event failed (%s): %s", event_type, e)
+        """Write a structured wire event to SQLite tap and/or WireLog JSONL. Never raises."""
+        token_estimate = max(1, len(content) // 4) if content else 0
+        elapsed_ms = (meta or {}).get("elapsed_ms")
+
+        if self._wire_db is not None:
+            try:
+                self._wire_db.log_wire_event(
+                    event_type=event_type,
+                    source="operator",
+                    content=content,
+                    model=self._model,
+                    run_id=run_id,
+                    turn_id=turn_id,
+                    tool_id=tool_id,
+                    meta=meta,
+                )
+            except Exception as e:
+                logger.debug("_wire SQLite failed (%s): %s", event_type, e)
+
+        if self._wire_log is not None:
+            try:
+                self._wire_log.log(
+                    direction="internal",
+                    role="operator",
+                    content=content,
+                    model=self._model,
+                    token_count=token_estimate,
+                    latency_ms=elapsed_ms,
+                    event_type=event_type,
+                    source="operator",
+                    run_id=run_id,
+                    turn_id=turn_id,
+                    tool_id=tool_id,
+                    meta=meta,
+                )
+            except Exception as e:
+                logger.debug("_wire JSONL failed (%s): %s", event_type, e)
 
     # ------------------------------------------------------------------
     # Tool execution
@@ -839,6 +862,13 @@ class Operator:
         self._reload_skills_if_changed()
         if not question.strip():
             return "No question provided."
+
+        _run_id = uuid.uuid4().hex[:12]
+        _t_run_start = time.monotonic()
+        _cumulative_tokens = 0
+        self._wire("operator_start", _run_id, content=question[:500],
+                   meta={"model": self._model, "max_iter": self._max_iter,
+                         "question_len": len(question)})
 
         _run_deadline = time.monotonic() + self._run_timeout
         messages = [{"role": "system", "content": self._system}]
@@ -934,10 +964,34 @@ class Operator:
                 # valid JSON string instead of Python's str(dict) representation.
                 tool_input = json.dumps(_inp) if isinstance(_inp, (dict, list)) else str(_inp)
                 thought = parsed.get("thought", "")
+                _turn_id = f"{_run_id}:{iteration}"
+                _tool_id = f"{_turn_id}:{tool_name}"
 
                 logger.info("Operator tool call: %s(%r) — %s", tool_name, tool_input, thought)
 
+                if thought:
+                    _cumulative_tokens += len(thought) // 4
+                    self._wire("operator_thought", _run_id, content=thought,
+                               turn_id=_turn_id,
+                               meta={"iteration": iteration, "tool_next": tool_name})
+
+                self._wire("operator_tool_call", _run_id,
+                           content=tool_input[:100],
+                           turn_id=_turn_id, tool_id=_tool_id,
+                           meta={"tool": tool_name, "iteration": iteration,
+                                 "input_preview": tool_input[:100]})
+
+                _t_tool = time.monotonic()
                 observation = self._run_tool(tool_name, tool_input)
+                _tool_elapsed = round((time.monotonic() - _t_tool) * 1000, 1)
+                _cumulative_tokens += len(observation) // 4
+
+                self._wire("operator_tool_result", _run_id,
+                           content=observation[:500],
+                           turn_id=_turn_id, tool_id=_tool_id,
+                           meta={"tool": tool_name, "iteration": iteration,
+                                 "elapsed_ms": _tool_elapsed,
+                                 "result_len": len(observation)})
 
                 # --- Loop detection ---
                 _recent_calls.append((tool_name, tool_input))
@@ -962,8 +1016,19 @@ class Operator:
                         f"Stop using it. Try a completely different approach or give your best answer based on what you already know."
                     )
 
+                self._wire("operator_iteration_end", _run_id,
+                           turn_id=_turn_id,
+                           meta={"iteration": iteration,
+                                 "cumulative_tokens": _cumulative_tokens,
+                                 "tool": tool_name,
+                                 "elapsed_ms": round((time.monotonic() - _t_run_start) * 1000, 1)})
+
                 messages.append({"role": "assistant", "content": raw})
                 if _loop_nudge:
+                    self._wire("operator_nudge", _run_id, content=_loop_nudge,
+                               turn_id=_turn_id,
+                               meta={"iteration": iteration, "tool_name": tool_name,
+                                     "consec_fail": _consec_fail.get(tool_name, 0)})
                     messages.append({"role": "user", "content": _loop_nudge})
                 else:
                     messages.append({
@@ -974,7 +1039,14 @@ class Operator:
 
             # Final answer
             if "answer" in parsed:
-                return str(parsed["answer"])
+                _answer = str(parsed["answer"])
+                _cumulative_tokens += len(_answer) // 4
+                self._wire("operator_finish", _run_id, content=_answer[:500],
+                           meta={"total_iterations": iteration + 1,
+                                 "total_elapsed_ms": round((time.monotonic() - _t_run_start) * 1000, 1),
+                                 "cumulative_tokens": _cumulative_tokens,
+                                 "status": "answer"})
+                return _answer
 
             # JSON parsed but has no usable keys — covers {}, {"thought": "..."}-only, or wrong keys
             bad_keys = [k for k in parsed if k not in ("thought", "tool", "input", "answer")]
@@ -999,8 +1071,18 @@ class Operator:
                 messages.append({"role": "user", "content": nudge})
                 continue
             content = parsed.get("thought", "") or str(parsed)
+            self._wire("operator_finish", _run_id, content=content[:500],
+                       meta={"total_iterations": iteration + 1,
+                             "total_elapsed_ms": round((time.monotonic() - _t_run_start) * 1000, 1),
+                             "cumulative_tokens": _cumulative_tokens,
+                             "status": "thought_fallback"})
             return content
 
+        self._wire("operator_finish", _run_id,
+                   meta={"total_iterations": self._max_iter,
+                         "total_elapsed_ms": round((time.monotonic() - _t_run_start) * 1000, 1),
+                         "cumulative_tokens": _cumulative_tokens,
+                         "status": "max_iterations"})
         return "Operator reached max iterations without a final answer. Try rephrasing your question."
 
     async def run_stream(self, question: str, history: list[dict] | None = None):
@@ -1040,6 +1122,7 @@ class Operator:
         _recent_calls: list[tuple[str, str]] = []
         _consec_fail: dict[str, int] = {}
         _run_deadline = time.monotonic() + self._run_timeout
+        _cumulative_tokens = 0
 
         for iteration in range(self._max_iter):
             if time.monotonic() > _run_deadline:
@@ -1119,20 +1202,30 @@ class Operator:
                 logger.info("Operator stream tool call: %s(%r) — %s", tool_name, tool_input, thought)
 
                 if thought:
+                    _cumulative_tokens += len(thought) // 4
                     self._wire("op_thought", _run_id, content=thought,
                                turn_id=_turn_id,
                                meta={"iteration": iteration, "tool_next": tool_name})
+                    self._wire("operator_thought", _run_id, content=thought,
+                               turn_id=_turn_id,
+                               meta={"iteration": iteration, "tool_next": tool_name})
 
-                self._wire("op_tool_call", _run_id, content=tool_input[:500],
+                self._wire("op_tool_call", _run_id, content=tool_input[:100],
                            turn_id=_turn_id, tool_id=_tool_id,
                            meta={"tool_name": tool_name, "iteration": iteration,
+                                 "input_preview": tool_input[:100],
                                  "input_len": len(tool_input)})
+                self._wire("operator_tool_call", _run_id, content=tool_input[:100],
+                           turn_id=_turn_id, tool_id=_tool_id,
+                           meta={"tool": tool_name, "iteration": iteration,
+                                 "input_preview": tool_input[:100]})
 
                 yield {"type": "tool_call", "tool": tool_name, "input": tool_input, "thought": thought}
 
                 _t_tool = time.monotonic()
                 observation = await asyncio.get_running_loop().run_in_executor(None, self._run_tool, tool_name, tool_input)
                 _tool_elapsed = round((time.monotonic() - _t_tool) * 1000, 1)
+                _cumulative_tokens += len(observation) // 4
 
                 self._wire("op_tool_result", _run_id, content=observation[:500],
                            turn_id=_turn_id, tool_id=_tool_id,
@@ -1167,9 +1260,20 @@ class Operator:
                         f"Stop using it. Try a completely different approach or give your best answer based on what you already know."
                     )
 
+                self._wire("operator_iteration_end", _run_id,
+                           turn_id=_turn_id,
+                           meta={"iteration": iteration,
+                                 "cumulative_tokens": _cumulative_tokens,
+                                 "tool": tool_name,
+                                 "elapsed_ms": round((time.monotonic() - _t_run_start) * 1000, 1)})
+
                 messages.append({"role": "assistant", "content": raw})
                 if _loop_nudge:
                     self._wire("op_loop_nudge", _run_id, content=_loop_nudge,
+                               turn_id=_turn_id,
+                               meta={"iteration": iteration, "tool_name": tool_name,
+                                     "consec_fail": _consec_fail.get(tool_name, 0)})
+                    self._wire("operator_nudge", _run_id, content=_loop_nudge,
                                turn_id=_turn_id,
                                meta={"iteration": iteration, "tool_name": tool_name,
                                      "consec_fail": _consec_fail.get(tool_name, 0)})
@@ -1183,10 +1287,16 @@ class Operator:
 
             if "answer" in parsed:
                 _answer = str(parsed["answer"])
+                _cumulative_tokens += len(_answer) // 4
                 self._wire("op_answer", _run_id, content=_answer[:500],
                            meta={"iteration": iteration,
                                  "total_elapsed_ms": round((time.monotonic() - _t_run_start) * 1000, 1),
                                  "answer_len": len(_answer)})
+                self._wire("operator_finish", _run_id, content=_answer[:500],
+                           meta={"total_iterations": iteration + 1,
+                                 "total_elapsed_ms": round((time.monotonic() - _t_run_start) * 1000, 1),
+                                 "cumulative_tokens": _cumulative_tokens,
+                                 "status": "answer"})
                 yield {"type": "answer", "content": _answer}
                 return
 
@@ -1214,7 +1324,17 @@ class Operator:
                 continue
             # Last resort — surface the thought as the answer
             content = parsed.get("thought", "") or str(parsed)
+            self._wire("operator_finish", _run_id, content=content[:500],
+                       meta={"total_iterations": iteration + 1,
+                             "total_elapsed_ms": round((time.monotonic() - _t_run_start) * 1000, 1),
+                             "cumulative_tokens": _cumulative_tokens,
+                             "status": "thought_fallback"})
             yield {"type": "answer", "content": content}
             return
 
+        self._wire("operator_finish", _run_id,
+                   meta={"total_iterations": self._max_iter,
+                         "total_elapsed_ms": round((time.monotonic() - _t_run_start) * 1000, 1),
+                         "cumulative_tokens": _cumulative_tokens,
+                         "status": "max_iterations"})
         yield {"type": "error", "message": "Operator reached max iterations without a final answer. Try rephrasing your question."}

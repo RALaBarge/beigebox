@@ -271,12 +271,31 @@ class HarnessOrchestrator:
 
             results = []
             async for r in self._dispatch(tasks):
+                _task_turn_id = f"{_turn_id}:{r.get('task_id', '')}"
+                _r_content = r.get("content", "")
                 self._wire("harness_turn", _run_id,
-                           content=r.get("content", "")[:500],
-                           turn_id=f"{_turn_id}:{r.get('task_id', '')}",
+                           content=_r_content[:500],
+                           turn_id=_task_turn_id,
                            meta={"round": round_num, "target": r.get("target"),
                                  "status": r.get("status"), "latency_ms": r.get("latency_ms"),
-                                 "attempts": r.get("attempts", 1)})
+                                 "attempts": r.get("attempts", 1),
+                                 "content_tokens": max(1, len(_r_content) // 4)})
+
+                # Attempt thought extraction from turn content (JSON responses from operator)
+                _extracted_thought: str | None = None
+                try:
+                    _parsed_turn = json.loads(_r_content)
+                    if isinstance(_parsed_turn, dict):
+                        _extracted_thought = _parsed_turn.get("thought") or _parsed_turn.get("reasoning")
+                except Exception:
+                    pass
+                if _extracted_thought:
+                    self._wire("harness_thought", _run_id,
+                               content=_extracted_thought[:500],
+                               turn_id=_task_turn_id,
+                               meta={"round": round_num, "target": r.get("target"),
+                                     "source": "turn_content"})
+
                 yield _ev("result", round=round_num, **r)
                 history.append({"round": round_num, **r})
                 results.append(r)
