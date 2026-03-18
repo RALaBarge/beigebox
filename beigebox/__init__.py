@@ -8,4 +8,4 @@ Dual-licensed under:
 See LICENSE.md and COMMERCIAL_LICENSE.md for details.
 """
 
-__version__ = "1.3.3.1"
+__version__ = "1.3.5"
