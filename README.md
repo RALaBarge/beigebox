@@ -582,7 +582,16 @@ tools:
 - `eval(js)` — run JavaScript and return result
 - `list_tabs()` — enumerate open tabs
 
-**Phase 1:** Basic navigation, screenshot, DOM reading, element interaction. **Phase 2** will add network inspection, performance tracing, and console log capture.
+**Phase 1:** Navigate, screenshot, DOM snapshot, click, type, scroll, eval, list tabs.
+
+**Phase 2 (Complete):**
+- `network` — Resource Timing API for request/response capture (duration, size, type)
+- `console` — Hooked console.log/warn/error with up to 100 entries
+- `performance` — Core Web Vitals (FCP, LCP, CLS), page load timing
+- `cookies` — List or clear cookies for current origin
+- `storage` — Inspect/clear localStorage, sessionStorage
+
+**Phase 3 (Future):** IndexedDB inspection, Service Worker control, network throttling simulation.
 
 ---
 
