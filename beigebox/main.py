@@ -54,6 +54,7 @@ from beigebox.mcp_server import McpServer
 from beigebox.amf_mesh import AmfMeshAdvertiser
 from beigebox.app_state import AppState
 from beigebox.observability.egress import build_egress_hooks, start_egress_hooks, stop_egress_hooks
+from beigebox.metrics import collect_system_metrics_async
 
 
 logger = logging.getLogger(__name__)
@@ -1394,6 +1395,24 @@ async def api_backends():
             "primary_backend": cfg.get("backend", {}).get("url", ""),
         })
     backends_list = await _st.backend_router.health()
+
+    # Passive model spec discovery: upsert any loaded models observed in hw_stats
+    if _st.sqlite_store:
+        for b in backends_list:
+            for hw in (b.get("hw_stats") or []):
+                model_name = hw.get("model", "")
+                vram_mb = hw.get("vram_used_mb") or None  # None, not 0
+                if model_name:
+                    try:
+                        _st.sqlite_store.store_model_spec(
+                            model_name=model_name,
+                            backend=b.get("name", "unknown"),
+                            vram_mb=vram_mb,
+                            discovery_method="ollama_ps",
+                        )
+                    except Exception as _e:
+                        logger.debug("model_spec upsert failed for %s: %s", model_name, _e)
+
     return JSONResponse({
         "enabled": True,
         "backends": backends_list,  # list, not dict
@@ -1495,6 +1514,49 @@ async def api_backend_models(backend_name: str):
     except Exception as e:
         logger.warning("Failed to list models from backend '%s': %s", backend_name, e)
         return JSONResponse({"models": []})
+
+
+@app.get("/api/v1/system-metrics")
+async def api_system_metrics():
+    """
+    Real-time CPU, RAM, and GPU utilization with temperature probes.
+    Collected with psutil + pynvml; gracefully degrades if libraries absent.
+    Cached 1s server-side; safe to poll at 2s intervals from the frontend.
+    """
+    data = await collect_system_metrics_async()
+    return JSONResponse(data)
+
+
+@app.get("/api/v1/model-specs")
+async def api_model_specs():
+    """Return all discovered model resource specs from SQLite."""
+    _st = get_state()
+    if not _st.sqlite_store:
+        return JSONResponse({"error": "storage not initialized"}, status_code=503)
+    specs = _st.sqlite_store.get_model_specs()
+    return JSONResponse({"specs": specs, "count": len(specs)})
+
+
+@app.get("/api/v1/model-specs/export")
+async def api_model_specs_export():
+    """Download all model specs as CSV."""
+    import io
+    import csv
+    _st = get_state()
+    if not _st.sqlite_store:
+        return JSONResponse({"error": "storage not initialized"}, status_code=503)
+    specs = _st.sqlite_store.get_model_specs()
+    buf = io.StringIO()
+    if specs:
+        writer = csv.DictWriter(buf, fieldnames=specs[0].keys())
+        writer.writeheader()
+        writer.writerows(specs)
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(
+        buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=model_specs.csv"},
+    )
 
 
 # ---------------------------------------------------------------------------

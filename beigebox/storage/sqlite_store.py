@@ -129,6 +129,23 @@ CREATE INDEX IF NOT EXISTS idx_eval_results_run
     ON eval_results(run_id);
 CREATE INDEX IF NOT EXISTS idx_eval_results_ts
     ON eval_results(ts);
+
+CREATE TABLE IF NOT EXISTS model_specs (
+    id INTEGER PRIMARY KEY,
+    model_name TEXT UNIQUE NOT NULL,
+    backend TEXT NOT NULL,
+    vram_mb INTEGER,
+    ram_mb INTEGER,
+    params_billions REAL,
+    discovered_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    discovery_method TEXT,
+    last_seen_loaded TEXT,
+    notes TEXT,
+    misc1 TEXT,
+    misc2 TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_model_specs_name
+    ON model_specs(model_name);
 """
 
 # Migrations: append-only ALTER TABLE statements that add new columns to
@@ -830,4 +847,44 @@ class SQLiteStore:
                 params,
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def store_model_spec(
+        self,
+        model_name: str,
+        backend: str,
+        vram_mb: int | None = None,
+        ram_mb: int | None = None,
+        params_billions: float | None = None,
+        discovery_method: str = "ollama_ps",
+        notes: str | None = None,
+    ) -> None:
+        """Upsert a model spec row. Called passively from health/metrics checks."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO model_specs
+                   (model_name, backend, vram_mb, ram_mb, params_billions,
+                    discovered_at, discovery_method, last_seen_loaded, notes)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(model_name) DO UPDATE SET
+                     backend           = excluded.backend,
+                     vram_mb           = COALESCE(excluded.vram_mb, vram_mb),
+                     ram_mb            = COALESCE(excluded.ram_mb, ram_mb),
+                     params_billions   = COALESCE(excluded.params_billions, params_billions),
+                     discovery_method  = excluded.discovery_method,
+                     last_seen_loaded  = excluded.last_seen_loaded,
+                     notes             = COALESCE(excluded.notes, notes)
+                """,
+                (model_name, backend, vram_mb, ram_mb, params_billions,
+                 now, discovery_method, now, notes),
+            )
+
+    def get_model_specs(self) -> list[dict]:
+        """Return all stored model specs, most recently seen first."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM model_specs ORDER BY last_seen_loaded DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
 

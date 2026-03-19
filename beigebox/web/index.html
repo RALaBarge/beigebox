@@ -75,6 +75,7 @@
   }
   .status-dot.ok  { background: var(--green); box-shadow: 0 0 6px var(--green); }
   .status-dot.err { background: var(--red);   box-shadow: 0 0 6px var(--red);   }
+  .sys-m { font-size: 10px; color: var(--fg-muted); font-family: inherit; letter-spacing: 0.3px; }
   #clock { color: var(--fg-muted); font-size: 11px; }
 
   /* ── Tabs ────────────────────────────────────────────────────────────── */
@@ -1311,6 +1312,11 @@
   <div class="status-bar">
     <span><span class="status-dot" id="proxy-dot"></span><span id="proxy-status" style="font-size:11px;color:var(--fg-dim)">connecting…</span></span>
     <span id="ctx-usage"></span>
+    <span id="sysmetrics" title="" style="display:flex;gap:8px;align-items:center">
+      <span id="sys-cpu" class="sys-m">CPU —</span>
+      <span id="sys-ram" class="sys-m">RAM —</span>
+      <span id="sys-gpu" class="sys-m"></span>
+    </span>
     <span id="vi-pill" onclick="toggleViMode()" title="toggle vi mode">π</span>
     <span id="clock"></span>
   </div>
@@ -2203,6 +2209,65 @@ async function pollHealth() {
 pollHealth();
 setInterval(pollHealth, 10000);
 
+function _sysColor(pct) {
+  if (pct == null) return 'var(--fg-muted)';
+  return pct > 85 ? 'var(--red)' : pct > 70 ? 'var(--yellow)' : 'var(--green)';
+}
+
+function _buildMetricsTooltip(d) {
+  const lines = [];
+  if (d.cpu_temp_c != null) lines.push(`CPU temp: ${d.cpu_temp_c}°C`);
+  if (d.ram_total_mb != null) lines.push(`RAM: ${d.ram_used_mb} / ${d.ram_total_mb} MB`);
+  (d.gpus || []).forEach(g => {
+    lines.push(`GPU ${g.id} ${g.name}: ${g.load_percent}% load, ${g.memory_used_mb}/${g.memory_total_mb} MB`);
+    if (g.temp_c != null) lines.push(`  temp: ${g.temp_c}°C`);
+  });
+  return lines.join('\n');
+}
+
+async function pollSystemMetrics() {
+  try {
+    const d = await api('/api/v1/system-metrics');
+
+    const cpuEl = document.getElementById('sys-cpu');
+    const ramEl = document.getElementById('sys-ram');
+    const gpuEl = document.getElementById('sys-gpu');
+
+    if (cpuEl) {
+      const tempStr = d.cpu_temp_c != null ? ` ${Math.round(d.cpu_temp_c)}°` : '';
+      cpuEl.textContent = d.cpu_percent != null ? `CPU ${Math.round(d.cpu_percent)}%${tempStr}` : 'CPU —';
+      cpuEl.style.color = _sysColor(d.cpu_percent);
+    }
+
+    if (ramEl) {
+      ramEl.textContent = d.ram_percent != null ? `RAM ${Math.round(d.ram_percent)}%` : 'RAM —';
+      ramEl.style.color = _sysColor(d.ram_percent);
+    }
+
+    if (gpuEl) {
+      if (d.gpus && d.gpus.length > 0) {
+        const g = d.gpus[0];
+        const memPct = g.memory_total_mb > 0 ? (g.memory_used_mb / g.memory_total_mb * 100) : null;
+        const loadStr = `GPU ${Math.round(g.load_percent)}%`;
+        const memStr  = memPct != null ? ` ${Math.round(memPct)}% VRAM` : '';
+        gpuEl.textContent = loadStr + memStr;
+        gpuEl.style.color = _sysColor(Math.max(g.load_percent, memPct ?? 0));
+      } else {
+        gpuEl.textContent = '';
+      }
+    }
+
+    const wrapper = document.getElementById('sysmetrics');
+    if (wrapper) wrapper.title = _buildMetricsTooltip(d);
+
+  } catch {
+    const cpuEl = document.getElementById('sys-cpu');
+    if (cpuEl) { cpuEl.textContent = 'CPU —'; cpuEl.style.color = 'var(--fg-muted)'; }
+  }
+}
+pollSystemMetrics();
+setInterval(pollSystemMetrics, 2000);
+
 async function resetPerfStats() {
   await api('/api/v1/model-performance/reset', { method: 'POST' });
   loadDashboard();
@@ -2213,7 +2278,7 @@ async function loadDashboard() {
   const el = document.getElementById('dash-body');
   el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
   try {
-    const [status, stats, backends, info, costs, perf, routing, orBal] = await Promise.allSettled([
+    const [status, stats, backends, info, costs, perf, routing, orBal, modelSpecs] = await Promise.allSettled([
       api('/api/v1/status'),
       api('/api/v1/stats'),
       api('/api/v1/backends'),
@@ -2222,6 +2287,7 @@ async function loadDashboard() {
       api('/api/v1/model-performance?days=30'),
       api('/api/v1/routing-stats'),
       api('/api/v1/openrouter/balance'),
+      api('/api/v1/model-specs'),
     ]);
 
     let html = '';
@@ -2360,6 +2426,36 @@ async function loadDashboard() {
       const inf = info.status === 'fulfilled' ? info.value : {};
       html += subsystem('Primary Backend', true, esc(inf.backend?.url || bk.primary_backend || '—'));
       html += `<div style="color:var(--fg-muted);font-size:11px;padding:4px 0">Multi-backend routing disabled (backends_enabled: false)</div>`;
+    }
+
+    // ── Model Resource Specs ──
+    const specs = modelSpecs.status === 'fulfilled' ? modelSpecs.value : {};
+    const specsList = specs.specs || [];
+    if (specsList.length > 0) {
+      html += '<div class="section-header">Model Resource Specs</div>';
+      html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px">';
+      html += '<tr style="color:var(--fg-muted);border-bottom:1px solid var(--bg-border)">';
+      html += '<th style="text-align:left;padding:4px;border-right:1px solid var(--bg-border)">Model</th>';
+      html += '<th style="text-align:left;padding:4px;border-right:1px solid var(--bg-border)">Backend</th>';
+      html += '<th style="text-align:right;padding:4px;border-right:1px solid var(--bg-border)">VRAM (MB)</th>';
+      html += '<th style="text-align:left;padding:4px;border-right:1px solid var(--bg-border)">Method</th>';
+      html += '<th style="text-align:left;padding:4px">Last Seen</th>';
+      html += '</tr>';
+      specsList.forEach((spec, idx) => {
+        const rowStyle = idx % 2 === 0 ? 'background:var(--bg)' : 'background:var(--bg-alt)';
+        const vramStr = spec.vram_mb != null ? spec.vram_mb : '—';
+        const lastSeen = spec.last_seen_loaded
+          ? new Date(spec.last_seen_loaded).toLocaleDateString() + ' ' + new Date(spec.last_seen_loaded).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
+          : '—';
+        html += `<tr style="${rowStyle};border-bottom:1px solid var(--bg-border)">`;
+        html += `<td style="padding:4px;border-right:1px solid var(--bg-border);color:var(--fg)">${esc(spec.model_name)}</td>`;
+        html += `<td style="padding:4px;border-right:1px solid var(--bg-border);color:var(--fg-muted)">${esc(spec.backend)}</td>`;
+        html += `<td style="padding:4px;border-right:1px solid var(--bg-border);text-align:right;color:var(--fg)">${vramStr}</td>`;
+        html += `<td style="padding:4px;border-right:1px solid var(--bg-border);color:var(--fg-muted)">${esc(spec.discovery_method || '—')}</td>`;
+        html += `<td style="padding:4px;color:var(--fg-muted)">${lastSeen}</td>`;
+        html += '</tr>';
+      });
+      html += '</table></div>';
     }
 
     // ── Info ──

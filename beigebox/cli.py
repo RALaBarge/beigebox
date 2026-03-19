@@ -659,6 +659,148 @@ def cmd_index_docs(args):
     print("  Operator can now search these docs via 'document_search' tool.")
 
 
+def cmd_discover_models(args):
+    """Discover and display model resource specs from a running BeigeBox instance."""
+    import httpx
+
+    url = args.url or "http://localhost:1337"
+    try:
+        backends = httpx.get(f"{url}/api/v1/backends", timeout=5).json()
+        metrics = httpx.get(f"{url}/api/v1/system-metrics", timeout=5).json()
+        specs = httpx.get(f"{url}/api/v1/model-specs", timeout=5).json()
+    except Exception as e:
+        print(f"  ✗  Cannot reach BeigeBox at {url}: {e}")
+        return
+
+    print(BANNER)
+    print("  Model Resource Discovery")
+    print("  " + "─" * 60)
+
+    # Currently loaded models from Ollama /api/ps (via hw_stats)
+    loaded = []
+    if backends.get("enabled"):
+        for b in backends.get("backends", []):
+            for hw in (b.get("hw_stats") or []):
+                loaded.append({**hw, "backend": b.get("name", "?")})
+
+    if loaded:
+        print()
+        print("  Currently loaded models:")
+        print(f"  {'Model':<35} {'Backend':<12} {'VRAM MB':>8} {'Layers':>10} {'Ctx':>8}")
+        print("  " + "─" * 75)
+        for m in loaded:
+            layers = (
+                f"{m['gpu_layers']}/{m['total_layers']}"
+                if m.get("total_layers")
+                else str(m.get("gpu_layers", 0))
+            )
+            print(
+                f"  {m['model']:<35} {m['backend']:<12} {m.get('vram_used_mb', 0):>8} {layers:>10} {m.get('context_window', 0):>8}"
+            )
+
+    # GPU info
+    gpus = metrics.get("gpus", [])
+    if gpus:
+        print()
+        print("  GPU(s):")
+        for g in gpus:
+            mem_used = g.get("memory_used_mb", 0)
+            mem_total = g.get("memory_total_mb", 0)
+            headroom = mem_total - mem_used if mem_total else 0
+            print(
+                f"  [{g['id']}] {g['name']} — {mem_used}/{mem_total} MB used — {headroom} MB free"
+            )
+
+    # All discovered specs from SQLite
+    all_specs = specs.get("specs", [])
+    if all_specs:
+        print()
+        print("  All discovered model specs (SQLite):")
+        print(
+            f"  {'Model':<35} {'Backend':<12} {'VRAM MB':>8} {'Method':<14} {'Last seen'}"
+        )
+        print("  " + "─" * 85)
+        for s in all_specs:
+            last = s.get("last_seen_loaded", "")[:19] if s.get("last_seen_loaded") else "—"
+            vram = str(s.get("vram_mb", "—")) if s.get("vram_mb") else "—"
+            print(
+                f"  {s['model_name']:<35} {s['backend']:<12} {vram:>8} {s.get('discovery_method','?'):<14} {last}"
+            )
+    else:
+        print()
+        print("  No model specs discovered yet. Run a model to populate.")
+
+    print()
+
+
+def cmd_deployment_plan(args):
+    """Print a capacity summary: VRAM headroom and potential OOM risks."""
+    import httpx
+
+    url = args.url or "http://localhost:1337"
+    try:
+        backends = httpx.get(f"{url}/api/v1/backends", timeout=5).json()
+        metrics = httpx.get(f"{url}/api/v1/system-metrics", timeout=5).json()
+        specs = httpx.get(f"{url}/api/v1/model-specs", timeout=5).json()
+    except Exception as e:
+        print(f"  ✗  Cannot reach BeigeBox at {url}: {e}")
+        return
+
+    print(BANNER)
+    print("  Deployment Capacity Plan")
+    print("  " + "─" * 60)
+
+    gpus = metrics.get("gpus", [])
+    all_specs = specs.get("specs", [])
+
+    # Build per-GPU VRAM budget
+    if gpus:
+        print()
+        print("  GPU VRAM:")
+        for g in gpus:
+            used = g.get("memory_used_mb", 0)
+            total = g.get("memory_total_mb", 0)
+            free = total - used
+            bar_pct = used / total if total else 0
+            bar_filled = int(bar_pct * 20)
+            bar = "█" * bar_filled + "░" * (20 - bar_filled)
+            warn = " ⚠ HIGH" if bar_pct > 0.85 else (" ~ warn" if bar_pct > 0.70 else "")
+            print(f"  GPU {g['id']} {g['name']}")
+            print(
+                f"    [{bar}] {used}/{total} MB ({bar_pct*100:.0f}% used){warn}"
+            )
+            print(f"    Free: {free} MB")
+
+    # Per-model footprint from discovered specs
+    if all_specs:
+        print()
+        print("  Known model VRAM footprints:")
+        for s in all_specs:
+            vram = s.get("vram_mb")
+            vstr = f"{vram} MB" if vram else "unknown"
+            # Flag if known vram > free VRAM on any GPU
+            risk = ""
+            if vram and gpus:
+                for g in gpus:
+                    free = g.get("memory_total_mb", 0) - g.get("memory_used_mb", 0)
+                    if vram > free:
+                        risk = f"  ⚠ OOM risk on GPU {g['id']} ({free} MB free)"
+            print(f"  {s['model_name']:<35} {vstr:>10}{risk}")
+
+    # System RAM
+    print()
+    ram_pct = metrics.get("ram_percent")
+    ram_used = metrics.get("ram_used_mb")
+    ram_total = metrics.get("ram_total_mb")
+    if ram_pct is not None:
+        ram_warn = (
+            " ⚠ HIGH" if ram_pct > 85 else (" ~ warn" if ram_pct > 70 else "")
+        )
+        print(f"  System RAM: {ram_used}/{ram_total} MB ({ram_pct:.0f}% used){ram_warn}")
+
+    print()
+
+
 # ---------------------------------------------------------------------------
 # Parser with aliases
 # ---------------------------------------------------------------------------
@@ -783,7 +925,21 @@ def main():
         p.add_argument("query", nargs="*", help="Question to ask (omit for interactive REPL)")
     _add_command(sub, ["operator", "op"],
                  "Launch the Operator agent (web, data, shell)", cmd_operator, setup_operator)
-    
+
+    def setup_discover_models(p):
+        p.add_argument("--url", "-u", default=None,
+                       help="BeigeBox URL (default: http://localhost:1337)")
+
+    _add_command(sub, ["discover-models", "discover"],
+                 "Discover and display model resource specs", cmd_discover_models, setup_discover_models)
+
+    def setup_deployment_plan(p):
+        p.add_argument("--url", "-u", default=None,
+                       help="BeigeBox URL (default: http://localhost:1337)")
+
+    _add_command(sub, ["deployment-plan", "capacity"],
+                 "Print VRAM/RAM capacity plan and OOM risk flags", cmd_deployment_plan, setup_deployment_plan)
+
     args = parser.parse_args()
     if not args.command:
         cmd_tone(args)
