@@ -603,7 +603,13 @@ tools:
 - `cookies` — List or clear cookies for current origin
 - `storage` — Inspect/clear localStorage, sessionStorage
 
-**Phase 3 (Future):** IndexedDB inspection, Service Worker control, network throttling simulation.
+**Phase 3 (Complete):**
+- `indexeddb` — List databases & stores, clear IndexedDB
+- `service_worker` — List/unregister Service Workers
+- `cache` — List Cache Storage, clear individual or all caches
+- `throttle` — Network condition emulation (latency, bandwidth, offline mode)
+
+**Phase 4+ (Future):** WebAuthn testing, geolocation spoofing, device emulation, Media Session control.
 
 ---
 
