@@ -60,6 +60,18 @@ Adds Whisper (STT) on `:9000` and Kokoro (TTS) on `:8880` as sidecars. Enable in
 
 Uncomment the `deploy` block on the `ollama` service in `docker-compose.yaml` and restart. For per-model GPU layer control see [Per-model options](#per-model-options) below.
 
+### Production deployments
+
+BeigeBox ships with three production-ready deployment options:
+
+| Method | Best for | Docs |
+|---|---|---|
+| **Docker Compose** | Single-host production, persistent volumes, env-based config | [deploy/docker/](deploy/docker/) |
+| **Kubernetes** | Multi-node clusters, auto-scaling, managed upgrades | [deploy/k8s/](deploy/k8s/) |
+| **Systemd (bare metal)** | Linux servers, minimal overhead, VirtualEnv isolation | [deploy/systemd/](deploy/systemd/) |
+
+All three include health checks, security hardening, and persistent data management. See [deploy/README.md](deploy/README.md) for detailed setup instructions.
+
 ### Alternative frontends
 
 BeigeBox exposes a standard OpenAI-compatible `/v1` endpoint. You can use any compatible client:
