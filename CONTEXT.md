@@ -624,6 +624,74 @@ class ShadowAgent:
 
 ---
 
+## metrics.py — System metrics collection
+
+**File:** `beigebox/metrics.py` (122 lines)
+
+Module-level in-memory cache with 1s TTL to avoid repeated expensive system calls.
+
+**Key functions:**
+
+- `_collect_cpu()` → dict — Returns `cpu_percent` (via `psutil.cpu_percent(interval=0.1)`) and `cpu_temp_c` (via `psutil.sensors_temperatures()`). CPU temps: tries keys in order: `coretemp` → `k10temp` → `acpitz` → `acpi` → `cpu_thermal`. Takes first entry's `.current` field. Linux-only; gracefully returns None on macOS/Windows or if psutil absent.
+
+- `_collect_ram()` → dict — Returns `ram_percent`, `ram_used_mb`, `ram_total_mb` via `psutil.virtual_memory()`.
+
+- `_collect_gpus()` → list[dict] — NVIDIA GPU metrics via `pynvml`. Per GPU: `id, name, load_percent, memory_used_mb, memory_total_mb, temp_c`. Returns `[]` if pynvml not installed or NVIDIA driver absent; catches `ImportError` + `NVMLError` silently.
+
+- `collect_system_metrics()` → dict — Synchronous collection; caches result 1s (checks `time.monotonic()`); returns dict with cpu/ram/gpus + ISO timestamp.
+
+- `collect_system_metrics_async()` → Awaitable[dict] — Runs `collect_system_metrics()` via `loop.run_in_executor()` to avoid blocking event loop (psutil.cpu_percent does 100ms blocking sleep).
+
+**All collection is try/except — never raises. Returns None/[] when unavailable.**
+
+---
+
+## Model resource visibility (merged main 2026-03-19)
+
+**Three-part system for observing model VRAM footprints and system capacity:**
+
+### Part 1: Passive Model Specs Discovery
+
+**SQLite table:** `model_specs` (sqlite_store.py ~line 133)
+```
+id, model_name (UNIQUE), backend, vram_mb, ram_mb, params_billions, discovered_at,
+discovery_method, last_seen_loaded, notes, misc1, misc2
+```
+
+**Methods:**
+- `store_model_spec(model_name, backend, vram_mb=None, ram_mb=None, params_billions=None, discovery_method='ollama_ps', notes=None)` — Upserts with `ON CONFLICT DO UPDATE SET ... COALESCE(excluded.vram_mb, vram_mb)`. Preserves prior GPU measurements when vram_mb=None (CPU-only runs don't overwrite real numbers).
+- `get_model_specs() → list[dict]` — `SELECT * ORDER BY last_seen_loaded DESC`
+
+**Passive upsert in `api_backends()`** (main.py ~line 1399): After `backends_list = await _st.backend_router.health()`, iterate backends and their hw_stats; call `store_model_spec()` for each loaded model with `discovery_method='ollama_ps'`. Non-blocking; guarded with try/except.
+
+### Part 2: Real-time System Metrics API
+
+**Three endpoints** (main.py ~line 1519):
+
+- `GET /api/v1/system-metrics` — Async; returns `{cpu_percent, cpu_temp_c, ram_percent, ram_used_mb, ram_total_mb, gpus: [...], timestamp}`. Calls `await collect_system_metrics_async()` (non-blocking). 1s server-side cache.
+
+- `GET /api/v1/model-specs` — Returns `{specs: [...], count: N}` from `sqlite_store.get_model_specs()`. Returns 503 if sqlite not initialized.
+
+- `GET /api/v1/model-specs/export` — CSV download via `csv.DictWriter`. Returns 503 if sqlite not initialized.
+
+### Part 3: Top-bar Metrics Display & CLI
+
+**Web UI** (index.html):
+- HTML: `#sysmetrics` span with `#sys-cpu`, `#sys-ram`, `#sys-gpu` children (GPU span starts empty for CPU-only systems).
+- CSS: `.sys-m` class (10px, muted color, inherited font).
+- JS: `pollSystemMetrics()` function runs every 2s; calls `/api/v1/system-metrics`; renders CPU %, RAM %, GPU % with _sysColor() helper (null→muted, >85→red, >70→yellow, else→green); _buildMetricsTooltip() shows per-GPU breakdown with temps.
+- Dashboard: Model Resource Specs panel added to `loadDashboard()` as 9th Promise.allSettled entry; renders table if `modelSpecs.specs.length > 0`.
+
+**CLI commands** (cli.py):
+
+- `beigebox discover-models` — Hits `/api/v1/backends`, `/api/v1/system-metrics`, `/api/v1/model-specs` on running server; prints currently-loaded models table (model, backend, VRAM MB, GPU layers, context window) + GPU inventory with free VRAM headroom + all discovered specs table from SQLite. Accepts `--url / -u` (default http://localhost:1337).
+
+- `beigebox deployment-plan` — Same API calls; prints ASCII VRAM bars (█░, 20-char) per GPU with ⚠ HIGH if >85% + per-model OOM risk flags (checks if vram_mb > free_vram) + system RAM summary with thresholds.
+
+**Dependencies added:** `psutil>=5.9.0`, `pynvml>=11.5.0` in pyproject.toml.
+
+---
+
 ## harness/autonomous — Context isolation (implemented 2026-03-13)
 
 Every autonomous turn gets a clean subagent call — `op.run_stream(cur_question, [])`.
