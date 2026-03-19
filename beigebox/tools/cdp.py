@@ -37,6 +37,12 @@ Operator call format:
     {"tool": "cdp.performance",   "input": ""}
     {"tool": "cdp.cookies",       "input": {"action": "list"}}
     {"tool": "cdp.storage",       "input": {"action": "list"}}
+
+    Phase 3 (IndexedDB, Service Workers, Cache, Throttling):
+    {"tool": "cdp.indexeddb",     "input": {"action": "list"}}
+    {"tool": "cdp.service_worker","input": {"action": "list"}}
+    {"tool": "cdp.cache",         "input": {"action": "list"}}
+    {"tool": "cdp.throttle",      "input": {"action": "set", "latency": 100, "download": 1000, "upload": 500}}
 """
 from __future__ import annotations
 
@@ -201,6 +207,12 @@ class CDPTool:
         '  cdp.cookies      — List/delete:      {"tool": "cdp.cookies", "input": {"action": "list"}}\n'
         '  cdp.storage      — LocalStorage/etc: {"tool": "cdp.storage", "input": {"action": "list"}}\n'
         "\n"
+        "PHASE 3 (IndexedDB, Service Workers, Cache, Throttling):\n"
+        '  cdp.indexeddb    — List DBs/stores: {"tool": "cdp.indexeddb", "input": {"action": "list"}}\n'
+        '  cdp.service_worker — List/unregister: {"tool": "cdp.service_worker", "input": {"action": "list"}}\n'
+        '  cdp.cache        — List cache names: {"tool": "cdp.cache", "input": {"action": "list"}}\n'
+        '  cdp.throttle     — Network throttle: {"tool": "cdp.throttle", "input": {"action": "set", "latency": 100, "download": 1000, "upload": 500}}\n'
+        "\n"
         "Requires Chrome/Chromium running with --remote-debugging-port=9222.\n"
         "Errors are returned as strings (never crash — check result for 'Error:' prefix)."
     )
@@ -283,6 +295,15 @@ class CDPTool:
             return await self._cookies(inp)
         elif method == "storage":
             return await self._storage(inp)
+        # Phase 3
+        elif method == "indexeddb":
+            return await self._indexeddb(inp)
+        elif method == "service_worker":
+            return await self._service_worker(inp)
+        elif method == "cache":
+            return await self._cache(inp)
+        elif method == "throttle":
+            return await self._throttle(inp)
         else:
             return f"Error: unknown CDP method '{method}'"
 
@@ -906,4 +927,239 @@ class CDPTool:
         except Exception as exc:
             self._client = None
             logger.warning("cdp._storage failed: %s", exc)
+            return f"Error: {exc}"
+
+    # ------------------------------------------------------------------
+    # PHASE 3: IndexedDB, Service Workers, Cache, Throttling
+    # ------------------------------------------------------------------
+
+    async def _indexeddb(self, inp: Any) -> str:
+        """List IndexedDB databases and object stores."""
+        try:
+            if isinstance(inp, dict):
+                action = inp.get("action", "list")
+                db_name = inp.get("db")
+            else:
+                action = "list"
+                db_name = None
+
+            client = await self._get_client()
+
+            if action == "list":
+                # Use Storage domain to enumerate IndexedDBs
+                result = await client.send("Storage.getIndexedDBDatabaseNames", {})
+                db_names = result.get("databaseNames", [])
+
+                if not db_names:
+                    return "No IndexedDB databases found."
+
+                lines = [f"IndexedDB databases ({len(db_names)}):"]
+                for db in db_names[:20]:  # Limit to first 20
+                    lines.append(f"  • {db}")
+
+                # Try to get key counts
+                expr = f"""(function(){{
+  const dbs = await indexedDB.databases();
+  const details = {{}};
+  for (const db of dbs) {{
+    try {{
+      const req = indexedDB.open(db.name);
+      req.onsuccess = () => {{
+        const conn = req.result;
+        const stores = Array.from(conn.objectStoreNames);
+        details[db.name] = stores;
+        conn.close();
+      }};
+    }} catch(e) {{}}
+  }}
+  return details;
+}})()"""
+                # Note: Promise-based indexedDB is complex; simplified for MVP
+                return "\n".join(lines) + "\n(Use Inspector for detailed store inspection)"
+
+            elif action == "clear":
+                if not db_name:
+                    return "Error: db name required for clear action"
+                expr = f"await indexedDB.deleteDatabase('{db_name}')"
+                await client.send("Runtime.evaluate", {
+                    "expression": expr,
+                    "returnByValue": True,
+                    "awaitPromise": True,
+                })
+                return f"IndexedDB '{db_name}' cleared."
+            else:
+                return f"Error: unknown indexeddb action '{action}'"
+        except Exception as exc:
+            self._client = None
+            logger.warning("cdp._indexeddb failed: %s", exc)
+            return f"Error: {exc}"
+
+    async def _service_worker(self, inp: Any) -> str:
+        """List or unregister Service Workers."""
+        try:
+            if isinstance(inp, dict):
+                action = inp.get("action", "list")
+            else:
+                action = "list"
+
+            client = await self._get_client()
+
+            if action == "list":
+                # Service Worker API is accessible via Runtime.evaluate
+                expr = """(function(){
+  if (!navigator.serviceWorker) return {error: 'Service Workers not supported'};
+  return navigator.serviceWorker.getRegistrations().then(regs => {
+    return regs.map(r => ({
+      scope: r.scope,
+      updateViaCache: r.updateViaCache,
+      active: r.active ? r.active.state : 'none',
+      waiting: r.waiting ? r.waiting.state : 'none'
+    }));
+  });
+})()"""
+                result = await client.send("Runtime.evaluate", {
+                    "expression": expr,
+                    "returnByValue": True,
+                    "awaitPromise": True,
+                })
+                data = result.get("result", {}).get("value")
+
+                if isinstance(data, dict) and "error" in data:
+                    return data["error"]
+
+                if not data:
+                    return "No Service Workers registered."
+
+                lines = [f"Service Workers ({len(data)}):"]
+                for sw in data:
+                    lines.append(f"  Scope: {sw.get('scope', '?')}")
+                    lines.append(f"    Active: {sw.get('active', '?')}, Waiting: {sw.get('waiting', '?')}")
+                return "\n".join(lines)
+
+            elif action == "unregister":
+                expr = """navigator.serviceWorker.getRegistrations().then(regs =>
+                  Promise.all(regs.map(r => r.unregister()))
+                ).then(results => results.length)"""
+                result = await client.send("Runtime.evaluate", {
+                    "expression": expr,
+                    "returnByValue": True,
+                    "awaitPromise": True,
+                })
+                count = result.get("result", {}).get("value", 0)
+                return f"Unregistered {count} Service Worker(s)."
+            else:
+                return f"Error: unknown service_worker action '{action}'"
+        except Exception as exc:
+            self._client = None
+            logger.warning("cdp._service_worker failed: %s", exc)
+            return f"Error: {exc}"
+
+    async def _cache(self, inp: Any) -> str:
+        """List or clear Cache Storage (Service Worker caches)."""
+        try:
+            if isinstance(inp, dict):
+                action = inp.get("action", "list")
+                cache_name = inp.get("name")
+            else:
+                action = "list"
+                cache_name = None
+
+            client = await self._get_client()
+
+            if action == "list":
+                expr = """caches.keys().then(names =>
+                  Promise.all(names.map(name =>
+                    caches.open(name).then(cache =>
+                      cache.keys().then(reqs => ({name, count: reqs.length}))
+                    )
+                  ))
+                )"""
+                result = await client.send("Runtime.evaluate", {
+                    "expression": expr,
+                    "returnByValue": True,
+                    "awaitPromise": True,
+                })
+                caches = result.get("result", {}).get("value", [])
+
+                if not caches:
+                    return "No cache stores found."
+
+                lines = [f"Cache stores ({len(caches)}):"]
+                for cache in caches:
+                    lines.append(f"  {cache.get('name', '?')} — {cache.get('count', 0)} entries")
+                return "\n".join(lines)
+
+            elif action == "clear":
+                if not cache_name:
+                    expr = "caches.keys().then(names => Promise.all(names.map(n => caches.delete(n)))).then(results => results.length)"
+                else:
+                    expr = f"caches.delete('{cache_name}').then(ok => ok ? 1 : 0)"
+                result = await client.send("Runtime.evaluate", {
+                    "expression": expr,
+                    "returnByValue": True,
+                    "awaitPromise": True,
+                })
+                count = result.get("result", {}).get("value", 0)
+                return f"Cleared {count} cache(s)."
+            else:
+                return f"Error: unknown cache action '{action}'"
+        except Exception as exc:
+            self._client = None
+            logger.warning("cdp._cache failed: %s", exc)
+            return f"Error: {exc}"
+
+    async def _throttle(self, inp: Any) -> str:
+        """Set network throttling to simulate slow connections."""
+        try:
+            if isinstance(inp, dict):
+                action = inp.get("action", "set")
+                latency = inp.get("latency", 0)  # ms
+                download = inp.get("download", -1)  # kbps, -1 = no throttle
+                upload = inp.get("upload", -1)     # kbps
+            else:
+                action = "set"
+                latency = 0
+                download = -1
+                upload = -1
+
+            client = await self._get_client()
+
+            if action == "set":
+                # Enable Network domain if not already
+                await client.send("Network.enable", {})
+                # Set throttling
+                await client.send("Network.emulateNetworkConditions", {
+                    "offline": False,
+                    "downloadThroughput": download,  # -1 to disable
+                    "uploadThroughput": upload,      # -1 to disable
+                    "latency": latency,              # ms
+                })
+                return f"Network throttling set: {latency}ms latency, {download} kbps down, {upload} kbps up"
+
+            elif action == "reset":
+                # Reset to no throttling
+                await client.send("Network.emulateNetworkConditions", {
+                    "offline": False,
+                    "downloadThroughput": -1,
+                    "uploadThroughput": -1,
+                    "latency": 0,
+                })
+                return "Network throttling disabled."
+
+            elif action == "offline":
+                # Simulate offline mode
+                await client.send("Network.emulateNetworkConditions", {
+                    "offline": True,
+                    "downloadThroughput": -1,
+                    "uploadThroughput": -1,
+                    "latency": 0,
+                })
+                return "Network set to offline mode."
+
+            else:
+                return f"Error: unknown throttle action '{action}' (use 'set', 'reset', or 'offline')"
+
+        except Exception as exc:
+            self._client = None
+            logger.warning("cdp._throttle failed: %s", exc)
             return f"Error: {exc}"
