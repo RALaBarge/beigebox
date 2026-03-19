@@ -520,7 +520,8 @@ class TestOrchestrationIntegration:
 
         # Verify state updated
         assert len(global_state["execution_log"]) == 1
-        assert "def hello()" in global_state["facts"]
+        assert len(global_state["facts"]) == 1
+        assert "def hello()" in global_state["facts"][0]  # Check substring
         assert "hello.py" in global_state["artifacts"]
 
     def test_workflow_with_invalid_response_retry(self):
