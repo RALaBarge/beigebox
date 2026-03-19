@@ -247,6 +247,15 @@ operator:
       - calculator
       - datetime
       - memory
+      - cdp
+    full:
+      - web_search
+      - web_scraper
+      - calculator
+      - datetime
+      - memory
+      - cdp
+      - document_search
 
   # Map fnmatch patterns (against model name) to a profile name.
   # Patterns are checked in order; first match wins.
@@ -362,7 +371,7 @@ tools:
   #                 {"tool": "cdp.eval", "input": "document.title"}
   #                 {"tool": "cdp.list_tabs", "input": ""}
   cdp:
-    enabled: false
+    enabled: true
     ws_url: ws://localhost:9222
     timeout: 10   # seconds per CDP command
 

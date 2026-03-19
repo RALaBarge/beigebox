@@ -48,6 +48,14 @@ Open **http://localhost:1337** for BeigeBox's built-in web interface.
 
 The OpenAI-compatible API is at `http://localhost:1337/v1` — point any OpenAI-compatible client at it.
 
+### Browser Automation (CDP)
+
+```bash
+docker compose --profile cdp up -d
+```
+
+Adds Chromium with Chrome DevTools Protocol (CDP) on `:9222`. The operator agent can now control a real browser: navigate, click, type, scrape with JS execution, capture network requests, and measure performance. See [Browser Automation (CDP)](#browser-automation-cdp---chrome-devtools-protocol) for details.
+
 ### Voice support
 
 ```bash
@@ -106,6 +114,49 @@ Then open http://localhost:3000 (runs alongside BeigeBox on `:1337`).
 ## What you get
 
 Because all LLM traffic passes through BeigeBox, it can observe, route, modify, store, and orchestrate everything without your frontend or backend knowing it exists.
+
+### Browser Automation (CDP — Chrome DevTools Protocol)
+
+**Primary tool for web interaction.** The operator agent can control a real Chromium browser in real-time:
+
+**Basic operations:**
+- `navigate(url)` — go to a webpage
+- `screenshot()` — capture current page as PNG
+- `dom_snapshot()` — extract DOM tree (selectors + text content)
+- `click(selector)` — click elements (buttons, links, forms)
+- `type({selector, text})` — type into input fields
+- `scroll({x, y})` — scroll the page
+- `eval(javascript)` — execute arbitrary JS and get result
+
+**Advanced inspection:**
+- **Network capture** — intercept HTTP/HTTPS requests+responses, measure latency
+- **Console logs** — read JS console output (errors, warnings, logs from the page)
+- **Performance metrics** — TTFB, FCP, LCP, layout shifts, DOM timing
+- **Cookies** — list, get, set, delete browser cookies per-request
+- **Storage** — read/write localStorage, sessionStorage
+- **IndexedDB** — query local databases and blobs
+- **Service Workers** — list active workers, clear caches
+- **Network throttling** — simulate slow connections (3G, 4G latency/bandwidth)
+
+**Enable in Docker:**
+```bash
+docker compose --profile cdp up -d
+```
+
+Then in the Config tab or via the operator:
+```json
+{"tool": "cdp.navigate", "input": "https://example.com"}
+{"tool": "cdp.screenshot", "input": ""}
+{"tool": "cdp.click", "input": "#submit-button"}
+{"tool": "cdp.network", "input": {"action": "capture", "limit": 50}}
+```
+
+**Use cases:**
+- Web scraping with JS execution (not just HTML parsing)
+- Form filling and submission with real browser interaction
+- Testing sites that require JavaScript execution
+- Capturing network requests to debug API calls
+- Measuring page performance in realistic conditions
 
 ### Routing
 

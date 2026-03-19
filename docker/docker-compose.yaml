@@ -8,13 +8,16 @@
 # PROFILES:
 #   (default)           Ollama (CPU) + BeigeBox — transparent proxy + integrated UI
 #   voice               adds Whisper (STT) + Kokoro (TTS)
+#   cdp                 adds Chromium with CDP (Chrome DevTools Protocol) for browser automation
 #   engines-cpp         use llama.cpp instead of Ollama (quantized models, minimal resource)
 #   engines-vllm        use vLLM instead of Ollama (production-grade inference)
 #   engines-executorch  use ExecutorTorch instead of Ollama (edge/mobile inference)
 #
 # EXAMPLES:
 #   docker compose up -d                              # full stack, Ollama (default)
+#   docker compose --profile cdp up -d                # + Chromium for browser automation (CDP)
 #   docker compose --profile voice up -d              # + voice I/O
+#   docker compose --profile cdp --profile voice up -d # + browser automation + voice
 #   docker compose --profile engines-cpp up -d        # use llama.cpp instead
 #   docker compose --profile engines-vllm up -d       # use vLLM instead
 #   docker compose --profile engines-executorch up -d # use ExecutorTorch instead
@@ -32,6 +35,7 @@
 #   beigebox        → :1337   transparent proxy + integrated web UI
 #   whisper         → :9000   speech-to-text (voice profile)
 #   kokoro          → :8880   text-to-speech (voice profile)
+#   chrome          → :9222   Chrome DevTools Protocol (cdp profile)
 #   llama-cpp       → :8001   C++ inference (engines-cpp profile)
 #   vllm            → :8002   Production inference (engines-vllm profile)
 #   executorch      → :8003   Edge inference (engines-executorch profile)
@@ -179,6 +183,49 @@ services:
       timeout: 10s
       retries: 3
       start_period: 120s
+
+  # ---------------------------------------------------------------------------
+  # Chrome — CDP (Chrome DevTools Protocol) for browser automation (cdp profile)
+  # ---------------------------------------------------------------------------
+  # Headless Chromium with remote debugging for operator web automation.
+  # Connect via: ws://localhost:9222 (from beigebox or external clients)
+  # Operator tools: navigate, screenshot, dom_snapshot, click, type, scroll, eval
+  #                 network capture, console logs, performance metrics, cookies
+  #                 indexeddb, service workers, cache storage, network throttling
+  chrome:
+    profiles: [cdp]
+    image: chromium-headless:latest
+    container_name: beigebox-chrome
+    ports:
+      - "9222:9222"
+    command: >
+      --no-sandbox
+      --disable-gpu
+      --headless
+      --disable-dev-shm-usage
+      --remote-debugging-address=0.0.0.0
+      --remote-debugging-port=9222
+      --disable-background-networking
+      --disable-breakpad
+      --disable-client-side-phishing-detection
+      --disable-default-apps
+      --disable-extensions
+      --disable-sync
+      --metrics-recording-only
+      --no-first-run
+      --safebrowsing-disable-auto-update
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9222/json/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    # Optional: limit memory if needed
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 1G
 
   # ---------------------------------------------------------------------------
   # llama.cpp — C++ inference engine (engines-cpp profile)
