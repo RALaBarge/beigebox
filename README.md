@@ -72,6 +72,20 @@ BeigeBox ships with three production-ready deployment options:
 
 All three include health checks, security hardening, and persistent data management. See [deploy/README.md](deploy/README.md) for detailed setup instructions.
 
+#### Docker Compose helper
+
+For Docker Compose deployments, use the bundled helper script to switch between dev and prod configurations:
+
+```bash
+cd docker
+./compose-switch.sh dev      # Development mode (local build, host mounts)
+./compose-switch.sh prod     # Production mode (image pull, named volumes, auto-restart)
+./compose-switch.sh status   # Show current active configuration
+docker compose up -d         # Start using current configuration
+```
+
+The script manages symlinks to `docker-compose.yaml`, handles `.env` setup, and validates required files. See `docker/compose-switch.sh --help` for details.
+
 ### Alternative frontends
 
 BeigeBox exposes a standard OpenAI-compatible `/v1` endpoint. You can use any compatible client:
@@ -617,13 +631,37 @@ tools:
 
 All design docs (1,166 files from `2600/`) are indexed into ChromaDB as searchable chunks. The operator can search architecture decisions, past session notes, and implementation guides via the `document_search` tool.
 
-**Index docs:**
+**Index docs locally:**
 
 ```bash
 beigebox index-docs /path/to/2600/
 ```
 
 This chunks documents (1200 chars per chunk, 150 char overlap), embeds them, and stores in ChromaDB. Operator can then ask questions like "What's the harness orchestration design?" and get relevant excerpts.
+
+**Production upload tracking:**
+
+The `2600/` directory uses a staging system to track which documents have been uploaded to production:
+
+- **`2600/`** — working copy (indexable locally)
+- **`2600/2600-staging/`** — intermediate staging for docs pending bulk upload
+- **`2600/.upload-manifest.json`** — tracks upload status (committed to Git for audit trail)
+
+Workflow:
+```bash
+# Add new docs and index locally
+cp new-design-doc.md 2600/
+beigebox index-docs 2600/
+
+# When ready for production sync
+cp 2600/new-design-doc.md 2600/2600-staging/
+beigebox upload-docs 2600/2600-staging/   # (future CLI)
+
+# Manifest auto-updates with upload_at, md5, status
+cat 2600/.upload-manifest.json | jq '.files."new-design-doc.md"'
+```
+
+Failed uploads are retried without reprocessing the entire 2600/. See `2600/2600-staging/README.md` for details.
 
 ---
 

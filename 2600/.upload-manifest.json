@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "description": "Upload manifest for 2600/ document indexing. Tracks which files have been synced to production.",
+  "schema": {
+    "version": "string — manifest version for schema compatibility",
+    "last_sync": "ISO 8601 timestamp of last successful bulk upload",
+    "files": "object mapping file_path → {uploaded_at, md5, status}"
+  },
+  "last_sync": "2026-03-18T00:00:00Z",
+  "files": {
+    "agentic-tool-prompting-beigebox.md": {
+      "uploaded_at": "2026-03-18T00:00:00Z",
+      "md5": "placeholder",
+      "status": "uploaded"
+    }
+  },
+  "_comments": {
+    "workflow": [
+      "1. New docs added to 2600/ and indexed into ChromaDB locally",
+      "2. When ready for bulk sync: cp -r new-docs 2600/2600-staging/",
+      "3. Run: beigebox upload-docs 2600/2600-staging/",
+      "4. Script updates this manifest with uploaded_at, md5, status=uploaded",
+      "5. Move synced files back to 2600/ or delete from staging",
+      "6. Commit updated manifest to Git for audit trail"
+    ],
+    "status_values": ["pending", "uploaded", "failed"],
+    "git_audit": "This manifest is committed to Git so you can see upload history via git log",
+    "recovery": "To retry failed uploads: grep '\"failed\"' .upload-manifest.json and re-process"
+  }
+}
