@@ -201,7 +201,7 @@ BeigeBox includes a built-in single-file web interface at `http://localhost:1337
 | **Conversations** | Semantic search, replay, fork, export |
 | **Tap** | Live wiretap stream with source/event_type/run_id/role filters; clickable chips for conv and run cross-linking; group-by-run accordion; expandable meta panel; all operator and harness events written to SQLite |
 | **Operator** | Interactive agent with tool execution |
-| **Harness** | Parallel model comparison + orchestrated goal-driven mode + ensemble voting + group chat |
+| **Harness** | Parallel model comparison + orchestrated goal-driven mode + ensemble voting + group chat. Draggable splitter between orchestrator pane and worker output for dynamic layout sizing. |
 | **Config** | Full config editor with collapsible sections, hot-reload — every setting, feature flag, and generation parameter |
 
 ### Per-pane chat settings
@@ -548,6 +548,55 @@ The operator calls it with JSON: `{"tool": "namespace.method", "input": {...}}`.
 **Reliability note (v1.2.3):** Chrome MV3 service workers can be killed after ~30s of inactivity. BrowserBox now sends a `{"type":"ping"}` keepalive every 20s via `setInterval` to keep the SW alive (more reliable than Chrome alarms, which round up to 1 minute for unpacked extensions). The relay silently drops ping/pong frames. The `browserbox.py` tool uses a deadline-tracked `asyncio.wait_for` receive loop instead of an unbounded `async for` — so a dead extension is detected within the configured timeout rather than hanging forever.
 
 Available namespaces: `dom`, `tabs`, `nav`, `fetch`, `storage`, `clip`, `network`, `inject`, `pdf` (40 tools total). Full schema: `GET http://localhost:9010/tools`.
+
+---
+
+## Chrome DevTools Protocol (CDP)
+
+Headless browser automation via Chrome's [DevTools Protocol](https://chromedevtools.io/docs/debugger-protocol). Unlike BrowserBox (which shows a live browser), CDP runs Chrome headless — great for scripted automation, screenshot capture, form filling, and DOM extraction without visual feedback.
+
+**Setup:**
+
+```bash
+# Start Chrome with remote debugging enabled
+google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/beigebox-cdp
+```
+
+**Enable in `config.yaml`:**
+
+```yaml
+tools:
+  cdp:
+    enabled: false
+    ws_url: ws://localhost:9222
+    timeout: 10   # seconds per command
+```
+
+**Available actions:**
+- `navigate(url)` — load a page
+- `screenshot()` — capture viewport as PNG
+- `dom_snapshot()` — extract full DOM as JSON
+- `click(selector)` — click CSS selectors
+- `type(selector, text)` — fill inputs
+- `scroll(x, y)` — scroll the viewport
+- `eval(js)` — run JavaScript and return result
+- `list_tabs()` — enumerate open tabs
+
+**Phase 1:** Basic navigation, screenshot, DOM reading, element interaction. **Phase 2** will add network inspection, performance tracing, and console log capture.
+
+---
+
+## Document Search (RAG)
+
+All design docs (1,166 files from `2600/`) are indexed into ChromaDB as searchable chunks. The operator can search architecture decisions, past session notes, and implementation guides via the `document_search` tool.
+
+**Index docs:**
+
+```bash
+beigebox index-docs /path/to/2600/
+```
+
+This chunks documents (1200 chars per chunk, 150 char overlap), embeds them, and stores in ChromaDB. Operator can then ask questions like "What's the harness orchestration design?" and get relevant excerpts.
 
 ---
 
