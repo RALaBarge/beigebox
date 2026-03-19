@@ -22,14 +22,21 @@ Config (config.yaml):
         timeout: 10
 
 Operator call format:
-    {"tool": "cdp.navigate",     "input": "https://example.com"}
-    {"tool": "cdp.screenshot",   "input": ""}
-    {"tool": "cdp.dom_snapshot", "input": ""}
-    {"tool": "cdp.click",        "input": "#submit-button"}
-    {"tool": "cdp.type",         "input": {"selector": "#search", "text": "hello"}}
-    {"tool": "cdp.scroll",       "input": {"x": 0, "y": 500}}
-    {"tool": "cdp.eval",         "input": "document.title"}
-    {"tool": "cdp.list_tabs",    "input": ""}
+    {"tool": "cdp.navigate",      "input": "https://example.com"}
+    {"tool": "cdp.screenshot",    "input": ""}
+    {"tool": "cdp.dom_snapshot",  "input": ""}
+    {"tool": "cdp.click",         "input": "#submit-button"}
+    {"tool": "cdp.type",          "input": {"selector": "#search", "text": "hello"}}
+    {"tool": "cdp.scroll",        "input": {"x": 0, "y": 500}}
+    {"tool": "cdp.eval",          "input": "document.title"}
+    {"tool": "cdp.list_tabs",     "input": ""}
+
+    Phase 2 (Network, Performance, Storage):
+    {"tool": "cdp.network",       "input": {"action": "capture", "limit": 50}}
+    {"tool": "cdp.console",       "input": ""}
+    {"tool": "cdp.performance",   "input": ""}
+    {"tool": "cdp.cookies",       "input": {"action": "list"}}
+    {"tool": "cdp.storage",       "input": {"action": "list"}}
 """
 from __future__ import annotations
 
@@ -177,7 +184,7 @@ class CDPTool:
         "REQUIRED input format — always a JSON object with exactly these two keys:\n"
         '  {"tool": "cdp.<method>", "input": <value>}\n'
         "\n"
-        "Available methods:\n"
+        "PHASE 1 (Navigation & Interaction):\n"
         "  cdp.navigate     — Navigate to URL:  {\"tool\": \"cdp.navigate\", \"input\": \"https://example.com\"}\n"
         "  cdp.screenshot   — Take screenshot:  {\"tool\": \"cdp.screenshot\", \"input\": \"\"}\n"
         "  cdp.dom_snapshot — DOM/a11y snapshot: {\"tool\": \"cdp.dom_snapshot\", \"input\": \"\"}\n"
@@ -186,6 +193,13 @@ class CDPTool:
         '  cdp.scroll       — Scroll page:      {"tool": "cdp.scroll", "input": {"x": 0, "y": 500}}\n'
         '  cdp.eval         — Evaluate JS:      {"tool": "cdp.eval", "input": "document.title"}\n'
         "  cdp.list_tabs    — List open tabs:   {\"tool\": \"cdp.list_tabs\", \"input\": \"\"}\n"
+        "\n"
+        "PHASE 2 (Network, Performance, Storage):\n"
+        '  cdp.network      — Capture requests: {"tool": "cdp.network", "input": {"action": "capture", "limit": 50}}\n'
+        '  cdp.console      — Get console logs: {"tool": "cdp.console", "input": ""}\n'
+        '  cdp.performance  — Core Web Vitals:  {"tool": "cdp.performance", "input": ""}\n'
+        '  cdp.cookies      — List/delete:      {"tool": "cdp.cookies", "input": {"action": "list"}}\n'
+        '  cdp.storage      — LocalStorage/etc: {"tool": "cdp.storage", "input": {"action": "list"}}\n'
         "\n"
         "Requires Chrome/Chromium running with --remote-debugging-port=9222.\n"
         "Errors are returned as strings (never crash — check result for 'Error:' prefix)."
@@ -241,6 +255,7 @@ class CDPTool:
     # ------------------------------------------------------------------
 
     async def _dispatch(self, method: str, inp: Any) -> str:
+        # Phase 1
         if method == "list_tabs":
             return await self._list_tabs()
         elif method == "navigate":
@@ -257,6 +272,17 @@ class CDPTool:
             return await self._scroll(inp)
         elif method == "eval":
             return await self._eval(str(inp))
+        # Phase 2
+        elif method == "network":
+            return await self._network(inp)
+        elif method == "console":
+            return await self._console()
+        elif method == "performance":
+            return await self._performance()
+        elif method == "cookies":
+            return await self._cookies(inp)
+        elif method == "storage":
+            return await self._storage(inp)
         else:
             return f"Error: unknown CDP method '{method}'"
 
@@ -635,4 +661,249 @@ class CDPTool:
         except Exception as exc:
             self._client = None
             logger.warning("cdp._eval failed: %s", exc)
+            return f"Error: {exc}"
+
+    # ------------------------------------------------------------------
+    # PHASE 2: Network, Performance, Storage
+    # ------------------------------------------------------------------
+
+    async def _network(self, inp: Any) -> str:
+        """Capture recent network requests/responses with optional filtering."""
+        try:
+            if isinstance(inp, dict):
+                action = inp.get("action", "capture")
+                limit = inp.get("limit", 50)
+            else:
+                action = "capture"
+                limit = 50
+
+            if action != "capture":
+                return f"Error: unknown network action '{action}' (use 'capture')"
+
+            client = await self._get_client()
+            # Enable Network domain and request interception
+            await client.send("Network.enable", {})
+
+            # Retrieve network requests (returns cached requests)
+            # We use Runtime.evaluate to fetch from the Resource Timing API
+            expr = """(function(){
+  const requests = performance.getEntriesByType('resource').map(r => ({
+    name: r.name,
+    type: r.initiatorType,
+    duration: Math.round(r.duration),
+    size: r.transferSize || 0,
+    status: 'unknown'
+  }));
+  const navs = performance.getEntriesByType('navigation');
+  return {document: navs[0], requests: requests.slice(0, 50)};
+})()"""
+            result = await client.send("Runtime.evaluate", {
+                "expression": expr,
+                "returnByValue": True,
+            })
+            data = result.get("result", {}).get("value", {})
+            lines = ["Network requests (from Resource Timing API):"]
+            if data.get("document"):
+                doc = data["document"]
+                lines.append(f"  Navigation: domInteractive={doc.get('domInteractive', 0)}ms, loadEventEnd={doc.get('loadEventEnd', 0)}ms")
+            for req in data.get("requests", [])[:limit]:
+                lines.append(f"  {req['name'][:80]} ({req['type']}) {req['duration']:.0f}ms, {req['size']} bytes")
+            if not data.get("requests"):
+                lines.append("  (no requests captured yet)")
+            return "\n".join(lines)
+        except TimeoutError:
+            self._client = None
+            return f"Error: network capture timed out after {self._timeout}s"
+        except Exception as exc:
+            self._client = None
+            logger.warning("cdp._network failed: %s", exc)
+            return f"Error: {exc}"
+
+    async def _console(self) -> str:
+        """Capture console logs (messages, warnings, errors) from the page."""
+        try:
+            client = await self._get_client()
+            # Enable Runtime domain for console messages
+            await client.send("Runtime.enable", {})
+
+            # Evaluate a script that returns console history
+            # (Note: actual CDP doesn't persist console — we capture via JS)
+            expr = """(function(){
+  const logs = window.__cdp_console_logs = window.__cdp_console_logs || [];
+  // Hook console methods
+  ['log','warn','error','info','debug'].forEach(method => {
+    const orig = console[method];
+    console[method] = function(...args) {
+      const msg = args.map(a => {
+        if (typeof a === 'object') return JSON.stringify(a);
+        return String(a);
+      }).join(' ');
+      logs.push({method, msg, ts: new Date().toISOString()});
+      if (logs.length > 100) logs.shift();
+      return orig.apply(console, args);
+    };
+  });
+  return logs.length;
+})()"""
+            await client.send("Runtime.evaluate", {"expression": expr, "returnByValue": True})
+
+            # Now read the logs
+            expr2 = "window.__cdp_console_logs || []"
+            result = await client.send("Runtime.evaluate", {
+                "expression": expr2,
+                "returnByValue": True,
+            })
+            logs = result.get("result", {}).get("value", [])
+
+            if not logs:
+                return "No console logs captured yet. Navigate a page and interact with it."
+
+            lines = [f"Console logs ({len(logs)} entries):"]
+            for log in logs[-20:]:  # Last 20 entries
+                method = log.get("method", "log").upper()
+                msg = log.get("msg", "")[:100]
+                lines.append(f"  [{method}] {msg}")
+            return "\n".join(lines)
+        except Exception as exc:
+            self._client = None
+            logger.warning("cdp._console failed: %s", exc)
+            return f"Error: {exc}"
+
+    async def _performance(self) -> str:
+        """Capture Core Web Vitals and performance metrics."""
+        try:
+            client = await self._get_client()
+
+            expr = """(function(){
+  const nav = performance.getEntriesByType('navigation')[0] || {};
+  const paint = performance.getEntriesByType('paint');
+  const fcpEntry = paint.find(p => p.name === 'first-contentful-paint');
+  const lcpCandidates = performance.getEntriesByType('largest-contentful-paint');
+  const lcp = lcpCandidates[lcpCandidates.length - 1];
+  const clsEntries = performance.getEntriesByType('layout-shift').filter(e => !e.hadRecentInput);
+  const cls = clsEntries.reduce((sum, e) => sum + e.value, 0);
+
+  return {
+    FCP: fcpEntry ? fcpEntry.startTime.toFixed(1) : 'N/A',
+    LCP: lcp ? lcp.renderTime.toFixed(1) : 'N/A',
+    CLS: cls.toFixed(3),
+    TTFB: (nav.responseStart - nav.requestStart).toFixed(1),
+    DOMContentLoaded: nav.domContentLoadedEventEnd ? (nav.domContentLoadedEventEnd - nav.navigationStart).toFixed(1) : 'N/A',
+    LoadComplete: nav.loadEventEnd ? (nav.loadEventEnd - nav.navigationStart).toFixed(1) : 'N/A',
+  };
+})()"""
+            result = await client.send("Runtime.evaluate", {
+                "expression": expr,
+                "returnByValue": True,
+            })
+            metrics = result.get("result", {}).get("value", {})
+
+            lines = ["Core Web Vitals & Performance:"]
+            for key, val in metrics.items():
+                unit = "ms" if key != "CLS" else ""
+                lines.append(f"  {key}: {val}{unit}")
+            return "\n".join(lines)
+        except Exception as exc:
+            self._client = None
+            logger.warning("cdp._performance failed: %s", exc)
+            return f"Error: {exc}"
+
+    async def _cookies(self, inp: Any) -> str:
+        """List or delete cookies."""
+        try:
+            if isinstance(inp, dict):
+                action = inp.get("action", "list")
+                name_filter = inp.get("name")
+            else:
+                action = "list"
+                name_filter = None
+
+            client = await self._get_client()
+
+            if action == "list":
+                # Get cookies via HTTP (simpler than CDP Network.getCookies)
+                async with httpx.AsyncClient(timeout=self._timeout) as http_client:
+                    resp = await http_client.get(f"{self._http_base}/json/list")
+                    resp.raise_for_status()
+                    tabs = resp.json()
+                    tab = next((t for t in tabs if t.get("type") == "page"), None)
+                    if not tab:
+                        return "Error: no page tab found"
+
+                # Use CDP to get cookies for current URL
+                expr = """(function(){
+  return document.cookie.split('; ').map(c => {
+    const [name, value] = c.split('=');
+    return {name, value};
+  });
+})()"""
+                result = await client.send("Runtime.evaluate", {
+                    "expression": expr,
+                    "returnByValue": True,
+                })
+                cookies = result.get("result", {}).get("value", [])
+
+                if not cookies:
+                    return "No cookies found."
+
+                lines = [f"Cookies ({len(cookies)}):"]
+                for cookie in cookies:
+                    name = cookie.get("name", "")
+                    value = cookie.get("value", "")[:60]
+                    lines.append(f"  {name}={value}...")
+                return "\n".join(lines)
+            elif action == "clear":
+                expr = "document.cookie.split('; ').forEach(c => document.cookie = c.split('=')[0] + '=;expires=' + new Date().toUTCString())"
+                await client.send("Runtime.evaluate", {"expression": expr})
+                return "Cookies cleared."
+            else:
+                return f"Error: unknown cookie action '{action}' (use 'list' or 'clear')"
+        except Exception as exc:
+            self._client = None
+            logger.warning("cdp._cookies failed: %s", exc)
+            return f"Error: {exc}"
+
+    async def _storage(self, inp: Any) -> str:
+        """List or clear localStorage, sessionStorage, indexedDB."""
+        try:
+            if isinstance(inp, dict):
+                action = inp.get("action", "list")
+                store_type = inp.get("type", "localStorage")
+            else:
+                action = "list"
+                store_type = "localStorage"
+
+            client = await self._get_client()
+
+            if action == "list":
+                if store_type == "localStorage":
+                    expr = "Object.entries(localStorage).slice(0, 20)"
+                elif store_type == "sessionStorage":
+                    expr = "Object.entries(sessionStorage).slice(0, 20)"
+                else:
+                    return f"Error: unknown storage type '{store_type}'"
+
+                result = await client.send("Runtime.evaluate", {
+                    "expression": expr,
+                    "returnByValue": True,
+                })
+                items = result.get("result", {}).get("value", [])
+
+                if not items:
+                    return f"No items in {store_type}."
+
+                lines = [f"{store_type} ({len(items)} entries):"]
+                for key, value in items:
+                    val_str = str(value)[:80]
+                    lines.append(f"  {key}: {val_str}")
+                return "\n".join(lines)
+            elif action == "clear":
+                expr = f"{store_type}.clear()"
+                await client.send("Runtime.evaluate", {"expression": expr})
+                return f"{store_type} cleared."
+            else:
+                return f"Error: unknown action '{action}' (use 'list' or 'clear')"
+        except Exception as exc:
+            self._client = None
+            logger.warning("cdp._storage failed: %s", exc)
             return f"Error: {exc}"
