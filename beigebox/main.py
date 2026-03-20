@@ -3618,11 +3618,13 @@ async def discovery_run(request: Request):
     state = get_state()
     body = await request.json()
 
+    from beigebox.discovery.runner import DiscoveryRunner
+    import asyncio
+
     opportunity_id = body.get("opportunity_id", "unknown")
     variants = body.get("variants", [])
     test_cases = body.get("test_cases", [])
     weight_profile = body.get("weight_profile", "general")
-    run_id = str(uuid.uuid4())[:8]
 
     if not variants:
         return JSONResponse(
@@ -3630,76 +3632,31 @@ async def discovery_run(request: Request):
             status_code=400,
         )
 
-    # Score each variant
-    judge = JudgeRubric(
-        judge_model="claude-opus",
-        backend_url=f"http://{get_config()['server']['host']}:{get_config()['server']['port']}",
-    )
-    scorer = ParetoOptimizer()
-    scored_variants = []
+    try:
+        # Use DiscoveryRunner to execute opportunity experiment
+        runner = DiscoveryRunner(
+            sqlite_store=state.sqlite_store,
+            judge_model="claude-opus",
+            backend_url=f"http://{get_config()['server']['host']}:{get_config()['server']['port']}",
+        )
 
-    for variant in variants:
-        variant_name = variant.get("name", "unknown")
-        try:
-            # Run oracle tests
-            oracle_pass_rate = OracleRegistry.run_all(lambda inp: "test_response")
-            oracle_passed = oracle_pass_rate >= 0.8
+        # Run the experiment (async)
+        result = await runner.run_opportunity(
+            opportunity_id=opportunity_id,
+            opportunity_name=body.get("opportunity_name", opportunity_id),
+            variants=variants,
+            test_cases=test_cases,
+            weight_profile=weight_profile,
+        )
 
-            # TODO: Run candidate on test_cases via Harness, pass responses to judge
-            # For now, return neutral DimensionScore
-            dim_score = DimensionScore(
-                accuracy=2.5,
-                efficiency=2.5,
-                clarity=2.5,
-                hallucination=2.5,
-                safety=2.5,
-            )
+        return JSONResponse(result)
 
-            # Compute weighted score
-            weights = ParetoOptimizer.WEIGHT_PROFILES.get(
-                weight_profile, ParetoOptimizer.WEIGHT_PROFILES["general"]
-            )
-            weighted = scorer.weighted_score(dim_score, weights)
-
-            scored_var = ScoredVariant(
-                name=variant_name,
-                scores=dim_score,
-                weighted=weighted,
-            )
-            scored_variants.append(scored_var)
-
-            # Persist to database
-            if state.sqlite_store:
-                state.sqlite_store.store_discovery_scorecard(
-                    run_id=run_id,
-                    opportunity_id=opportunity_id,
-                    variant_name=variant_name,
-                    accuracy=dim_score.accuracy,
-                    efficiency=dim_score.efficiency,
-                    clarity=dim_score.clarity,
-                    hallucination=dim_score.hallucination,
-                    safety=dim_score.safety,
-                    overall_score=weighted,
-                    oracle_passed=oracle_passed,
-                    weight_profile=weight_profile,
-                )
-
-        except Exception as e:
-            logger.exception(f"Discovery scoring failed for {variant_name}: {e}")
-
-    # Identify Pareto front
-    pareto_front = scorer.find_pareto_front(scored_variants)
-
-    # Select champion
-    champion = scorer.select_champion(scored_variants, weight_profile)
-
-    return JSONResponse({
-        "run_id": run_id,
-        "opportunity_id": opportunity_id,
-        "pareto_front": [v.to_dict() for v in pareto_front],
-        "champion": champion.to_dict() if champion else None,
-        "scorecards": [v.to_dict() for v in scored_variants],
-    })
+    except Exception as e:
+        logger.exception(f"Discovery experiment failed: {e}")
+        return JSONResponse(
+            {"error": f"Discovery failed: {str(e)}", "run_id": str(uuid.uuid4())[:8]},
+            status_code=500,
+        )
 
 
 @app.get("/api/v1/discovery/results")
