@@ -275,31 +275,13 @@ class EnsembleVoter:
         → regex scan for first {...} block. The judge is instructed to emit raw
         JSON only, but LLMs sometimes add fences or prose; this tolerates that.
         """
-        # Try direct parse
-        try:
-            return json.loads(text)
-        except:
-            pass
+        from beigebox.utils.json_parse import extract_json_object
 
-        # Strip markdown fences
-        text = text.replace("```json", "").replace("```", "")
+        result = extract_json_object(text)
+        if result:
+            return result
 
-        # Try again
-        try:
-            return json.loads(text)
-        except:
-            pass
-
-        # Regex extraction: find { ... }
-        import re
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group())
-            except:
-                pass
-
-        # Fallback
+        # Fallback if no JSON found
         return {
             "winner": "unknown",
             "reasoning": "Could not parse judge response",
