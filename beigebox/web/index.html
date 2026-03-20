@@ -2109,6 +2109,25 @@ function esc(s) {
 
 // ── Config tab hover tooltips ────────────────────────────────────────────────
 const TOOLTIPS = {
+  // Features (Phase 1 refactoring)
+  features_backends:           'Enable/disable multi-backend routing. When off, all requests go directly to the primary backend.',
+  features_decision_llm:       'Enable a lightweight LLM to classify requests and drive routing decisions.',
+  features_classifier:         'Enable the embedding classifier — fast tier 2 routing via cosine similarity.',
+  features_semantic_cache:     'Enable semantic cache — deduplicate near-identical requests without hitting the backend.',
+  features_operator:           'Enable LLM-driven tool use and multi-turn agentic reasoning.',
+  features_harness:            'Enable the Harness goal-directed multi-agent orchestrator.',
+  features_tools:              'Master switch for all tool integrations (web search, calculator, memory, etc.).',
+  features_cost_tracking:      'Track estimated token costs per request and accumulate per-model totals.',
+  features_conversation_replay: 'Allow replaying past conversations with full context reconstruction from SQLite.',
+  features_auto_summarization: 'Automatically compress long context windows when token count exceeds the budget.',
+  features_system_context:     'Inject the contents of system_context.md into every request\'s system prompt.',
+  features_wiretap:            'Log all proxied requests and responses to disk for later inspection.',
+  features_payload_log:        'Log full payloads (complete LLM context) to disk — verbose, for debugging.',
+  features_wasm:               'Enable the WASM post-processing pipeline for response transforms.',
+  features_guardrails:         'Enable input/output content filtering (PII redaction, prompt injection blocking, etc.).',
+  features_amf_mesh:           'Enable service mesh advertisement (mDNS + NATS heartbeat).',
+  features_voice:              'Enable speech-to-text (STT) and text-to-speech (TTS) via external services.',
+  features_hooks:              'Enable custom middleware hooks — drop your own .py files into hooks/ directory.',
   // Models Registry (Phase 2 refactoring)
   models_default:              'Global fallback model used when no specific role-based model is selected.',
   models_routing:              'Judge/routing model (decision LLM) — fast LLM that classifies requests. (default: llama3.2:3b)',
@@ -2135,7 +2154,14 @@ const TOOLTIPS = {
   auto_token_budget:           'Trigger summarization when the conversation exceeds this many tokens.',
   auto_summary_model:          'Model used to generate the summary. Leave blank to reuse the active model.',
   auto_keep_last:              'Number of most-recent messages preserved verbatim after summarization.',
-  // Routing
+  // Routing (Phase 3)
+  tier1_ttl:                   'Tier 1: Keep user sticky to their chosen model for this many seconds.',
+  classifier_rebuild_interval: 'Tier 2: Rebuild classifier centroids every N seconds.',
+  semantic_cache_threshold:    'Tier 3: Serve from cache if embedding similarity exceeds this (0–1). Higher = stricter matching.',
+  semantic_cache_max_entries:  'Tier 3: Evict oldest cache entry when count exceeds this.',
+  semantic_cache_ttl:          'Tier 3: Expire cache entries older than this many seconds.',
+  decision_llm_temperature:    'Tier 4: Temperature for the judge LLM (0.0=deterministic, 2.0=random). Lower = more confident routing.',
+  // Routing control
   force_route:                 'Pin every session to a specific routing bucket, overriding the decision LLM.',
   force_decision:              'Skip session cache and embedding classifier — always run the decision LLM on every request.',
   border_threshold:            'Embedding classifier confidence gap below which a request is considered borderline and escalated to the decision LLM. Lower = more escalations. (default ~0.04)',
@@ -6530,6 +6556,28 @@ async function loadConfig() {
     const SO = (name, open=false) => `<details${open?' open':''} class="cfg-section"><summary class="section-header">${name}</summary>`;
     const SC = '</details>';
 
+    // ── Features (Phase 1 refactoring) ─────────────────────────────────
+    html += SO('Features (Master Control)', true);
+    html += cfgToggle('features_backends', 'Multi-backend routing', c.features?.backends ?? true);
+    html += cfgToggle('features_decision_llm', 'Decision LLM (judge)', c.features?.decision_llm ?? true);
+    html += cfgToggle('features_classifier', 'Embedding classifier', c.features?.classifier ?? true);
+    html += cfgToggle('features_semantic_cache', 'Semantic cache', c.features?.semantic_cache ?? false);
+    html += cfgToggle('features_operator', 'Operator (LLM-driven tools)', c.features?.operator ?? true);
+    html += cfgToggle('features_harness', 'Harness orchestrator', c.features?.harness ?? true);
+    html += cfgToggle('features_tools', 'Tools & function calling', c.features?.tools ?? true);
+    html += cfgToggle('features_cost_tracking', 'Cost tracking', c.features?.cost_tracking ?? true);
+    html += cfgToggle('features_conversation_replay', 'Conversation replay', c.features?.conversation_replay ?? true);
+    html += cfgToggle('features_auto_summarization', 'Auto-summarization', c.features?.auto_summarization ?? false);
+    html += cfgToggle('features_system_context', 'System context injection', c.features?.system_context ?? false);
+    html += cfgToggle('features_wiretap', 'Request/response logging', c.features?.wiretap ?? true);
+    html += cfgToggle('features_payload_log', 'Full payload logging', c.features?.payload_log ?? false);
+    html += cfgToggle('features_wasm', 'WASM transforms', c.features?.wasm ?? false);
+    html += cfgToggle('features_guardrails', 'Content filtering (guardrails)', c.features?.guardrails ?? false);
+    html += cfgToggle('features_amf_mesh', 'Service mesh advertisement', c.features?.amf_mesh ?? false);
+    html += cfgToggle('features_voice', 'Speech I/O (STT + TTS)', c.features?.voice ?? false);
+    html += cfgToggle('features_hooks', 'Custom middleware hooks', c.features?.hooks ?? false);
+    html += SC;
+
     // ── Models Registry (Phase 2 refactoring) ──────────────────────────
     html += SO('Models Registry', true);
     html += cfgInput('models_default', 'Default model', c.models?.default || 'qwen3:4b');
@@ -6540,10 +6588,34 @@ async function loadConfig() {
     html += cfgInput('models_summary', 'Summarization model', c.models?.summary || 'llama3.2:3b');
     html += SC;
 
-    // ── Routing & Intelligence ────────────────────────────────────────────
-    html += SO('Routing & Intelligence', true);
-    html += cfgToggle('decision_llm_enabled', 'Decision LLM (judge)', c.decision_llm?.enabled ?? false);
-    html += cfgInput('decision_llm_timeout', 'Judge timeout (s)', c.decision_llm?.timeout ?? 5, 'number');
+    // ── Routing Pipeline (Phase 3 refactoring) ────────────────────────────
+    html += SO('Routing Pipeline (4 Tiers)', true);
+    html += `<div style="font-size:11px;color:var(--fg-dim);margin-bottom:8px;line-height:1.6"><strong>Request evaluation order:</strong><br/>Tier 1 (Session Cache) → Tier 2 (Classifier) → Tier 3 (Semantic Cache) → Tier 4 (Judge) → Default</div>`;
+
+    html += `<div style="margin:8px 0"><strong style="font-size:12px">Tier 1: Session Cache</strong> (sticky routing)</div>`;
+    html += cfgInput('tier1_ttl', 'Session TTL (seconds)', c.routing?.session_cache?.ttl_seconds ?? 3600, 'number');
+
+    html += `<hr style="border:none;border-top:1px solid var(--bg-border);margin:8px 0">`;
+    html += `<div style="margin:8px 0"><strong style="font-size:12px">Tier 2: Embedding Classifier</strong> (fast cosine routing)</div>`;
+    html += cfgToggle('features_classifier', 'Classifier enabled', c.routing?.classifier?.enabled ?? true);
+    html += cfgInput('classifier_rebuild_interval', 'Centroid rebuild (seconds)', c.routing?.classifier?.centroid_rebuild_interval ?? 3600, 'number');
+
+    html += `<hr style="border:none;border-top:1px solid var(--bg-border);margin:8px 0">`;
+    html += `<div style="margin:8px 0"><strong style="font-size:12px">Tier 3: Semantic Cache</strong> (deduplication)</div>`;
+    html += cfgToggle('features_semantic_cache', 'Semantic cache enabled', c.routing?.semantic_cache?.enabled ?? false);
+    html += `<div id="sub-features_semantic_cache" style="display:${c.routing?.semantic_cache?.enabled ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
+    html += cfgInput('semantic_cache_threshold', 'Similarity threshold', c.routing?.semantic_cache?.similarity_threshold ?? 0.92, 'number');
+    html += cfgInput('semantic_cache_max_entries', 'Max cached entries', c.routing?.semantic_cache?.max_entries ?? 500, 'number');
+    html += cfgInput('semantic_cache_ttl', 'Entry TTL (seconds)', c.routing?.semantic_cache?.ttl_seconds ?? 3600, 'number');
+    html += '</div>';
+
+    html += `<hr style="border:none;border-top:1px solid var(--bg-border);margin:8px 0">`;
+    html += `<div style="margin:8px 0"><strong style="font-size:12px">Tier 4: Decision LLM</strong> (judge/classifier)</div>`;
+    html += cfgToggle('features_decision_llm', 'Judge enabled', c.routing?.decision_llm?.enabled ?? true);
+    html += cfgInput('decision_llm_temperature', 'Judge temperature', c.routing?.decision_llm?.temperature ?? 0.2, 'number');
+
+    html += `<hr style="border:none;border-top:1px solid var(--bg-border);margin:8px 0">`;
+    html += `<div style="margin:8px 0"><strong style="font-size:12px">Routing Control</strong></div>`;
     html += cfgToggle('force_decision', 'Force judge every request', c.routing?.force_decision ?? false);
     html += `<hr style="border:none;border-top:1px solid var(--bg-border);margin:8px 0">`;
     html += cfgSelect('force_route', 'Force route', c.routing?.force_route || '',

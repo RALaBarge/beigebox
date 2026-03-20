@@ -751,6 +751,27 @@ async def api_config():
 
     # Merge runtime overrides onto config values
     return JSONResponse({
+        # ── Features (Phase 1 refactoring) ────────────────────────────
+        "features": {
+            "backends":              rt.get("features_backends", cfg.get("features", {}).get("backends", cfg.get("backends_enabled", False))),
+            "decision_llm":          rt.get("features_decision_llm", cfg.get("features", {}).get("decision_llm", cfg.get("decision_llm", {}).get("enabled", True))),
+            "classifier":            rt.get("features_classifier", cfg.get("features", {}).get("classifier", cfg.get("classifier", {}).get("enabled", True))),
+            "semantic_cache":        rt.get("features_semantic_cache", cfg.get("features", {}).get("semantic_cache", cfg.get("semantic_cache", {}).get("enabled", False))),
+            "operator":              rt.get("features_operator", cfg.get("features", {}).get("operator", cfg.get("operator", {}).get("enabled", True))),
+            "harness":               rt.get("features_harness", cfg.get("features", {}).get("harness", cfg.get("harness", {}).get("enabled", True))),
+            "tools":                 rt.get("features_tools", cfg.get("features", {}).get("tools", cfg.get("tools", {}).get("enabled", False))),
+            "cost_tracking":         rt.get("features_cost_tracking", cfg.get("features", {}).get("cost_tracking", cfg.get("cost_tracking", {}).get("enabled", False))),
+            "conversation_replay":   rt.get("features_conversation_replay", cfg.get("features", {}).get("conversation_replay", cfg.get("conversation_replay", {}).get("enabled", False))),
+            "auto_summarization":    rt.get("features_auto_summarization", cfg.get("features", {}).get("auto_summarization", cfg.get("auto_summarization", {}).get("enabled", False))),
+            "system_context":        rt.get("features_system_context", cfg.get("features", {}).get("system_context", cfg.get("system_context", {}).get("enabled", False))),
+            "wiretap":               rt.get("features_wiretap", cfg.get("features", {}).get("wiretap", cfg.get("wiretap", {}).get("enabled", True))),
+            "payload_log":           rt.get("features_payload_log", cfg.get("features", {}).get("payload_log", False)),
+            "wasm":                  rt.get("features_wasm", cfg.get("features", {}).get("wasm", cfg.get("wasm", {}).get("enabled", False))),
+            "guardrails":            rt.get("features_guardrails", cfg.get("features", {}).get("guardrails", cfg.get("guardrails", {}).get("enabled", False))),
+            "amf_mesh":              rt.get("features_amf_mesh", cfg.get("features", {}).get("amf_mesh", cfg.get("amf_mesh", {}).get("enabled", False))),
+            "voice":                 rt.get("features_voice", cfg.get("features", {}).get("voice", cfg.get("voice", {}).get("enabled", False))),
+            "hooks":                 rt.get("features_hooks", cfg.get("features", {}).get("hooks", cfg.get("hooks", {}).get("enabled", False))),
+        },
         # ── Backend ──────────────────────────────────────────────────
         "backend": {
             "url":           cfg.get("backend", {}).get("url", ""),
@@ -846,9 +867,30 @@ async def api_config():
             "summary_model": rt.get("auto_summary_model", cfg.get("auto_summarization", {}).get("summary_model", "")),
             "keep_last": rt.get("auto_keep_last", cfg.get("auto_summarization", {}).get("keep_last", 4)),
         },
-        # ── Routing ───────────────────────────────────────────────────
+        # ── Routing — Tier Pipeline (Phase 3 refactoring) ────────────────
         "routing": {
-            "session_ttl_seconds": cfg.get("routing", {}).get("session_ttl_seconds", 1800),
+            # Tier 1: Session cache
+            "session_cache": {
+                "ttl_seconds": cfg.get("routing", {}).get("session_cache", {}).get("ttl_seconds", 3600),
+            },
+            # Tier 2: Embedding classifier
+            "classifier": {
+                "enabled": rt.get("features_classifier", cfg.get("features", {}).get("classifier", cfg.get("classifier", {}).get("enabled", True))),
+                "centroid_rebuild_interval": cfg.get("routing", {}).get("classifier", {}).get("centroid_rebuild_interval", cfg.get("classifier", {}).get("centroid_rebuild_interval", 3600)),
+            },
+            # Tier 3: Semantic cache
+            "semantic_cache": {
+                "enabled": rt.get("features_semantic_cache", cfg.get("features", {}).get("semantic_cache", cfg.get("semantic_cache", {}).get("enabled", False))),
+                "similarity_threshold": cfg.get("routing", {}).get("semantic_cache", {}).get("similarity_threshold", cfg.get("semantic_cache", {}).get("similarity_threshold", 0.92)),
+                "max_entries": cfg.get("routing", {}).get("semantic_cache", {}).get("max_entries", cfg.get("semantic_cache", {}).get("max_entries", 500)),
+                "ttl_seconds": cfg.get("routing", {}).get("semantic_cache", {}).get("ttl_seconds", cfg.get("semantic_cache", {}).get("ttl_seconds", 3600)),
+            },
+            # Tier 4: Decision LLM (judge)
+            "decision_llm": {
+                "enabled": rt.get("features_decision_llm", cfg.get("features", {}).get("decision_llm", cfg.get("decision_llm", {}).get("enabled", True))),
+                "temperature": cfg.get("routing", {}).get("decision_llm", {}).get("temperature", cfg.get("decision_llm", {}).get("temperature", 0.2)),
+            },
+            # Routing control
             "force_route":         rt.get("force_route", ""),
             "force_decision":      rt.get("force_decision", False),
             "border_threshold":    rt.get("border_threshold"),
@@ -959,6 +1001,25 @@ async def api_config_save(request: Request):
         "web_ui_palette":               "web_ui_palette",
         "voice_enabled":                "voice_enabled",
         "voice_hotkey":                 "voice_hotkey",
+        # Features (Phase 1 refactoring)
+        "features_backends":            "features_backends",
+        "features_decision_llm":        "features_decision_llm",
+        "features_classifier":          "features_classifier",
+        "features_semantic_cache":      "features_semantic_cache",
+        "features_operator":            "features_operator",
+        "features_harness":             "features_harness",
+        "features_tools":               "features_tools",
+        "features_cost_tracking":       "features_cost_tracking",
+        "features_conversation_replay": "features_conversation_replay",
+        "features_auto_summarization":  "features_auto_summarization",
+        "features_system_context":      "features_system_context",
+        "features_wiretap":             "features_wiretap",
+        "features_payload_log":         "features_payload_log",
+        "features_wasm":                "features_wasm",
+        "features_guardrails":          "features_guardrails",
+        "features_amf_mesh":            "features_amf_mesh",
+        "features_voice":               "features_voice",
+        "features_hooks":               "features_hooks",
         # Models Registry (Phase 2 refactoring)
         "models_default":               "models_default",
         "models_routing":               "models_routing",
@@ -969,7 +1030,7 @@ async def api_config_save(request: Request):
         "force_route":                  "force_route",
         "border_threshold":             "border_threshold",
         "agentic_threshold":            "agentic_threshold",
-        # Features
+        # Features (keep old keys for backwards compat)
         "decision_llm_enabled":         "decision_llm_enabled",
         "tools_enabled":                "tools_enabled",
         "log_conversations":            "log_conversations",

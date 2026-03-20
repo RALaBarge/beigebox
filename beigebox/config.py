@@ -37,6 +37,27 @@ _KNOWN_TOP_LEVEL_KEYS = {
 # extra='allow' so unknown sub-keys never break anything.
 # Type annotations catch wrong types (e.g. enabled: "yes" instead of true).
 
+class _FeaturesCfg(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    backends: bool = True
+    decision_llm: bool = True
+    classifier: bool = True
+    semantic_cache: bool = False
+    operator: bool = True
+    harness: bool = True
+    tools: bool = True
+    cost_tracking: bool = True
+    conversation_replay: bool = True
+    auto_summarization: bool = False
+    system_context: bool = False
+    wiretap: bool = True
+    payload_log: bool = False
+    wasm: bool = False
+    guardrails: bool = False
+    amf_mesh: bool = False
+    voice: bool = False
+    hooks: bool = False
+
 class _ServerCfg(BaseModel):
     model_config = ConfigDict(extra="allow")
     host: str = "0.0.0.0"
@@ -94,6 +115,7 @@ class _AutoSumCfg(BaseModel):
 class _BeigeBoxConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
     backends_enabled: bool = False
+    features: _FeaturesCfg = _FeaturesCfg()
     server: _ServerCfg = _ServerCfg()
     backend: _BackendCfg = _BackendCfg()
     models: _ModelsCfg = _ModelsCfg()

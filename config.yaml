@@ -5,6 +5,32 @@
 # Copy this to your project root as config.yaml (or merge with existing if you have custom settings)
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Features — Centralized Master Control (Phase 1 refactoring)
+# ─────────────────────────────────────────────────────────────────────────────
+# Single place to toggle all major features on/off. Use alongside runtime_config.yaml
+# for session-level overrides (features_<name> keys).
+
+features:
+  backends: true                  # Multi-backend routing
+  decision_llm: true              # Judge/routing LLM
+  classifier: true                # Embedding classifier
+  semantic_cache: false           # Semantic deduplication cache
+  operator: true                  # LLM-driven tool use
+  harness: true                   # Multi-agent orchestrator
+  tools: true                     # Function calling
+  cost_tracking: true             # Estimate token costs
+  conversation_replay: true       # Replay conversations from SQLite
+  auto_summarization: false       # Compress long contexts
+  system_context: false           # Inject system_context.md into every request
+  wiretap: true                   # Log all requests/responses
+  payload_log: false              # Log full payloads to payload.jsonl
+  wasm: false                     # WASM transform pipeline
+  guardrails: false               # Input/output content filtering
+  amf_mesh: false                 # Service mesh advertisement
+  voice: false                    # Speech-to-text + text-to-speech
+  hooks: false                    # Custom middleware hooks
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Server Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -516,6 +542,38 @@ semantic_cache:
   similarity_threshold: 0.92  # cosine similarity cutoff (0–1); higher = stricter
   max_entries: 500            # evict oldest when exceeded
   ttl_seconds: 3600           # cache entries expire after this many seconds
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Routing — Explicit tier pipeline (Phase 3 refactoring)
+# ─────────────────────────────────────────────────────────────────────────────
+# The request evaluation pipeline has 4 explicit tiers + fallback:
+#  Tier 1 (session_cache): Sticky routing — pin session to model if user has used one before
+#  Tier 2 (classifier): Embedding classifier — fast cosine similarity routing
+#  Tier 3 (semantic_cache): Semantic deduplication — serve from cache if request is near-identical
+#  Tier 4 (decision_llm): Judge/routing LLM — slow but accurate request classification
+#  Fallback: Default model or backend selection
+
+routing:
+  # Tier 1 — Session cache (sticky routing)
+  session_cache:
+    ttl_seconds: 3600  # Keep user sticky to their model choice for this many seconds
+
+  # Tier 2 — Embedding classifier
+  classifier:
+    enabled: true           # Alias for classifier.enabled (see Features section)
+    centroid_rebuild_interval: 3600
+
+  # Tier 3 — Semantic cache (deduplication)
+  semantic_cache:
+    enabled: false          # Alias for semantic_cache.enabled (see Features section)
+    similarity_threshold: 0.92
+    max_entries: 500
+    ttl_seconds: 3600
+
+  # Tier 4 — Decision LLM (judge/routing)
+  decision_llm:
+    enabled: true           # Alias for decision_llm.enabled (see Features section)
+    temperature: 0.2
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Z-Commands (Special command syntax like "z: code", "z: search")
