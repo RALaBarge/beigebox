@@ -22,6 +22,7 @@ import json
 import logging
 import asyncio
 import time
+import fnmatch
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -1600,11 +1601,24 @@ class Proxy:
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.get(f"{self.backend_url}/v1/models")
                 resp.raise_for_status()
+
+                # Check if local model filtering is enabled
+                local_cfg = self.cfg.get("local_models", {})
+                filter_enabled = local_cfg.get("filter_enabled", False)
+                allowed_models = local_cfg.get("allowed_models", [])
+
                 for m in resp.json().get("data", []):
                     mid = m.get("id") or m.get("name") or ""
-                    if mid and mid not in seen:
-                        seen.add(mid)
-                        all_models.append(m)
+                    if not mid or mid in seen:
+                        continue
+
+                    # Apply local model filter if enabled
+                    if filter_enabled and allowed_models:
+                        if not any(fnmatch.fnmatch(mid, pattern) for pattern in allowed_models):
+                            continue
+
+                    seen.add(mid)
+                    all_models.append(m)
         except Exception:
             pass
 

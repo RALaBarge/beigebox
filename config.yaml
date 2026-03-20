@@ -57,6 +57,16 @@ backends:
     backoff_base: 1.5
     backoff_max: 10.0
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Local Models Filter — control which Ollama models appear in the dropdown
+# ─────────────────────────────────────────────────────────────────────────────
+# Enable to whitelist specific local models. When disabled, all Ollama models
+# are offered. Patterns support fnmatch (e.g., "llama*", "qwen*:*").
+
+local_models:
+  filter_enabled: false  # Set to true to whitelist specific models
+  allowed_models: []     # e.g., ["qwen3:4b", "ministral-3-14b-hq:latest", "llama*"]
+
   # Tertiary: OpenRouter API fallback (optional)
   # Uncomment and add API key if you want API fallback.
   # By default BeigeBox will NOT send plain model ids like "llama3.2" here.
@@ -295,36 +305,39 @@ operator:
   shell:
     enabled: true
     shell_binary: "/usr/local/bin/bb"  # Custom hardened binary (optional)
-    allowed_commands:
-      - awk
-      - cat
-      - cut
-      - df
-      - du
-      - find
-      - free
-      - grep
-      - head
-      - ls
-      - nproc
-      - nvidia-smi
-      - ps
-      - sed
-      - sort
-      - stat
-      - tail
-      - uniq
-      - uptime
-      - wc
+    # Empty allowlist = allow all commands by default (blocklist model)
+    allowed_commands: []
+
     blocked_patterns:
-      - "rm -rf"
-      - "rm -r"
-      - "sudo"
+      # ── Block WRITES only (reads are allowed) ────
+      - "> /home/jinx"
+      - ">> /home/jinx"
+      - "> ~/.*"
+      - ">> ~/.*"
       - "> /etc"
       - "> /app"
       - "> /usr"
+      - "> /root"
+      - "> /var"
+      - "> /opt"
+      - "> /"
+
+      # ── Block dangerous commands ────
+      - "^rm "
+      - "^sudo "
+      - "^su "
+      - "^chmod "
+      - "^chown "
+      - "dd "
+      - "mkfs"
+      - "mount"
+      - "umount"
+
+      # ── Block injection patterns ────
       - "$()"
       - "`"
+      - "|.*sudo"
+      - "&&.*sudo"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tools (Function Calling)

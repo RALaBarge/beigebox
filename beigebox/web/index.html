@@ -433,6 +433,11 @@
   .op-alt-plan    { border-left: 2px solid var(--lavender); margin: 8px 0 12px; padding-left: 8px; }
   .op-alt-plan summary { color: var(--lavender); font-size: 11px; cursor: pointer; user-select: none; }
   .op-alt-plan-body { color: var(--fg-dim); font-size: 12px; white-space: pre-wrap; margin-top: 6px; }
+  .op-code-block  { margin: 4px 0; border-radius: 2px; }
+  .op-code-block summary { padding: 4px 0; cursor: pointer; user-select: none; font-weight: 500; transition: color 0.15s; }
+  .op-code-block summary:hover { color: var(--yellow); }
+  .op-tool-call   { color: var(--fg-muted); margin: 4px 0; font-size: 11px; }
+  .op-tool-result { color: var(--green);    margin: 4px 0; font-size: 11px; padding: 4px 6px; background: rgba(163, 190, 140, 0.08); border-radius: 2px; }
   .op-info        { color: var(--blue);    font-size: 11px; margin: 4px 0; font-style: italic; }
   .op-pending     { color: var(--yellow);  font-style: italic; }
   .op-sep         { border-top: 1px solid var(--bg-border); margin: 8px 0; }
@@ -3275,9 +3280,11 @@ function appendMsgToPane(paneId, role, text, model, container) {
   if (!area) return null;
   const div = document.createElement('div');
   div.className = `msg ${role}`;
+  // Format assistant messages (JSON, markdown, code blocks); keep user messages plain
+  const content = role === 'assistant' ? _formatOutput(text) : esc(text);
   div.innerHTML = `
     <div class="meta">${esc(role === 'user' ? 'you' : (model || role))} · ${new Date().toLocaleTimeString()}</div>
-    <div class="bubble">${esc(text)}</div>`;
+    <div class="bubble">${content}</div>`;
   area.appendChild(div);
   _scrollNearBottom(area);
   return div;
@@ -3983,8 +3990,8 @@ function _reapplyTapHighlights() {
     const convMatch = _tapSelectedConv && el.dataset.conv === _tapSelectedConv;
     const runMatch  = _tapSelectedRun  && el.dataset.run  === _tapSelectedRun;
     const hit = convMatch || runMatch;
-    el.style.background  = hit ? 'rgba(137,180,250,0.22)' : '';
-    el.style.borderColor = hit ? 'rgba(137,180,250,0.60)' : '';
+    el.style.background  = hit ? 'rgba(137,180,250,0.08)' : '';
+    el.style.borderColor = hit ? 'rgba(137,180,250,0.25)' : '';
   });
 }
 
@@ -4039,6 +4046,21 @@ const TAP_EVENT_COLOR = {
 };
 
 const TIMING_COLORS = { fast: '#a5d6a7', medium: '#fff176', slow: '#ffcc80', crit: '#ef9a9a' };
+
+function _renderTapEntriesWithSeparators(entries) {
+  let html = '';
+  let lastConv = null;
+  for (const e of entries) {
+    const conv = e.conv_id || e.conv || '';
+    // Add separator when conversation changes
+    if (lastConv !== null && lastConv !== conv && conv) {
+      html += `<div style="height:1px;background:linear-gradient(90deg,transparent,rgba(136,192,208,0.3),transparent);margin:4px 0"></div>`;
+    }
+    html += _renderTapEntry(e);
+    if (conv) lastConv = conv;
+  }
+  return html;
+}
 
 function _renderTapEntry(e) {
   const ts      = e.ts ? new Date(e.ts).toLocaleTimeString() : '?';
@@ -4253,8 +4275,16 @@ async function loadTap() {
     if (role)   chips.push(`role=${esc(role)}`);
     if (runId)  chips.push(`run=${esc(runId)}`);
 
-    const reversed = d.entries.slice().reverse();
-    const body = grouped ? _renderTapGrouped(reversed) : reversed.map(_renderTapEntry).join('');
+    // Sort by timestamp descending (newest first)
+    const sorted = d.entries.slice().sort((a, b) => new Date(b.ts) - new Date(a.ts));
+
+    // Auto-highlight the first (most recent) conversation
+    if (sorted.length > 0 && !_tapSelectedRun) {
+      const firstConv = sorted[0].conv_id || sorted[0].conv;
+      if (firstConv) _tapSelectedConv = firstConv;
+    }
+
+    const body = grouped ? _renderTapGrouped(sorted) : _renderTapEntriesWithSeparators(sorted);
 
     el.innerHTML =
       `<div style="color:var(--fg-muted);font-size:10px;padding-bottom:8px">${d.total} total · showing ${d.entries.length}` +
@@ -4316,6 +4346,83 @@ function saveOpHistory() {
   } catch(e) {
     // silently fail (quota exceeded, etc)
   }
+}
+
+function _formatOutput(text) {
+  /**
+   * Format output: pretty-print JSON (collapsible), handle markdown, code blocks.
+   * Used by Operator, Chat, and Harness tabs. Returns HTML.
+   */
+  let html = '';
+  let remaining = text;
+
+  // Try to parse as JSON first (whole text)
+  try {
+    const json = JSON.parse(text);
+    const jsonStr = JSON.stringify(json, null, 2);
+    const jsonId = 'op-json-' + Math.random().toString(36).slice(2);
+    const preview = jsonStr.split('\n').slice(0, 3).join('\n');
+    html += `<details class="op-code-block" open>
+      <summary style="cursor:pointer;color:var(--cyan);margin-bottom:4px">📋 JSON</summary>
+      <pre style="background:var(--bg-input);border-radius:2px;padding:8px;overflow-x:auto;color:var(--green);font-size:11px;line-height:1.4">${esc(jsonStr)}</pre>
+    </details>`;
+    return html;
+  } catch {}
+
+  // Process line-by-line: handle code blocks, markdown
+  const lines = text.split('\n');
+  let inCodeBlock = false;
+  let codeBlockLang = '';
+  let codeBlockLines = [];
+  const codeBlockId = 'op-code-' + Math.random().toString(36).slice(2);
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Detect code block start
+    if (line.match(/^```(\w*)/)) {
+      if (!inCodeBlock) {
+        inCodeBlock = true;
+        codeBlockLang = line.match(/^```(\w*)/)?.[1] || '';
+        codeBlockLines = [];
+        continue;
+      }
+    }
+
+    // Detect code block end
+    if (inCodeBlock && line.match(/^```/)) {
+      inCodeBlock = false;
+      const code = codeBlockLines.join('\n');
+      const blockId = 'op-cb-' + Math.random().toString(36).slice(2);
+      html += `<details class="op-code-block">
+        <summary style="cursor:pointer;color:var(--yellow);margin:4px 0">📄 Code (${codeBlockLang || 'text'})</summary>
+        <pre style="background:var(--bg-input);border-radius:2px;padding:8px;overflow-x:auto;color:var(--cyan);font-size:11px;line-height:1.4;margin:4px 0">${esc(code)}</pre>
+      </details>`;
+      continue;
+    }
+
+    // Accumulate code block lines
+    if (inCodeBlock) {
+      codeBlockLines.push(line);
+      continue;
+    }
+
+    // Markdown: headers, bold, lists
+    let formatted = line
+      .replace(/^### (.*)/g, '<strong style="color:var(--lavender);font-size:13px">### $1</strong>')
+      .replace(/^## (.*)/g, '<strong style="color:var(--lavender);font-size:14px">## $1</strong>')
+      .replace(/^# (.*)/g, '<strong style="color:var(--lavender);font-size:15px"># $1</strong>')
+      .replace(/\*\*(.*?)\*\*/g, '<strong style="color:var(--yellow)">$1</strong>')
+      .replace(/_(.*?)_/g, '<em style="color:var(--fg-muted)">$1</em>')
+      .replace(/^- (.*)/, '• $1')
+      .replace(/^  - (.*)/, '  ◦ $1');
+
+    if (formatted || !html) {
+      html += `<div style="color:var(--fg-dim);margin:2px 0;line-height:1.5">${esc(formatted)}</div>`;
+    }
+  }
+
+  return html || esc(text);
 }
 
 async function runOp() {
@@ -4408,15 +4515,14 @@ async function runOp() {
               const el = document.getElementById(lastToolCallId);
               if (el) {
                 el.className = 'op-tool-result';
-                const resultSnippet = evt.result.length > 200 ? evt.result.slice(0, 200) + '…' : evt.result;
-                el.innerHTML = `✓ <strong>${esc(evt.tool)}</strong>: ${esc(resultSnippet)}`;
+                el.innerHTML = `✓ <strong>${esc(evt.tool)}</strong><br>${_formatOutput(evt.result)}`;
               }
               lastToolCallId = null;
             }
           } else if (evt.type === 'answer') {
             finalAnswer = evt.content;
             streamEl.insertAdjacentHTML('beforeend',
-              `<div class="op-answer">${esc(evt.content)}</div>`);
+              `<div class="op-answer">${_formatOutput(evt.content)}</div>`);
             speakText(evt.content);
           } else if (evt.type === 'run_score') {
             const flags = evt.flags && evt.flags.length ? ` <span class="op-score-flags">[${evt.flags.join(', ')}]</span>` : '';
@@ -5240,7 +5346,7 @@ async function harnessOrchRun() {
     const statusEl = document.getElementById(`orch-status-${safeId}`);
     if (outputEl) {
       outputEl.className = `harness-pane-output${status === 'pending' ? ' thinking' : ''}`;
-      outputEl.textContent = content;
+      outputEl.innerHTML = _formatOutput(content);
     }
     if (statusEl) {
       statusEl.className = `harness-status ${status}`;
@@ -5486,14 +5592,13 @@ async function harnessAgenticRun() {
               const el = document.getElementById(lastToolCallId);
               if (el) {
                 el.className = 'op-tool-result';
-                const snippet = evt.result.length > 200 ? evt.result.slice(0, 200) + '…' : evt.result;
-                el.innerHTML = `✓ <strong>${esc(evt.tool)}</strong>: ${esc(snippet)}`;
+                el.innerHTML = `✓ <strong>${esc(evt.tool)}</strong><br>${_formatOutput(evt.result)}`;
               }
               lastToolCallId = null;
             }
           } else if (evt.type === 'answer') {
             feedEl.insertAdjacentHTML('beforeend',
-              `<div class="op-answer">${esc(evt.content)}</div>`);
+              `<div class="op-answer">${_formatOutput(evt.content)}</div>`);
           } else if (evt.type === 'info') {
             feedEl.insertAdjacentHTML('beforeend',
               `<div class="op-info">ℹ ${esc(evt.message)}</div>`);
@@ -5629,14 +5734,14 @@ async function harnessRalphRun() {
           case 'agent_chunk': {
             currentOutput += ev.chunk;
             const outEl = document.getElementById(`ralph-pane-out-${ev.iteration}`);
-            if (outEl) { outEl.className = 'harness-pane-output thinking'; outEl.textContent = currentOutput; outEl.scrollTop = outEl.scrollHeight; }
+            if (outEl) { outEl.className = 'harness-pane-output thinking'; outEl.innerHTML = _formatOutput(currentOutput); outEl.scrollTop = outEl.scrollHeight; }
             break;
           }
 
           case 'agent_done': {
             const outEl = document.getElementById(`ralph-pane-out-${ev.iteration}`);
             const stEl  = document.getElementById(`ralph-pane-status-${ev.iteration}`);
-            if (outEl) { outEl.className = 'harness-pane-output'; outEl.textContent = ev.response; }
+            if (outEl) { outEl.className = 'harness-pane-output'; outEl.innerHTML = _formatOutput(ev.response); }
             if (stEl)  { stEl.className = 'harness-status'; stEl.textContent = `${ev.latency_ms}ms`; }
             break;
           }
