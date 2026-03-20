@@ -1,0 +1,1251 @@
+2026-03-20 18:25:00,686 [INFO] beigebox.storage.sqlite_store: SQLite store initialized at data/beigebox.db
+2026-03-20 18:25:00,955 [INFO] chromadb.telemetry.product.posthog: Anonymized telemetry enabled. See                     https://docs.trychroma.com/telemetry for more information.
+2026-03-20 18:25:01,024 [INFO] beigebox.storage.backends.chroma: ChromaBackend initialised (path=data/chroma, thread-safe)
+2026-03-20 18:25:01,024 [INFO] beigebox.storage.vector_store: VectorStore initialised (backend=ChromaBackend, model=nomic-embed-text)
+2026-03-20 18:25:01,024 [INFO] beigebox.storage.blob_store: BlobStore initialised at data/chroma/blobs
+2026-03-20 18:25:01,024 [INFO] beigebox.tools.calculator: CalculatorTool initialized
+2026-03-20 18:25:01,024 [INFO] beigebox.tools.datetime_tool: DateTimeTool initialized (local UTC-5.0)
+2026-03-20 18:25:01,029 [WARNING] beigebox.tools.system_info: bwrap probe failed (Command '['/usr/bin/bwrap', '--die-with-parent', '--unshare-all', '--ro-bind', '/usr', '/usr', '--ro-bind-try', '/bin', '/bin', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--chdir', '/tmp', '/bin/true']' returned non-zero exit status 1.) — falling back to busybox wrapper. Check kernel.unprivileged_userns_clone if unexpected.
+2026-03-20 18:25:01,029 [INFO] beigebox.tools.system_info: SystemInfoTool initialised (execution mode: busybox fallback)
+2026-03-20 18:25:01,030 [INFO] beigebox.tools.system_info: Shell allowlist: 0 commands
+2026-03-20 18:25:01,030 [INFO] beigebox.tools.memory: MemoryTool initialized (max_results=3, min_score=0.3, preprocess=False model=llama3.2:3b)
+2026-03-20 18:25:01,030 [INFO] beigebox.tools.registry: CDP tool registered (ws_url=ws://localhost:9222)
+2026-03-20 18:25:01,030 [INFO] beigebox.tools.registry: Tool registry loaded: ['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp']
+2026-03-20 18:25:01,031 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'dice' ← dice.py (DiceTool)
+2026-03-20 18:25:01,031 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'doc_parser' ← doc_parser.py (DocParserTool)
+2026-03-20 18:25:01,031 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'units' ← units.py (UnitsTool)
+2026-03-20 18:25:01,032 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'wiretap_summary' ← wiretap_summary.py (WiretapSummaryTool)
+2026-03-20 18:25:01,032 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'zip_inspector' ← zip_inspector.py (ZipInspectorTool)
+2026-03-20 18:25:01,032 [INFO] beigebox.tools.plugin_loader: Plugin loader: registered 5 plugin(s): ['dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector']
+2026-03-20 18:25:01,032 [INFO] beigebox.tools.registry: Tool registry after plugins: ['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp', 'dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector']
+2026-03-20 18:25:01,032 [INFO] beigebox.agents.decision: DecisionAgent enabled (model=llama3.2:3b, routes=[], tools=['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp', 'dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector'])
+2026-03-20 18:25:01,032 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: simple
+2026-03-20 18:25:01,032 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: complex
+2026-03-20 18:25:01,033 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: code
+2026-03-20 18:25:01,033 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: creative
+2026-03-20 18:25:01,033 [INFO] beigebox.backends.router: Backend 'ollama-local': per-endpoint timeout_ms=120000 (120.0s)
+2026-03-20 18:25:01,033 [INFO] beigebox.backends.router: Multi-backend router initialized: ollama-local(p2) → openrouter(p3)
+2026-03-20 18:25:01,033 [INFO] beigebox.main: Multi-backend router: enabled (2 backends)
+2026-03-20 18:25:01,033 [INFO] beigebox.main: Cost tracking: enabled
+2026-03-20 18:25:01,033 [INFO] beigebox.auth: Auth: disabled (no keys configured)
+2026-03-20 18:25:01,052 [INFO] beigebox.agents.skill_loader: Loaded skill: beigebox-admin
+2026-03-20 18:25:01,052 [INFO] beigebox.agents.skill_loader: Loaded skill: algorithmic-art
+2026-03-20 18:25:01,053 [INFO] beigebox.agents.skill_loader: Loaded skill: brand-guidelines
+2026-03-20 18:25:01,053 [INFO] beigebox.agents.skill_loader: Loaded skill: canvas-design
+2026-03-20 18:25:01,054 [INFO] beigebox.agents.skill_loader: Loaded skill: claude-api
+2026-03-20 18:25:01,054 [INFO] beigebox.agents.skill_loader: Loaded skill: doc-coauthoring
+2026-03-20 18:25:01,055 [INFO] beigebox.agents.skill_loader: Loaded skill: docx
+2026-03-20 18:25:01,056 [INFO] beigebox.agents.skill_loader: Loaded skill: frontend-design
+2026-03-20 18:25:01,056 [INFO] beigebox.agents.skill_loader: Loaded skill: internal-comms
+2026-03-20 18:25:01,056 [INFO] beigebox.agents.skill_loader: Loaded skill: mcp-builder
+2026-03-20 18:25:01,057 [INFO] beigebox.agents.skill_loader: Loaded skill: pdf
+2026-03-20 18:25:01,058 [INFO] beigebox.agents.skill_loader: Loaded skill: pptx
+2026-03-20 18:25:01,058 [INFO] beigebox.agents.skill_loader: Loaded skill: skill-creator
+2026-03-20 18:25:01,059 [INFO] beigebox.agents.skill_loader: Loaded skill: slack-gif-creator
+2026-03-20 18:25:01,059 [INFO] beigebox.agents.skill_loader: Loaded skill: theme-factory
+2026-03-20 18:25:01,059 [INFO] beigebox.agents.skill_loader: Loaded skill: web-artifacts-builder
+2026-03-20 18:25:01,060 [INFO] beigebox.agents.skill_loader: Loaded skill: webapp-testing
+2026-03-20 18:25:01,061 [INFO] beigebox.agents.skill_loader: Loaded skill: xlsx
+2026-03-20 18:25:01,061 [INFO] beigebox.agents.skill_loader: Loaded skill: template-skill
+2026-03-20 18:25:01,062 [INFO] beigebox.agents.skill_loader: Loaded skill: adaptyv
+2026-03-20 18:25:01,062 [INFO] beigebox.agents.skill_loader: Loaded skill: aeon
+2026-03-20 18:25:01,063 [INFO] beigebox.agents.skill_loader: Loaded skill: alpha-vantage
+2026-03-20 18:25:01,063 [INFO] beigebox.agents.skill_loader: Loaded skill: alphafold-database
+2026-03-20 18:25:01,064 [INFO] beigebox.agents.skill_loader: Loaded skill: anndata
+2026-03-20 18:25:01,064 [INFO] beigebox.agents.skill_loader: Loaded skill: arboreto
+2026-03-20 18:25:01,065 [INFO] beigebox.agents.skill_loader: Loaded skill: astropy
+2026-03-20 18:25:01,065 [INFO] beigebox.agents.skill_loader: Loaded skill: benchling-integration
+2026-03-20 18:25:01,066 [INFO] beigebox.agents.skill_loader: Loaded skill: bgpt-paper-search
+2026-03-20 18:25:01,067 [INFO] beigebox.agents.skill_loader: Loaded skill: bindingdb-database
+2026-03-20 18:25:01,067 [INFO] beigebox.agents.skill_loader: Loaded skill: biopython
+2026-03-20 18:25:01,068 [INFO] beigebox.agents.skill_loader: Loaded skill: biorxiv-database
+2026-03-20 18:25:01,068 [INFO] beigebox.agents.skill_loader: Loaded skill: bioservices
+2026-03-20 18:25:01,069 [INFO] beigebox.agents.skill_loader: Loaded skill: brenda-database
+2026-03-20 18:25:01,069 [INFO] beigebox.agents.skill_loader: Loaded skill: cbioportal-database
+2026-03-20 18:25:01,070 [INFO] beigebox.agents.skill_loader: Loaded skill: cellxgene-census
+2026-03-20 18:25:01,070 [INFO] beigebox.agents.skill_loader: Loaded skill: chembl-database
+2026-03-20 18:25:01,071 [INFO] beigebox.agents.skill_loader: Loaded skill: cirq
+2026-03-20 18:25:01,071 [INFO] beigebox.agents.skill_loader: Loaded skill: citation-management
+2026-03-20 18:25:01,072 [INFO] beigebox.agents.skill_loader: Loaded skill: clinical-decision-support
+2026-03-20 18:25:01,073 [INFO] beigebox.agents.skill_loader: Loaded skill: clinical-reports
+2026-03-20 18:25:01,073 [INFO] beigebox.agents.skill_loader: Loaded skill: clinicaltrials-database
+2026-03-20 18:25:01,073 [INFO] beigebox.agents.skill_loader: Loaded skill: clinpgx-database
+2026-03-20 18:25:01,074 [INFO] beigebox.agents.skill_loader: Loaded skill: clinvar-database
+2026-03-20 18:25:01,074 [INFO] beigebox.agents.skill_loader: Loaded skill: cobrapy
+2026-03-20 18:25:01,075 [INFO] beigebox.agents.skill_loader: Loaded skill: consciousness-council
+2026-03-20 18:25:01,076 [INFO] beigebox.agents.skill_loader: Loaded skill: cosmic-database
+2026-03-20 18:25:01,076 [INFO] beigebox.agents.skill_loader: Loaded skill: dask
+2026-03-20 18:25:01,077 [INFO] beigebox.agents.skill_loader: Loaded skill: datacommons-client
+2026-03-20 18:25:01,077 [INFO] beigebox.agents.skill_loader: Loaded skill: datamol
+2026-03-20 18:25:01,078 [INFO] beigebox.agents.skill_loader: Loaded skill: deepchem
+2026-03-20 18:25:01,078 [INFO] beigebox.agents.skill_loader: Loaded skill: deeptools
+2026-03-20 18:25:01,079 [INFO] beigebox.agents.skill_loader: Loaded skill: denario
+2026-03-20 18:25:01,079 [INFO] beigebox.agents.skill_loader: Loaded skill: depmap
+2026-03-20 18:25:01,080 [INFO] beigebox.agents.skill_loader: Loaded skill: dhdna-profiler
+2026-03-20 18:25:01,080 [INFO] beigebox.agents.skill_loader: Loaded skill: diffdock
+2026-03-20 18:25:01,081 [INFO] beigebox.agents.skill_loader: Loaded skill: dnanexus-integration
+2026-03-20 18:25:01,081 [INFO] beigebox.agents.skill_loader: Loaded skill: docx
+2026-03-20 18:25:01,082 [INFO] beigebox.agents.skill_loader: Loaded skill: pdf
+2026-03-20 18:25:01,082 [INFO] beigebox.agents.skill_loader: Loaded skill: pptx
+2026-03-20 18:25:01,082 [INFO] beigebox.agents.skill_loader: Loaded skill: xlsx
+2026-03-20 18:25:01,083 [INFO] beigebox.agents.skill_loader: Loaded skill: drugbank-database
+2026-03-20 18:25:01,084 [INFO] beigebox.agents.skill_loader: Loaded skill: edgartools
+2026-03-20 18:25:01,084 [INFO] beigebox.agents.skill_loader: Loaded skill: ena-database
+2026-03-20 18:25:01,085 [INFO] beigebox.agents.skill_loader: Loaded skill: ensembl-database
+2026-03-20 18:25:01,085 [INFO] beigebox.agents.skill_loader: Loaded skill: esm
+2026-03-20 18:25:01,086 [INFO] beigebox.agents.skill_loader: Loaded skill: etetoolkit
+2026-03-20 18:25:01,086 [INFO] beigebox.agents.skill_loader: Loaded skill: exploratory-data-analysis
+2026-03-20 18:25:01,087 [INFO] beigebox.agents.skill_loader: Loaded skill: fda-database
+2026-03-20 18:25:01,087 [INFO] beigebox.agents.skill_loader: Loaded skill: flowio
+2026-03-20 18:25:01,088 [INFO] beigebox.agents.skill_loader: Loaded skill: fluidsim
+2026-03-20 18:25:01,088 [INFO] beigebox.agents.skill_loader: Loaded skill: fred-economic-data
+2026-03-20 18:25:01,089 [INFO] beigebox.agents.skill_loader: Loaded skill: gene-database
+2026-03-20 18:25:01,089 [INFO] beigebox.agents.skill_loader: Loaded skill: generate-image
+2026-03-20 18:25:01,090 [INFO] beigebox.agents.skill_loader: Loaded skill: geniml
+2026-03-20 18:25:01,090 [INFO] beigebox.agents.skill_loader: Loaded skill: geo-database
+2026-03-20 18:25:01,091 [INFO] beigebox.agents.skill_loader: Loaded skill: geomaster
+2026-03-20 18:25:01,092 [INFO] beigebox.agents.skill_loader: Loaded skill: geopandas
+2026-03-20 18:25:01,092 [INFO] beigebox.agents.skill_loader: Loaded skill: get-available-resources
+2026-03-20 18:25:01,093 [INFO] beigebox.agents.skill_loader: Loaded skill: gget
+2026-03-20 18:25:01,093 [INFO] beigebox.agents.skill_loader: Loaded skill: ginkgo-cloud-lab
+2026-03-20 18:25:01,094 [INFO] beigebox.agents.skill_loader: Loaded skill: glycoengineering
+2026-03-20 18:25:01,094 [INFO] beigebox.agents.skill_loader: Loaded skill: gnomad-database
+2026-03-20 18:25:01,095 [INFO] beigebox.agents.skill_loader: Loaded skill: gtars
+2026-03-20 18:25:01,095 [INFO] beigebox.agents.skill_loader: Loaded skill: gtex-database
+2026-03-20 18:25:01,096 [INFO] beigebox.agents.skill_loader: Loaded skill: gwas-database
+2026-03-20 18:25:01,096 [INFO] beigebox.agents.skill_loader: Loaded skill: hedgefundmonitor
+2026-03-20 18:25:01,097 [INFO] beigebox.agents.skill_loader: Loaded skill: histolab
+2026-03-20 18:25:01,097 [INFO] beigebox.agents.skill_loader: Loaded skill: hmdb-database
+2026-03-20 18:25:01,098 [INFO] beigebox.agents.skill_loader: Loaded skill: hypogenic
+2026-03-20 18:25:01,099 [INFO] beigebox.agents.skill_loader: Loaded skill: hypothesis-generation
+2026-03-20 18:25:01,099 [INFO] beigebox.agents.skill_loader: Loaded skill: imaging-data-commons
+2026-03-20 18:25:01,100 [INFO] beigebox.agents.skill_loader: Loaded skill: infographics
+2026-03-20 18:25:01,100 [INFO] beigebox.agents.skill_loader: Loaded skill: interpro-database
+2026-03-20 18:25:01,101 [INFO] beigebox.agents.skill_loader: Loaded skill: iso-13485-certification
+2026-03-20 18:25:01,102 [INFO] beigebox.agents.skill_loader: Loaded skill: jaspar-database
+2026-03-20 18:25:01,102 [INFO] beigebox.agents.skill_loader: Loaded skill: kegg-database
+2026-03-20 18:25:01,103 [INFO] beigebox.agents.skill_loader: Loaded skill: labarchive-integration
+2026-03-20 18:25:01,103 [INFO] beigebox.agents.skill_loader: Loaded skill: lamindb
+2026-03-20 18:25:01,104 [INFO] beigebox.agents.skill_loader: Loaded skill: latchbio-integration
+2026-03-20 18:25:01,104 [INFO] beigebox.agents.skill_loader: Loaded skill: latex-posters
+2026-03-20 18:25:01,105 [INFO] beigebox.agents.skill_loader: Loaded skill: literature-review
+2026-03-20 18:25:01,106 [INFO] beigebox.agents.skill_loader: Loaded skill: markdown-mermaid-writing
+2026-03-20 18:25:01,107 [INFO] beigebox.agents.skill_loader: Loaded skill: market-research-reports
+2026-03-20 18:25:01,107 [INFO] beigebox.agents.skill_loader: Loaded skill: markitdown
+2026-03-20 18:25:01,108 [INFO] beigebox.agents.skill_loader: Loaded skill: matchms
+2026-03-20 18:25:01,108 [INFO] beigebox.agents.skill_loader: Loaded skill: matlab
+2026-03-20 18:25:01,109 [INFO] beigebox.agents.skill_loader: Loaded skill: matplotlib
+2026-03-20 18:25:01,109 [INFO] beigebox.agents.skill_loader: Loaded skill: medchem
+2026-03-20 18:25:01,110 [INFO] beigebox.agents.skill_loader: Loaded skill: metabolomics-workbench-database
+2026-03-20 18:25:01,110 [INFO] beigebox.agents.skill_loader: Loaded skill: modal
+2026-03-20 18:25:01,111 [INFO] beigebox.agents.skill_loader: Loaded skill: molecular-dynamics
+2026-03-20 18:25:01,111 [INFO] beigebox.agents.skill_loader: Loaded skill: molfeat
+2026-03-20 18:25:01,112 [INFO] beigebox.agents.skill_loader: Loaded skill: monarch-database
+2026-03-20 18:25:01,112 [INFO] beigebox.agents.skill_loader: Loaded skill: networkx
+2026-03-20 18:25:01,113 [INFO] beigebox.agents.skill_loader: Loaded skill: neurokit2
+2026-03-20 18:25:01,114 [INFO] beigebox.agents.skill_loader: Loaded skill: neuropixels-analysis
+2026-03-20 18:25:01,114 [INFO] beigebox.agents.skill_loader: Loaded skill: offer-k-dense-web
+2026-03-20 18:25:01,114 [INFO] beigebox.agents.skill_loader: Loaded skill: omero-integration
+2026-03-20 18:25:01,115 [INFO] beigebox.agents.skill_loader: Loaded skill: open-notebook
+2026-03-20 18:25:01,116 [INFO] beigebox.agents.skill_loader: Loaded skill: openalex-database
+2026-03-20 18:25:01,116 [INFO] beigebox.agents.skill_loader: Loaded skill: opentargets-database
+2026-03-20 18:25:01,117 [INFO] beigebox.agents.skill_loader: Loaded skill: opentrons-integration
+2026-03-20 18:25:01,117 [INFO] beigebox.agents.skill_loader: Loaded skill: paper-2-web
+2026-03-20 18:25:01,118 [INFO] beigebox.agents.skill_loader: Loaded skill: parallel-web
+2026-03-20 18:25:01,118 [INFO] beigebox.agents.skill_loader: Loaded skill: pathml
+2026-03-20 18:25:01,119 [INFO] beigebox.agents.skill_loader: Loaded skill: pdb-database
+2026-03-20 18:25:01,119 [INFO] beigebox.agents.skill_loader: Loaded skill: peer-review
+2026-03-20 18:25:01,120 [INFO] beigebox.agents.skill_loader: Loaded skill: pennylane
+2026-03-20 18:25:01,121 [INFO] beigebox.agents.skill_loader: Loaded skill: perplexity-search
+2026-03-20 18:25:01,121 [INFO] beigebox.agents.skill_loader: Loaded skill: phylogenetics
+2026-03-20 18:25:01,122 [INFO] beigebox.agents.skill_loader: Loaded skill: plotly
+2026-03-20 18:25:01,122 [INFO] beigebox.agents.skill_loader: Loaded skill: polars
+2026-03-20 18:25:01,123 [INFO] beigebox.agents.skill_loader: Loaded skill: pptx-posters
+2026-03-20 18:25:01,123 [INFO] beigebox.agents.skill_loader: Loaded skill: protocolsio-integration
+2026-03-20 18:25:01,124 [INFO] beigebox.agents.skill_loader: Loaded skill: pubchem-database
+2026-03-20 18:25:01,125 [INFO] beigebox.agents.skill_loader: Loaded skill: pubmed-database
+2026-03-20 18:25:01,125 [INFO] beigebox.agents.skill_loader: Loaded skill: pufferlib
+2026-03-20 18:25:01,126 [INFO] beigebox.agents.skill_loader: Loaded skill: pydeseq2
+2026-03-20 18:25:01,126 [INFO] beigebox.agents.skill_loader: Loaded skill: pydicom
+2026-03-20 18:25:01,127 [INFO] beigebox.agents.skill_loader: Loaded skill: pyhealth
+2026-03-20 18:25:01,127 [INFO] beigebox.agents.skill_loader: Loaded skill: pylabrobot
+2026-03-20 18:25:01,128 [INFO] beigebox.agents.skill_loader: Loaded skill: pymatgen
+2026-03-20 18:25:01,128 [INFO] beigebox.agents.skill_loader: Loaded skill: pymc-bayesian-modeling
+2026-03-20 18:25:01,129 [INFO] beigebox.agents.skill_loader: Loaded skill: pymoo
+2026-03-20 18:25:01,129 [INFO] beigebox.agents.skill_loader: Loaded skill: pyopenms
+2026-03-20 18:25:01,130 [INFO] beigebox.agents.skill_loader: Loaded skill: pysam
+2026-03-20 18:25:01,130 [INFO] beigebox.agents.skill_loader: Loaded skill: pytdc
+2026-03-20 18:25:01,131 [INFO] beigebox.agents.skill_loader: Loaded skill: pytorch-lightning
+2026-03-20 18:25:01,131 [INFO] beigebox.agents.skill_loader: Loaded skill: pyzotero
+2026-03-20 18:25:01,132 [INFO] beigebox.agents.skill_loader: Loaded skill: qiskit
+2026-03-20 18:25:01,133 [INFO] beigebox.agents.skill_loader: Loaded skill: qutip
+2026-03-20 18:25:01,133 [INFO] beigebox.agents.skill_loader: Loaded skill: rdkit
+2026-03-20 18:25:01,134 [INFO] beigebox.agents.skill_loader: Loaded skill: reactome-database
+2026-03-20 18:25:01,134 [INFO] beigebox.agents.skill_loader: Loaded skill: research-grants
+2026-03-20 18:25:01,135 [INFO] beigebox.agents.skill_loader: Loaded skill: research-lookup
+2026-03-20 18:25:01,135 [INFO] beigebox.agents.skill_loader: Loaded skill: rowan
+2026-03-20 18:25:01,136 [INFO] beigebox.agents.skill_loader: Loaded skill: scanpy
+2026-03-20 18:25:01,136 [INFO] beigebox.agents.skill_loader: Loaded skill: scholar-evaluation
+2026-03-20 18:25:01,137 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-brainstorming
+2026-03-20 18:25:01,138 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-critical-thinking
+2026-03-20 18:25:01,138 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-schematics
+2026-03-20 18:25:01,139 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-slides
+2026-03-20 18:25:01,139 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-visualization
+2026-03-20 18:25:01,140 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-writing
+2026-03-20 18:25:01,140 [INFO] beigebox.agents.skill_loader: Loaded skill: scikit-bio
+2026-03-20 18:25:01,141 [INFO] beigebox.agents.skill_loader: Loaded skill: scikit-learn
+2026-03-20 18:25:01,142 [INFO] beigebox.agents.skill_loader: Loaded skill: scikit-survival
+2026-03-20 18:25:01,142 [INFO] beigebox.agents.skill_loader: Loaded skill: scvelo
+2026-03-20 18:25:01,143 [INFO] beigebox.agents.skill_loader: Loaded skill: scvi-tools
+2026-03-20 18:25:01,143 [INFO] beigebox.agents.skill_loader: Loaded skill: seaborn
+2026-03-20 18:25:01,144 [INFO] beigebox.agents.skill_loader: Loaded skill: shap
+2026-03-20 18:25:01,144 [INFO] beigebox.agents.skill_loader: Loaded skill: simpy
+2026-03-20 18:25:01,145 [INFO] beigebox.agents.skill_loader: Loaded skill: stable-baselines3
+2026-03-20 18:25:01,145 [INFO] beigebox.agents.skill_loader: Loaded skill: statistical-analysis
+2026-03-20 18:25:01,146 [INFO] beigebox.agents.skill_loader: Loaded skill: statsmodels
+2026-03-20 18:25:01,146 [INFO] beigebox.agents.skill_loader: Loaded skill: string-database
+2026-03-20 18:25:01,147 [INFO] beigebox.agents.skill_loader: Loaded skill: sympy
+2026-03-20 18:25:01,148 [INFO] beigebox.agents.skill_loader: Loaded skill: tiledbvcf
+2026-03-20 18:25:01,148 [INFO] beigebox.agents.skill_loader: Loaded skill: timesfm-forecasting
+2026-03-20 18:25:01,149 [INFO] beigebox.agents.skill_loader: Loaded skill: torch-geometric
+2026-03-20 18:25:01,149 [INFO] beigebox.agents.skill_loader: Loaded skill: torchdrug
+2026-03-20 18:25:01,150 [INFO] beigebox.agents.skill_loader: Loaded skill: transformers
+2026-03-20 18:25:01,150 [INFO] beigebox.agents.skill_loader: Loaded skill: treatment-plans
+2026-03-20 18:25:01,151 [INFO] beigebox.agents.skill_loader: Loaded skill: umap-learn
+2026-03-20 18:25:01,151 [INFO] beigebox.agents.skill_loader: Loaded skill: uniprot-database
+2026-03-20 18:25:01,152 [INFO] beigebox.agents.skill_loader: Loaded skill: usfiscaldata
+2026-03-20 18:25:01,153 [INFO] beigebox.agents.skill_loader: Loaded skill: uspto-database
+2026-03-20 18:25:01,153 [INFO] beigebox.agents.skill_loader: Loaded skill: vaex
+2026-03-20 18:25:01,154 [INFO] beigebox.agents.skill_loader: Loaded skill: venue-templates
+2026-03-20 18:25:01,154 [INFO] beigebox.agents.skill_loader: Loaded skill: what-if-oracle
+2026-03-20 18:25:01,155 [INFO] beigebox.agents.skill_loader: Loaded skill: zarr-python
+2026-03-20 18:25:01,155 [INFO] beigebox.agents.skill_loader: Loaded skill: zinc-database
+2026-03-20 18:25:01,156 [INFO] beigebox.agents.skill_loader: Loaded skill: pdf-processing
+2026-03-20 18:25:01,156 [INFO] beigebox.main: MCP server: enabled (POST /mcp) — operator/run tool exposed
+2026-03-20 18:25:01,156 [INFO] beigebox.amf_mesh: AMF mesh: disabled (set amf_mesh.enabled: true in config.yaml)
+2026-03-20 18:25:01,156 [INFO] beigebox.main: BeigeBox started — listening on 0.0.0.0:8001, backend http://localhost:11434
+2026-03-20 18:25:01,156 [INFO] beigebox.main: Storage: SQLite=./data/beigebox.db, Vector=./data/chroma
+2026-03-20 18:25:01,156 [INFO] beigebox.main: Tools: ['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp', 'dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector']
+2026-03-20 18:25:01,156 [INFO] beigebox.main: Hooks: []
+2026-03-20 18:25:01,156 [INFO] beigebox.main: Decision LLM: enabled
+2026-03-20 18:25:01,156 [INFO] beigebox.main: Embedding classifier: ready
+2026-03-20 18:25:01,156 [INFO] beigebox.main: Z-commands: enabled (prefix messages with 'z: <directive>')
+2026-03-20 18:25:01,156 [WARNING] beigebox.main: Operator agent: ENABLED — LLM-driven tool execution active (ALL registered tools)
+2026-03-20 18:25:01,187 [WARNING] beigebox.main: Embedding preload attempt 1/5 failed (All connection attempts failed) — retrying in 5s
+2026-03-20 18:25:06,205 [WARNING] beigebox.main: Embedding preload attempt 2/5 failed (All connection attempts failed) — retrying in 10s
+2026-03-20 18:25:16,224 [WARNING] beigebox.main: Embedding preload attempt 3/5 failed (All connection attempts failed) — retrying in 20s
+2026-03-20 18:25:25,670 [ERROR] beigebox.main: Discovery scoring failed for baseline_middle: 'ParetoOptimizer' object has no attribute 'weighted_score'
+Traceback (most recent call last):
+  File "/home/jinx/ai-stack/beigebox/beigebox/main.py", line 3662, in discovery_run
+    weighted = scorer.weighted_score(dim_score, weights)
+               ^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'ParetoOptimizer' object has no attribute 'weighted_score'
+2026-03-20 18:25:25,671 [ERROR] beigebox.main: Discovery scoring failed for facts_first: 'ParetoOptimizer' object has no attribute 'weighted_score'
+Traceback (most recent call last):
+  File "/home/jinx/ai-stack/beigebox/beigebox/main.py", line 3662, in discovery_run
+    weighted = scorer.weighted_score(dim_score, weights)
+               ^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'ParetoOptimizer' object has no attribute 'weighted_score'
+2026-03-20 18:25:25,672 [ERROR] beigebox.main: Discovery scoring failed for facts_last: 'ParetoOptimizer' object has no attribute 'weighted_score'
+Traceback (most recent call last):
+  File "/home/jinx/ai-stack/beigebox/beigebox/main.py", line 3662, in discovery_run
+    weighted = scorer.weighted_score(dim_score, weights)
+               ^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'ParetoOptimizer' object has no attribute 'weighted_score'
+2026-03-20 18:25:25,673 [ERROR] beigebox.main: Discovery scoring failed for alternating: 'ParetoOptimizer' object has no attribute 'weighted_score'
+Traceback (most recent call last):
+  File "/home/jinx/ai-stack/beigebox/beigebox/main.py", line 3662, in discovery_run
+    weighted = scorer.weighted_score(dim_score, weights)
+               ^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'ParetoOptimizer' object has no attribute 'weighted_score'
+2026-03-20 18:25:25,679 [ERROR] beigebox.main: Discovery scoring failed for baseline_no_compression: 'ParetoOptimizer' object has no attribute 'weighted_score'
+Traceback (most recent call last):
+  File "/home/jinx/ai-stack/beigebox/beigebox/main.py", line 3662, in discovery_run
+    weighted = scorer.weighted_score(dim_score, weights)
+               ^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'ParetoOptimizer' object has no attribute 'weighted_score'
+2026-03-20 18:25:25,680 [ERROR] beigebox.main: Discovery scoring failed for extractive: 'ParetoOptimizer' object has no attribute 'weighted_score'
+Traceback (most recent call last):
+  File "/home/jinx/ai-stack/beigebox/beigebox/main.py", line 3662, in discovery_run
+    weighted = scorer.weighted_score(dim_score, weights)
+               ^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'ParetoOptimizer' object has no attribute 'weighted_score'
+2026-03-20 18:25:25,680 [ERROR] beigebox.main: Discovery scoring failed for abstractive: 'ParetoOptimizer' object has no attribute 'weighted_score'
+Traceback (most recent call last):
+  File "/home/jinx/ai-stack/beigebox/beigebox/main.py", line 3662, in discovery_run
+    weighted = scorer.weighted_score(dim_score, weights)
+               ^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'ParetoOptimizer' object has no attribute 'weighted_score'
+2026-03-20 18:25:25,681 [ERROR] beigebox.main: Discovery scoring failed for hybrid: 'ParetoOptimizer' object has no attribute 'weighted_score'
+Traceback (most recent call last):
+  File "/home/jinx/ai-stack/beigebox/beigebox/main.py", line 3662, in discovery_run
+    weighted = scorer.weighted_score(dim_score, weights)
+               ^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'ParetoOptimizer' object has no attribute 'weighted_score'
+2026-03-20 18:25:31,205 [WARNING] beigebox.agents.decision: Decision preload attempt 1/5 failed (All connection attempts failed) — retrying in 5s
+2026-03-20 18:25:33,087 [ERROR] beigebox.main: Discovery scoring failed for variant_a: 'ParetoOptimizer' object has no attribute 'weighted_score'
+Traceback (most recent call last):
+  File "/home/jinx/ai-stack/beigebox/beigebox/main.py", line 3662, in discovery_run
+    weighted = scorer.weighted_score(dim_score, weights)
+               ^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'ParetoOptimizer' object has no attribute 'weighted_score'
+2026-03-20 18:25:33,088 [ERROR] beigebox.main: Discovery scoring failed for variant_b: 'ParetoOptimizer' object has no attribute 'weighted_score'
+Traceback (most recent call last):
+  File "/home/jinx/ai-stack/beigebox/beigebox/main.py", line 3662, in discovery_run
+    weighted = scorer.weighted_score(dim_score, weights)
+               ^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'ParetoOptimizer' object has no attribute 'weighted_score'
+2026-03-20 18:25:36,240 [WARNING] beigebox.agents.decision: Decision preload attempt 2/5 failed (All connection attempts failed) — retrying in 10s
+2026-03-20 18:25:36,241 [WARNING] beigebox.main: Embedding preload attempt 4/5 failed (All connection attempts failed) — retrying in 40s
+2026-03-20 18:25:46,258 [WARNING] beigebox.agents.decision: Decision preload attempt 3/5 failed (All connection attempts failed) — retrying in 20s
+2026-03-20 18:26:06,276 [WARNING] beigebox.agents.decision: Decision preload attempt 4/5 failed (All connection attempts failed) — retrying in 40s
+2026-03-20 18:26:16,260 [WARNING] beigebox.main: Embedding preload failed after 5 attempts: All connection attempts failed
+2026-03-20 18:26:46,299 [WARNING] beigebox.agents.decision: Failed to preload decision model after 5 attempts: All connection attempts failed
+2026-03-20 19:22:44,155 [INFO] beigebox.main: BeigeBox shutting down
+2026-03-20 19:22:44,155 [INFO] beigebox.main: Wiretap and payload log flushed and closed
+2026-03-20 19:22:44,684 [INFO] beigebox.storage.sqlite_store: SQLite store initialized at data/beigebox.db
+2026-03-20 19:22:44,952 [INFO] chromadb.telemetry.product.posthog: Anonymized telemetry enabled. See                     https://docs.trychroma.com/telemetry for more information.
+2026-03-20 19:22:45,022 [INFO] beigebox.storage.backends.chroma: ChromaBackend initialised (path=data/chroma, thread-safe)
+2026-03-20 19:22:45,023 [INFO] beigebox.storage.vector_store: VectorStore initialised (backend=ChromaBackend, model=nomic-embed-text)
+2026-03-20 19:22:45,023 [INFO] beigebox.storage.blob_store: BlobStore initialised at data/chroma/blobs
+2026-03-20 19:22:45,023 [INFO] beigebox.tools.calculator: CalculatorTool initialized
+2026-03-20 19:22:45,023 [INFO] beigebox.tools.datetime_tool: DateTimeTool initialized (local UTC-5.0)
+2026-03-20 19:22:45,028 [WARNING] beigebox.tools.system_info: bwrap probe failed (Command '['/usr/bin/bwrap', '--die-with-parent', '--unshare-all', '--ro-bind', '/usr', '/usr', '--ro-bind-try', '/bin', '/bin', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--chdir', '/tmp', '/bin/true']' returned non-zero exit status 1.) — falling back to busybox wrapper. Check kernel.unprivileged_userns_clone if unexpected.
+2026-03-20 19:22:45,028 [INFO] beigebox.tools.system_info: SystemInfoTool initialised (execution mode: busybox fallback)
+2026-03-20 19:22:45,029 [INFO] beigebox.tools.system_info: Shell allowlist: 0 commands
+2026-03-20 19:22:45,029 [INFO] beigebox.tools.memory: MemoryTool initialized (max_results=3, min_score=0.3, preprocess=False model=llama3.2:3b)
+2026-03-20 19:22:45,030 [INFO] beigebox.tools.registry: CDP tool registered (ws_url=ws://localhost:9222)
+2026-03-20 19:22:45,030 [INFO] beigebox.tools.registry: Tool registry loaded: ['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp']
+2026-03-20 19:22:45,030 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'dice' ← dice.py (DiceTool)
+2026-03-20 19:22:45,031 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'doc_parser' ← doc_parser.py (DocParserTool)
+2026-03-20 19:22:45,031 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'units' ← units.py (UnitsTool)
+2026-03-20 19:22:45,031 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'wiretap_summary' ← wiretap_summary.py (WiretapSummaryTool)
+2026-03-20 19:22:45,031 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'zip_inspector' ← zip_inspector.py (ZipInspectorTool)
+2026-03-20 19:22:45,031 [INFO] beigebox.tools.plugin_loader: Plugin loader: registered 5 plugin(s): ['dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector']
+2026-03-20 19:22:45,031 [INFO] beigebox.tools.registry: Tool registry after plugins: ['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp', 'dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector']
+2026-03-20 19:22:45,031 [INFO] beigebox.agents.decision: DecisionAgent enabled (model=llama3.2:3b, routes=[], tools=['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp', 'dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector'])
+2026-03-20 19:22:45,032 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: simple
+2026-03-20 19:22:45,032 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: complex
+2026-03-20 19:22:45,032 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: code
+2026-03-20 19:22:45,032 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: creative
+2026-03-20 19:22:45,032 [INFO] beigebox.backends.router: Backend 'ollama-local': per-endpoint timeout_ms=120000 (120.0s)
+2026-03-20 19:22:45,033 [INFO] beigebox.backends.router: Multi-backend router initialized: ollama-local(p2) → openrouter(p3)
+2026-03-20 19:22:45,033 [INFO] beigebox.main: Multi-backend router: enabled (2 backends)
+2026-03-20 19:22:45,033 [INFO] beigebox.main: Cost tracking: enabled
+2026-03-20 19:22:45,033 [INFO] beigebox.auth: Auth: disabled (no keys configured)
+2026-03-20 19:22:45,053 [INFO] beigebox.agents.skill_loader: Loaded skill: beigebox-admin
+2026-03-20 19:22:45,054 [INFO] beigebox.agents.skill_loader: Loaded skill: algorithmic-art
+2026-03-20 19:22:45,054 [INFO] beigebox.agents.skill_loader: Loaded skill: brand-guidelines
+2026-03-20 19:22:45,055 [INFO] beigebox.agents.skill_loader: Loaded skill: canvas-design
+2026-03-20 19:22:45,055 [INFO] beigebox.agents.skill_loader: Loaded skill: claude-api
+2026-03-20 19:22:45,055 [INFO] beigebox.agents.skill_loader: Loaded skill: doc-coauthoring
+2026-03-20 19:22:45,056 [INFO] beigebox.agents.skill_loader: Loaded skill: docx
+2026-03-20 19:22:45,057 [INFO] beigebox.agents.skill_loader: Loaded skill: frontend-design
+2026-03-20 19:22:45,057 [INFO] beigebox.agents.skill_loader: Loaded skill: internal-comms
+2026-03-20 19:22:45,058 [INFO] beigebox.agents.skill_loader: Loaded skill: mcp-builder
+2026-03-20 19:22:45,058 [INFO] beigebox.agents.skill_loader: Loaded skill: pdf
+2026-03-20 19:22:45,059 [INFO] beigebox.agents.skill_loader: Loaded skill: pptx
+2026-03-20 19:22:45,059 [INFO] beigebox.agents.skill_loader: Loaded skill: skill-creator
+2026-03-20 19:22:45,060 [INFO] beigebox.agents.skill_loader: Loaded skill: slack-gif-creator
+2026-03-20 19:22:45,060 [INFO] beigebox.agents.skill_loader: Loaded skill: theme-factory
+2026-03-20 19:22:45,061 [INFO] beigebox.agents.skill_loader: Loaded skill: web-artifacts-builder
+2026-03-20 19:22:45,061 [INFO] beigebox.agents.skill_loader: Loaded skill: webapp-testing
+2026-03-20 19:22:45,062 [INFO] beigebox.agents.skill_loader: Loaded skill: xlsx
+2026-03-20 19:22:45,062 [INFO] beigebox.agents.skill_loader: Loaded skill: template-skill
+2026-03-20 19:22:45,063 [INFO] beigebox.agents.skill_loader: Loaded skill: adaptyv
+2026-03-20 19:22:45,063 [INFO] beigebox.agents.skill_loader: Loaded skill: aeon
+2026-03-20 19:22:45,064 [INFO] beigebox.agents.skill_loader: Loaded skill: alpha-vantage
+2026-03-20 19:22:45,064 [INFO] beigebox.agents.skill_loader: Loaded skill: alphafold-database
+2026-03-20 19:22:45,065 [INFO] beigebox.agents.skill_loader: Loaded skill: anndata
+2026-03-20 19:22:45,066 [INFO] beigebox.agents.skill_loader: Loaded skill: arboreto
+2026-03-20 19:22:45,066 [INFO] beigebox.agents.skill_loader: Loaded skill: astropy
+2026-03-20 19:22:45,067 [INFO] beigebox.agents.skill_loader: Loaded skill: benchling-integration
+2026-03-20 19:22:45,067 [INFO] beigebox.agents.skill_loader: Loaded skill: bgpt-paper-search
+2026-03-20 19:22:45,068 [INFO] beigebox.agents.skill_loader: Loaded skill: bindingdb-database
+2026-03-20 19:22:45,068 [INFO] beigebox.agents.skill_loader: Loaded skill: biopython
+2026-03-20 19:22:45,069 [INFO] beigebox.agents.skill_loader: Loaded skill: biorxiv-database
+2026-03-20 19:22:45,069 [INFO] beigebox.agents.skill_loader: Loaded skill: bioservices
+2026-03-20 19:22:45,070 [INFO] beigebox.agents.skill_loader: Loaded skill: brenda-database
+2026-03-20 19:22:45,070 [INFO] beigebox.agents.skill_loader: Loaded skill: cbioportal-database
+2026-03-20 19:22:45,071 [INFO] beigebox.agents.skill_loader: Loaded skill: cellxgene-census
+2026-03-20 19:22:45,071 [INFO] beigebox.agents.skill_loader: Loaded skill: chembl-database
+2026-03-20 19:22:45,072 [INFO] beigebox.agents.skill_loader: Loaded skill: cirq
+2026-03-20 19:22:45,073 [INFO] beigebox.agents.skill_loader: Loaded skill: citation-management
+2026-03-20 19:22:45,073 [INFO] beigebox.agents.skill_loader: Loaded skill: clinical-decision-support
+2026-03-20 19:22:45,074 [INFO] beigebox.agents.skill_loader: Loaded skill: clinical-reports
+2026-03-20 19:22:45,074 [INFO] beigebox.agents.skill_loader: Loaded skill: clinicaltrials-database
+2026-03-20 19:22:45,075 [INFO] beigebox.agents.skill_loader: Loaded skill: clinpgx-database
+2026-03-20 19:22:45,075 [INFO] beigebox.agents.skill_loader: Loaded skill: clinvar-database
+2026-03-20 19:22:45,076 [INFO] beigebox.agents.skill_loader: Loaded skill: cobrapy
+2026-03-20 19:22:45,076 [INFO] beigebox.agents.skill_loader: Loaded skill: consciousness-council
+2026-03-20 19:22:45,077 [INFO] beigebox.agents.skill_loader: Loaded skill: cosmic-database
+2026-03-20 19:22:45,077 [INFO] beigebox.agents.skill_loader: Loaded skill: dask
+2026-03-20 19:22:45,078 [INFO] beigebox.agents.skill_loader: Loaded skill: datacommons-client
+2026-03-20 19:22:45,079 [INFO] beigebox.agents.skill_loader: Loaded skill: datamol
+2026-03-20 19:22:45,079 [INFO] beigebox.agents.skill_loader: Loaded skill: deepchem
+2026-03-20 19:22:45,080 [INFO] beigebox.agents.skill_loader: Loaded skill: deeptools
+2026-03-20 19:22:45,080 [INFO] beigebox.agents.skill_loader: Loaded skill: denario
+2026-03-20 19:22:45,081 [INFO] beigebox.agents.skill_loader: Loaded skill: depmap
+2026-03-20 19:22:45,081 [INFO] beigebox.agents.skill_loader: Loaded skill: dhdna-profiler
+2026-03-20 19:22:45,082 [INFO] beigebox.agents.skill_loader: Loaded skill: diffdock
+2026-03-20 19:22:45,082 [INFO] beigebox.agents.skill_loader: Loaded skill: dnanexus-integration
+2026-03-20 19:22:45,083 [INFO] beigebox.agents.skill_loader: Loaded skill: docx
+2026-03-20 19:22:45,083 [INFO] beigebox.agents.skill_loader: Loaded skill: pdf
+2026-03-20 19:22:45,084 [INFO] beigebox.agents.skill_loader: Loaded skill: pptx
+2026-03-20 19:22:45,084 [INFO] beigebox.agents.skill_loader: Loaded skill: xlsx
+2026-03-20 19:22:45,085 [INFO] beigebox.agents.skill_loader: Loaded skill: drugbank-database
+2026-03-20 19:22:45,085 [INFO] beigebox.agents.skill_loader: Loaded skill: edgartools
+2026-03-20 19:22:45,086 [INFO] beigebox.agents.skill_loader: Loaded skill: ena-database
+2026-03-20 19:22:45,086 [INFO] beigebox.agents.skill_loader: Loaded skill: ensembl-database
+2026-03-20 19:22:45,087 [INFO] beigebox.agents.skill_loader: Loaded skill: esm
+2026-03-20 19:22:45,087 [INFO] beigebox.agents.skill_loader: Loaded skill: etetoolkit
+2026-03-20 19:22:45,088 [INFO] beigebox.agents.skill_loader: Loaded skill: exploratory-data-analysis
+2026-03-20 19:22:45,088 [INFO] beigebox.agents.skill_loader: Loaded skill: fda-database
+2026-03-20 19:22:45,089 [INFO] beigebox.agents.skill_loader: Loaded skill: flowio
+2026-03-20 19:22:45,089 [INFO] beigebox.agents.skill_loader: Loaded skill: fluidsim
+2026-03-20 19:22:45,090 [INFO] beigebox.agents.skill_loader: Loaded skill: fred-economic-data
+2026-03-20 19:22:45,090 [INFO] beigebox.agents.skill_loader: Loaded skill: gene-database
+2026-03-20 19:22:45,091 [INFO] beigebox.agents.skill_loader: Loaded skill: generate-image
+2026-03-20 19:22:45,091 [INFO] beigebox.agents.skill_loader: Loaded skill: geniml
+2026-03-20 19:22:45,092 [INFO] beigebox.agents.skill_loader: Loaded skill: geo-database
+2026-03-20 19:22:45,093 [INFO] beigebox.agents.skill_loader: Loaded skill: geomaster
+2026-03-20 19:22:45,093 [INFO] beigebox.agents.skill_loader: Loaded skill: geopandas
+2026-03-20 19:22:45,094 [INFO] beigebox.agents.skill_loader: Loaded skill: get-available-resources
+2026-03-20 19:22:45,094 [INFO] beigebox.agents.skill_loader: Loaded skill: gget
+2026-03-20 19:22:45,095 [INFO] beigebox.agents.skill_loader: Loaded skill: ginkgo-cloud-lab
+2026-03-20 19:22:45,095 [INFO] beigebox.agents.skill_loader: Loaded skill: glycoengineering
+2026-03-20 19:22:45,096 [INFO] beigebox.agents.skill_loader: Loaded skill: gnomad-database
+2026-03-20 19:22:45,096 [INFO] beigebox.agents.skill_loader: Loaded skill: gtars
+2026-03-20 19:22:45,097 [INFO] beigebox.agents.skill_loader: Loaded skill: gtex-database
+2026-03-20 19:22:45,097 [INFO] beigebox.agents.skill_loader: Loaded skill: gwas-database
+2026-03-20 19:22:45,098 [INFO] beigebox.agents.skill_loader: Loaded skill: hedgefundmonitor
+2026-03-20 19:22:45,099 [INFO] beigebox.agents.skill_loader: Loaded skill: histolab
+2026-03-20 19:22:45,099 [INFO] beigebox.agents.skill_loader: Loaded skill: hmdb-database
+2026-03-20 19:22:45,100 [INFO] beigebox.agents.skill_loader: Loaded skill: hypogenic
+2026-03-20 19:22:45,101 [INFO] beigebox.agents.skill_loader: Loaded skill: hypothesis-generation
+2026-03-20 19:22:45,102 [INFO] beigebox.agents.skill_loader: Loaded skill: imaging-data-commons
+2026-03-20 19:22:45,102 [INFO] beigebox.agents.skill_loader: Loaded skill: infographics
+2026-03-20 19:22:45,103 [INFO] beigebox.agents.skill_loader: Loaded skill: interpro-database
+2026-03-20 19:22:45,104 [INFO] beigebox.agents.skill_loader: Loaded skill: iso-13485-certification
+2026-03-20 19:22:45,104 [INFO] beigebox.agents.skill_loader: Loaded skill: jaspar-database
+2026-03-20 19:22:45,105 [INFO] beigebox.agents.skill_loader: Loaded skill: kegg-database
+2026-03-20 19:22:45,105 [INFO] beigebox.agents.skill_loader: Loaded skill: labarchive-integration
+2026-03-20 19:22:45,106 [INFO] beigebox.agents.skill_loader: Loaded skill: lamindb
+2026-03-20 19:22:45,106 [INFO] beigebox.agents.skill_loader: Loaded skill: latchbio-integration
+2026-03-20 19:22:45,107 [INFO] beigebox.agents.skill_loader: Loaded skill: latex-posters
+2026-03-20 19:22:45,107 [INFO] beigebox.agents.skill_loader: Loaded skill: literature-review
+2026-03-20 19:22:45,109 [INFO] beigebox.agents.skill_loader: Loaded skill: markdown-mermaid-writing
+2026-03-20 19:22:45,109 [INFO] beigebox.agents.skill_loader: Loaded skill: market-research-reports
+2026-03-20 19:22:45,110 [INFO] beigebox.agents.skill_loader: Loaded skill: markitdown
+2026-03-20 19:22:45,110 [INFO] beigebox.agents.skill_loader: Loaded skill: matchms
+2026-03-20 19:22:45,111 [INFO] beigebox.agents.skill_loader: Loaded skill: matlab
+2026-03-20 19:22:45,112 [INFO] beigebox.agents.skill_loader: Loaded skill: matplotlib
+2026-03-20 19:22:45,112 [INFO] beigebox.agents.skill_loader: Loaded skill: medchem
+2026-03-20 19:22:45,113 [INFO] beigebox.agents.skill_loader: Loaded skill: metabolomics-workbench-database
+2026-03-20 19:22:45,113 [INFO] beigebox.agents.skill_loader: Loaded skill: modal
+2026-03-20 19:22:45,114 [INFO] beigebox.agents.skill_loader: Loaded skill: molecular-dynamics
+2026-03-20 19:22:45,114 [INFO] beigebox.agents.skill_loader: Loaded skill: molfeat
+2026-03-20 19:22:45,115 [INFO] beigebox.agents.skill_loader: Loaded skill: monarch-database
+2026-03-20 19:22:45,115 [INFO] beigebox.agents.skill_loader: Loaded skill: networkx
+2026-03-20 19:22:45,116 [INFO] beigebox.agents.skill_loader: Loaded skill: neurokit2
+2026-03-20 19:22:45,116 [INFO] beigebox.agents.skill_loader: Loaded skill: neuropixels-analysis
+2026-03-20 19:22:45,117 [INFO] beigebox.agents.skill_loader: Loaded skill: offer-k-dense-web
+2026-03-20 19:22:45,117 [INFO] beigebox.agents.skill_loader: Loaded skill: omero-integration
+2026-03-20 19:22:45,118 [INFO] beigebox.agents.skill_loader: Loaded skill: open-notebook
+2026-03-20 19:22:45,119 [INFO] beigebox.agents.skill_loader: Loaded skill: openalex-database
+2026-03-20 19:22:45,119 [INFO] beigebox.agents.skill_loader: Loaded skill: opentargets-database
+2026-03-20 19:22:45,120 [INFO] beigebox.agents.skill_loader: Loaded skill: opentrons-integration
+2026-03-20 19:22:45,120 [INFO] beigebox.agents.skill_loader: Loaded skill: paper-2-web
+2026-03-20 19:22:45,121 [INFO] beigebox.agents.skill_loader: Loaded skill: parallel-web
+2026-03-20 19:22:45,121 [INFO] beigebox.agents.skill_loader: Loaded skill: pathml
+2026-03-20 19:22:45,122 [INFO] beigebox.agents.skill_loader: Loaded skill: pdb-database
+2026-03-20 19:22:45,122 [INFO] beigebox.agents.skill_loader: Loaded skill: peer-review
+2026-03-20 19:22:45,123 [INFO] beigebox.agents.skill_loader: Loaded skill: pennylane
+2026-03-20 19:22:45,124 [INFO] beigebox.agents.skill_loader: Loaded skill: perplexity-search
+2026-03-20 19:22:45,124 [INFO] beigebox.agents.skill_loader: Loaded skill: phylogenetics
+2026-03-20 19:22:45,125 [INFO] beigebox.agents.skill_loader: Loaded skill: plotly
+2026-03-20 19:22:45,125 [INFO] beigebox.agents.skill_loader: Loaded skill: polars
+2026-03-20 19:22:45,126 [INFO] beigebox.agents.skill_loader: Loaded skill: pptx-posters
+2026-03-20 19:22:45,126 [INFO] beigebox.agents.skill_loader: Loaded skill: protocolsio-integration
+2026-03-20 19:22:45,127 [INFO] beigebox.agents.skill_loader: Loaded skill: pubchem-database
+2026-03-20 19:22:45,127 [INFO] beigebox.agents.skill_loader: Loaded skill: pubmed-database
+2026-03-20 19:22:45,128 [INFO] beigebox.agents.skill_loader: Loaded skill: pufferlib
+2026-03-20 19:22:45,128 [INFO] beigebox.agents.skill_loader: Loaded skill: pydeseq2
+2026-03-20 19:22:45,129 [INFO] beigebox.agents.skill_loader: Loaded skill: pydicom
+2026-03-20 19:22:45,130 [INFO] beigebox.agents.skill_loader: Loaded skill: pyhealth
+2026-03-20 19:22:45,130 [INFO] beigebox.agents.skill_loader: Loaded skill: pylabrobot
+2026-03-20 19:22:45,131 [INFO] beigebox.agents.skill_loader: Loaded skill: pymatgen
+2026-03-20 19:22:45,131 [INFO] beigebox.agents.skill_loader: Loaded skill: pymc-bayesian-modeling
+2026-03-20 19:22:45,132 [INFO] beigebox.agents.skill_loader: Loaded skill: pymoo
+2026-03-20 19:22:45,132 [INFO] beigebox.agents.skill_loader: Loaded skill: pyopenms
+2026-03-20 19:22:45,133 [INFO] beigebox.agents.skill_loader: Loaded skill: pysam
+2026-03-20 19:22:45,133 [INFO] beigebox.agents.skill_loader: Loaded skill: pytdc
+2026-03-20 19:22:45,134 [INFO] beigebox.agents.skill_loader: Loaded skill: pytorch-lightning
+2026-03-20 19:22:45,134 [INFO] beigebox.agents.skill_loader: Loaded skill: pyzotero
+2026-03-20 19:22:45,135 [INFO] beigebox.agents.skill_loader: Loaded skill: qiskit
+2026-03-20 19:22:45,136 [INFO] beigebox.agents.skill_loader: Loaded skill: qutip
+2026-03-20 19:22:45,136 [INFO] beigebox.agents.skill_loader: Loaded skill: rdkit
+2026-03-20 19:22:45,137 [INFO] beigebox.agents.skill_loader: Loaded skill: reactome-database
+2026-03-20 19:22:45,137 [INFO] beigebox.agents.skill_loader: Loaded skill: research-grants
+2026-03-20 19:22:45,138 [INFO] beigebox.agents.skill_loader: Loaded skill: research-lookup
+2026-03-20 19:22:45,138 [INFO] beigebox.agents.skill_loader: Loaded skill: rowan
+2026-03-20 19:22:45,139 [INFO] beigebox.agents.skill_loader: Loaded skill: scanpy
+2026-03-20 19:22:45,139 [INFO] beigebox.agents.skill_loader: Loaded skill: scholar-evaluation
+2026-03-20 19:22:45,140 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-brainstorming
+2026-03-20 19:22:45,141 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-critical-thinking
+2026-03-20 19:22:45,141 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-schematics
+2026-03-20 19:22:45,142 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-slides
+2026-03-20 19:22:45,142 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-visualization
+2026-03-20 19:22:45,143 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-writing
+2026-03-20 19:22:45,143 [INFO] beigebox.agents.skill_loader: Loaded skill: scikit-bio
+2026-03-20 19:22:45,144 [INFO] beigebox.agents.skill_loader: Loaded skill: scikit-learn
+2026-03-20 19:22:45,145 [INFO] beigebox.agents.skill_loader: Loaded skill: scikit-survival
+2026-03-20 19:22:45,145 [INFO] beigebox.agents.skill_loader: Loaded skill: scvelo
+2026-03-20 19:22:45,146 [INFO] beigebox.agents.skill_loader: Loaded skill: scvi-tools
+2026-03-20 19:22:45,146 [INFO] beigebox.agents.skill_loader: Loaded skill: seaborn
+2026-03-20 19:22:45,147 [INFO] beigebox.agents.skill_loader: Loaded skill: shap
+2026-03-20 19:22:45,147 [INFO] beigebox.agents.skill_loader: Loaded skill: simpy
+2026-03-20 19:22:45,148 [INFO] beigebox.agents.skill_loader: Loaded skill: stable-baselines3
+2026-03-20 19:22:45,148 [INFO] beigebox.agents.skill_loader: Loaded skill: statistical-analysis
+2026-03-20 19:22:45,149 [INFO] beigebox.agents.skill_loader: Loaded skill: statsmodels
+2026-03-20 19:22:45,149 [INFO] beigebox.agents.skill_loader: Loaded skill: string-database
+2026-03-20 19:22:45,150 [INFO] beigebox.agents.skill_loader: Loaded skill: sympy
+2026-03-20 19:22:45,151 [INFO] beigebox.agents.skill_loader: Loaded skill: tiledbvcf
+2026-03-20 19:22:45,151 [INFO] beigebox.agents.skill_loader: Loaded skill: timesfm-forecasting
+2026-03-20 19:22:45,152 [INFO] beigebox.agents.skill_loader: Loaded skill: torch-geometric
+2026-03-20 19:22:45,152 [INFO] beigebox.agents.skill_loader: Loaded skill: torchdrug
+2026-03-20 19:22:45,153 [INFO] beigebox.agents.skill_loader: Loaded skill: transformers
+2026-03-20 19:22:45,154 [INFO] beigebox.agents.skill_loader: Loaded skill: treatment-plans
+2026-03-20 19:22:45,154 [INFO] beigebox.agents.skill_loader: Loaded skill: umap-learn
+2026-03-20 19:22:45,155 [INFO] beigebox.agents.skill_loader: Loaded skill: uniprot-database
+2026-03-20 19:22:45,155 [INFO] beigebox.agents.skill_loader: Loaded skill: usfiscaldata
+2026-03-20 19:22:45,156 [INFO] beigebox.agents.skill_loader: Loaded skill: uspto-database
+2026-03-20 19:22:45,156 [INFO] beigebox.agents.skill_loader: Loaded skill: vaex
+2026-03-20 19:22:45,157 [INFO] beigebox.agents.skill_loader: Loaded skill: venue-templates
+2026-03-20 19:22:45,158 [INFO] beigebox.agents.skill_loader: Loaded skill: what-if-oracle
+2026-03-20 19:22:45,158 [INFO] beigebox.agents.skill_loader: Loaded skill: zarr-python
+2026-03-20 19:22:45,159 [INFO] beigebox.agents.skill_loader: Loaded skill: zinc-database
+2026-03-20 19:22:45,159 [INFO] beigebox.agents.skill_loader: Loaded skill: pdf-processing
+2026-03-20 19:22:45,159 [INFO] beigebox.main: MCP server: enabled (POST /mcp) — operator/run tool exposed
+2026-03-20 19:22:45,159 [INFO] beigebox.amf_mesh: AMF mesh: disabled (set amf_mesh.enabled: true in config.yaml)
+2026-03-20 19:22:45,160 [INFO] beigebox.main: BeigeBox started — listening on 0.0.0.0:8001, backend http://localhost:11434
+2026-03-20 19:22:45,160 [INFO] beigebox.main: Storage: SQLite=./data/beigebox.db, Vector=./data/chroma
+2026-03-20 19:22:45,160 [INFO] beigebox.main: Tools: ['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp', 'dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector']
+2026-03-20 19:22:45,160 [INFO] beigebox.main: Hooks: []
+2026-03-20 19:22:45,160 [INFO] beigebox.main: Decision LLM: enabled
+2026-03-20 19:22:45,160 [INFO] beigebox.main: Embedding classifier: ready
+2026-03-20 19:22:45,160 [INFO] beigebox.main: Z-commands: enabled (prefix messages with 'z: <directive>')
+2026-03-20 19:22:45,160 [WARNING] beigebox.main: Operator agent: ENABLED — LLM-driven tool execution active (ALL registered tools)
+2026-03-20 19:22:45,191 [WARNING] beigebox.main: Embedding preload attempt 1/5 failed (All connection attempts failed) — retrying in 5s
+2026-03-20 19:22:50,211 [WARNING] beigebox.main: Embedding preload attempt 2/5 failed (All connection attempts failed) — retrying in 10s
+2026-03-20 19:22:53,836 [INFO] beigebox.main: BeigeBox shutting down
+2026-03-20 19:22:53,836 [INFO] beigebox.main: Wiretap and payload log flushed and closed
+2026-03-20 19:22:54,349 [INFO] beigebox.storage.sqlite_store: SQLite store initialized at data/beigebox.db
+2026-03-20 19:22:54,615 [INFO] chromadb.telemetry.product.posthog: Anonymized telemetry enabled. See                     https://docs.trychroma.com/telemetry for more information.
+2026-03-20 19:22:54,685 [INFO] beigebox.storage.backends.chroma: ChromaBackend initialised (path=data/chroma, thread-safe)
+2026-03-20 19:22:54,685 [INFO] beigebox.storage.vector_store: VectorStore initialised (backend=ChromaBackend, model=nomic-embed-text)
+2026-03-20 19:22:54,685 [INFO] beigebox.storage.blob_store: BlobStore initialised at data/chroma/blobs
+2026-03-20 19:22:54,685 [INFO] beigebox.tools.calculator: CalculatorTool initialized
+2026-03-20 19:22:54,685 [INFO] beigebox.tools.datetime_tool: DateTimeTool initialized (local UTC-5.0)
+2026-03-20 19:22:54,690 [WARNING] beigebox.tools.system_info: bwrap probe failed (Command '['/usr/bin/bwrap', '--die-with-parent', '--unshare-all', '--ro-bind', '/usr', '/usr', '--ro-bind-try', '/bin', '/bin', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--chdir', '/tmp', '/bin/true']' returned non-zero exit status 1.) — falling back to busybox wrapper. Check kernel.unprivileged_userns_clone if unexpected.
+2026-03-20 19:22:54,690 [INFO] beigebox.tools.system_info: SystemInfoTool initialised (execution mode: busybox fallback)
+2026-03-20 19:22:54,691 [INFO] beigebox.tools.system_info: Shell allowlist: 0 commands
+2026-03-20 19:22:54,691 [INFO] beigebox.tools.memory: MemoryTool initialized (max_results=3, min_score=0.3, preprocess=False model=llama3.2:3b)
+2026-03-20 19:22:54,691 [INFO] beigebox.tools.registry: CDP tool registered (ws_url=ws://localhost:9222)
+2026-03-20 19:22:54,692 [INFO] beigebox.tools.registry: Tool registry loaded: ['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp']
+2026-03-20 19:22:54,692 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'dice' ← dice.py (DiceTool)
+2026-03-20 19:22:54,692 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'doc_parser' ← doc_parser.py (DocParserTool)
+2026-03-20 19:22:54,692 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'units' ← units.py (UnitsTool)
+2026-03-20 19:22:54,693 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'wiretap_summary' ← wiretap_summary.py (WiretapSummaryTool)
+2026-03-20 19:22:54,693 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'zip_inspector' ← zip_inspector.py (ZipInspectorTool)
+2026-03-20 19:22:54,693 [INFO] beigebox.tools.plugin_loader: Plugin loader: registered 5 plugin(s): ['dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector']
+2026-03-20 19:22:54,693 [INFO] beigebox.tools.registry: Tool registry after plugins: ['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp', 'dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector']
+2026-03-20 19:22:54,693 [INFO] beigebox.agents.decision: DecisionAgent enabled (model=llama3.2:3b, routes=[], tools=['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp', 'dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector'])
+2026-03-20 19:22:54,693 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: simple
+2026-03-20 19:22:54,693 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: complex
+2026-03-20 19:22:54,694 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: code
+2026-03-20 19:22:54,694 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: creative
+2026-03-20 19:22:54,694 [INFO] beigebox.backends.router: Backend 'ollama-local': per-endpoint timeout_ms=120000 (120.0s)
+2026-03-20 19:22:54,694 [INFO] beigebox.backends.router: Multi-backend router initialized: ollama-local(p2) → openrouter(p3)
+2026-03-20 19:22:54,694 [INFO] beigebox.main: Multi-backend router: enabled (2 backends)
+2026-03-20 19:22:54,694 [INFO] beigebox.main: Cost tracking: enabled
+2026-03-20 19:22:54,694 [INFO] beigebox.auth: Auth: disabled (no keys configured)
+2026-03-20 19:22:54,713 [INFO] beigebox.agents.skill_loader: Loaded skill: beigebox-admin
+2026-03-20 19:22:54,713 [INFO] beigebox.agents.skill_loader: Loaded skill: algorithmic-art
+2026-03-20 19:22:54,714 [INFO] beigebox.agents.skill_loader: Loaded skill: brand-guidelines
+2026-03-20 19:22:54,714 [INFO] beigebox.agents.skill_loader: Loaded skill: canvas-design
+2026-03-20 19:22:54,714 [INFO] beigebox.agents.skill_loader: Loaded skill: claude-api
+2026-03-20 19:22:54,715 [INFO] beigebox.agents.skill_loader: Loaded skill: doc-coauthoring
+2026-03-20 19:22:54,716 [INFO] beigebox.agents.skill_loader: Loaded skill: docx
+2026-03-20 19:22:54,716 [INFO] beigebox.agents.skill_loader: Loaded skill: frontend-design
+2026-03-20 19:22:54,717 [INFO] beigebox.agents.skill_loader: Loaded skill: internal-comms
+2026-03-20 19:22:54,717 [INFO] beigebox.agents.skill_loader: Loaded skill: mcp-builder
+2026-03-20 19:22:54,718 [INFO] beigebox.agents.skill_loader: Loaded skill: pdf
+2026-03-20 19:22:54,718 [INFO] beigebox.agents.skill_loader: Loaded skill: pptx
+2026-03-20 19:22:54,719 [INFO] beigebox.agents.skill_loader: Loaded skill: skill-creator
+2026-03-20 19:22:54,719 [INFO] beigebox.agents.skill_loader: Loaded skill: slack-gif-creator
+2026-03-20 19:22:54,720 [INFO] beigebox.agents.skill_loader: Loaded skill: theme-factory
+2026-03-20 19:22:54,720 [INFO] beigebox.agents.skill_loader: Loaded skill: web-artifacts-builder
+2026-03-20 19:22:54,720 [INFO] beigebox.agents.skill_loader: Loaded skill: webapp-testing
+2026-03-20 19:22:54,721 [INFO] beigebox.agents.skill_loader: Loaded skill: xlsx
+2026-03-20 19:22:54,721 [INFO] beigebox.agents.skill_loader: Loaded skill: template-skill
+2026-03-20 19:22:54,722 [INFO] beigebox.agents.skill_loader: Loaded skill: adaptyv
+2026-03-20 19:22:54,723 [INFO] beigebox.agents.skill_loader: Loaded skill: aeon
+2026-03-20 19:22:54,724 [INFO] beigebox.agents.skill_loader: Loaded skill: alpha-vantage
+2026-03-20 19:22:54,724 [INFO] beigebox.agents.skill_loader: Loaded skill: alphafold-database
+2026-03-20 19:22:54,725 [INFO] beigebox.agents.skill_loader: Loaded skill: anndata
+2026-03-20 19:22:54,725 [INFO] beigebox.agents.skill_loader: Loaded skill: arboreto
+2026-03-20 19:22:54,726 [INFO] beigebox.agents.skill_loader: Loaded skill: astropy
+2026-03-20 19:22:54,726 [INFO] beigebox.agents.skill_loader: Loaded skill: benchling-integration
+2026-03-20 19:22:54,727 [INFO] beigebox.agents.skill_loader: Loaded skill: bgpt-paper-search
+2026-03-20 19:22:54,728 [INFO] beigebox.agents.skill_loader: Loaded skill: bindingdb-database
+2026-03-20 19:22:54,728 [INFO] beigebox.agents.skill_loader: Loaded skill: biopython
+2026-03-20 19:22:54,729 [INFO] beigebox.agents.skill_loader: Loaded skill: biorxiv-database
+2026-03-20 19:22:54,729 [INFO] beigebox.agents.skill_loader: Loaded skill: bioservices
+2026-03-20 19:22:54,730 [INFO] beigebox.agents.skill_loader: Loaded skill: brenda-database
+2026-03-20 19:22:54,730 [INFO] beigebox.agents.skill_loader: Loaded skill: cbioportal-database
+2026-03-20 19:22:54,731 [INFO] beigebox.agents.skill_loader: Loaded skill: cellxgene-census
+2026-03-20 19:22:54,731 [INFO] beigebox.agents.skill_loader: Loaded skill: chembl-database
+2026-03-20 19:22:54,731 [INFO] beigebox.agents.skill_loader: Loaded skill: cirq
+2026-03-20 19:22:54,732 [INFO] beigebox.agents.skill_loader: Loaded skill: citation-management
+2026-03-20 19:22:54,733 [INFO] beigebox.agents.skill_loader: Loaded skill: clinical-decision-support
+2026-03-20 19:22:54,733 [INFO] beigebox.agents.skill_loader: Loaded skill: clinical-reports
+2026-03-20 19:22:54,734 [INFO] beigebox.agents.skill_loader: Loaded skill: clinicaltrials-database
+2026-03-20 19:22:54,734 [INFO] beigebox.agents.skill_loader: Loaded skill: clinpgx-database
+2026-03-20 19:22:54,735 [INFO] beigebox.agents.skill_loader: Loaded skill: clinvar-database
+2026-03-20 19:22:54,735 [INFO] beigebox.agents.skill_loader: Loaded skill: cobrapy
+2026-03-20 19:22:54,736 [INFO] beigebox.agents.skill_loader: Loaded skill: consciousness-council
+2026-03-20 19:22:54,736 [INFO] beigebox.agents.skill_loader: Loaded skill: cosmic-database
+2026-03-20 19:22:54,737 [INFO] beigebox.agents.skill_loader: Loaded skill: dask
+2026-03-20 19:22:54,737 [INFO] beigebox.agents.skill_loader: Loaded skill: datacommons-client
+2026-03-20 19:22:54,738 [INFO] beigebox.agents.skill_loader: Loaded skill: datamol
+2026-03-20 19:22:54,739 [INFO] beigebox.agents.skill_loader: Loaded skill: deepchem
+2026-03-20 19:22:54,740 [INFO] beigebox.agents.skill_loader: Loaded skill: deeptools
+2026-03-20 19:22:54,740 [INFO] beigebox.agents.skill_loader: Loaded skill: denario
+2026-03-20 19:22:54,741 [INFO] beigebox.agents.skill_loader: Loaded skill: depmap
+2026-03-20 19:22:54,742 [INFO] beigebox.agents.skill_loader: Loaded skill: dhdna-profiler
+2026-03-20 19:22:54,743 [INFO] beigebox.agents.skill_loader: Loaded skill: diffdock
+2026-03-20 19:22:54,743 [INFO] beigebox.agents.skill_loader: Loaded skill: dnanexus-integration
+2026-03-20 19:22:54,744 [INFO] beigebox.agents.skill_loader: Loaded skill: docx
+2026-03-20 19:22:54,744 [INFO] beigebox.agents.skill_loader: Loaded skill: pdf
+2026-03-20 19:22:54,745 [INFO] beigebox.agents.skill_loader: Loaded skill: pptx
+2026-03-20 19:22:54,745 [INFO] beigebox.agents.skill_loader: Loaded skill: xlsx
+2026-03-20 19:22:54,746 [INFO] beigebox.agents.skill_loader: Loaded skill: drugbank-database
+2026-03-20 19:22:54,746 [INFO] beigebox.agents.skill_loader: Loaded skill: edgartools
+2026-03-20 19:22:54,747 [INFO] beigebox.agents.skill_loader: Loaded skill: ena-database
+2026-03-20 19:22:54,747 [INFO] beigebox.agents.skill_loader: Loaded skill: ensembl-database
+2026-03-20 19:22:54,748 [INFO] beigebox.agents.skill_loader: Loaded skill: esm
+2026-03-20 19:22:54,748 [INFO] beigebox.agents.skill_loader: Loaded skill: etetoolkit
+2026-03-20 19:22:54,749 [INFO] beigebox.agents.skill_loader: Loaded skill: exploratory-data-analysis
+2026-03-20 19:22:54,750 [INFO] beigebox.agents.skill_loader: Loaded skill: fda-database
+2026-03-20 19:22:54,750 [INFO] beigebox.agents.skill_loader: Loaded skill: flowio
+2026-03-20 19:22:54,751 [INFO] beigebox.agents.skill_loader: Loaded skill: fluidsim
+2026-03-20 19:22:54,752 [INFO] beigebox.agents.skill_loader: Loaded skill: fred-economic-data
+2026-03-20 19:22:54,752 [INFO] beigebox.agents.skill_loader: Loaded skill: gene-database
+2026-03-20 19:22:54,753 [INFO] beigebox.agents.skill_loader: Loaded skill: generate-image
+2026-03-20 19:22:54,754 [INFO] beigebox.agents.skill_loader: Loaded skill: geniml
+2026-03-20 19:22:54,754 [INFO] beigebox.agents.skill_loader: Loaded skill: geo-database
+2026-03-20 19:22:54,755 [INFO] beigebox.agents.skill_loader: Loaded skill: geomaster
+2026-03-20 19:22:54,755 [INFO] beigebox.agents.skill_loader: Loaded skill: geopandas
+2026-03-20 19:22:54,756 [INFO] beigebox.agents.skill_loader: Loaded skill: get-available-resources
+2026-03-20 19:22:54,757 [INFO] beigebox.agents.skill_loader: Loaded skill: gget
+2026-03-20 19:22:54,757 [INFO] beigebox.agents.skill_loader: Loaded skill: ginkgo-cloud-lab
+2026-03-20 19:22:54,758 [INFO] beigebox.agents.skill_loader: Loaded skill: glycoengineering
+2026-03-20 19:22:54,758 [INFO] beigebox.agents.skill_loader: Loaded skill: gnomad-database
+2026-03-20 19:22:54,759 [INFO] beigebox.agents.skill_loader: Loaded skill: gtars
+2026-03-20 19:22:54,759 [INFO] beigebox.agents.skill_loader: Loaded skill: gtex-database
+2026-03-20 19:22:54,760 [INFO] beigebox.agents.skill_loader: Loaded skill: gwas-database
+2026-03-20 19:22:54,760 [INFO] beigebox.agents.skill_loader: Loaded skill: hedgefundmonitor
+2026-03-20 19:22:54,761 [INFO] beigebox.agents.skill_loader: Loaded skill: histolab
+2026-03-20 19:22:54,761 [INFO] beigebox.agents.skill_loader: Loaded skill: hmdb-database
+2026-03-20 19:22:54,762 [INFO] beigebox.agents.skill_loader: Loaded skill: hypogenic
+2026-03-20 19:22:54,763 [INFO] beigebox.agents.skill_loader: Loaded skill: hypothesis-generation
+2026-03-20 19:22:54,763 [INFO] beigebox.agents.skill_loader: Loaded skill: imaging-data-commons
+2026-03-20 19:22:54,764 [INFO] beigebox.agents.skill_loader: Loaded skill: infographics
+2026-03-20 19:22:54,764 [INFO] beigebox.agents.skill_loader: Loaded skill: interpro-database
+2026-03-20 19:22:54,765 [INFO] beigebox.agents.skill_loader: Loaded skill: iso-13485-certification
+2026-03-20 19:22:54,765 [INFO] beigebox.agents.skill_loader: Loaded skill: jaspar-database
+2026-03-20 19:22:54,766 [INFO] beigebox.agents.skill_loader: Loaded skill: kegg-database
+2026-03-20 19:22:54,766 [INFO] beigebox.agents.skill_loader: Loaded skill: labarchive-integration
+2026-03-20 19:22:54,767 [INFO] beigebox.agents.skill_loader: Loaded skill: lamindb
+2026-03-20 19:22:54,768 [INFO] beigebox.agents.skill_loader: Loaded skill: latchbio-integration
+2026-03-20 19:22:54,768 [INFO] beigebox.agents.skill_loader: Loaded skill: latex-posters
+2026-03-20 19:22:54,769 [INFO] beigebox.agents.skill_loader: Loaded skill: literature-review
+2026-03-20 19:22:54,770 [INFO] beigebox.agents.skill_loader: Loaded skill: markdown-mermaid-writing
+2026-03-20 19:22:54,770 [INFO] beigebox.agents.skill_loader: Loaded skill: market-research-reports
+2026-03-20 19:22:54,771 [INFO] beigebox.agents.skill_loader: Loaded skill: markitdown
+2026-03-20 19:22:54,772 [INFO] beigebox.agents.skill_loader: Loaded skill: matchms
+2026-03-20 19:22:54,772 [INFO] beigebox.agents.skill_loader: Loaded skill: matlab
+2026-03-20 19:22:54,773 [INFO] beigebox.agents.skill_loader: Loaded skill: matplotlib
+2026-03-20 19:22:54,773 [INFO] beigebox.agents.skill_loader: Loaded skill: medchem
+2026-03-20 19:22:54,774 [INFO] beigebox.agents.skill_loader: Loaded skill: metabolomics-workbench-database
+2026-03-20 19:22:54,774 [INFO] beigebox.agents.skill_loader: Loaded skill: modal
+2026-03-20 19:22:54,775 [INFO] beigebox.agents.skill_loader: Loaded skill: molecular-dynamics
+2026-03-20 19:22:54,775 [INFO] beigebox.agents.skill_loader: Loaded skill: molfeat
+2026-03-20 19:22:54,776 [INFO] beigebox.agents.skill_loader: Loaded skill: monarch-database
+2026-03-20 19:22:54,776 [INFO] beigebox.agents.skill_loader: Loaded skill: networkx
+2026-03-20 19:22:54,777 [INFO] beigebox.agents.skill_loader: Loaded skill: neurokit2
+2026-03-20 19:22:54,777 [INFO] beigebox.agents.skill_loader: Loaded skill: neuropixels-analysis
+2026-03-20 19:22:54,778 [INFO] beigebox.agents.skill_loader: Loaded skill: offer-k-dense-web
+2026-03-20 19:22:54,778 [INFO] beigebox.agents.skill_loader: Loaded skill: omero-integration
+2026-03-20 19:22:54,779 [INFO] beigebox.agents.skill_loader: Loaded skill: open-notebook
+2026-03-20 19:22:54,780 [INFO] beigebox.agents.skill_loader: Loaded skill: openalex-database
+2026-03-20 19:22:54,780 [INFO] beigebox.agents.skill_loader: Loaded skill: opentargets-database
+2026-03-20 19:22:54,781 [INFO] beigebox.agents.skill_loader: Loaded skill: opentrons-integration
+2026-03-20 19:22:54,781 [INFO] beigebox.agents.skill_loader: Loaded skill: paper-2-web
+2026-03-20 19:22:54,782 [INFO] beigebox.agents.skill_loader: Loaded skill: parallel-web
+2026-03-20 19:22:54,782 [INFO] beigebox.agents.skill_loader: Loaded skill: pathml
+2026-03-20 19:22:54,783 [INFO] beigebox.agents.skill_loader: Loaded skill: pdb-database
+2026-03-20 19:22:54,783 [INFO] beigebox.agents.skill_loader: Loaded skill: peer-review
+2026-03-20 19:22:54,784 [INFO] beigebox.agents.skill_loader: Loaded skill: pennylane
+2026-03-20 19:22:54,785 [INFO] beigebox.agents.skill_loader: Loaded skill: perplexity-search
+2026-03-20 19:22:54,785 [INFO] beigebox.agents.skill_loader: Loaded skill: phylogenetics
+2026-03-20 19:22:54,786 [INFO] beigebox.agents.skill_loader: Loaded skill: plotly
+2026-03-20 19:22:54,786 [INFO] beigebox.agents.skill_loader: Loaded skill: polars
+2026-03-20 19:22:54,787 [INFO] beigebox.agents.skill_loader: Loaded skill: pptx-posters
+2026-03-20 19:22:54,787 [INFO] beigebox.agents.skill_loader: Loaded skill: protocolsio-integration
+2026-03-20 19:22:54,788 [INFO] beigebox.agents.skill_loader: Loaded skill: pubchem-database
+2026-03-20 19:22:54,788 [INFO] beigebox.agents.skill_loader: Loaded skill: pubmed-database
+2026-03-20 19:22:54,789 [INFO] beigebox.agents.skill_loader: Loaded skill: pufferlib
+2026-03-20 19:22:54,789 [INFO] beigebox.agents.skill_loader: Loaded skill: pydeseq2
+2026-03-20 19:22:54,790 [INFO] beigebox.agents.skill_loader: Loaded skill: pydicom
+2026-03-20 19:22:54,790 [INFO] beigebox.agents.skill_loader: Loaded skill: pyhealth
+2026-03-20 19:22:54,791 [INFO] beigebox.agents.skill_loader: Loaded skill: pylabrobot
+2026-03-20 19:22:54,791 [INFO] beigebox.agents.skill_loader: Loaded skill: pymatgen
+2026-03-20 19:22:54,792 [INFO] beigebox.agents.skill_loader: Loaded skill: pymc-bayesian-modeling
+2026-03-20 19:22:54,792 [INFO] beigebox.agents.skill_loader: Loaded skill: pymoo
+2026-03-20 19:22:54,793 [INFO] beigebox.agents.skill_loader: Loaded skill: pyopenms
+2026-03-20 19:22:54,793 [INFO] beigebox.agents.skill_loader: Loaded skill: pysam
+2026-03-20 19:22:54,794 [INFO] beigebox.agents.skill_loader: Loaded skill: pytdc
+2026-03-20 19:22:54,794 [INFO] beigebox.agents.skill_loader: Loaded skill: pytorch-lightning
+2026-03-20 19:22:54,795 [INFO] beigebox.agents.skill_loader: Loaded skill: pyzotero
+2026-03-20 19:22:54,795 [INFO] beigebox.agents.skill_loader: Loaded skill: qiskit
+2026-03-20 19:22:54,796 [INFO] beigebox.agents.skill_loader: Loaded skill: qutip
+2026-03-20 19:22:54,796 [INFO] beigebox.agents.skill_loader: Loaded skill: rdkit
+2026-03-20 19:22:54,797 [INFO] beigebox.agents.skill_loader: Loaded skill: reactome-database
+2026-03-20 19:22:54,797 [INFO] beigebox.agents.skill_loader: Loaded skill: research-grants
+2026-03-20 19:22:54,798 [INFO] beigebox.agents.skill_loader: Loaded skill: research-lookup
+2026-03-20 19:22:54,799 [INFO] beigebox.agents.skill_loader: Loaded skill: rowan
+2026-03-20 19:22:54,799 [INFO] beigebox.agents.skill_loader: Loaded skill: scanpy
+2026-03-20 19:22:54,800 [INFO] beigebox.agents.skill_loader: Loaded skill: scholar-evaluation
+2026-03-20 19:22:54,800 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-brainstorming
+2026-03-20 19:22:54,801 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-critical-thinking
+2026-03-20 19:22:54,801 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-schematics
+2026-03-20 19:22:54,802 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-slides
+2026-03-20 19:22:54,803 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-visualization
+2026-03-20 19:22:54,803 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-writing
+2026-03-20 19:22:54,804 [INFO] beigebox.agents.skill_loader: Loaded skill: scikit-bio
+2026-03-20 19:22:54,805 [INFO] beigebox.agents.skill_loader: Loaded skill: scikit-learn
+2026-03-20 19:22:54,805 [INFO] beigebox.agents.skill_loader: Loaded skill: scikit-survival
+2026-03-20 19:22:54,806 [INFO] beigebox.agents.skill_loader: Loaded skill: scvelo
+2026-03-20 19:22:54,807 [INFO] beigebox.agents.skill_loader: Loaded skill: scvi-tools
+2026-03-20 19:22:54,807 [INFO] beigebox.agents.skill_loader: Loaded skill: seaborn
+2026-03-20 19:22:54,808 [INFO] beigebox.agents.skill_loader: Loaded skill: shap
+2026-03-20 19:22:54,809 [INFO] beigebox.agents.skill_loader: Loaded skill: simpy
+2026-03-20 19:22:54,809 [INFO] beigebox.agents.skill_loader: Loaded skill: stable-baselines3
+2026-03-20 19:22:54,810 [INFO] beigebox.agents.skill_loader: Loaded skill: statistical-analysis
+2026-03-20 19:22:54,810 [INFO] beigebox.agents.skill_loader: Loaded skill: statsmodels
+2026-03-20 19:22:54,811 [INFO] beigebox.agents.skill_loader: Loaded skill: string-database
+2026-03-20 19:22:54,811 [INFO] beigebox.agents.skill_loader: Loaded skill: sympy
+2026-03-20 19:22:54,812 [INFO] beigebox.agents.skill_loader: Loaded skill: tiledbvcf
+2026-03-20 19:22:54,813 [INFO] beigebox.agents.skill_loader: Loaded skill: timesfm-forecasting
+2026-03-20 19:22:54,813 [INFO] beigebox.agents.skill_loader: Loaded skill: torch-geometric
+2026-03-20 19:22:54,814 [INFO] beigebox.agents.skill_loader: Loaded skill: torchdrug
+2026-03-20 19:22:54,814 [INFO] beigebox.agents.skill_loader: Loaded skill: transformers
+2026-03-20 19:22:54,815 [INFO] beigebox.agents.skill_loader: Loaded skill: treatment-plans
+2026-03-20 19:22:54,815 [INFO] beigebox.agents.skill_loader: Loaded skill: umap-learn
+2026-03-20 19:22:54,816 [INFO] beigebox.agents.skill_loader: Loaded skill: uniprot-database
+2026-03-20 19:22:54,817 [INFO] beigebox.agents.skill_loader: Loaded skill: usfiscaldata
+2026-03-20 19:22:54,817 [INFO] beigebox.agents.skill_loader: Loaded skill: uspto-database
+2026-03-20 19:22:54,818 [INFO] beigebox.agents.skill_loader: Loaded skill: vaex
+2026-03-20 19:22:54,818 [INFO] beigebox.agents.skill_loader: Loaded skill: venue-templates
+2026-03-20 19:22:54,819 [INFO] beigebox.agents.skill_loader: Loaded skill: what-if-oracle
+2026-03-20 19:22:54,819 [INFO] beigebox.agents.skill_loader: Loaded skill: zarr-python
+2026-03-20 19:22:54,820 [INFO] beigebox.agents.skill_loader: Loaded skill: zinc-database
+2026-03-20 19:22:54,820 [INFO] beigebox.agents.skill_loader: Loaded skill: pdf-processing
+2026-03-20 19:22:54,821 [INFO] beigebox.main: MCP server: enabled (POST /mcp) — operator/run tool exposed
+2026-03-20 19:22:54,821 [INFO] beigebox.amf_mesh: AMF mesh: disabled (set amf_mesh.enabled: true in config.yaml)
+2026-03-20 19:22:54,821 [INFO] beigebox.main: BeigeBox started — listening on 0.0.0.0:8001, backend http://localhost:11434
+2026-03-20 19:22:54,821 [INFO] beigebox.main: Storage: SQLite=./data/beigebox.db, Vector=./data/chroma
+2026-03-20 19:22:54,821 [INFO] beigebox.main: Tools: ['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp', 'dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector']
+2026-03-20 19:22:54,821 [INFO] beigebox.main: Hooks: []
+2026-03-20 19:22:54,821 [INFO] beigebox.main: Decision LLM: enabled
+2026-03-20 19:22:54,821 [INFO] beigebox.main: Embedding classifier: ready
+2026-03-20 19:22:54,821 [INFO] beigebox.main: Z-commands: enabled (prefix messages with 'z: <directive>')
+2026-03-20 19:22:54,821 [WARNING] beigebox.main: Operator agent: ENABLED — LLM-driven tool execution active (ALL registered tools)
+2026-03-20 19:22:54,852 [WARNING] beigebox.main: Embedding preload attempt 1/5 failed (All connection attempts failed) — retrying in 5s
+2026-03-20 19:22:59,871 [WARNING] beigebox.main: Embedding preload attempt 2/5 failed (All connection attempts failed) — retrying in 10s
+2026-03-20 19:23:04,405 [INFO] beigebox.main: BeigeBox shutting down
+2026-03-20 19:23:04,405 [INFO] beigebox.main: Wiretap and payload log flushed and closed
+2026-03-20 19:23:04,945 [INFO] beigebox.storage.sqlite_store: SQLite store initialized at data/beigebox.db
+2026-03-20 19:23:05,205 [INFO] chromadb.telemetry.product.posthog: Anonymized telemetry enabled. See                     https://docs.trychroma.com/telemetry for more information.
+2026-03-20 19:23:05,276 [INFO] beigebox.storage.backends.chroma: ChromaBackend initialised (path=data/chroma, thread-safe)
+2026-03-20 19:23:05,276 [INFO] beigebox.storage.vector_store: VectorStore initialised (backend=ChromaBackend, model=nomic-embed-text)
+2026-03-20 19:23:05,276 [INFO] beigebox.storage.blob_store: BlobStore initialised at data/chroma/blobs
+2026-03-20 19:23:05,277 [INFO] beigebox.tools.calculator: CalculatorTool initialized
+2026-03-20 19:23:05,277 [INFO] beigebox.tools.datetime_tool: DateTimeTool initialized (local UTC-5.0)
+2026-03-20 19:23:05,281 [WARNING] beigebox.tools.system_info: bwrap probe failed (Command '['/usr/bin/bwrap', '--die-with-parent', '--unshare-all', '--ro-bind', '/usr', '/usr', '--ro-bind-try', '/bin', '/bin', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--chdir', '/tmp', '/bin/true']' returned non-zero exit status 1.) — falling back to busybox wrapper. Check kernel.unprivileged_userns_clone if unexpected.
+2026-03-20 19:23:05,281 [INFO] beigebox.tools.system_info: SystemInfoTool initialised (execution mode: busybox fallback)
+2026-03-20 19:23:05,283 [INFO] beigebox.tools.system_info: Shell allowlist: 0 commands
+2026-03-20 19:23:05,283 [INFO] beigebox.tools.memory: MemoryTool initialized (max_results=3, min_score=0.3, preprocess=False model=llama3.2:3b)
+2026-03-20 19:23:05,283 [INFO] beigebox.tools.registry: CDP tool registered (ws_url=ws://localhost:9222)
+2026-03-20 19:23:05,283 [INFO] beigebox.tools.registry: Tool registry loaded: ['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp']
+2026-03-20 19:23:05,284 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'dice' ← dice.py (DiceTool)
+2026-03-20 19:23:05,284 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'doc_parser' ← doc_parser.py (DocParserTool)
+2026-03-20 19:23:05,284 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'units' ← units.py (UnitsTool)
+2026-03-20 19:23:05,285 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'wiretap_summary' ← wiretap_summary.py (WiretapSummaryTool)
+2026-03-20 19:23:05,285 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'zip_inspector' ← zip_inspector.py (ZipInspectorTool)
+2026-03-20 19:23:05,285 [INFO] beigebox.tools.plugin_loader: Plugin loader: registered 5 plugin(s): ['dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector']
+2026-03-20 19:23:05,285 [INFO] beigebox.tools.registry: Tool registry after plugins: ['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp', 'dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector']
+2026-03-20 19:23:05,285 [INFO] beigebox.agents.decision: DecisionAgent enabled (model=llama3.2:3b, routes=[], tools=['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp', 'dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector'])
+2026-03-20 19:23:05,286 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: simple
+2026-03-20 19:23:05,286 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: complex
+2026-03-20 19:23:05,286 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: code
+2026-03-20 19:23:05,286 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: creative
+2026-03-20 19:23:05,286 [INFO] beigebox.backends.router: Backend 'ollama-local': per-endpoint timeout_ms=120000 (120.0s)
+2026-03-20 19:23:05,287 [INFO] beigebox.backends.router: Multi-backend router initialized: ollama-local(p2) → openrouter(p3)
+2026-03-20 19:23:05,287 [INFO] beigebox.main: Multi-backend router: enabled (2 backends)
+2026-03-20 19:23:05,287 [INFO] beigebox.main: Cost tracking: enabled
+2026-03-20 19:23:05,287 [INFO] beigebox.auth: Auth: disabled (no keys configured)
+2026-03-20 19:23:05,307 [INFO] beigebox.agents.skill_loader: Loaded skill: beigebox-admin
+2026-03-20 19:23:05,307 [INFO] beigebox.agents.skill_loader: Loaded skill: algorithmic-art
+2026-03-20 19:23:05,308 [INFO] beigebox.agents.skill_loader: Loaded skill: brand-guidelines
+2026-03-20 19:23:05,309 [INFO] beigebox.agents.skill_loader: Loaded skill: canvas-design
+2026-03-20 19:23:05,309 [INFO] beigebox.agents.skill_loader: Loaded skill: claude-api
+2026-03-20 19:23:05,310 [INFO] beigebox.agents.skill_loader: Loaded skill: doc-coauthoring
+2026-03-20 19:23:05,311 [INFO] beigebox.agents.skill_loader: Loaded skill: docx
+2026-03-20 19:23:05,311 [INFO] beigebox.agents.skill_loader: Loaded skill: frontend-design
+2026-03-20 19:23:05,312 [INFO] beigebox.agents.skill_loader: Loaded skill: internal-comms
+2026-03-20 19:23:05,313 [INFO] beigebox.agents.skill_loader: Loaded skill: mcp-builder
+2026-03-20 19:23:05,313 [INFO] beigebox.agents.skill_loader: Loaded skill: pdf
+2026-03-20 19:23:05,314 [INFO] beigebox.agents.skill_loader: Loaded skill: pptx
+2026-03-20 19:23:05,315 [INFO] beigebox.agents.skill_loader: Loaded skill: skill-creator
+2026-03-20 19:23:05,315 [INFO] beigebox.agents.skill_loader: Loaded skill: slack-gif-creator
+2026-03-20 19:23:05,316 [INFO] beigebox.agents.skill_loader: Loaded skill: theme-factory
+2026-03-20 19:23:05,317 [INFO] beigebox.agents.skill_loader: Loaded skill: web-artifacts-builder
+2026-03-20 19:23:05,317 [INFO] beigebox.agents.skill_loader: Loaded skill: webapp-testing
+2026-03-20 19:23:05,318 [INFO] beigebox.agents.skill_loader: Loaded skill: xlsx
+2026-03-20 19:23:05,318 [INFO] beigebox.agents.skill_loader: Loaded skill: template-skill
+2026-03-20 19:23:05,319 [INFO] beigebox.agents.skill_loader: Loaded skill: adaptyv
+2026-03-20 19:23:05,320 [INFO] beigebox.agents.skill_loader: Loaded skill: aeon
+2026-03-20 19:23:05,320 [INFO] beigebox.agents.skill_loader: Loaded skill: alpha-vantage
+2026-03-20 19:23:05,321 [INFO] beigebox.agents.skill_loader: Loaded skill: alphafold-database
+2026-03-20 19:23:05,321 [INFO] beigebox.agents.skill_loader: Loaded skill: anndata
+2026-03-20 19:23:05,322 [INFO] beigebox.agents.skill_loader: Loaded skill: arboreto
+2026-03-20 19:23:05,323 [INFO] beigebox.agents.skill_loader: Loaded skill: astropy
+2026-03-20 19:23:05,324 [INFO] beigebox.agents.skill_loader: Loaded skill: benchling-integration
+2026-03-20 19:23:05,324 [INFO] beigebox.agents.skill_loader: Loaded skill: bgpt-paper-search
+2026-03-20 19:23:05,325 [INFO] beigebox.agents.skill_loader: Loaded skill: bindingdb-database
+2026-03-20 19:23:05,325 [INFO] beigebox.agents.skill_loader: Loaded skill: biopython
+2026-03-20 19:23:05,326 [INFO] beigebox.agents.skill_loader: Loaded skill: biorxiv-database
+2026-03-20 19:23:05,327 [INFO] beigebox.agents.skill_loader: Loaded skill: bioservices
+2026-03-20 19:23:05,327 [INFO] beigebox.agents.skill_loader: Loaded skill: brenda-database
+2026-03-20 19:23:05,327 [INFO] beigebox.agents.skill_loader: Loaded skill: cbioportal-database
+2026-03-20 19:23:05,328 [INFO] beigebox.agents.skill_loader: Loaded skill: cellxgene-census
+2026-03-20 19:23:05,328 [INFO] beigebox.agents.skill_loader: Loaded skill: chembl-database
+2026-03-20 19:23:05,329 [INFO] beigebox.agents.skill_loader: Loaded skill: cirq
+2026-03-20 19:23:05,330 [INFO] beigebox.agents.skill_loader: Loaded skill: citation-management
+2026-03-20 19:23:05,330 [INFO] beigebox.agents.skill_loader: Loaded skill: clinical-decision-support
+2026-03-20 19:23:05,331 [INFO] beigebox.agents.skill_loader: Loaded skill: clinical-reports
+2026-03-20 19:23:05,331 [INFO] beigebox.agents.skill_loader: Loaded skill: clinicaltrials-database
+2026-03-20 19:23:05,332 [INFO] beigebox.agents.skill_loader: Loaded skill: clinpgx-database
+2026-03-20 19:23:05,332 [INFO] beigebox.agents.skill_loader: Loaded skill: clinvar-database
+2026-03-20 19:23:05,333 [INFO] beigebox.agents.skill_loader: Loaded skill: cobrapy
+2026-03-20 19:23:05,333 [INFO] beigebox.agents.skill_loader: Loaded skill: consciousness-council
+2026-03-20 19:23:05,334 [INFO] beigebox.agents.skill_loader: Loaded skill: cosmic-database
+2026-03-20 19:23:05,334 [INFO] beigebox.agents.skill_loader: Loaded skill: dask
+2026-03-20 19:23:05,335 [INFO] beigebox.agents.skill_loader: Loaded skill: datacommons-client
+2026-03-20 19:23:05,336 [INFO] beigebox.agents.skill_loader: Loaded skill: datamol
+2026-03-20 19:23:05,336 [INFO] beigebox.agents.skill_loader: Loaded skill: deepchem
+2026-03-20 19:23:05,337 [INFO] beigebox.agents.skill_loader: Loaded skill: deeptools
+2026-03-20 19:23:05,337 [INFO] beigebox.agents.skill_loader: Loaded skill: denario
+2026-03-20 19:23:05,338 [INFO] beigebox.agents.skill_loader: Loaded skill: depmap
+2026-03-20 19:23:05,338 [INFO] beigebox.agents.skill_loader: Loaded skill: dhdna-profiler
+2026-03-20 19:23:05,339 [INFO] beigebox.agents.skill_loader: Loaded skill: diffdock
+2026-03-20 19:23:05,339 [INFO] beigebox.agents.skill_loader: Loaded skill: dnanexus-integration
+2026-03-20 19:23:05,340 [INFO] beigebox.agents.skill_loader: Loaded skill: docx
+2026-03-20 19:23:05,341 [INFO] beigebox.agents.skill_loader: Loaded skill: pdf
+2026-03-20 19:23:05,341 [INFO] beigebox.agents.skill_loader: Loaded skill: pptx
+2026-03-20 19:23:05,342 [INFO] beigebox.agents.skill_loader: Loaded skill: xlsx
+2026-03-20 19:23:05,342 [INFO] beigebox.agents.skill_loader: Loaded skill: drugbank-database
+2026-03-20 19:23:05,343 [INFO] beigebox.agents.skill_loader: Loaded skill: edgartools
+2026-03-20 19:23:05,344 [INFO] beigebox.agents.skill_loader: Loaded skill: ena-database
+2026-03-20 19:23:05,344 [INFO] beigebox.agents.skill_loader: Loaded skill: ensembl-database
+2026-03-20 19:23:05,345 [INFO] beigebox.agents.skill_loader: Loaded skill: esm
+2026-03-20 19:23:05,346 [INFO] beigebox.agents.skill_loader: Loaded skill: etetoolkit
+2026-03-20 19:23:05,346 [INFO] beigebox.agents.skill_loader: Loaded skill: exploratory-data-analysis
+2026-03-20 19:23:05,347 [INFO] beigebox.agents.skill_loader: Loaded skill: fda-database
+2026-03-20 19:23:05,347 [INFO] beigebox.agents.skill_loader: Loaded skill: flowio
+2026-03-20 19:23:05,348 [INFO] beigebox.agents.skill_loader: Loaded skill: fluidsim
+2026-03-20 19:23:05,349 [INFO] beigebox.agents.skill_loader: Loaded skill: fred-economic-data
+2026-03-20 19:23:05,349 [INFO] beigebox.agents.skill_loader: Loaded skill: gene-database
+2026-03-20 19:23:05,350 [INFO] beigebox.agents.skill_loader: Loaded skill: generate-image
+2026-03-20 19:23:05,350 [INFO] beigebox.agents.skill_loader: Loaded skill: geniml
+2026-03-20 19:23:05,351 [INFO] beigebox.agents.skill_loader: Loaded skill: geo-database
+2026-03-20 19:23:05,352 [INFO] beigebox.agents.skill_loader: Loaded skill: geomaster
+2026-03-20 19:23:05,352 [INFO] beigebox.agents.skill_loader: Loaded skill: geopandas
+2026-03-20 19:23:05,353 [INFO] beigebox.agents.skill_loader: Loaded skill: get-available-resources
+2026-03-20 19:23:05,353 [INFO] beigebox.agents.skill_loader: Loaded skill: gget
+2026-03-20 19:23:05,354 [INFO] beigebox.agents.skill_loader: Loaded skill: ginkgo-cloud-lab
+2026-03-20 19:23:05,354 [INFO] beigebox.agents.skill_loader: Loaded skill: glycoengineering
+2026-03-20 19:23:05,355 [INFO] beigebox.agents.skill_loader: Loaded skill: gnomad-database
+2026-03-20 19:23:05,355 [INFO] beigebox.agents.skill_loader: Loaded skill: gtars
+2026-03-20 19:23:05,356 [INFO] beigebox.agents.skill_loader: Loaded skill: gtex-database
+2026-03-20 19:23:05,357 [INFO] beigebox.agents.skill_loader: Loaded skill: gwas-database
+2026-03-20 19:23:05,357 [INFO] beigebox.agents.skill_loader: Loaded skill: hedgefundmonitor
+2026-03-20 19:23:05,358 [INFO] beigebox.agents.skill_loader: Loaded skill: histolab
+2026-03-20 19:23:05,358 [INFO] beigebox.agents.skill_loader: Loaded skill: hmdb-database
+2026-03-20 19:23:05,360 [INFO] beigebox.agents.skill_loader: Loaded skill: hypogenic
+2026-03-20 19:23:05,360 [INFO] beigebox.agents.skill_loader: Loaded skill: hypothesis-generation
+2026-03-20 19:23:05,361 [INFO] beigebox.agents.skill_loader: Loaded skill: imaging-data-commons
+2026-03-20 19:23:05,362 [INFO] beigebox.agents.skill_loader: Loaded skill: infographics
+2026-03-20 19:23:05,362 [INFO] beigebox.agents.skill_loader: Loaded skill: interpro-database
+2026-03-20 19:23:05,363 [INFO] beigebox.agents.skill_loader: Loaded skill: iso-13485-certification
+2026-03-20 19:23:05,363 [INFO] beigebox.agents.skill_loader: Loaded skill: jaspar-database
+2026-03-20 19:23:05,364 [INFO] beigebox.agents.skill_loader: Loaded skill: kegg-database
+2026-03-20 19:23:05,365 [INFO] beigebox.agents.skill_loader: Loaded skill: labarchive-integration
+2026-03-20 19:23:05,365 [INFO] beigebox.agents.skill_loader: Loaded skill: lamindb
+2026-03-20 19:23:05,366 [INFO] beigebox.agents.skill_loader: Loaded skill: latchbio-integration
+2026-03-20 19:23:05,366 [INFO] beigebox.agents.skill_loader: Loaded skill: latex-posters
+2026-03-20 19:23:05,367 [INFO] beigebox.agents.skill_loader: Loaded skill: literature-review
+2026-03-20 19:23:05,368 [INFO] beigebox.agents.skill_loader: Loaded skill: markdown-mermaid-writing
+2026-03-20 19:23:05,369 [INFO] beigebox.agents.skill_loader: Loaded skill: market-research-reports
+2026-03-20 19:23:05,369 [INFO] beigebox.agents.skill_loader: Loaded skill: markitdown
+2026-03-20 19:23:05,370 [INFO] beigebox.agents.skill_loader: Loaded skill: matchms
+2026-03-20 19:23:05,370 [INFO] beigebox.agents.skill_loader: Loaded skill: matlab
+2026-03-20 19:23:05,371 [INFO] beigebox.agents.skill_loader: Loaded skill: matplotlib
+2026-03-20 19:23:05,372 [INFO] beigebox.agents.skill_loader: Loaded skill: medchem
+2026-03-20 19:23:05,372 [INFO] beigebox.agents.skill_loader: Loaded skill: metabolomics-workbench-database
+2026-03-20 19:23:05,373 [INFO] beigebox.agents.skill_loader: Loaded skill: modal
+2026-03-20 19:23:05,373 [INFO] beigebox.agents.skill_loader: Loaded skill: molecular-dynamics
+2026-03-20 19:23:05,374 [INFO] beigebox.agents.skill_loader: Loaded skill: molfeat
+2026-03-20 19:23:05,374 [INFO] beigebox.agents.skill_loader: Loaded skill: monarch-database
+2026-03-20 19:23:05,375 [INFO] beigebox.agents.skill_loader: Loaded skill: networkx
+2026-03-20 19:23:05,375 [INFO] beigebox.agents.skill_loader: Loaded skill: neurokit2
+2026-03-20 19:23:05,376 [INFO] beigebox.agents.skill_loader: Loaded skill: neuropixels-analysis
+2026-03-20 19:23:05,377 [INFO] beigebox.agents.skill_loader: Loaded skill: offer-k-dense-web
+2026-03-20 19:23:05,377 [INFO] beigebox.agents.skill_loader: Loaded skill: omero-integration
+2026-03-20 19:23:05,378 [INFO] beigebox.agents.skill_loader: Loaded skill: open-notebook
+2026-03-20 19:23:05,379 [INFO] beigebox.agents.skill_loader: Loaded skill: openalex-database
+2026-03-20 19:23:05,379 [INFO] beigebox.agents.skill_loader: Loaded skill: opentargets-database
+2026-03-20 19:23:05,380 [INFO] beigebox.agents.skill_loader: Loaded skill: opentrons-integration
+2026-03-20 19:23:05,380 [INFO] beigebox.agents.skill_loader: Loaded skill: paper-2-web
+2026-03-20 19:23:05,381 [INFO] beigebox.agents.skill_loader: Loaded skill: parallel-web
+2026-03-20 19:23:05,381 [INFO] beigebox.agents.skill_loader: Loaded skill: pathml
+2026-03-20 19:23:05,382 [INFO] beigebox.agents.skill_loader: Loaded skill: pdb-database
+2026-03-20 19:23:05,382 [INFO] beigebox.agents.skill_loader: Loaded skill: peer-review
+2026-03-20 19:23:05,383 [INFO] beigebox.agents.skill_loader: Loaded skill: pennylane
+2026-03-20 19:23:05,384 [INFO] beigebox.agents.skill_loader: Loaded skill: perplexity-search
+2026-03-20 19:23:05,384 [INFO] beigebox.agents.skill_loader: Loaded skill: phylogenetics
+2026-03-20 19:23:05,385 [INFO] beigebox.agents.skill_loader: Loaded skill: plotly
+2026-03-20 19:23:05,385 [INFO] beigebox.agents.skill_loader: Loaded skill: polars
+2026-03-20 19:23:05,386 [INFO] beigebox.agents.skill_loader: Loaded skill: pptx-posters
+2026-03-20 19:23:05,386 [INFO] beigebox.agents.skill_loader: Loaded skill: protocolsio-integration
+2026-03-20 19:23:05,387 [INFO] beigebox.agents.skill_loader: Loaded skill: pubchem-database
+2026-03-20 19:23:05,387 [INFO] beigebox.agents.skill_loader: Loaded skill: pubmed-database
+2026-03-20 19:23:05,388 [INFO] beigebox.agents.skill_loader: Loaded skill: pufferlib
+2026-03-20 19:23:05,388 [INFO] beigebox.agents.skill_loader: Loaded skill: pydeseq2
+2026-03-20 19:23:05,389 [INFO] beigebox.agents.skill_loader: Loaded skill: pydicom
+2026-03-20 19:23:05,390 [INFO] beigebox.agents.skill_loader: Loaded skill: pyhealth
+2026-03-20 19:23:05,390 [INFO] beigebox.agents.skill_loader: Loaded skill: pylabrobot
+2026-03-20 19:23:05,391 [INFO] beigebox.agents.skill_loader: Loaded skill: pymatgen
+2026-03-20 19:23:05,391 [INFO] beigebox.agents.skill_loader: Loaded skill: pymc-bayesian-modeling
+2026-03-20 19:23:05,392 [INFO] beigebox.agents.skill_loader: Loaded skill: pymoo
+2026-03-20 19:23:05,392 [INFO] beigebox.agents.skill_loader: Loaded skill: pyopenms
+2026-03-20 19:23:05,393 [INFO] beigebox.agents.skill_loader: Loaded skill: pysam
+2026-03-20 19:23:05,393 [INFO] beigebox.agents.skill_loader: Loaded skill: pytdc
+2026-03-20 19:23:05,394 [INFO] beigebox.agents.skill_loader: Loaded skill: pytorch-lightning
+2026-03-20 19:23:05,394 [INFO] beigebox.agents.skill_loader: Loaded skill: pyzotero
+2026-03-20 19:23:05,395 [INFO] beigebox.agents.skill_loader: Loaded skill: qiskit
+2026-03-20 19:23:05,395 [INFO] beigebox.agents.skill_loader: Loaded skill: qutip
+2026-03-20 19:23:05,396 [INFO] beigebox.agents.skill_loader: Loaded skill: rdkit
+2026-03-20 19:23:05,396 [INFO] beigebox.agents.skill_loader: Loaded skill: reactome-database
+2026-03-20 19:23:05,397 [INFO] beigebox.agents.skill_loader: Loaded skill: research-grants
+2026-03-20 19:23:05,397 [INFO] beigebox.agents.skill_loader: Loaded skill: research-lookup
+2026-03-20 19:23:05,398 [INFO] beigebox.agents.skill_loader: Loaded skill: rowan
+2026-03-20 19:23:05,399 [INFO] beigebox.agents.skill_loader: Loaded skill: scanpy
+2026-03-20 19:23:05,399 [INFO] beigebox.agents.skill_loader: Loaded skill: scholar-evaluation
+2026-03-20 19:23:05,400 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-brainstorming
+2026-03-20 19:23:05,401 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-critical-thinking
+2026-03-20 19:23:05,402 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-schematics
+2026-03-20 19:23:05,402 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-slides
+2026-03-20 19:23:05,403 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-visualization
+2026-03-20 19:23:05,404 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-writing
+2026-03-20 19:23:05,404 [INFO] beigebox.agents.skill_loader: Loaded skill: scikit-bio
+2026-03-20 19:23:05,405 [INFO] beigebox.agents.skill_loader: Loaded skill: scikit-learn
+2026-03-20 19:23:05,405 [INFO] beigebox.agents.skill_loader: Loaded skill: scikit-survival
+2026-03-20 19:23:05,406 [INFO] beigebox.agents.skill_loader: Loaded skill: scvelo
+2026-03-20 19:23:05,406 [INFO] beigebox.agents.skill_loader: Loaded skill: scvi-tools
+2026-03-20 19:23:05,407 [INFO] beigebox.agents.skill_loader: Loaded skill: seaborn
+2026-03-20 19:23:05,408 [INFO] beigebox.agents.skill_loader: Loaded skill: shap
+2026-03-20 19:23:05,408 [INFO] beigebox.agents.skill_loader: Loaded skill: simpy
+2026-03-20 19:23:05,409 [INFO] beigebox.agents.skill_loader: Loaded skill: stable-baselines3
+2026-03-20 19:23:05,409 [INFO] beigebox.agents.skill_loader: Loaded skill: statistical-analysis
+2026-03-20 19:23:05,410 [INFO] beigebox.agents.skill_loader: Loaded skill: statsmodels
+2026-03-20 19:23:05,410 [INFO] beigebox.agents.skill_loader: Loaded skill: string-database
+2026-03-20 19:23:05,411 [INFO] beigebox.agents.skill_loader: Loaded skill: sympy
+2026-03-20 19:23:05,411 [INFO] beigebox.agents.skill_loader: Loaded skill: tiledbvcf
+2026-03-20 19:23:05,412 [INFO] beigebox.agents.skill_loader: Loaded skill: timesfm-forecasting
+2026-03-20 19:23:05,413 [INFO] beigebox.agents.skill_loader: Loaded skill: torch-geometric
+2026-03-20 19:23:05,413 [INFO] beigebox.agents.skill_loader: Loaded skill: torchdrug
+2026-03-20 19:23:05,414 [INFO] beigebox.agents.skill_loader: Loaded skill: transformers
+2026-03-20 19:23:05,414 [INFO] beigebox.agents.skill_loader: Loaded skill: treatment-plans
+2026-03-20 19:23:05,415 [INFO] beigebox.agents.skill_loader: Loaded skill: umap-learn
+2026-03-20 19:23:05,415 [INFO] beigebox.agents.skill_loader: Loaded skill: uniprot-database
+2026-03-20 19:23:05,416 [INFO] beigebox.agents.skill_loader: Loaded skill: usfiscaldata
+2026-03-20 19:23:05,416 [INFO] beigebox.agents.skill_loader: Loaded skill: uspto-database
+2026-03-20 19:23:05,417 [INFO] beigebox.agents.skill_loader: Loaded skill: vaex
+2026-03-20 19:23:05,418 [INFO] beigebox.agents.skill_loader: Loaded skill: venue-templates
+2026-03-20 19:23:05,419 [INFO] beigebox.agents.skill_loader: Loaded skill: what-if-oracle
+2026-03-20 19:23:05,420 [INFO] beigebox.agents.skill_loader: Loaded skill: zarr-python
+2026-03-20 19:23:05,420 [INFO] beigebox.agents.skill_loader: Loaded skill: zinc-database
+2026-03-20 19:23:05,421 [INFO] beigebox.agents.skill_loader: Loaded skill: pdf-processing
+2026-03-20 19:23:05,421 [INFO] beigebox.main: MCP server: enabled (POST /mcp) — operator/run tool exposed
+2026-03-20 19:23:05,421 [INFO] beigebox.amf_mesh: AMF mesh: disabled (set amf_mesh.enabled: true in config.yaml)
+2026-03-20 19:23:05,421 [INFO] beigebox.main: BeigeBox started — listening on 0.0.0.0:8001, backend http://localhost:11434
+2026-03-20 19:23:05,421 [INFO] beigebox.main: Storage: SQLite=./data/beigebox.db, Vector=./data/chroma
+2026-03-20 19:23:05,421 [INFO] beigebox.main: Tools: ['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp', 'dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector']
+2026-03-20 19:23:05,421 [INFO] beigebox.main: Hooks: []
+2026-03-20 19:23:05,421 [INFO] beigebox.main: Decision LLM: enabled
+2026-03-20 19:23:05,421 [INFO] beigebox.main: Embedding classifier: ready
+2026-03-20 19:23:05,421 [INFO] beigebox.main: Z-commands: enabled (prefix messages with 'z: <directive>')
+2026-03-20 19:23:05,421 [WARNING] beigebox.main: Operator agent: ENABLED — LLM-driven tool execution active (ALL registered tools)
+2026-03-20 19:23:05,455 [WARNING] beigebox.main: Embedding preload attempt 1/5 failed (All connection attempts failed) — retrying in 5s
+2026-03-20 19:23:10,476 [WARNING] beigebox.main: Embedding preload attempt 2/5 failed (All connection attempts failed) — retrying in 10s
+2026-03-20 19:23:15,509 [INFO] beigebox.main: BeigeBox shutting down
+2026-03-20 19:23:15,509 [INFO] beigebox.main: Wiretap and payload log flushed and closed
+2026-03-20 19:23:16,042 [INFO] beigebox.storage.sqlite_store: SQLite store initialized at data/beigebox.db
+2026-03-20 19:23:16,317 [INFO] chromadb.telemetry.product.posthog: Anonymized telemetry enabled. See                     https://docs.trychroma.com/telemetry for more information.
+2026-03-20 19:23:16,387 [INFO] beigebox.storage.backends.chroma: ChromaBackend initialised (path=data/chroma, thread-safe)
+2026-03-20 19:23:16,387 [INFO] beigebox.storage.vector_store: VectorStore initialised (backend=ChromaBackend, model=nomic-embed-text)
+2026-03-20 19:23:16,387 [INFO] beigebox.storage.blob_store: BlobStore initialised at data/chroma/blobs
+2026-03-20 19:23:16,387 [INFO] beigebox.tools.calculator: CalculatorTool initialized
+2026-03-20 19:23:16,387 [INFO] beigebox.tools.datetime_tool: DateTimeTool initialized (local UTC-5.0)
+2026-03-20 19:23:16,392 [WARNING] beigebox.tools.system_info: bwrap probe failed (Command '['/usr/bin/bwrap', '--die-with-parent', '--unshare-all', '--ro-bind', '/usr', '/usr', '--ro-bind-try', '/bin', '/bin', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--chdir', '/tmp', '/bin/true']' returned non-zero exit status 1.) — falling back to busybox wrapper. Check kernel.unprivileged_userns_clone if unexpected.
+2026-03-20 19:23:16,392 [INFO] beigebox.tools.system_info: SystemInfoTool initialised (execution mode: busybox fallback)
+2026-03-20 19:23:16,394 [INFO] beigebox.tools.system_info: Shell allowlist: 0 commands
+2026-03-20 19:23:16,394 [INFO] beigebox.tools.memory: MemoryTool initialized (max_results=3, min_score=0.3, preprocess=False model=llama3.2:3b)
+2026-03-20 19:23:16,394 [INFO] beigebox.tools.registry: CDP tool registered (ws_url=ws://localhost:9222)
+2026-03-20 19:23:16,394 [INFO] beigebox.tools.registry: Tool registry loaded: ['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp']
+2026-03-20 19:23:16,394 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'dice' ← dice.py (DiceTool)
+2026-03-20 19:23:16,395 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'doc_parser' ← doc_parser.py (DocParserTool)
+2026-03-20 19:23:16,395 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'units' ← units.py (UnitsTool)
+2026-03-20 19:23:16,395 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'wiretap_summary' ← wiretap_summary.py (WiretapSummaryTool)
+2026-03-20 19:23:16,395 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'zip_inspector' ← zip_inspector.py (ZipInspectorTool)
+2026-03-20 19:23:16,395 [INFO] beigebox.tools.plugin_loader: Plugin loader: registered 5 plugin(s): ['dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector']
+2026-03-20 19:23:16,395 [INFO] beigebox.tools.registry: Tool registry after plugins: ['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp', 'dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector']
+2026-03-20 19:23:16,395 [INFO] beigebox.agents.decision: DecisionAgent enabled (model=llama3.2:3b, routes=[], tools=['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp', 'dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector'])
+2026-03-20 19:23:16,396 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: simple
+2026-03-20 19:23:16,396 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: complex
+2026-03-20 19:23:16,396 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: code
+2026-03-20 19:23:16,396 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: creative
+2026-03-20 19:23:16,396 [INFO] beigebox.backends.router: Backend 'ollama-local': per-endpoint timeout_ms=120000 (120.0s)
+2026-03-20 19:23:16,397 [INFO] beigebox.backends.router: Multi-backend router initialized: ollama-local(p2) → openrouter(p3)
+2026-03-20 19:23:16,397 [INFO] beigebox.main: Multi-backend router: enabled (2 backends)
+2026-03-20 19:23:16,397 [INFO] beigebox.main: Cost tracking: enabled
+2026-03-20 19:23:16,397 [INFO] beigebox.auth: Auth: disabled (no keys configured)
+2026-03-20 19:23:16,417 [INFO] beigebox.agents.skill_loader: Loaded skill: beigebox-admin
+2026-03-20 19:23:16,417 [INFO] beigebox.agents.skill_loader: Loaded skill: algorithmic-art
+2026-03-20 19:23:16,418 [INFO] beigebox.agents.skill_loader: Loaded skill: brand-guidelines
+2026-03-20 19:23:16,418 [INFO] beigebox.agents.skill_loader: Loaded skill: canvas-design
+2026-03-20 19:23:16,419 [INFO] beigebox.agents.skill_loader: Loaded skill: claude-api
+2026-03-20 19:23:16,419 [INFO] beigebox.agents.skill_loader: Loaded skill: doc-coauthoring
+2026-03-20 19:23:16,420 [INFO] beigebox.agents.skill_loader: Loaded skill: docx
+2026-03-20 19:23:16,421 [INFO] beigebox.agents.skill_loader: Loaded skill: frontend-design
+2026-03-20 19:23:16,421 [INFO] beigebox.agents.skill_loader: Loaded skill: internal-comms
+2026-03-20 19:23:16,421 [INFO] beigebox.agents.skill_loader: Loaded skill: mcp-builder
+2026-03-20 19:23:16,422 [INFO] beigebox.agents.skill_loader: Loaded skill: pdf
+2026-03-20 19:23:16,423 [INFO] beigebox.agents.skill_loader: Loaded skill: pptx
+2026-03-20 19:23:16,423 [INFO] beigebox.agents.skill_loader: Loaded skill: skill-creator
+2026-03-20 19:23:16,424 [INFO] beigebox.agents.skill_loader: Loaded skill: slack-gif-creator
+2026-03-20 19:23:16,424 [INFO] beigebox.agents.skill_loader: Loaded skill: theme-factory
+2026-03-20 19:23:16,424 [INFO] beigebox.agents.skill_loader: Loaded skill: web-artifacts-builder
+2026-03-20 19:23:16,425 [INFO] beigebox.agents.skill_loader: Loaded skill: webapp-testing
+2026-03-20 19:23:16,426 [INFO] beigebox.agents.skill_loader: Loaded skill: xlsx
+2026-03-20 19:23:16,426 [INFO] beigebox.agents.skill_loader: Loaded skill: template-skill
+2026-03-20 19:23:16,427 [INFO] beigebox.agents.skill_loader: Loaded skill: adaptyv
+2026-03-20 19:23:16,427 [INFO] beigebox.agents.skill_loader: Loaded skill: aeon
+2026-03-20 19:23:16,428 [INFO] beigebox.agents.skill_loader: Loaded skill: alpha-vantage
+2026-03-20 19:23:16,428 [INFO] beigebox.agents.skill_loader: Loaded skill: alphafold-database
+2026-03-20 19:23:16,429 [INFO] beigebox.agents.skill_loader: Loaded skill: anndata
+2026-03-20 19:23:16,429 [INFO] beigebox.agents.skill_loader: Loaded skill: arboreto
+2026-03-20 19:23:16,430 [INFO] beigebox.agents.skill_loader: Loaded skill: astropy
+2026-03-20 19:23:16,430 [INFO] beigebox.agents.skill_loader: Loaded skill: benchling-integration
+2026-03-20 19:23:16,431 [INFO] beigebox.agents.skill_loader: Loaded skill: bgpt-paper-search
+2026-03-20 19:23:16,432 [INFO] beigebox.agents.skill_loader: Loaded skill: bindingdb-database
+2026-03-20 19:23:16,432 [INFO] beigebox.agents.skill_loader: Loaded skill: biopython
+2026-03-20 19:23:16,433 [INFO] beigebox.agents.skill_loader: Loaded skill: biorxiv-database
+2026-03-20 19:23:16,433 [INFO] beigebox.agents.skill_loader: Loaded skill: bioservices
+2026-03-20 19:23:16,434 [INFO] beigebox.agents.skill_loader: Loaded skill: brenda-database
+2026-03-20 19:23:16,434 [INFO] beigebox.agents.skill_loader: Loaded skill: cbioportal-database
+2026-03-20 19:23:16,435 [INFO] beigebox.agents.skill_loader: Loaded skill: cellxgene-census
+2026-03-20 19:23:16,435 [INFO] beigebox.agents.skill_loader: Loaded skill: chembl-database
+2026-03-20 19:23:16,436 [INFO] beigebox.agents.skill_loader: Loaded skill: cirq
+2026-03-20 19:23:16,436 [INFO] beigebox.agents.skill_loader: Loaded skill: citation-management
+2026-03-20 19:23:16,437 [INFO] beigebox.agents.skill_loader: Loaded skill: clinical-decision-support
+2026-03-20 19:23:16,438 [INFO] beigebox.agents.skill_loader: Loaded skill: clinical-reports
+2026-03-20 19:23:16,439 [INFO] beigebox.agents.skill_loader: Loaded skill: clinicaltrials-database
+2026-03-20 19:23:16,439 [INFO] beigebox.agents.skill_loader: Loaded skill: clinpgx-database
+2026-03-20 19:23:16,440 [INFO] beigebox.agents.skill_loader: Loaded skill: clinvar-database
+2026-03-20 19:23:16,440 [INFO] beigebox.agents.skill_loader: Loaded skill: cobrapy
+2026-03-20 19:23:16,441 [INFO] beigebox.agents.skill_loader: Loaded skill: consciousness-council
+2026-03-20 19:23:16,442 [INFO] beigebox.agents.skill_loader: Loaded skill: cosmic-database
+2026-03-20 19:23:16,442 [INFO] beigebox.agents.skill_loader: Loaded skill: dask
+2026-03-20 19:23:16,443 [INFO] beigebox.agents.skill_loader: Loaded skill: datacommons-client
+2026-03-20 19:23:16,443 [INFO] beigebox.agents.skill_loader: Loaded skill: datamol
+2026-03-20 19:23:16,444 [INFO] beigebox.agents.skill_loader: Loaded skill: deepchem
+2026-03-20 19:23:16,444 [INFO] beigebox.agents.skill_loader: Loaded skill: deeptools
+2026-03-20 19:23:16,445 [INFO] beigebox.agents.skill_loader: Loaded skill: denario
+2026-03-20 19:23:16,446 [INFO] beigebox.agents.skill_loader: Loaded skill: depmap
+2026-03-20 19:23:16,446 [INFO] beigebox.agents.skill_loader: Loaded skill: dhdna-profiler
+2026-03-20 19:23:16,447 [INFO] beigebox.agents.skill_loader: Loaded skill: diffdock
+2026-03-20 19:23:16,447 [INFO] beigebox.agents.skill_loader: Loaded skill: dnanexus-integration
+2026-03-20 19:23:16,448 [INFO] beigebox.agents.skill_loader: Loaded skill: docx
+2026-03-20 19:23:16,448 [INFO] beigebox.agents.skill_loader: Loaded skill: pdf
+2026-03-20 19:23:16,448 [INFO] beigebox.agents.skill_loader: Loaded skill: pptx
+2026-03-20 19:23:16,449 [INFO] beigebox.agents.skill_loader: Loaded skill: xlsx
+2026-03-20 19:23:16,449 [INFO] beigebox.agents.skill_loader: Loaded skill: drugbank-database
+2026-03-20 19:23:16,450 [INFO] beigebox.agents.skill_loader: Loaded skill: edgartools
+2026-03-20 19:23:16,450 [INFO] beigebox.agents.skill_loader: Loaded skill: ena-database
+2026-03-20 19:23:16,451 [INFO] beigebox.agents.skill_loader: Loaded skill: ensembl-database
+2026-03-20 19:23:16,451 [INFO] beigebox.agents.skill_loader: Loaded skill: esm
+2026-03-20 19:23:16,452 [INFO] beigebox.agents.skill_loader: Loaded skill: etetoolkit
+2026-03-20 19:23:16,453 [INFO] beigebox.agents.skill_loader: Loaded skill: exploratory-data-analysis
+2026-03-20 19:23:16,453 [INFO] beigebox.agents.skill_loader: Loaded skill: fda-database
+2026-03-20 19:23:16,454 [INFO] beigebox.agents.skill_loader: Loaded skill: flowio
+2026-03-20 19:23:16,454 [INFO] beigebox.agents.skill_loader: Loaded skill: fluidsim
+2026-03-20 19:23:16,455 [INFO] beigebox.agents.skill_loader: Loaded skill: fred-economic-data
+2026-03-20 19:23:16,455 [INFO] beigebox.agents.skill_loader: Loaded skill: gene-database
+2026-03-20 19:23:16,456 [INFO] beigebox.agents.skill_loader: Loaded skill: generate-image
+2026-03-20 19:23:16,456 [INFO] beigebox.agents.skill_loader: Loaded skill: geniml
+2026-03-20 19:23:16,457 [INFO] beigebox.agents.skill_loader: Loaded skill: geo-database
+2026-03-20 19:23:16,457 [INFO] beigebox.agents.skill_loader: Loaded skill: geomaster
+2026-03-20 19:23:16,458 [INFO] beigebox.agents.skill_loader: Loaded skill: geopandas
+2026-03-20 19:23:16,459 [INFO] beigebox.agents.skill_loader: Loaded skill: get-available-resources
+2026-03-20 19:23:16,459 [INFO] beigebox.agents.skill_loader: Loaded skill: gget
+2026-03-20 19:23:16,460 [INFO] beigebox.agents.skill_loader: Loaded skill: ginkgo-cloud-lab
+2026-03-20 19:23:16,460 [INFO] beigebox.agents.skill_loader: Loaded skill: glycoengineering
+2026-03-20 19:23:16,461 [INFO] beigebox.agents.skill_loader: Loaded skill: gnomad-database
+2026-03-20 19:23:16,461 [INFO] beigebox.agents.skill_loader: Loaded skill: gtars
+2026-03-20 19:23:16,462 [INFO] beigebox.agents.skill_loader: Loaded skill: gtex-database
+2026-03-20 19:23:16,462 [INFO] beigebox.agents.skill_loader: Loaded skill: gwas-database
+2026-03-20 19:23:16,463 [INFO] beigebox.agents.skill_loader: Loaded skill: hedgefundmonitor
+2026-03-20 19:23:16,463 [INFO] beigebox.agents.skill_loader: Loaded skill: histolab
+2026-03-20 19:23:16,464 [INFO] beigebox.agents.skill_loader: Loaded skill: hmdb-database
+2026-03-20 19:23:16,465 [INFO] beigebox.agents.skill_loader: Loaded skill: hypogenic
+2026-03-20 19:23:16,466 [INFO] beigebox.agents.skill_loader: Loaded skill: hypothesis-generation
+2026-03-20 19:23:16,467 [INFO] beigebox.agents.skill_loader: Loaded skill: imaging-data-commons
+2026-03-20 19:23:16,467 [INFO] beigebox.agents.skill_loader: Loaded skill: infographics
+2026-03-20 19:23:16,468 [INFO] beigebox.agents.skill_loader: Loaded skill: interpro-database
+2026-03-20 19:23:16,469 [INFO] beigebox.agents.skill_loader: Loaded skill: iso-13485-certification
+2026-03-20 19:23:16,469 [INFO] beigebox.agents.skill_loader: Loaded skill: jaspar-database
+2026-03-20 19:23:16,470 [INFO] beigebox.agents.skill_loader: Loaded skill: kegg-database
+2026-03-20 19:23:16,470 [INFO] beigebox.agents.skill_loader: Loaded skill: labarchive-integration
+2026-03-20 19:23:16,471 [INFO] beigebox.agents.skill_loader: Loaded skill: lamindb
+2026-03-20 19:23:16,471 [INFO] beigebox.agents.skill_loader: Loaded skill: latchbio-integration
+2026-03-20 19:23:16,472 [INFO] beigebox.agents.skill_loader: Loaded skill: latex-posters
+2026-03-20 19:23:16,472 [INFO] beigebox.agents.skill_loader: Loaded skill: literature-review
+2026-03-20 19:23:16,474 [INFO] beigebox.agents.skill_loader: Loaded skill: markdown-mermaid-writing
+2026-03-20 19:23:16,474 [INFO] beigebox.agents.skill_loader: Loaded skill: market-research-reports
+2026-03-20 19:23:16,475 [INFO] beigebox.agents.skill_loader: Loaded skill: markitdown
+2026-03-20 19:23:16,475 [INFO] beigebox.agents.skill_loader: Loaded skill: matchms
+2026-03-20 19:23:16,476 [INFO] beigebox.agents.skill_loader: Loaded skill: matlab
+2026-03-20 19:23:16,477 [INFO] beigebox.agents.skill_loader: Loaded skill: matplotlib
+2026-03-20 19:23:16,477 [INFO] beigebox.agents.skill_loader: Loaded skill: medchem
+2026-03-20 19:23:16,478 [INFO] beigebox.agents.skill_loader: Loaded skill: metabolomics-workbench-database
+2026-03-20 19:23:16,478 [INFO] beigebox.agents.skill_loader: Loaded skill: modal
+2026-03-20 19:23:16,479 [INFO] beigebox.agents.skill_loader: Loaded skill: molecular-dynamics
+2026-03-20 19:23:16,479 [INFO] beigebox.agents.skill_loader: Loaded skill: molfeat
+2026-03-20 19:23:16,479 [INFO] beigebox.agents.skill_loader: Loaded skill: monarch-database
+2026-03-20 19:23:16,480 [INFO] beigebox.agents.skill_loader: Loaded skill: networkx
+2026-03-20 19:23:16,481 [INFO] beigebox.agents.skill_loader: Loaded skill: neurokit2
+2026-03-20 19:23:16,481 [INFO] beigebox.agents.skill_loader: Loaded skill: neuropixels-analysis
+2026-03-20 19:23:16,482 [INFO] beigebox.agents.skill_loader: Loaded skill: offer-k-dense-web
+2026-03-20 19:23:16,482 [INFO] beigebox.agents.skill_loader: Loaded skill: omero-integration
+2026-03-20 19:23:16,483 [INFO] beigebox.agents.skill_loader: Loaded skill: open-notebook
+2026-03-20 19:23:16,483 [INFO] beigebox.agents.skill_loader: Loaded skill: openalex-database
+2026-03-20 19:23:16,484 [INFO] beigebox.agents.skill_loader: Loaded skill: opentargets-database
+2026-03-20 19:23:16,484 [INFO] beigebox.agents.skill_loader: Loaded skill: opentrons-integration
+2026-03-20 19:23:16,485 [INFO] beigebox.agents.skill_loader: Loaded skill: paper-2-web
+2026-03-20 19:23:16,486 [INFO] beigebox.agents.skill_loader: Loaded skill: parallel-web
+2026-03-20 19:23:16,486 [INFO] beigebox.agents.skill_loader: Loaded skill: pathml
+2026-03-20 19:23:16,487 [INFO] beigebox.agents.skill_loader: Loaded skill: pdb-database
+2026-03-20 19:23:16,487 [INFO] beigebox.agents.skill_loader: Loaded skill: peer-review
+2026-03-20 19:23:16,488 [INFO] beigebox.agents.skill_loader: Loaded skill: pennylane
+2026-03-20 19:23:16,489 [INFO] beigebox.agents.skill_loader: Loaded skill: perplexity-search
+2026-03-20 19:23:16,489 [INFO] beigebox.agents.skill_loader: Loaded skill: phylogenetics
+2026-03-20 19:23:16,490 [INFO] beigebox.agents.skill_loader: Loaded skill: plotly
+2026-03-20 19:23:16,490 [INFO] beigebox.agents.skill_loader: Loaded skill: polars
+2026-03-20 19:23:16,491 [INFO] beigebox.agents.skill_loader: Loaded skill: pptx-posters
+2026-03-20 19:23:16,491 [INFO] beigebox.agents.skill_loader: Loaded skill: protocolsio-integration
+2026-03-20 19:23:16,492 [INFO] beigebox.agents.skill_loader: Loaded skill: pubchem-database
+2026-03-20 19:23:16,492 [INFO] beigebox.agents.skill_loader: Loaded skill: pubmed-database
+2026-03-20 19:23:16,493 [INFO] beigebox.agents.skill_loader: Loaded skill: pufferlib
+2026-03-20 19:23:16,493 [INFO] beigebox.agents.skill_loader: Loaded skill: pydeseq2
+2026-03-20 19:23:16,494 [INFO] beigebox.agents.skill_loader: Loaded skill: pydicom
+2026-03-20 19:23:16,495 [INFO] beigebox.agents.skill_loader: Loaded skill: pyhealth
+2026-03-20 19:23:16,495 [INFO] beigebox.agents.skill_loader: Loaded skill: pylabrobot
+2026-03-20 19:23:16,496 [INFO] beigebox.agents.skill_loader: Loaded skill: pymatgen
+2026-03-20 19:23:16,496 [INFO] beigebox.agents.skill_loader: Loaded skill: pymc-bayesian-modeling
+2026-03-20 19:23:16,496 [INFO] beigebox.agents.skill_loader: Loaded skill: pymoo
+2026-03-20 19:23:16,497 [INFO] beigebox.agents.skill_loader: Loaded skill: pyopenms
+2026-03-20 19:23:16,497 [INFO] beigebox.agents.skill_loader: Loaded skill: pysam
+2026-03-20 19:23:16,498 [INFO] beigebox.agents.skill_loader: Loaded skill: pytdc
+2026-03-20 19:23:16,498 [INFO] beigebox.agents.skill_loader: Loaded skill: pytorch-lightning
+2026-03-20 19:23:16,499 [INFO] beigebox.agents.skill_loader: Loaded skill: pyzotero
+2026-03-20 19:23:16,500 [INFO] beigebox.agents.skill_loader: Loaded skill: qiskit
+2026-03-20 19:23:16,500 [INFO] beigebox.agents.skill_loader: Loaded skill: qutip
+2026-03-20 19:23:16,501 [INFO] beigebox.agents.skill_loader: Loaded skill: rdkit
+2026-03-20 19:23:16,501 [INFO] beigebox.agents.skill_loader: Loaded skill: reactome-database
+2026-03-20 19:23:16,502 [INFO] beigebox.agents.skill_loader: Loaded skill: research-grants
+2026-03-20 19:23:16,502 [INFO] beigebox.agents.skill_loader: Loaded skill: research-lookup
+2026-03-20 19:23:16,503 [INFO] beigebox.agents.skill_loader: Loaded skill: rowan
+2026-03-20 19:23:16,504 [INFO] beigebox.agents.skill_loader: Loaded skill: scanpy
+2026-03-20 19:23:16,504 [INFO] beigebox.agents.skill_loader: Loaded skill: scholar-evaluation
+2026-03-20 19:23:16,505 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-brainstorming
+2026-03-20 19:23:16,505 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-critical-thinking
+2026-03-20 19:23:16,506 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-schematics
+2026-03-20 19:23:16,506 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-slides
+2026-03-20 19:23:16,507 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-visualization
+2026-03-20 19:23:16,508 [INFO] beigebox.agents.skill_loader: Loaded skill: scientific-writing
+2026-03-20 19:23:16,508 [INFO] beigebox.agents.skill_loader: Loaded skill: scikit-bio
+2026-03-20 19:23:16,509 [INFO] beigebox.agents.skill_loader: Loaded skill: scikit-learn
+2026-03-20 19:23:16,509 [INFO] beigebox.agents.skill_loader: Loaded skill: scikit-survival
+2026-03-20 19:23:16,510 [INFO] beigebox.agents.skill_loader: Loaded skill: scvelo
+2026-03-20 19:23:16,510 [INFO] beigebox.agents.skill_loader: Loaded skill: scvi-tools
+2026-03-20 19:23:16,511 [INFO] beigebox.agents.skill_loader: Loaded skill: seaborn
+2026-03-20 19:23:16,511 [INFO] beigebox.agents.skill_loader: Loaded skill: shap
+2026-03-20 19:23:16,512 [INFO] beigebox.agents.skill_loader: Loaded skill: simpy
+2026-03-20 19:23:16,512 [INFO] beigebox.agents.skill_loader: Loaded skill: stable-baselines3
+2026-03-20 19:23:16,513 [INFO] beigebox.agents.skill_loader: Loaded skill: statistical-analysis
+2026-03-20 19:23:16,514 [INFO] beigebox.agents.skill_loader: Loaded skill: statsmodels
+2026-03-20 19:23:16,514 [INFO] beigebox.agents.skill_loader: Loaded skill: string-database
+2026-03-20 19:23:16,515 [INFO] beigebox.agents.skill_loader: Loaded skill: sympy
+2026-03-20 19:23:16,515 [INFO] beigebox.agents.skill_loader: Loaded skill: tiledbvcf
+2026-03-20 19:23:16,516 [INFO] beigebox.agents.skill_loader: Loaded skill: timesfm-forecasting
+2026-03-20 19:23:16,516 [INFO] beigebox.agents.skill_loader: Loaded skill: torch-geometric
+2026-03-20 19:23:16,517 [INFO] beigebox.agents.skill_loader: Loaded skill: torchdrug
+2026-03-20 19:23:16,517 [INFO] beigebox.agents.skill_loader: Loaded skill: transformers
+2026-03-20 19:23:16,518 [INFO] beigebox.agents.skill_loader: Loaded skill: treatment-plans
+2026-03-20 19:23:16,519 [INFO] beigebox.agents.skill_loader: Loaded skill: umap-learn
+2026-03-20 19:23:16,519 [INFO] beigebox.agents.skill_loader: Loaded skill: uniprot-database
+2026-03-20 19:23:16,520 [INFO] beigebox.agents.skill_loader: Loaded skill: usfiscaldata
+2026-03-20 19:23:16,520 [INFO] beigebox.agents.skill_loader: Loaded skill: uspto-database
+2026-03-20 19:23:16,521 [INFO] beigebox.agents.skill_loader: Loaded skill: vaex
+2026-03-20 19:23:16,522 [INFO] beigebox.agents.skill_loader: Loaded skill: venue-templates
+2026-03-20 19:23:16,522 [INFO] beigebox.agents.skill_loader: Loaded skill: what-if-oracle
+2026-03-20 19:23:16,523 [INFO] beigebox.agents.skill_loader: Loaded skill: zarr-python
+2026-03-20 19:23:16,523 [INFO] beigebox.agents.skill_loader: Loaded skill: zinc-database
+2026-03-20 19:23:16,524 [INFO] beigebox.agents.skill_loader: Loaded skill: pdf-processing
+2026-03-20 19:23:16,524 [INFO] beigebox.main: MCP server: enabled (POST /mcp) — operator/run tool exposed
+2026-03-20 19:23:16,524 [INFO] beigebox.amf_mesh: AMF mesh: disabled (set amf_mesh.enabled: true in config.yaml)
+2026-03-20 19:23:16,524 [INFO] beigebox.main: BeigeBox started — listening on 0.0.0.0:8001, backend http://localhost:11434
+2026-03-20 19:23:16,524 [INFO] beigebox.main: Storage: SQLite=./data/beigebox.db, Vector=./data/chroma
+2026-03-20 19:23:16,524 [INFO] beigebox.main: Tools: ['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp', 'dice', 'doc_parser', 'units', 'wiretap_summary', 'zip_inspector']
+2026-03-20 19:23:16,524 [INFO] beigebox.main: Hooks: []
+2026-03-20 19:23:16,524 [INFO] beigebox.main: Decision LLM: enabled
+2026-03-20 19:23:16,524 [INFO] beigebox.main: Embedding classifier: ready
+2026-03-20 19:23:16,524 [INFO] beigebox.main: Z-commands: enabled (prefix messages with 'z: <directive>')
+2026-03-20 19:23:16,524 [WARNING] beigebox.main: Operator agent: ENABLED — LLM-driven tool execution active (ALL registered tools)
+2026-03-20 19:23:16,555 [WARNING] beigebox.main: Embedding preload attempt 1/5 failed (All connection attempts failed) — retrying in 5s
+2026-03-20 19:23:21,574 [WARNING] beigebox.main: Embedding preload attempt 2/5 failed (All connection attempts failed) — retrying in 10s

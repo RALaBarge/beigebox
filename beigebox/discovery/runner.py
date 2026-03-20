@@ -3,8 +3,8 @@ Discovery Experiment Runner
 
 Executes a discovery opportunity experiment:
 1. Load opportunity config (variants, test cases)
-2. Run PromptOptimizer with each variant
-3. Collect JudgeRubric scores
+2. Run each variant on test cases via LLM backend
+3. Collect JudgeRubric scores per variant
 4. Identify Pareto front
 5. Select champion
 6. Persist to SQLite
@@ -13,10 +13,13 @@ Executes a discovery opportunity experiment:
 
 from __future__ import annotations
 
+import httpx
+import json
 import logging
 import uuid
 from typing import Any, Dict, List
 
+from beigebox.config import get_config
 from beigebox.eval.judge import JudgeRubric, DimensionScore
 from beigebox.eval.oracle import OracleRegistry
 from beigebox.orchestration.optimizer import PromptOptimizer, ScoreCard
@@ -32,12 +35,82 @@ class DiscoveryRunner:
         self,
         sqlite_store=None,
         judge_model: str = "claude-opus",
+        backend_url: str | None = None,
+        candidate_model: str = "llama2",
     ):
         """Initialize runner."""
         self.sqlite_store = sqlite_store
         self.judge_model = judge_model
         self.optimizer = PromptOptimizer(judge_model=judge_model)
         self.pareto = ParetoOptimizer()
+
+        # Get backend URL from config or use provided
+        cfg = get_config()
+        self.backend_url = backend_url or cfg.get("backend", {}).get("url", "http://localhost:11434")
+        self.candidate_model = candidate_model
+
+    async def _run_candidate_on_tests(
+        self,
+        variant_name: str,
+        config: Dict[str, Any],
+        test_cases: List[Dict[str, Any]],
+    ) -> List[str]:
+        """
+        Run a candidate on all test cases via LLM backend.
+
+        Returns list of responses (one per test case).
+        """
+        responses = []
+
+        # Build system prompt from config
+        system_prompt = f"You are evaluating a {variant_name} approach. Answer concisely."
+        if "description" in config:
+            system_prompt = f"{system_prompt}\n\nApproach: {config['description']}"
+
+        # Apply config parameters to request
+        temperature = config.get("temperature", 0.7)
+        top_p = config.get("top_p", 0.9)
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            for test_case in test_cases:
+                try:
+                    prompt = test_case.get("input", "")
+
+                    # Call LLM backend
+                    body = {
+                        "model": self.candidate_model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": prompt},
+                        ],
+                        "temperature": temperature,
+                        "top_p": top_p,
+                        "stream": False,
+                    }
+
+                    # Try BeigeBox first (port 1337), then Ollama (11434)
+                    for url in [
+                        "http://127.0.0.1:1337/v1/chat/completions",
+                        "http://127.0.0.1:11434/v1/chat/completions",
+                    ]:
+                        try:
+                            resp = await client.post(url, json=body, timeout=30)
+                            if resp.status_code == 200:
+                                result = resp.json()
+                                content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                                responses.append(content)
+                                break
+                        except Exception:
+                            continue
+                    else:
+                        # Fallback if no backend responded
+                        responses.append(f"(no response from {self.candidate_model})")
+
+                except Exception as e:
+                    logger.warning(f"Failed to run test case: {e}")
+                    responses.append(f"(error: {str(e)[:50]})")
+
+        return responses
 
     async def run_opportunity(
         self,
@@ -86,11 +159,15 @@ class DiscoveryRunner:
             try:
                 logger.info(f"  Scoring variant: {variant_name}")
 
+                # Run candidate on test cases
+                logger.info(f"    Running {len(test_cases)} test cases...")
+                responses = await self._run_candidate_on_tests(variant_name, config, test_cases)
+
                 # Run oracle tests
-                oracle_pass_rate = oracle.run_all(lambda inp: "test")
+                oracle_pass_rate = oracle.run_all(lambda inp: responses[min(0, len(responses) - 1)] if responses else "test")
                 oracle_passed = oracle_pass_rate >= 0.8
 
-                # Score with JudgeRubric on a few test cases
+                # Score with JudgeRubric on actual responses
                 dim_scores = {
                     "accuracy": [],
                     "efficiency": [],
@@ -99,17 +176,16 @@ class DiscoveryRunner:
                     "safety": [],
                 }
 
-                for test_case in test_cases[:5]:  # Limit to first 5 for speed
+                for i, test_case in enumerate(test_cases[:5]):  # Limit to first 5 for speed
                     try:
                         prompt = test_case.get("input", "")
                         expected = test_case.get("expected", "")
-
-                        context = f"Variant: {variant_name}\nConfig: {config}\nExpected: {expected}"
+                        response = responses[i] if i < len(responses) else "(no response)"
 
                         dim_score = await judge.score(
                             prompt=prompt,
-                            response=f"variant evaluation",
-                            context=context,
+                            response=response,
+                            context=f"Expected: {expected}",
                         )
 
                         dim_scores["accuracy"].append(dim_score.accuracy)
