@@ -9,6 +9,7 @@ import json
 import logging
 from pathlib import Path
 from contextlib import contextmanager
+from typing import Any, Dict
 
 from beigebox.storage.models import Message
 
