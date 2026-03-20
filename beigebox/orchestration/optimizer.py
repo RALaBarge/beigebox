@@ -351,14 +351,24 @@ class PromptOptimizer:
         """
         Use Judge model to score candidate on multi-dimensional rubric.
 
-        Requires asyncio context. For now, returns neutral score if called
-        outside async context (fallback for backwards compatibility).
+        Scores the candidate's suitability for the test cases by:
+        1. Evaluating how well the config handles each test case
+        2. Collecting multi-dimensional scores from JudgeRubric
+        3. Aggregating into overall score
+
+        For full integration, this would run candidates via Harness to generate
+        actual responses, then judge those responses. Current implementation
+        evaluates candidate config fitness for test cases.
 
         Returns:
             Overall score 0.0-1.0
         """
         import asyncio
         from beigebox.eval.judge import JudgeRubric
+
+        if not test_cases:
+            logger.debug("No test cases to score, returning neutral score")
+            return 0.5
 
         if judge_prompt is None:
             judge_prompt = self._default_judge_prompt()
@@ -373,15 +383,108 @@ class PromptOptimizer:
             logger.debug("No event loop for judge scoring, returning neutral score")
             return 0.5
 
-        # In a real implementation, this would:
-        # 1. Run candidate on test_cases via Harness
-        # 2. Send results to Judge model for each result
-        # 3. Aggregate multi-dimensional scores
-        # 4. Return weighted average
+        # Score each test case using the candidate config
+        # For each test case, evaluate how well the config would handle it
+        dim_scores = {
+            "accuracy": [],
+            "efficiency": [],
+            "clarity": [],
+            "hallucination": [],
+            "safety": [],
+        }
 
-        # Placeholder: return neutral (0.5) until Harness integration
-        # The framework is ready to score once test_cases produce responses
-        logger.debug(f"Judge scoring for {len(test_cases)} test cases (Harness integration pending)")
+        for i, test_case in enumerate(test_cases[:10]):  # Limit to first 10 for speed
+            try:
+                prompt = test_case.get("input", "")
+                expected = test_case.get("expected", "")
+
+                # Build context about the candidate config
+                config_context = f"""
+Candidate Configuration:
+- Temperature: {config.get('temperature', 0.7)}
+- Top P: {config.get('top_p', 0.9)}
+- Constraints: {config.get('constraints', {})}
+
+Expected output: {expected}
+"""
+
+                # Evaluate candidate's fitness for this test case
+                # This is synchronous wrapper for async call
+                try:
+                    # Use run_until_complete if loop is running, else just await
+                    if loop.is_running():
+                        # Can't use run_until_complete on running loop
+                        logger.debug(
+                            f"Async loop already running, skipping detailed JudgeRubric "
+                            f"scoring (test case {i+1}/{len(test_cases)})"
+                        )
+                        # Return early with partial aggregate
+                        break
+                    else:
+                        # Safe to run_until_complete
+                        dim_score = loop.run_until_complete(
+                            judge.score(
+                                prompt=prompt,
+                                response=f"(config-fitness evaluation)",
+                                context=config_context,
+                            )
+                        )
+
+                        # Collect scores
+                        dim_scores["accuracy"].append(dim_score.accuracy)
+                        dim_scores["efficiency"].append(dim_score.efficiency)
+                        dim_scores["clarity"].append(dim_score.clarity)
+                        dim_scores["hallucination"].append(dim_score.hallucination)
+                        dim_scores["safety"].append(dim_score.safety)
+
+                except RuntimeError as e:
+                    # Loop is running, can't use run_until_complete
+                    logger.debug(f"Cannot score in running async context: {e}")
+                    break
+
+            except Exception as e:
+                logger.warning(f"Failed to score test case {i}: {e}")
+                continue
+
+        # Aggregate scores
+        if any(dim_scores.values()):
+            avg_scores = {
+                dim: sum(scores) / len(scores) if scores else 2.5
+                for dim, scores in dim_scores.items()
+            }
+
+            # Normalize to 0-1 and compute weighted average
+            # Using general weight profile: accuracy=0.3, efficiency=0.2, clarity=0.2, hallucination=0.2, safety=0.1
+            normalized = {
+                dim: score / 5.0 for dim, score in avg_scores.items()
+            }
+
+            weights = {
+                "accuracy": 0.3,
+                "efficiency": 0.2,
+                "clarity": 0.2,
+                "hallucination": 0.2,
+                "safety": 0.1,
+            }
+
+            overall = sum(
+                normalized.get(dim, 0.5) * weight
+                for dim, weight in weights.items()
+            ) / sum(weights.values())
+
+            logger.debug(
+                f"Judge scored {len(test_cases)} test cases: "
+                f"accuracy={avg_scores['accuracy']:.1f}, "
+                f"efficiency={avg_scores['efficiency']:.1f}, "
+                f"clarity={avg_scores['clarity']:.1f}, "
+                f"hallucination={avg_scores['hallucination']:.1f}, "
+                f"safety={avg_scores['safety']:.1f}, "
+                f"overall={overall:.3f}"
+            )
+            return overall
+
+        # Fallback if no scores collected
+        logger.debug("No judge scores collected, returning neutral score")
         return 0.5
 
     def _default_judge_prompt(self) -> str:
