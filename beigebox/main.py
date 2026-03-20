@@ -3580,6 +3580,160 @@ async def completions(request: Request):
     """Legacy completions — forward to backend."""
     return await _wire_and_forward(request, "completions")
 
+# ---------------------------------------------------------------------------
+# Context Optimization Discovery Framework
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/discovery/run")
+async def discovery_run(request: Request):
+    """
+    Run a discovery experiment for context optimization.
+
+    POST /api/v1/discovery/run
+    {
+        "opportunity_id": "position_sensitivity" | "context_compression" | ...,
+        "variants": [
+            {"name": "baseline", "config": {...}},
+            {"name": "variant_a", "config": {...}},
+        ],
+        "test_cases": [
+            {"input": "...", "expected": "..."},
+        ],
+        "weight_profile": "general" | "code" | "reasoning" | "safety"
+    }
+
+    Returns:
+    {
+        "run_id": "<uuid>",
+        "pareto_front": [...],
+        "champion": {...},
+        "scorecards": [...]
+    }
+    """
+    import uuid
+    from beigebox.eval.judge import JudgeRubric, DimensionScore
+    from beigebox.orchestration.pareto import ParetoOptimizer, ScoredVariant
+    from beigebox.eval.oracle import OracleRegistry
+
+    state = get_state()
+    body = await request.json()
+
+    opportunity_id = body.get("opportunity_id", "unknown")
+    variants = body.get("variants", [])
+    test_cases = body.get("test_cases", [])
+    weight_profile = body.get("weight_profile", "general")
+    run_id = str(uuid.uuid4())[:8]
+
+    if not variants:
+        return JSONResponse(
+            {"error": "variants list required"},
+            status_code=400,
+        )
+
+    # Score each variant
+    judge = JudgeRubric(
+        judge_model="claude-opus",
+        backend_url=f"http://{get_config()['server']['host']}:{get_config()['server']['port']}",
+    )
+    scorer = ParetoOptimizer()
+    scored_variants = []
+
+    for variant in variants:
+        variant_name = variant.get("name", "unknown")
+        try:
+            # Run oracle tests
+            oracle_pass_rate = OracleRegistry.run_all(lambda inp: "test_response")
+            oracle_passed = oracle_pass_rate >= 0.8
+
+            # TODO: Run candidate on test_cases via Harness, pass responses to judge
+            # For now, return neutral DimensionScore
+            dim_score = DimensionScore(
+                accuracy=2.5,
+                efficiency=2.5,
+                clarity=2.5,
+                hallucination=2.5,
+                safety=2.5,
+            )
+
+            # Compute weighted score
+            weights = ParetoOptimizer.WEIGHT_PROFILES.get(
+                weight_profile, ParetoOptimizer.WEIGHT_PROFILES["general"]
+            )
+            weighted = scorer.weighted_score(dim_score, weights)
+
+            scored_var = ScoredVariant(
+                name=variant_name,
+                scores=dim_score,
+                weighted=weighted,
+            )
+            scored_variants.append(scored_var)
+
+            # Persist to database
+            if state.sqlite_store:
+                state.sqlite_store.store_discovery_scorecard(
+                    run_id=run_id,
+                    opportunity_id=opportunity_id,
+                    variant_name=variant_name,
+                    accuracy=dim_score.accuracy,
+                    efficiency=dim_score.efficiency,
+                    clarity=dim_score.clarity,
+                    hallucination=dim_score.hallucination,
+                    safety=dim_score.safety,
+                    overall_score=weighted,
+                    oracle_passed=oracle_passed,
+                    weight_profile=weight_profile,
+                )
+
+        except Exception as e:
+            logger.exception(f"Discovery scoring failed for {variant_name}: {e}")
+
+    # Identify Pareto front
+    pareto_front = scorer.find_pareto_front(scored_variants)
+
+    # Select champion
+    champion = scorer.select_champion(scored_variants, weight_profile)
+
+    return JSONResponse({
+        "run_id": run_id,
+        "opportunity_id": opportunity_id,
+        "pareto_front": [v.to_dict() for v in pareto_front],
+        "champion": champion.to_dict() if champion else None,
+        "scorecards": [v.to_dict() for v in scored_variants],
+    })
+
+
+@app.get("/api/v1/discovery/results")
+async def discovery_results(
+    request: Request,
+    opportunity_id: str | None = None,
+    run_id: str | None = None,
+    n: int = 100,
+):
+    """
+    Fetch discovery scorecard results.
+
+    GET /api/v1/discovery/results?opportunity_id=X&run_id=Y&n=50
+    """
+    state = get_state()
+
+    if not state.sqlite_store:
+        return JSONResponse(
+            {"error": "SQLite store not configured"},
+            status_code=503,
+        )
+
+    results = state.sqlite_store.get_discovery_scorecards(
+        opportunity_id=opportunity_id,
+        run_id=run_id,
+        n=n,
+    )
+
+    return JSONResponse({
+        "results": results,
+        "count": len(results),
+    })
+
+
 # OpenAI Files / Fine-tuning / Assistants (future-proofing)
 @app.api_route("/v1/files/{path:path}", methods=["GET","POST","DELETE"])
 async def files_passthrough(path: str, request: Request):

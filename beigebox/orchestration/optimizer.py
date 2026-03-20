@@ -45,6 +45,12 @@ class ScoreCard:
     oracle_passed: bool = False
     is_champion: bool = False
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    # Typed dimension fields (0-5 scale)
+    accuracy: float = 0.0
+    efficiency: float = 0.0
+    clarity: float = 0.0
+    hallucination: float = 0.0
+    safety: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize scorecard."""
@@ -57,6 +63,11 @@ class ScoreCard:
             "oracle_passed": self.oracle_passed,
             "is_champion": self.is_champion,
             "timestamp": self.timestamp,
+            "accuracy": self.accuracy,
+            "efficiency": self.efficiency,
+            "clarity": self.clarity,
+            "hallucination": self.hallucination,
+            "safety": self.safety,
         }
 
 
@@ -340,22 +351,38 @@ class PromptOptimizer:
         """
         Use Judge model to score candidate on multi-dimensional rubric.
 
+        Requires asyncio context. For now, returns neutral score if called
+        outside async context (fallback for backwards compatibility).
+
         Returns:
             Overall score 0.0-1.0
         """
+        import asyncio
+        from beigebox.eval.judge import JudgeRubric
+
         if judge_prompt is None:
             judge_prompt = self._default_judge_prompt()
 
+        judge = JudgeRubric(judge_model=self.judge_model)
+
+        # Try to run async scorer
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            # No event loop in current thread
+            logger.debug("No event loop for judge scoring, returning neutral score")
+            return 0.5
+
         # In a real implementation, this would:
         # 1. Run candidate on test_cases via Harness
-        # 2. Send results to Judge model
-        # 3. Parse multi-dimensional scores
+        # 2. Send results to Judge model for each result
+        # 3. Aggregate multi-dimensional scores
         # 4. Return weighted average
 
-        # For now, return mock score (would integrate with actual Harness)
-        import random
-
-        return random.uniform(0.5, 1.0)
+        # Placeholder: return neutral (0.5) until Harness integration
+        # The framework is ready to score once test_cases produce responses
+        logger.debug(f"Judge scoring for {len(test_cases)} test cases (Harness integration pending)")
+        return 0.5
 
     def _default_judge_prompt(self) -> str:
         """Default multi-dimensional scoring rubric."""

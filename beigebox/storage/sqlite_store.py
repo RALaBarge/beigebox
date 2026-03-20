@@ -146,6 +146,30 @@ CREATE TABLE IF NOT EXISTS model_specs (
 );
 CREATE INDEX IF NOT EXISTS idx_model_specs_name
     ON model_specs(model_name);
+
+CREATE TABLE IF NOT EXISTS discovery_scorecards (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id          TEXT NOT NULL,
+    opportunity_id  TEXT NOT NULL,
+    variant_name    TEXT NOT NULL,
+    accuracy        REAL,
+    efficiency      REAL,
+    clarity         REAL,
+    hallucination   REAL,
+    safety          REAL,
+    overall_score   REAL,
+    oracle_passed   INTEGER,
+    weight_profile  TEXT,
+    ts              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    misc1           TEXT,
+    misc2           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_discovery_scorecards_run
+    ON discovery_scorecards(run_id);
+CREATE INDEX IF NOT EXISTS idx_discovery_scorecards_opportunity
+    ON discovery_scorecards(opportunity_id);
+CREATE INDEX IF NOT EXISTS idx_discovery_scorecards_ts
+    ON discovery_scorecards(ts);
 """
 
 # Migrations: append-only ALTER TABLE statements that add new columns to
@@ -887,4 +911,79 @@ class SQLiteStore:
                 "SELECT * FROM model_specs ORDER BY last_seen_loaded DESC"
             ).fetchall()
         return [dict(r) for r in rows]
+
+    # ─ Discovery scorecards (context optimization) ────────────────────────────────
+
+    def store_discovery_scorecard(
+        self,
+        run_id: str,
+        opportunity_id: str,
+        variant_name: str,
+        accuracy: float,
+        efficiency: float,
+        clarity: float,
+        hallucination: float,
+        safety: float,
+        overall_score: float,
+        oracle_passed: bool,
+        weight_profile: str | None = None,
+    ) -> None:
+        """Store a single discovery scorecard."""
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO discovery_scorecards
+                   (run_id, opportunity_id, variant_name, accuracy, efficiency,
+                    clarity, hallucination, safety, overall_score, oracle_passed,
+                    weight_profile)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    run_id,
+                    opportunity_id,
+                    variant_name,
+                    accuracy,
+                    efficiency,
+                    clarity,
+                    hallucination,
+                    safety,
+                    overall_score,
+                    1 if oracle_passed else 0,
+                    weight_profile,
+                ),
+            )
+        logger.debug(
+            f"Stored discovery scorecard: {run_id}/{opportunity_id}/{variant_name} "
+            f"(score={overall_score:.3f})"
+        )
+
+    def get_discovery_scorecards(
+        self,
+        opportunity_id: str | None = None,
+        run_id: str | None = None,
+        n: int = 100,
+    ) -> list[dict]:
+        """Fetch recent discovery scorecards, optionally filtered."""
+        clauses: list[str] = []
+        params: list = []
+        if opportunity_id:
+            clauses.append("opportunity_id = ?")
+            params.append(opportunity_id)
+        if run_id:
+            clauses.append("run_id = ?")
+            params.append(run_id)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(n)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM discovery_scorecards {where} "
+                f"ORDER BY ts DESC LIMIT ?",
+                params,
+            ).fetchall()
+
+        results = []
+        for row in rows:
+            r = dict(row)
+            # Convert oracle_passed from int to bool
+            r["oracle_passed"] = bool(r.get("oracle_passed", 0))
+            results.append(r)
+        return results
 
