@@ -1,0 +1,302 @@
+# BeigeBox Configuration v2.0 — NEW STRUCTURE
+# This is the target structure after Phases 1-3 refactoring
+# Run with --migrate-config to auto-convert v1 → v2
+#
+# Key changes:
+# 1. Features centralized (Phase 1)
+# 2. Agents unified, models registry (Phase 2)
+# 3. Routing consolidated with explicit tiers (Phase 3)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FEATURES — Central feature registry (Phase 1)
+# ─────────────────────────────────────────────────────────────────────────────
+
+features:
+  # Backend & Routing
+  backends: true                # Multi-backend routing
+  decision_llm: true            # LLM-based routing (tier 4)
+  semantic_cache: false         # Semantic response caching
+  classifier: false             # Embedding-based classification
+
+  # Agents
+  operator: true                # LLM-driven tool execution
+  harness: true                 # Parallel orchestration
+
+  # System Features
+  cost_tracking: true           # Per-request spend tracking
+  conversation_replay: true     # Conversation history replay
+  auto_summarization: false     # Context window management
+  system_context: false         # Global system prompt injection
+
+  # Observability
+  wiretap: true                 # Request/response logging
+  payload_log: false            # Full LLM context dump
+
+  # Advanced
+  wasm: false                   # WASM post-processing transforms
+  guardrails: false             # Content filtering
+  amf_mesh: false               # Ambient mesh connectivity
+  tools: true                   # Tool execution system
+  voice: false                  # Speech-to-text / Text-to-speech
+  web_ui_voice: false           # Voice UI in web interface
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODELS — Unified model registry (Phase 2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+models:
+  # Default fallback — used if no specific model chosen
+  default: "qwen3:4b"
+
+  # Model allocation by agent role
+  profiles:
+    routing: "llama3.2:3b"      # decision_llm (tier 4 routing judge)
+    agentic: "qwen3:4b"         # operator (tool-using agent)
+    summary: "llama3.2:3b"      # auto_summarization
+    embedding: "nomic-embed-text" # embedding classifier (tier 2)
+
+  # Per-subtask model overrides (null = inherit from profile)
+  per_task:
+    pre_hook: null              # pre_hook inherits from agentic
+    post_hook: null
+    reflection: null
+    context_pruning: null
+
+  # Local model whitelist/filter
+  whitelist:
+    enabled: false
+    allowed_models: []          # fnmatch patterns: ["llama*", "qwen*:*"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ROUTING — Consolidated routing logic (Phase 3)
+# ─────────────────────────────────────────────────────────────────────────────
+
+routing:
+  # Explicit tier ordering (defines routing pipeline order)
+  # Tiers evaluated in order; first successful tier wins
+  tiers:
+    # Tier 1: Static multi-backend selection
+    1_backends:
+      enabled: true
+      backends:
+        - provider: ollama
+          name: ollama-local
+          url: http://localhost:11434
+          priority: 1
+          timeout_ms: 120000
+          max_retries: 2
+          backoff_base: 1.5
+          backoff_max: 10.0
+
+    # Tier 2: Embedding-based classifier
+    2_classifier:
+      enabled: false
+      border_threshold: 0.04
+
+    # Tier 3: Semantic cache (expensive LLM queries → cached responses)
+    3_semantic_cache:
+      enabled: false
+      similarity_threshold: 0.95
+      max_entries: 10000
+      ttl_seconds: 3600
+
+    # Tier 4: LLM-based routing (decision agent)
+    4_decision_llm:
+      enabled: true
+      temperature: 0.2
+      timeout_ms: 5000
+      max_tokens: 256
+
+  # Global routing settings
+  session_ttl_seconds: 1800
+  fallback_model: "qwen3:4b"    # If all tiers fail, use this model
+
+  # Runtime overrides
+  force_route: ""               # "simple"|"complex"|"code"|"large"|""
+  force_decision: false         # Force tier 4 evaluation every request
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AGENTS — Unified agent configuration (Phase 2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+agents:
+  # Decision LLM (routing judge in tier 4)
+  decision_llm:
+    enabled: true               # From features.decision_llm
+    # Config moved to routing.tiers.4_decision_llm
+    # But can also live here if preferred (see migration notes)
+
+  # Operator (LLM-driven tool execution)
+  operator:
+    enabled: true               # From features.operator
+    timeout_ms: 300000          # Per-iteration timeout
+    run_timeout_s: 600          # Total wall-clock timeout
+    max_iterations: 10
+
+    # Operator shell security
+    shell:
+      enabled: true
+      allowed_commands: []      # Whitelist mode (if empty, use blocklist)
+      blocked_patterns:         # Blocklist patterns (regex)
+        - "^rm "
+        - "^sudo "
+        - "> /home"
+        - "> /etc"
+
+    # Autonomous mode (self-directed agentic behavior)
+    autonomous:
+      enabled: false
+      temperature: 0.7
+      timeout_ms: 180000
+      max_turns: 20
+
+    # Pre-execution hook (e.g., syntax checking before code execution)
+    pre_hook:
+      enabled: false
+      timeout_ms: 8000
+
+    # Post-execution hook (e.g., reflection on results)
+    post_hook:
+      enabled: false
+      timeout_ms: 3000
+
+    # Context optimization (e.g., pruning irrelevant context)
+    context_pruning:
+      enabled: false
+      max_tokens: 8000
+
+    # Reflection on outputs (self-critique)
+    reflection:
+      enabled: false
+      temperature: 0.3
+      timeout_ms: 15000
+
+  # Harness (parallel orchestration + ensemble voting)
+  harness:
+    enabled: true               # From features.harness
+    ralph_enabled: false        # Ralph: test-driven loop mode
+
+    # Retry logic for failed tasks
+    retry:
+      max_retries: 2
+      backoff_base: 1.5
+      backoff_max: 10.0
+
+    # Task timeouts (unified in ms)
+    timeout_ms:
+      task: 120000              # Per-task timeout
+      operator: 180000          # Operator-specific timeout
+
+    # Shadow agents (counterfactual parallel runs for divergence detection)
+    shadow_agents:
+      enabled: false
+      timeout_ms: 30000
+      max_tool_calls: 3
+      divergence_threshold: 0.3
+
+    # Task stagger (delays between task launches to prevent thundering herd)
+    stagger:
+      operator_ms: 1000         # Delay between operator tasks
+      model_ms: 400             # Delay between model tasks
+
+    # Run storage & limits
+    store_runs: true
+    max_stored_runs: 1000
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REMAINING SECTIONS (unchanged structure but may be reorganized later)
+# ─────────────────────────────────────────────────────────────────────────────
+
+server:
+  host: "0.0.0.0"
+  port: 8001
+  log_level: "INFO"
+  log_conversations: true
+
+storage:
+  type: sqlite
+  path: ./data/beigebox.db
+  vector_store_path: ./data/chroma
+  vector_backend: chromadb
+
+wiretap:
+  enabled: true                 # From features.wiretap
+  path: ./data/wire.jsonl
+  max_lines: 100000
+  rotation_enabled: true
+
+payload_log:
+  enabled: false                # From features.payload_log
+  path: ./data/payload.jsonl
+
+cost_tracking:
+  enabled: true                 # From features.cost_tracking
+  track_openrouter: true
+  track_local: false
+
+conversation_replay:
+  enabled: true                 # From features.conversation_replay
+
+auto_summarization:
+  enabled: false                # From features.auto_summarization
+  summary_model: ""             # Inherits from models.profiles.summary
+  token_budget: 24000
+  keep_last: 8
+  summary_prefix: "Summary of earlier conversation: "
+
+system_context:
+  enabled: false                # From features.system_context
+  path: ./data/system_context.md
+
+voice:
+  enabled: false                # From features.voice
+  stt_model: "base"
+  tts_voice: "af"
+
+tools:
+  enabled: true                 # From features.tools
+  web_search:
+    enabled: true
+  calculator:
+    enabled: true
+  datetime:
+    enabled: true
+  system_info:
+    enabled: true
+  memory:
+    enabled: true
+    max_results: 3
+    min_score: 0.3
+  browserbox:
+    enabled: false
+    ws_url: ws://localhost:9009
+    timeout: 10
+  cdp:
+    enabled: false
+    ws_url: ws://localhost:9222
+    timeout: 10
+  plugins:
+    enabled: true
+    path: ./plugins
+
+wasm:
+  enabled: false                # From features.wasm
+  timeout_ms: 500
+  default_module: ""
+  modules: {}
+
+guardrails:
+  enabled: false                # From features.guardrails
+  input: {}
+  output: {}
+
+logging:
+  level: "INFO"
+  file: ""
+
+auth:
+  api_key: ""
+
+connections: {}
+
+hooks: []
