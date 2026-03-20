@@ -280,8 +280,8 @@ BeigeBox includes a built-in single-file web interface at `http://localhost:1337
 | **Chat** | Multi-pane streaming chat — fan out to N models simultaneously, per-pane settings |
 | **Conversations** | Semantic search, replay, fork, export |
 | **Tap** | Live wiretap stream with source/event_type/run_id/role filters; clickable chips for conv and run cross-linking; group-by-run accordion; expandable meta panel; all operator and harness events written to SQLite |
-| **Operator** | Interactive agent with tool execution |
-| **Harness** | Parallel model comparison + orchestrated goal-driven mode + ensemble voting + group chat. Draggable splitter between orchestrator pane and worker output for dynamic layout sizing. |
+| **Operator** | Interactive agent with tool execution; formatted output with pretty-printed JSON (collapsible), markdown rendering, and collapsible code blocks |
+| **Harness** | Parallel model comparison + orchestrated goal-driven mode + ensemble voting + group chat. Draggable splitter between orchestrator pane and worker output for dynamic layout sizing. Same formatting as Operator. |
 | **Config** | Full config editor with collapsible sections, hot-reload — every setting, feature flag, and generation parameter |
 
 ### Per-pane chat settings
@@ -380,6 +380,61 @@ operator:
 1. Runtime config override (editable in Config tab)
 2. Static config `operator.model`
 3. Falls back to `backend.default_model`
+
+**Operator shell security — blocklist approach:**
+
+The operator can execute shell commands via the `shell` tool. By default, all commands are allowed except those matching blocked patterns. Control this via the `shell` section in `config.yaml`:
+
+```yaml
+operator:
+  shell:
+    allowed_commands: []           # Empty = blocklist mode (all allowed unless blocked)
+    blocked_patterns:              # Patterns to reject (case-sensitive; regex syntax)
+      - "^sudo "                   # Block sudo prefix
+      - "^rm "                     # Block rm command
+      - "> /home/jinx"             # Block writes to /home/jinx
+      - "> /etc"                   # Block writes to /etc
+      - "> /app"                   # Block writes to /app
+      - "> /usr"                   # Block writes to /usr
+      - "> /root"                  # Block writes to /root
+      - "> /var"                   # Block writes to /var
+      - "> /opt"                   # Block writes to /opt
+      - "> /"                      # Block writes to root
+```
+
+Patterns are evaluated as regex. Common prefixes: `^cmd ` (start of command), `> /path` (output redirection), `| ` (piping).
+
+**Whitelist approach (restrictive):** To instead allow only specific commands, set `allowed_commands` and leave `blocked_patterns` empty:
+
+```yaml
+operator:
+  shell:
+    allowed_commands:
+      - "^ls "
+      - "^cat "
+      - "^grep "
+    blocked_patterns: []           # Ignored when allowed_commands is set
+```
+
+In whitelist mode, only commands matching `allowed_commands` patterns are executed.
+
+### Local model filtering
+
+Filter which Ollama models appear in the model dropdown via glob patterns:
+
+```yaml
+# config.yaml
+local_models:
+  filter_enabled: false            # Set to true to activate filtering
+  allowed_models:                  # Glob patterns (e.g. "llama*", "*:8b", "qwen*:*")
+    - "llama*"
+    - "qwen*"
+    - "ministral*"
+```
+
+When `filter_enabled: true`, only models matching at least one pattern in `allowed_models` are shown. Pattern syntax is standard fnmatch glob patterns (`*` = any chars, `?` = single char, `[abc]` = char set).
+
+Disable filtering (empty `allowed_models` or `filter_enabled: false`) to show all available Ollama models.
 
 ### Key feature flags (all disabled by default)
 
