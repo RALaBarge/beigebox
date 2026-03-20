@@ -1602,10 +1602,13 @@ class Proxy:
                 resp = await client.get(f"{self.backend_url}/v1/models")
                 resp.raise_for_status()
 
-                # Check if local model filtering is enabled
+                # Check if local model filtering is enabled (with runtime override support)
+                from beigebox.config import get_runtime_config
+                rt_cfg = get_runtime_config()
                 local_cfg = self.cfg.get("local_models", {})
-                filter_enabled = local_cfg.get("filter_enabled", False)
-                allowed_models = local_cfg.get("allowed_models", [])
+                # Runtime config takes precedence
+                filter_enabled = rt_cfg.get("local_models_filter_enabled", local_cfg.get("filter_enabled", False))
+                allowed_models = rt_cfg.get("local_models_allowed_models", local_cfg.get("allowed_models", []))
 
                 for m in resp.json().get("data", []):
                     mid = m.get("id") or m.get("name") or ""

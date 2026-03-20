@@ -6554,7 +6554,9 @@ async function loadConfig() {
     html += cfgToggle('operator_enabled', 'Operator (LLM-driven tools)', c.operator?.enabled ?? false);
     html += cfgInput('operator_model', 'Operator Model', c.operator?.model || '');
     html += kv('max iterations', String(c.operator?.max_iterations || 10));
-    html += kv('shell', badge(c.operator?.shell_enabled));
+    html += `<div style="margin:8px 0"><label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fg-dim)"><strong>Shell security (blocklist):</strong></label></div>`;
+    html += cfgInput('shell_allowed_commands', 'Whitelist patterns (JSON array)', JSON.stringify(c.operator?.shell?.allowed_commands || []), 'text');
+    html += cfgInput('shell_blocked_patterns', 'Blacklist patterns (JSON array)', JSON.stringify(c.operator?.shell?.blocked_patterns || []), 'text');
     html += cfgToggle('tools_enabled', 'Tools master switch', c.tools?.enabled ?? false);
     const toolList = Object.keys(c.tools || {}).filter(k => !['enabled','webhook_url','browserbox'].includes(k));
     if (toolList.length) {
@@ -6571,6 +6573,15 @@ async function loadConfig() {
     html += `<div id="sub-browserbox_enabled" style="display:${bbOn?'block':'none'};margin-left:16px;margin-top:4px">`;
     html += cfgInput('browserbox_ws_url', 'WebSocket relay URL', bbCfg.ws_url ?? 'ws://localhost:9009');
     html += cfgInput('browserbox_timeout', 'Timeout (s)', bbCfg.timeout ?? 10, 'number');
+    html += '</div>';
+    html += SC;
+
+    // ── Local Models Filter ────────────────────────────────────────────────
+    html += SO('Local Models', false);
+    html += cfgToggle('local_models_filter_enabled', 'Filter available models', c.local_models?.filter_enabled ?? false);
+    html += `<div id="sub-local_models_filter_enabled" style="display:${c.local_models?.filter_enabled ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
+    html += cfgInput('local_models_allowed_models', 'Allowed patterns (JSON array)', JSON.stringify(c.local_models?.allowed_models || []), 'text');
+    html += `<div style="font-size:11px;color:var(--muted);margin-top:6px">Example: <code>["llama*", "qwen3:*", "ministral*"]</code> — supports fnmatch glob patterns</div>`;
     html += '</div>';
     html += SC;
 
@@ -6701,7 +6712,7 @@ async function loadConfig() {
       'harness_enabled','operator_enabled',
       'conversation_replay_enabled','auto_summarization_enabled',
       'web_ui_vi_mode','voice_enabled','tts_autoplay','system_context_enabled','gen_force',
-      'force_decision','wasm_enabled','backends_enabled','browserbox_enabled',
+      'force_decision','wasm_enabled','backends_enabled','browserbox_enabled','local_models_filter_enabled',
     ];
     toggleIds.forEach(id => {
       const cb = document.getElementById(`cfg-${id}`);
@@ -6710,7 +6721,7 @@ async function loadConfig() {
     });
     // Expand sub-options when parent feature flag is toggled
     ['cost_tracking_enabled',
-     'auto_summarization_enabled','system_context_enabled','tts_autoplay','browserbox_enabled'].forEach(id => {
+     'auto_summarization_enabled','system_context_enabled','tts_autoplay','browserbox_enabled','local_models_filter_enabled'].forEach(id => {
       const cb = document.getElementById(`cfg-${id}`);
       const sub = document.getElementById(`sub-${id}`);
       if (cb && sub) {
@@ -6760,9 +6771,22 @@ async function saveConfig() {
     'decision_llm_timeout','wasm_timeout_ms',
     'border_threshold','agentic_threshold','browserbox_timeout',
   ];
+  const jsonArrays = [
+    'shell_allowed_commands','shell_blocked_patterns','local_models_allowed_models',
+  ];
   bools.forEach(k => { const v = getChecked(k); if (v !== null) payload[k] = v; });
   strings.forEach(k => { const v = getVal(k); if (v !== null) payload[k] = v; });
   numbers.forEach(k => { const el = document.getElementById(`cfg-${k}`); if (el && el.value !== '') payload[k] = parseFloat(el.value); });
+  jsonArrays.forEach(k => {
+    const val = getVal(k);
+    if (val !== null && val.trim()) {
+      try {
+        payload[k] = JSON.parse(val);
+      } catch {
+        console.error(`Failed to parse JSON for ${k}: ${val}`);
+      }
+    }
+  });
 
   try {
     const d = await api('/api/v1/config', {

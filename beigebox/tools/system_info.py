@@ -137,18 +137,22 @@ def _get_shell() -> str:
 
 def _get_allowed_commands() -> list[str]:
     try:
-        from beigebox.config import get_config
+        from beigebox.config import get_config, get_runtime_config
         cfg = get_config()
-        return cfg.get("operator", {}).get("shell", {}).get("allowed_commands", [])
+        rt = get_runtime_config()
+        # Runtime override takes precedence
+        return rt.get("shell_allowed_commands", cfg.get("operator", {}).get("shell", {}).get("allowed_commands", []))
     except Exception:
         return []
 
 
 def _get_blocked_patterns() -> list[str]:
     try:
-        from beigebox.config import get_config
+        from beigebox.config import get_config, get_runtime_config
         cfg = get_config()
-        return cfg.get("operator", {}).get("shell", {}).get("blocked_patterns", [])
+        rt = get_runtime_config()
+        # Runtime override takes precedence
+        return rt.get("shell_blocked_patterns", cfg.get("operator", {}).get("shell", {}).get("blocked_patterns", []))
     except Exception:
         return ["rm -rf", "sudo", "> /etc", "; ", "| "]
 

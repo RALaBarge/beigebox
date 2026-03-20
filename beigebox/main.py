@@ -797,7 +797,16 @@ async def api_config():
             "model":          rt.get("operator_model") or cfg.get("operator", {}).get("model", ""),
             "max_iterations": cfg.get("operator", {}).get("max_iterations", 10),
             "run_timeout":    rt.get("operator_run_timeout") or cfg.get("operator", {}).get("run_timeout", 600),
-            "shell_enabled":  cfg.get("operator", {}).get("shell", {}).get("enabled", False),
+            "shell": {
+                "enabled":            cfg.get("operator", {}).get("shell", {}).get("enabled", False),
+                "allowed_commands":   cfg.get("operator", {}).get("shell", {}).get("allowed_commands", []),
+                "blocked_patterns":   cfg.get("operator", {}).get("shell", {}).get("blocked_patterns", []),
+            },
+        },
+        # ── Local Models Filter ────────────────────────────────────────
+        "local_models": {
+            "filter_enabled": cfg.get("local_models", {}).get("filter_enabled", False),
+            "allowed_models": cfg.get("local_models", {}).get("allowed_models", []),
         },
         # ── Model advertising ─────────────────────────────────────────
         "model_advertising": cfg.get("model_advertising", {}),
@@ -971,6 +980,12 @@ async def api_config_save(request: Request):
         # Operator
         "operator_enabled":             "operator_enabled",
         "operator_model":               "operator_model",
+        # Operator shell security
+        "shell_allowed_commands":       "shell_allowed_commands",
+        "shell_blocked_patterns":       "shell_blocked_patterns",
+        # Local models filter
+        "local_models_filter_enabled":  "local_models_filter_enabled",
+        "local_models_allowed_models":  "local_models_allowed_models",
         # Generation parameters
         "gen_temperature":              "gen_temperature",
         "gen_top_p":                    "gen_top_p",
