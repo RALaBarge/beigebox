@@ -30,6 +30,8 @@ from typing import Any
 
 import httpx
 
+from beigebox.config import get_runtime_config
+
 logger = logging.getLogger(__name__)
 
 
@@ -79,9 +81,17 @@ async def maybe_summarize(
     token_budget = int(summ_cfg.get("token_budget", 3000))
     keep_last    = int(summ_cfg.get("keep_last", 4))
     prefix       = summ_cfg.get("summary_prefix", "Summary of earlier conversation: ")
-    model        = (
-        summ_cfg.get("summary_model")
-        or cfg.get("backend", {}).get("default_model", "")
+
+    # Resolve summary model from unified models registry (Phase 2 refactoring)
+    rt = get_runtime_config()
+    models_cfg = cfg.get("models", {})
+    model = (
+        rt.get("models_summary")  # runtime override, new unified key
+        or rt.get("auto_summary_model")  # runtime override, old key (compat)
+        or summ_cfg.get("summary_model")  # static config, old location (compat)
+        or models_cfg.get("profiles", {}).get("summary")  # new unified location
+        or models_cfg.get("default")  # fallback to global default
+        or cfg.get("backend", {}).get("default_model", "")  # ultimate fallback
     )
     backend_url  = cfg.get("backend", {}).get("url", "http://localhost:11434")
 

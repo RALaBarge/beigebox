@@ -757,6 +757,13 @@ async def api_config():
             "default_model": rt.get("default_model") or cfg.get("backend", {}).get("default_model", ""),
             "timeout":       cfg.get("backend", {}).get("timeout", 120),
         },
+        # ── Models Registry (Phase 2 refactoring) ────────────────────
+        "models": {
+            "default":       rt.get("models_default") or cfg.get("models", {}).get("default", "qwen3:4b"),
+            "routing":       rt.get("models_routing") or cfg.get("models", {}).get("profiles", {}).get("routing", "llama3.2:3b"),
+            "agentic":       rt.get("models_agentic") or cfg.get("models", {}).get("profiles", {}).get("agentic", "qwen3:4b"),
+            "summary":       rt.get("models_summary") or cfg.get("models", {}).get("profiles", {}).get("summary", "llama3.2:3b"),
+        },
         # ── Server ───────────────────────────────────────────────────
         "server": {
             "host": cfg.get("server", {}).get("host", "0.0.0.0"),
@@ -952,6 +959,11 @@ async def api_config_save(request: Request):
         "web_ui_palette":               "web_ui_palette",
         "voice_enabled":                "voice_enabled",
         "voice_hotkey":                 "voice_hotkey",
+        # Models Registry (Phase 2 refactoring)
+        "models_default":               "models_default",
+        "models_routing":               "models_routing",
+        "models_agentic":               "models_agentic",
+        "models_summary":               "models_summary",
         # Routing
         "default_model":                "default_model",
         "force_route":                  "force_route",

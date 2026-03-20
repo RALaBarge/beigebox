@@ -121,12 +121,36 @@ payload_log:
   path: ./data/payload.jsonl
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Models Registry — Unified model allocation by role
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 refactoring: consolidate scattered model definitions
+# default → global fallback
+# profiles.routing → decision_llm (judge)
+# profiles.agentic → operator (tool use)
+# profiles.summary → auto_summarization
+# per_task → operator sub-features (pre_hook, post_hook, reflection, context_pruning)
+
+models:
+  default: "qwen3:4b"                  # Global fallback (replaces backend.default_model)
+  profiles:
+    routing: "llama3.2:3b"              # Decision LLM / judge (replaces decision_llm.model)
+    agentic: "qwen3:4b"                 # Operator / tool use (replaces operator.model)
+    summary: "llama3.2:3b"              # Auto-summarization (replaces auto_summarization.summary_model)
+  per_task:
+    pre_hook: null                      # null = inherit from agentic
+    post_hook: null
+    reflection: null
+    context_pruning: null
+  whitelist:
+    enabled: false
+    allowed_models: []
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Decision LLM (Intelligent Routing)
 # ─────────────────────────────────────────────────────────────────────────────
 
 decision_llm:
   enabled: true
-  model: "llama3.2:3b"
   temperature: 0.2
   system_prompt: "You are a helpful routing assistant that decides which tool or backend to use."
   # routes:          # Define named routes with per-route model + wasm_module hints

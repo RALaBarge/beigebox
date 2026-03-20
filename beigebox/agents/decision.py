@@ -183,13 +183,21 @@ class DecisionAgent:
         wasm_cfg = cfg.get("wasm", {})
         wasm_modules = wasm_cfg.get("modules", {}) if wasm_cfg.get("enabled", False) else {}
 
+        # Resolve judge model from unified models registry (Phase 2 refactoring)
+        models_cfg = cfg.get("models", {})
+        judge_model = (
+            models_cfg.get("profiles", {}).get("routing")
+            or d_cfg.get("model")  # fallback to old location for backwards compat
+            or models_cfg.get("default", "")
+        )
+
         return cls(
-            model=d_cfg.get("model", ""),
+            model=judge_model,
             backend_url=d_cfg.get("backend_url", cfg["backend"]["url"]),
             timeout=d_cfg.get("timeout", 5),
             routes=d_cfg.get("routes", {}),
             available_tools=available_tools or [],
-            default_model=cfg["backend"].get("default_model", ""),
+            default_model=models_cfg.get("default", cfg["backend"].get("default_model", "")),
             wasm_modules=wasm_modules,
         )
 

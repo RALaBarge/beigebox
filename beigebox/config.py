@@ -48,10 +48,17 @@ class _BackendCfg(BaseModel):
     default_model: str = ""
     timeout: float = 120
 
+class _ModelsCfg(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    default: str = "qwen3:4b"
+    profiles: dict = {}
+    per_task: dict = {}
+    whitelist: dict = {}
+
 class _DecisionLLMCfg(BaseModel):
     model_config = ConfigDict(extra="allow")
     enabled: bool = False
-    model: str = ""
+    temperature: float = 0.2
     timeout: float = 5
     max_tokens: int = 256
 
@@ -89,6 +96,7 @@ class _BeigeBoxConfig(BaseModel):
     backends_enabled: bool = False
     server: _ServerCfg = _ServerCfg()
     backend: _BackendCfg = _BackendCfg()
+    models: _ModelsCfg = _ModelsCfg()
     decision_llm: _DecisionLLMCfg = _DecisionLLMCfg()
     operator: _OperatorCfg = _OperatorCfg()
     generation: _GenerationCfg = _GenerationCfg()

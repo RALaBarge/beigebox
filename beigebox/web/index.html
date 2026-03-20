@@ -2109,8 +2109,13 @@ function esc(s) {
 
 // ── Config tab hover tooltips ────────────────────────────────────────────────
 const TOOLTIPS = {
+  // Models Registry (Phase 2 refactoring)
+  models_default:              'Global fallback model used when no specific role-based model is selected.',
+  models_routing:              'Judge/routing model (decision LLM) — fast LLM that classifies requests. (default: llama3.2:3b)',
+  models_agentic:              'Operator/tool-use model — used for LLM-driven tool invocation and multi-turn reasoning. (default: qwen3:4b)',
+  models_summary:              'Summarization model — used for auto-summarization of long conversations. (default: llama3.2:3b)',
   // Backend
-  default_model:               'Default model sent to the backend when the frontend does not specify one.',
+  default_model:               'Deprecated: use Models Registry → Default model instead.',
   // Storage
   log_conversations:           'Persist every request/response pair to SQLite for replay and search.',
   // Decision LLM
@@ -6525,12 +6530,19 @@ async function loadConfig() {
     const SO = (name, open=false) => `<details${open?' open':''} class="cfg-section"><summary class="section-header">${name}</summary>`;
     const SC = '</details>';
 
+    // ── Models Registry (Phase 2 refactoring) ──────────────────────────
+    html += SO('Models Registry', true);
+    html += cfgInput('models_default', 'Default model', c.models?.default || 'qwen3:4b');
+    html += `<hr style="border:none;border-top:1px solid var(--bg-border);margin:8px 0">`;
+    html += `<div style="font-size:11px;color:var(--fg-dim);margin-bottom:8px"><strong>Model allocation by role:</strong></div>`;
+    html += cfgInput('models_routing', 'Judge/Routing model', c.models?.routing || 'llama3.2:3b');
+    html += cfgInput('models_agentic', 'Operator/Tool-use model', c.models?.agentic || 'qwen3:4b');
+    html += cfgInput('models_summary', 'Summarization model', c.models?.summary || 'llama3.2:3b');
+    html += SC;
+
     // ── Routing & Intelligence ────────────────────────────────────────────
     html += SO('Routing & Intelligence', true);
-    html += cfgInput('default_model', 'Default model', c.backend?.default_model || '');
-    html += `<hr style="border:none;border-top:1px solid var(--bg-border);margin:8px 0">`;
     html += cfgToggle('decision_llm_enabled', 'Decision LLM (judge)', c.decision_llm?.enabled ?? false);
-    html += kv('judge model', esc(c.decision_llm?.model || '—'));
     html += cfgInput('decision_llm_timeout', 'Judge timeout (s)', c.decision_llm?.timeout ?? 5, 'number');
     html += cfgToggle('force_decision', 'Force judge every request', c.routing?.force_decision ?? false);
     html += `<hr style="border:none;border-top:1px solid var(--bg-border);margin:8px 0">`;
@@ -6548,11 +6560,11 @@ async function loadConfig() {
     html += cfgToggle('auto_summarization_enabled', 'Auto-summarization', c.auto_summarization?.enabled ?? false);
     html += `<div id="sub-auto_summarization_enabled" style="display:${c.auto_summarization?.enabled ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
     html += cfgInput('auto_token_budget',  'Token budget (trigger)', c.auto_summarization?.token_budget ?? 3000, 'number');
-    html += cfgInput('auto_summary_model', 'Summary model',          c.auto_summarization?.summary_model ?? '');
     html += cfgInput('auto_keep_last',     'Keep last N messages',   c.auto_summarization?.keep_last ?? 4, 'number');
+    html += `<div style="font-size:11px;color:var(--fg-dim);margin-top:6px">Model: See <strong>Models Registry</strong> section above for summary model selection.</div>`;
     html += '</div>';
     html += cfgToggle('operator_enabled', 'Operator (LLM-driven tools)', c.operator?.enabled ?? false);
-    html += cfgInput('operator_model', 'Operator Model', c.operator?.model || '');
+    html += `<div style="font-size:11px;color:var(--fg-dim);margin-top:4px">Model: See <strong>Models Registry</strong> section above for operator/agentic model selection.</div>`;
     html += kv('max iterations', String(c.operator?.max_iterations || 10));
     html += `<div style="margin:8px 0"><label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fg-dim)"><strong>Shell security (blocklist):</strong></label></div>`;
     html += cfgInput('shell_allowed_commands', 'Whitelist patterns (JSON array)', JSON.stringify(c.operator?.shell?.allowed_commands || []), 'text');
