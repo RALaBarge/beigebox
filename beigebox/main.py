@@ -3734,6 +3734,170 @@ async def discovery_results(
     })
 
 
+# ---------------------------------------------------------------------------
+# Orchestration Profiles Management
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v1/orchestrations")
+async def list_orchestrations(enabled_only: bool = False):
+    """
+    List all orchestration profiles.
+
+    GET /api/v1/orchestrations?enabled_only=false
+    """
+    state = get_state()
+
+    if not state.sqlite_store:
+        return JSONResponse(
+            {"error": "SQLite store not configured"},
+            status_code=503,
+        )
+
+    profiles = state.sqlite_store.list_orchestration_profiles(enabled_only=enabled_only)
+    return JSONResponse({"profiles": profiles, "count": len(profiles)})
+
+
+@app.post("/api/v1/orchestrations")
+async def create_orchestration(request: Request):
+    """
+    Create a new orchestration profile.
+
+    POST /api/v1/orchestrations
+    {
+        "name": "aggressive_research",
+        "description": "Fast research with many tool calls",
+        "worker_type": "RESEARCH",
+        "config": {...},
+        "max_rounds": 12,
+        "max_iterations": 15
+    }
+    """
+    state = get_state()
+
+    if not state.sqlite_store:
+        return JSONResponse(
+            {"error": "SQLite store not configured"},
+            status_code=503,
+        )
+
+    body = await request.json()
+    name = body.get("name", "").strip()
+
+    if not name:
+        return JSONResponse(
+            {"error": "name required"},
+            status_code=400,
+        )
+
+    try:
+        profile = state.sqlite_store.create_orchestration_profile(
+            name=name,
+            description=body.get("description"),
+            config=body.get("config", {}),
+            worker_type=body.get("worker_type"),
+            max_rounds=body.get("max_rounds", 8),
+            max_iterations=body.get("max_iterations", 10),
+        )
+        return JSONResponse(profile, status_code=201)
+    except Exception as e:
+        logger.exception(f"Failed to create orchestration profile: {e}")
+        return JSONResponse(
+            {"error": str(e)},
+            status_code=400,
+        )
+
+
+@app.get("/api/v1/orchestrations/{name}")
+async def get_orchestration(name: str):
+    """
+    Get a specific orchestration profile.
+
+    GET /api/v1/orchestrations/aggressive_research
+    """
+    state = get_state()
+
+    if not state.sqlite_store:
+        return JSONResponse(
+            {"error": "SQLite store not configured"},
+            status_code=503,
+        )
+
+    profile = state.sqlite_store.get_orchestration_profile(name)
+
+    if not profile:
+        return JSONResponse(
+            {"error": "not found"},
+            status_code=404,
+        )
+
+    return JSONResponse(profile)
+
+
+@app.put("/api/v1/orchestrations/{name}")
+async def update_orchestration(name: str, request: Request):
+    """
+    Update an orchestration profile.
+
+    PUT /api/v1/orchestrations/aggressive_research
+    {
+        "description": "Updated description",
+        "max_rounds": 20
+    }
+    """
+    state = get_state()
+
+    if not state.sqlite_store:
+        return JSONResponse(
+            {"error": "SQLite store not configured"},
+            status_code=503,
+        )
+
+    body = await request.json()
+
+    try:
+        profile = state.sqlite_store.update_orchestration_profile(name, **body)
+
+        if not profile:
+            return JSONResponse(
+                {"error": "not found"},
+                status_code=404,
+            )
+
+        return JSONResponse(profile)
+    except Exception as e:
+        logger.exception(f"Failed to update orchestration profile: {e}")
+        return JSONResponse(
+            {"error": str(e)},
+            status_code=400,
+        )
+
+
+@app.delete("/api/v1/orchestrations/{name}")
+async def delete_orchestration(name: str):
+    """
+    Delete an orchestration profile.
+
+    DELETE /api/v1/orchestrations/aggressive_research
+    """
+    state = get_state()
+
+    if not state.sqlite_store:
+        return JSONResponse(
+            {"error": "SQLite store not configured"},
+            status_code=503,
+        )
+
+    deleted = state.sqlite_store.delete_orchestration_profile(name)
+
+    if not deleted:
+        return JSONResponse(
+            {"error": "not found"},
+            status_code=404,
+        )
+
+    return JSONResponse({"status": "deleted"})
+
+
 # OpenAI Files / Fine-tuning / Assistants (future-proofing)
 @app.api_route("/v1/files/{path:path}", methods=["GET","POST","DELETE"])
 async def files_passthrough(path: str, request: Request):

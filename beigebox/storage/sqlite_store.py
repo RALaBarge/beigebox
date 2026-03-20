@@ -170,6 +170,25 @@ CREATE INDEX IF NOT EXISTS idx_discovery_scorecards_opportunity
     ON discovery_scorecards(opportunity_id);
 CREATE INDEX IF NOT EXISTS idx_discovery_scorecards_ts
     ON discovery_scorecards(ts);
+
+CREATE TABLE IF NOT EXISTS orchestration_profiles (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT UNIQUE NOT NULL,
+    description     TEXT,
+    config          TEXT NOT NULL,
+    worker_type     TEXT,
+    max_rounds      INTEGER DEFAULT 8,
+    max_iterations  INTEGER DEFAULT 10,
+    enabled         INTEGER DEFAULT 1,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    misc1           TEXT,
+    misc2           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_orchestration_profiles_name
+    ON orchestration_profiles(name);
+CREATE INDEX IF NOT EXISTS idx_orchestration_profiles_enabled
+    ON orchestration_profiles(enabled);
 """
 
 # Migrations: append-only ALTER TABLE statements that add new columns to
@@ -986,4 +1005,102 @@ class SQLiteStore:
             r["oracle_passed"] = bool(r.get("oracle_passed", 0))
             results.append(r)
         return results
+
+    # ─ Orchestration profiles ────────────────────────────────────────────────────
+
+    def create_orchestration_profile(
+        self,
+        name: str,
+        config: Dict[str, Any],
+        description: str | None = None,
+        worker_type: str | None = None,
+        max_rounds: int = 8,
+        max_iterations: int = 10,
+    ) -> Dict[str, Any]:
+        """Create a new orchestration profile."""
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO orchestration_profiles
+                   (name, description, config, worker_type, max_rounds, max_iterations)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (name, description, json.dumps(config), worker_type, max_rounds, max_iterations),
+            )
+            row = conn.execute(
+                "SELECT * FROM orchestration_profiles WHERE name = ?",
+                (name,),
+            ).fetchone()
+        return dict(row) if row else {}
+
+    def get_orchestration_profile(self, name: str) -> Dict[str, Any] | None:
+        """Fetch a single orchestration profile by name."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM orchestration_profiles WHERE name = ?",
+                (name,),
+            ).fetchone()
+
+        if not row:
+            return None
+
+        profile = dict(row)
+        profile["config"] = json.loads(profile.get("config", "{}"))
+        profile["enabled"] = bool(profile.get("enabled", 1))
+        return profile
+
+    def list_orchestration_profiles(self, enabled_only: bool = False) -> list[Dict[str, Any]]:
+        """List all orchestration profiles."""
+        where = "WHERE enabled = 1" if enabled_only else ""
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM orchestration_profiles {where} ORDER BY name"
+            ).fetchall()
+
+        profiles = []
+        for row in rows:
+            p = dict(row)
+            p["config"] = json.loads(p.get("config", "{}"))
+            p["enabled"] = bool(p.get("enabled", 1))
+            profiles.append(p)
+        return profiles
+
+    def update_orchestration_profile(
+        self,
+        name: str,
+        **updates,
+    ) -> Dict[str, Any] | None:
+        """Update an orchestration profile."""
+        from datetime import datetime, timezone
+
+        allowed_fields = {"description", "config", "worker_type", "max_rounds", "max_iterations", "enabled"}
+        update_fields = {k: v for k, v in updates.items() if k in allowed_fields}
+
+        if not update_fields:
+            return self.get_orchestration_profile(name)
+
+        # Convert config to JSON if present
+        if "config" in update_fields and isinstance(update_fields["config"], dict):
+            update_fields["config"] = json.dumps(update_fields["config"])
+
+        # Add updated_at timestamp
+        update_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+        set_clause = ", ".join(f"{k} = ?" for k in update_fields.keys())
+        params = list(update_fields.values()) + [name]
+
+        with self._connect() as conn:
+            conn.execute(
+                f"UPDATE orchestration_profiles SET {set_clause} WHERE name = ?",
+                params,
+            )
+
+        return self.get_orchestration_profile(name)
+
+    def delete_orchestration_profile(self, name: str) -> bool:
+        """Delete an orchestration profile."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM orchestration_profiles WHERE name = ?",
+                (name,),
+            )
+            return cursor.rowcount > 0
 
