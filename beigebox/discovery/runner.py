@@ -28,6 +28,25 @@ from beigebox.orchestration.pareto import ParetoOptimizer, ScoredVariant
 logger = logging.getLogger(__name__)
 
 
+def _emit_tap(event_type: str, content: str, run_id: str = "", meta: dict | None = None):
+    """Emit structured event to Tap (wiretap) for observability."""
+    try:
+        from beigebox.main import get_state
+        state = get_state()
+        if state.proxy and state.proxy.wire:
+            state.proxy.wire.log(
+                direction="inbound",
+                role="discovery",
+                content=content,
+                event_type=event_type,
+                source="discovery",
+                run_id=run_id,
+                meta=meta or {},
+            )
+    except Exception as e:
+        logger.debug(f"Failed to emit Tap event: {e}")
+
+
 class DiscoveryRunner:
     """Execute a discovery opportunity experiment."""
 
@@ -147,6 +166,20 @@ class DiscoveryRunner:
             f"({len(variants)} variants, {len(test_cases)} test cases)"
         )
 
+        # Emit discovery start event to Tap
+        _emit_tap(
+            "discovery_start",
+            f"Discovery run {run_id}: {opportunity_name} ({len(variants)} variants, {len(test_cases)} cases)",
+            run_id=run_id,
+            meta={
+                "opportunity_id": opportunity_id,
+                "opportunity_name": opportunity_name,
+                "num_variants": len(variants),
+                "num_test_cases": len(test_cases),
+                "weight_profile": weight_profile,
+            }
+        )
+
         # Score each variant
         scored_variants = []
         judge = JudgeRubric(judge_model=self.judge_model)
@@ -158,6 +191,14 @@ class DiscoveryRunner:
 
             try:
                 logger.info(f"  Scoring variant: {variant_name}")
+
+                # Emit variant start event
+                _emit_tap(
+                    "discovery_variant_start",
+                    f"Scoring variant: {variant_name}",
+                    run_id=run_id,
+                    meta={"variant_name": variant_name}
+                )
 
                 # Run candidate on test cases
                 logger.info(f"    Running {len(test_cases)} test cases...")
@@ -255,8 +296,30 @@ class DiscoveryRunner:
                     f"efficiency={avg_dims['efficiency']:.1f}"
                 )
 
+                # Emit variant complete event
+                _emit_tap(
+                    "discovery_variant_complete",
+                    f"Variant {variant_name}: score={overall:.3f}",
+                    run_id=run_id,
+                    meta={
+                        "variant_name": variant_name,
+                        "overall_score": overall,
+                        "accuracy": avg_dims["accuracy"],
+                        "efficiency": avg_dims["efficiency"],
+                        "clarity": avg_dims["clarity"],
+                        "hallucination": avg_dims["hallucination"],
+                        "safety": avg_dims["safety"],
+                    }
+                )
+
             except Exception as e:
                 logger.exception(f"Failed to score variant {variant_name}: {e}")
+                _emit_tap(
+                    "discovery_variant_error",
+                    f"Failed to score {variant_name}: {str(e)[:100]}",
+                    run_id=run_id,
+                    meta={"variant_name": variant_name, "error": str(e)[:100]}
+                )
 
         # Find Pareto front
         pareto_front = self.pareto.find_pareto_front(scored_variants)
@@ -267,6 +330,20 @@ class DiscoveryRunner:
         logger.info(
             f"Discovery complete: {len(pareto_front)} on Pareto front, "
             f"champion={champion.name if champion else None}"
+        )
+
+        # Emit discovery complete event
+        _emit_tap(
+            "discovery_complete",
+            f"Discovery {opportunity_id}: {len(pareto_front)} Pareto variants, champion={champion.name if champion else 'none'}",
+            run_id=run_id,
+            meta={
+                "opportunity_id": opportunity_id,
+                "num_variants_scored": len(scored_variants),
+                "pareto_size": len(pareto_front),
+                "champion": champion.name if champion else None,
+                "champion_score": champion.weighted if champion else None,
+            }
         )
 
         return {
