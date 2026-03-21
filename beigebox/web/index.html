@@ -6830,23 +6830,22 @@ async function loadConfig() {
       'web_ui_vi_mode','voice_enabled','tts_autoplay','system_context_enabled','gen_force',
       'force_decision','wasm_enabled','backends_enabled','browserbox_enabled','local_models_filter_enabled',
     ];
-    toggleIds.forEach(id => {
-      const cb = document.getElementById(`cfg-${id}`);
-      const lbl = document.getElementById(`cfg-${id}-lbl`);
-      if (cb && lbl) cb.addEventListener('change', () => { lbl.textContent = cb.checked ? 'enabled' : 'disabled'; });
-    });
-    // Expand sub-options when parent feature flag is toggled
-    ['cost_tracking_enabled',
-     'auto_summarization_enabled','system_context_enabled','tts_autoplay','browserbox_enabled','local_models_filter_enabled'].forEach(id => {
-      const cb = document.getElementById(`cfg-${id}`);
-      const sub = document.getElementById(`sub-${id}`);
-      if (cb && sub) {
-        cb.addEventListener('change', () => {
-          sub.style.display = cb.checked ? 'block' : 'none';
-          if (id === 'system_context_enabled' && cb.checked) loadSystemContext();
-        });
-      }
-    });
+    // Use event delegation for better reliability — attach to config-body instead of individual checkboxes
+    const configBody = document.getElementById('config-body');
+    if (configBody) {
+      configBody.addEventListener('change', (evt) => {
+        if (evt.target.tagName === 'INPUT' && evt.target.type === 'checkbox') {
+          const id = evt.target.id.replace('cfg-', '');
+          const lbl = document.getElementById(`cfg-${id}-lbl`);
+          if (lbl) lbl.textContent = evt.target.checked ? 'enabled' : 'disabled';
+
+          // Handle sub-option visibility
+          const subEl = document.getElementById(`sub-${id}`);
+          if (subEl) subEl.style.display = evt.target.checked ? 'block' : 'none';
+          if (id === 'system_context_enabled' && evt.target.checked) loadSystemContext();
+        }
+      }, true); // use capture phase for better reliability
+    }
     // Auto-load context if already enabled
     if (c.system_context?.enabled) loadSystemContext();
 
