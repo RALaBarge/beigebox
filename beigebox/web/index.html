@@ -6912,6 +6912,21 @@ async function saveConfig() {
     }
   });
 
+  // Sync old and new feature toggle names to keep them in sync
+  // (Phase 1 refactoring: transitioning from individual toggles to master feature flags)
+  const syncPairs = [
+    ['features_harness', 'harness_enabled'],
+    ['features_conversation_replay', 'conversation_replay_enabled'],
+    ['features_auto_summarization', 'auto_summarization_enabled'],
+    ['features_operator', 'operator_enabled'],
+    ['features_tools', 'tools_enabled'],
+  ];
+  syncPairs.forEach(([newKey, oldKey]) => {
+    // If either key is in the payload, sync the other one
+    if (newKey in payload) payload[oldKey] = payload[newKey];
+    else if (oldKey in payload) payload[newKey] = payload[oldKey];
+  });
+
   try {
     const d = await api('/api/v1/config', {
       method: 'POST',
