@@ -6928,9 +6928,13 @@ async function saveConfig() {
         status.textContent = `⚠ saved ${saved} key(s), ${errors} failed`;
         status.style.color = 'var(--yellow, #fa0)';
         setTimeout(() => { if (status) { status.textContent = ''; status.style.color = ''; } }, 4000);
+        // Reload config to reflect what was actually saved
+        setTimeout(() => { loadConfig(); }, 1500);
       } else {
         status.textContent = `✓ saved (${saved} keys)`;
         setTimeout(() => { if (status) status.textContent = ''; }, 3000);
+        // Reload config panel to reflect saved changes
+        setTimeout(() => { loadConfig(); }, 500);
       }
     }
   } catch(e) {
