@@ -52,7 +52,8 @@ from beigebox.agents.routing_rules import (
 )
 from beigebox.logging import (
     log_routing_decision, log_model_selection, log_token_usage,
-    log_latency_stage, log_cache_event
+    log_latency_stage, log_cache_event, log_request_started,
+    log_request_completed
 )
 from beigebox.backends.openrouter import _COST_SENTINEL_PREFIX
 from beigebox.cache import SemanticCache, ToolResultCache
@@ -1270,6 +1271,13 @@ class Proxy:
         model = self._get_model(body)
         conversation_id = self._extract_conversation_id(body)
 
+        # Log request start
+        prompt_tokens = _estimate_tokens(str(body.get("messages", [])))
+        try:
+            log_request_started(model, prompt_tokens)
+        except Exception:
+            pass  # Don't block on logging
+
         # Z-command parsing
         zcmd, body = self._process_z_command(body)
         _stages["z_command"] = (_time.monotonic() - _t0) * 1000
@@ -1490,6 +1498,19 @@ class Proxy:
         # Wall-clock stream duration
         _stages["backend"] = (_time.monotonic() - _t_backend) * 1000
         total_ms = (_time.monotonic() - _t0) * 1000
+
+        # Log request completion
+        try:
+            completion_tokens = _estimate_tokens("".join(full_response))
+            log_request_completed(
+                model=model,
+                latency_ms=total_ms,
+                tokens_in=prompt_tokens,
+                tokens_out=completion_tokens,
+                cost=stream_cost_usd,
+            )
+        except Exception:
+            pass  # Don't block on logging
 
         # Log the complete response after streaming finishes (skip synthetic)
         if not is_synthetic:
