@@ -6816,6 +6816,13 @@ async function loadConfig() {
 
     // Wire toggle labels + expand/collapse sub-options
     const toggleIds = [
+      // Features (Phase 1 refactoring)
+      'features_backends','features_decision_llm','features_classifier','features_semantic_cache',
+      'features_operator','features_harness','features_tools','features_cost_tracking',
+      'features_conversation_replay','features_auto_summarization','features_system_context',
+      'features_wiretap','features_payload_log','features_wasm','features_guardrails',
+      'features_amf_mesh','features_voice','features_hooks',
+      // Legacy toggles (backwards compat)
       'log_conversations','decision_llm_enabled','tools_enabled',
       'cost_tracking_enabled','cost_track_openrouter','cost_track_local',
       'harness_enabled','operator_enabled',
