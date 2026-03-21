@@ -1323,6 +1323,7 @@
       <span id="sys-gpu" class="sys-m"></span>
     </span>
     <span id="vi-pill" onclick="toggleViMode()" title="toggle vi mode">π</span>
+    <span id="cdp-pill" onclick="launchCDP()" title="Launch Chrome browser (CDP)" style="cursor:pointer;padding:0 6px;border-radius:3px">🌐</span>
     <span id="clock"></span>
   </div>
 </div>
@@ -1971,6 +1972,30 @@ async function toggleViMode() {
     if (d.vi_mode) injectViMode(); else removeViMode();
   } catch(e) {
     console.error('vi mode toggle failed:', e);
+  }
+}
+
+// ── CDP (Chrome DevTools Protocol) browser launcher ────────────────────────
+async function launchCDP() {
+  const pill = document.getElementById('cdp-pill');
+  pill.style.opacity = '0.5';
+  try {
+    const d = await api('/api/v1/cdp/status');
+    if (d.available) {
+      pill.style.background = 'rgba(163, 190, 140, 0.2)';
+      pill.style.color = 'var(--green)';
+      window.open(d.http_url, '_blank', 'width=1400,height=900');
+    } else {
+      pill.style.background = 'rgba(191, 97, 106, 0.2)';
+      pill.style.color = 'var(--red)';
+      alert('Chrome DevTools not available.\n\nStart with:\ndocker compose --profile cdp up -d');
+    }
+  } catch(e) {
+    console.error('CDP status check failed:', e);
+    pill.style.background = 'rgba(191, 97, 106, 0.2)';
+    pill.style.color = 'var(--red)';
+  } finally {
+    setTimeout(() => { pill.style.opacity = '1'; }, 500);
   }
 }
 

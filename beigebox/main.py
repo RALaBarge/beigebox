@@ -3855,6 +3855,42 @@ async def delete_orchestration(name: str):
     return JSONResponse({"status": "deleted"})
 
 
+# ---------------------------------------------------------------------------
+# CDP (Chrome DevTools Protocol) Browser Control
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v1/cdp/status")
+async def cdp_status():
+    """
+    Check if CDP (Chrome DevTools Protocol) browser is available.
+
+    GET /api/v1/cdp/status
+    Returns: {"available": true/false, "ws_url": "ws://...", "http_url": "http://..."}
+    """
+    cdp_ws_url = "ws://localhost:9222"
+    cdp_http_url = "http://localhost:9222"
+
+    try:
+        # Quick health check: try to fetch the CDP protocol version
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            resp = await client.get(f"{cdp_http_url}/json/version")
+            if resp.status_code == 200:
+                return JSONResponse({
+                    "available": True,
+                    "ws_url": cdp_ws_url,
+                    "http_url": cdp_http_url,
+                })
+    except Exception:
+        pass
+
+    return JSONResponse({
+        "available": False,
+        "ws_url": cdp_ws_url,
+        "http_url": cdp_http_url,
+        "note": "Chrome/Chromium not running. Start with: docker compose --profile cdp up -d",
+    })
+
+
 # OpenAI Files / Fine-tuning / Assistants (future-proofing)
 @app.api_route("/v1/files/{path:path}", methods=["GET","POST","DELETE"])
 async def files_passthrough(path: str, request: Request):
