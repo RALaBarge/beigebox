@@ -17,9 +17,14 @@ data/
 *.jsonl
 chroma/
 
-# Agent output files (keep directory, ignore contents)
-workspace/out/*
+# Agent workspace (input/output directory — keep .gitkeep placeholders only)
+workspace/
+!workspace/
+!workspace/in/
+!workspace/out/
+!workspace/in/.gitkeep
 !workspace/out/.gitkeep
+!workspace/README.md
 
 # Secrets
 *.key
