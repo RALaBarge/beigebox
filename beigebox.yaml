@@ -1,0 +1,95 @@
+# BeigeBox Agent Package Manifest
+#
+# Follows Microsoft Agent Package Manager (APM) specification
+# Reference: https://github.com/microsoft/apm (main branch)
+# Schema docs: https://microsoft.github.io/apm/reference/manifest-schema/
+#
+# Declares tools, skills, modules, and MCP servers available in BeigeBox.
+# Install dependencies: `beigebox install`
+# List available tools: `beigebox list tools`
+# Pack for distribution: `beigebox pack --target distribution`
+
+name: beigebox
+version: 1.3.6
+description: "Modular OpenAI-compatible LLM middleware with integrated observability, routing, and agentic orchestration"
+author: "BeigeBox Contributors"
+license: "AGPL-3.0"
+target: agents
+type: hybrid
+
+# Built-in Tools (auto-registered from tool registry)
+tools:
+  - web_search          # Search the web for current information
+  - web_scraper         # Scrape and extract data from web pages
+  - calculator          # Mathematical computations
+  - datetime            # Current time and date operations
+  - memory              # Persistent memory/recall
+  - cdp                 # Chrome DevTools Protocol (browser automation)
+  - document_search     # RAG: search indexed design docs
+  - system_info         # System diagnostics and environment info
+  - shell               # Execute shell commands (sandboxed)
+
+# Skills (from 2600/skills/ + submodules)
+skills:
+  - path: 2600/skills/
+    description: "Community skills (Anthropic + K-Dense scientific library)"
+
+# WASM Modules (post-LLM response transforms)
+modules:
+  - name: output_normalizer
+    path: wasm_modules/output_normalizer.wasm
+    description: "Normalize LLM output to consistent markdown (3 levels: minimal/medium/full)"
+  - name: opener_strip
+    path: wasm_modules/opener_strip.wasm
+    description: "Strip sycophantic opening phrases"
+  - name: pii_redactor
+    path: wasm_modules/pii_redactor.wasm
+    description: "Redact PII (emails, phones, SSNs, credit cards)"
+  - name: json_extractor
+    path: wasm_modules/json_extractor.wasm
+    description: "Extract JSON from mixed prose responses"
+  - name: markdown_stripper
+    path: wasm_modules/markdown_stripper.wasm
+    description: "Remove markdown formatting for plaintext/TTS"
+
+# MCP Servers (Model Context Protocol)
+mcp:
+  - name: beigebox_tools
+    description: "BeigeBox tool registry as MCP server"
+    transport: http
+    url: "http://localhost:1337/mcp"
+
+# Development dependencies (local testing only, excluded from bundles)
+devDependencies: []
+
+# Feature flags
+features:
+  backends: true
+  decision_llm: true
+  classifier: true
+  semantic_cache: false
+  operator: true
+  harness: true
+  tools: true
+  cost_tracking: true
+  conversation_replay: true
+  auto_summarization: false
+  system_context: false
+  wiretap: true
+  wasm: false
+  guardrails: false
+  voice: false
+
+# Deployment targets
+targets:
+  docker: "./docker/docker-compose.yaml"
+  kubernetes: "./deploy/k8s/"
+  systemd: "./deploy/systemd/"
+
+# Scripts for beigebox CLI
+scripts:
+  setup: "beigebox setup"
+  build-centroids: "beigebox build-centroids"
+  index-docs: "beigebox index-docs 2600/"
+  eval: "pytest tests/"
+  dev: "uvicorn beigebox.main:app --reload"
