@@ -194,33 +194,24 @@ services:
   #                 indexeddb, service workers, cache storage, network throttling
   chrome:
     profiles: [cdp]
-    image: chromium-headless:latest
+    image: browserless/chrome:latest
     container_name: beigebox-chrome
     ports:
-      - "9222:9222"
-    command: >
-      --no-sandbox
-      --disable-gpu
-      --headless
-      --disable-dev-shm-usage
-      --remote-debugging-address=0.0.0.0
-      --remote-debugging-port=9222
-      --disable-background-networking
-      --disable-breakpad
-      --disable-client-side-phishing-detection
-      --disable-default-apps
-      --disable-extensions
-      --disable-sync
-      --metrics-recording-only
-      --no-first-run
-      --safebrowsing-disable-auto-update
+      - "9222:3000"
+    environment:
+      # Enable remote debugging for CDP
+      DEBUG: "browserless/chrome"
+      MAX_CONCURRENT_SESSIONS: "10"
+      CHROME_DATA_DIR: "/data"
+    volumes:
+      - chrome_data:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9222/json/version"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/json/version"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
     # Optional: limit memory if needed
     # deploy:
     #   resources:
@@ -318,3 +309,4 @@ volumes:
   llama_cpp_models:
   vllm_models:
   executorch_models:
+  chrome_data:
