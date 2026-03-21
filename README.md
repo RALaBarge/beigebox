@@ -740,39 +740,60 @@ tools:
 
 ## Document Search (RAG)
 
-All design docs (1,166 files from `2600/`) are indexed into ChromaDB as searchable chunks. The operator can search architecture decisions, past session notes, and implementation guides via the `document_search` tool.
+All design docs (1,166+ files from `2600/`) are indexed into ChromaDB as searchable chunks. The operator can search architecture decisions, past session notes, and implementation guides via the `document_search` tool.
 
-**Index docs locally:**
+**Directory structure:**
+
+- **`2600/`** — working copy (active design docs, indexed locally)
+- **`2600/2600-staging/`** — auto-ingest folder (drop docs here, auto-indexed on startup)
+- **`2599/`** — archive (indexed docs moved here automatically)
+- **`2600/.upload-manifest.json`** — upload tracking (md5, timestamp, status, committed to Git for audit)
+
+**Quick workflow — auto-ingest on startup:**
+
+```bash
+# 1. Drop markdown file in staging folder
+cp my-design.md beigebox/2600/2600-staging/
+
+# 2. Start server
+beigebox dial
+
+# 3. Happens automatically in background:
+#    - Chunks document (1200 chars, 150 char overlap)
+#    - Embeds into ChromaDB
+#    - Moves to 2600/2599/ (archive)
+#    - Updates .upload-manifest.json (timestamp, md5, status)
+#    - Logs completion
+```
+
+**Manual bulk indexing (e.g., for existing files in `2600/`):**
 
 ```bash
 beigebox index-docs /path/to/2600/
 ```
 
-This chunks documents (1200 chars per chunk, 150 char overlap), embeds them, and stores in ChromaDB. Operator can then ask questions like "What's the harness orchestration design?" and get relevant excerpts.
+This chunks documents, embeds them, and stores in ChromaDB. Operator can then ask questions like "What's the harness orchestration design?" and get relevant excerpts.
 
-**Production upload tracking:**
+**Manifest tracking:**
 
-The `2600/` directory uses a staging system to track which documents have been uploaded to production:
+Every staged document produces an entry in `.upload-manifest.json`:
 
-- **`2600/`** — working copy (indexable locally)
-- **`2600/2600-staging/`** — intermediate staging for docs pending bulk upload
-- **`2600/.upload-manifest.json`** — tracks upload status (committed to Git for audit trail)
-
-Workflow:
-```bash
-# Add new docs and index locally
-cp new-design-doc.md 2600/
-beigebox index-docs 2600/
-
-# When ready for production sync
-cp 2600/new-design-doc.md 2600/2600-staging/
-beigebox upload-docs 2600/2600-staging/   # (future CLI)
-
-# Manifest auto-updates with upload_at, md5, status
-cat 2600/.upload-manifest.json | jq '.files."new-design-doc.md"'
+```json
+{
+  "files": {
+    "my-design.md": {
+      "uploaded_at": "2026-03-21T12:30:45.123456Z",
+      "md5": "a1b2c3d4...",
+      "status": "uploaded"
+    }
+  },
+  "last_sync": "2026-03-21T12:30:45.123456Z"
+}
 ```
 
-Failed uploads are retried without reprocessing the entire 2600/. See `2600/2600-staging/README.md` for details.
+Manifest is committed to Git for full audit trail. Failed uploads are logged with error messages for debugging.
+
+See [2600/request-pipeline-complete.md](2600/request-pipeline-complete.md) and [2600/output-normalizer-wasm.md](2600/output-normalizer-wasm.md) for example design docs that follow this system.
 
 ---
 
