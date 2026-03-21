@@ -327,15 +327,6 @@ class SystemInfoTool:
     def run(self, query: str = "") -> str:
         """Run a shell command or gather system information."""
         if query and query.strip():
-            if not _bwrap_available():
-                return (
-                    "Shell command blocked: bubblewrap (bwrap) sandbox is not available on this host. "
-                    "Without bwrap, shell commands run without network isolation, filesystem isolation, "
-                    "or process namespace separation — the following protections are lost: "
-                    "no /app or /home hiding, no network block, no pid namespace, no tmpfs scratch. "
-                    "To enable shell access, install bubblewrap and ensure unprivileged user namespaces "
-                    "are permitted (kernel.unprivileged_userns_clone=1)."
-                )
             return _run(query.strip())
 
         sections = []
