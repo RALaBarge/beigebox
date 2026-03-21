@@ -29,6 +29,7 @@ from beigebox.backends.openrouter import OpenRouterBackend
 from beigebox.backends.openai_compat import OpenAICompatibleBackend
 from beigebox.backends.plugin_loader import load_backend_plugins
 from beigebox.config import get_config, get_runtime_config
+from beigebox.logging import log_backend_selection, log_error_event
 
 logger = logging.getLogger(__name__)
 
@@ -321,9 +322,21 @@ class MultiBackendRouter:
                     "Backend '%s' served model '%s' in %.0fms",
                     backend.name, model, response.latency_ms,
                 )
+                try:
+                    log_backend_selection(
+                        backend=backend.name,
+                        model=model,
+                        reason="fast_tier",
+                    )
+                except Exception:
+                    pass
                 return response
             errors.append(f"{backend.name}: {response.error}")
             logger.warning("Backend '%s' failed for model '%s': %s", backend.name, model, response.error)
+            try:
+                log_error_event("backend_router", f"{backend.name}: {response.error}", severity="warning")
+            except Exception:
+                pass
 
         # Second pass — degraded backends as last resort
         for backend in degraded:
@@ -333,12 +346,28 @@ class MultiBackendRouter:
                 self._tracker.record(backend.name, response.latency_ms)
                 logger.info("Backend '%s' (degraded) served model '%s' in %.0fms",
                             backend.name, model, response.latency_ms)
+                try:
+                    log_backend_selection(
+                        backend=backend.name,
+                        model=model,
+                        reason="degraded_fallback",
+                    )
+                except Exception:
+                    pass
                 return response
             errors.append(f"{backend.name}: {response.error}")
             logger.warning("Backend '%s' failed for model '%s': %s", backend.name, model, response.error)
+            try:
+                log_error_event("backend_router", f"{backend.name} (degraded): {response.error}", severity="warning")
+            except Exception:
+                pass
 
         error_summary = "; ".join(errors) if errors else "No backends available"
         logger.error("All backends exhausted for model '%s': %s", model, error_summary)
+        try:
+            log_error_event("backend_router", f"all backends failed: {error_summary[:100]}", severity="error")
+        except Exception:
+            pass
         return BackendResponse(
             ok=False,
             status_code=503,

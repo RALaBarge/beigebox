@@ -17,11 +17,13 @@ Design principles:
 
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 
 import httpx
 
 from beigebox.config import get_config
+from beigebox.logging import log_decision_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +258,7 @@ class DecisionAgent:
 
         self._decisions_total += 1
         effective_timeout = timeout if timeout is not None else self.timeout
+        _t0 = time.monotonic()
         try:
             async with httpx.AsyncClient(timeout=effective_timeout) as client:
                 resp = await client.post(
@@ -276,6 +279,7 @@ class DecisionAgent:
 
             content = data["choices"][0]["message"]["content"]
             decision = self._parse_response(content)
+            latency_ms = (time.monotonic() - _t0) * 1000
 
             logger.info(
                 "Decision: model=%s, search=%s, rag=%s, tools=%s — %s",
@@ -285,6 +289,18 @@ class DecisionAgent:
                 decision.tools,
                 decision.reasoning,
             )
+
+            # Log to Tap
+            try:
+                log_decision_llm_call(
+                    prompt_len=len(user_message),
+                    decision=f"model={decision.model}",
+                    confidence=decision.confidence,
+                    latency_ms=latency_ms,
+                )
+            except Exception:
+                pass
+
             return decision
 
         # All three failure modes (timeout, bad JSON, general error) return the
@@ -294,14 +310,29 @@ class DecisionAgent:
         except httpx.TimeoutException:
             self._fallbacks_total += 1
             logger.warning("Decision LLM timed out after %ds, using default", effective_timeout)
+            try:
+                from beigebox.logging import log_error_event
+                log_error_event("decision_llm", f"timeout after {effective_timeout}s", severity="warning")
+            except Exception:
+                pass
             return Decision(model=self.default_model, fallback=True)
         except json.JSONDecodeError as e:
             self._fallbacks_total += 1
             logger.warning("Decision LLM returned invalid JSON: %s", e)
+            try:
+                from beigebox.logging import log_error_event
+                log_error_event("decision_llm", f"invalid JSON: {str(e)[:50]}", severity="warning")
+            except Exception:
+                pass
             return Decision(model=self.default_model, fallback=True)
         except Exception as e:
             self._fallbacks_total += 1
             logger.warning("Decision LLM failed: %s", e)
+            try:
+                from beigebox.logging import log_error_event
+                log_error_event("decision_llm", str(e)[:100], severity="error")
+            except Exception:
+                pass
             return Decision(model=self.default_model, fallback=True)
 
     def fallback_stats(self) -> dict:

@@ -28,6 +28,8 @@ import time
 from dataclasses import dataclass
 from typing import Optional, Tuple
 from pathlib import Path
+
+from beigebox.logging import log_classifier_run, log_embedding_decision
 import numpy as np
 import httpx
 
@@ -332,6 +334,21 @@ class EmbeddingClassifier:
             best_route, confidence, borderline,
             {k: f"{v:.3f}" for k, v in scores.items()}, latency_ms,
         )
+
+        # Log to Tap
+        try:
+            log_classifier_run(
+                scores=scores,
+                chosen_route=best_route,
+                confidence=confidence,
+            )
+            log_embedding_decision(
+                similarity=scores.get(best_route, 0),
+                threshold=self.threshold,
+                decision="borderline" if borderline else "confident",
+            )
+        except Exception:
+            pass
 
         return EmbeddingDecision(
             tier=tier,
