@@ -10,7 +10,7 @@
 # Pack for distribution: `beigebox pack --target distribution`
 
 name: beigebox
-version: 1.3.6
+version: 1.9
 description: "Modular OpenAI-compatible LLM middleware with integrated observability, routing, and agentic orchestration"
 author: "BeigeBox Contributors"
 license: "AGPL-3.0"

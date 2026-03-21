@@ -20,7 +20,7 @@ flowchart LR
   BB --> DB
 ```
 
-**Current version: 1.3.6**
+**Current version: 1.9**
 
 ---
 
