@@ -6582,17 +6582,26 @@ async function loadConfig() {
     const SC = '</details>';
 
     // ── Features (Phase 1 refactoring) ─────────────────────────────────
-    html += SO('Features (Master Control)', true);
+    html += SO('Features', true);
     html += cfgToggle('features_backends', 'Multi-backend routing', c.features?.backends ?? true);
     html += cfgToggle('features_decision_llm', 'Decision LLM (judge)', c.features?.decision_llm ?? true);
     html += cfgToggle('features_classifier', 'Embedding classifier', c.features?.classifier ?? true);
     html += cfgToggle('features_semantic_cache', 'Semantic cache', c.features?.semantic_cache ?? false);
     html += cfgToggle('features_operator', 'Operator (LLM-driven tools)', c.features?.operator ?? true);
+    html += `<div id="sub-features_operator" style="display:${c.features?.operator ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
+    html += cfgInput('shell_allowed_commands', 'Whitelist patterns (JSON array)', JSON.stringify(c.operator?.shell?.allowed_commands || []), 'text');
+    html += cfgInput('shell_blocked_patterns', 'Blacklist patterns (JSON array)', JSON.stringify(c.operator?.shell?.blocked_patterns || []), 'text');
+    html += `</div>`;
     html += cfgToggle('features_harness', 'Harness orchestrator', c.features?.harness ?? true);
     html += cfgToggle('features_tools', 'Tools & function calling', c.features?.tools ?? true);
     html += cfgToggle('features_cost_tracking', 'Cost tracking', c.features?.cost_tracking ?? true);
     html += cfgToggle('features_conversation_replay', 'Conversation replay', c.features?.conversation_replay ?? true);
     html += cfgToggle('features_auto_summarization', 'Auto-summarization', c.features?.auto_summarization ?? false);
+    html += `<div id="sub-features_auto_summarization" style="display:${c.features?.auto_summarization ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
+    html += cfgInput('auto_token_budget',  'Token budget (trigger)', c.auto_summarization?.token_budget ?? 3000, 'number');
+    html += cfgInput('auto_keep_last',     'Keep last N messages',   c.auto_summarization?.keep_last ?? 4, 'number');
+    html += `<div style="font-size:11px;color:var(--fg-dim);margin-top:6px">Model: See <strong>Models Registry</strong> section for summary model.</div>`;
+    html += `</div>`;
     html += cfgToggle('features_system_context', 'System context injection', c.features?.system_context ?? false);
     html += cfgToggle('features_wiretap', 'Request/response logging', c.features?.wiretap ?? true);
     html += cfgToggle('features_payload_log', 'Full payload logging', c.features?.payload_log ?? false);
@@ -6650,40 +6659,6 @@ async function loadConfig() {
     html += kv('session TTL', `${c.routing?.session_ttl_seconds || 1800}s`);
     html += SC;
 
-    // ── Features ─────────────────────────────────────────────────────────
-    html += SO('Features', true);
-    html += cfgToggle('harness_enabled', 'Harness orchestrator', c.harness?.enabled ?? true);
-    html += cfgToggle('conversation_replay_enabled', 'Conversation replay', c.conversation_replay?.enabled ?? false);
-    html += cfgToggle('auto_summarization_enabled', 'Auto-summarization', c.auto_summarization?.enabled ?? false);
-    html += `<div id="sub-auto_summarization_enabled" style="display:${c.auto_summarization?.enabled ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
-    html += cfgInput('auto_token_budget',  'Token budget (trigger)', c.auto_summarization?.token_budget ?? 3000, 'number');
-    html += cfgInput('auto_keep_last',     'Keep last N messages',   c.auto_summarization?.keep_last ?? 4, 'number');
-    html += `<div style="font-size:11px;color:var(--fg-dim);margin-top:6px">Model: See <strong>Models Registry</strong> section above for summary model selection.</div>`;
-    html += '</div>';
-    html += cfgToggle('operator_enabled', 'Operator (LLM-driven tools)', c.operator?.enabled ?? false);
-    html += `<div style="font-size:11px;color:var(--fg-dim);margin-top:4px">Model: See <strong>Models Registry</strong> section above for operator/agentic model selection.</div>`;
-    html += kv('max iterations', String(c.operator?.max_iterations || 10));
-    html += `<div style="margin:8px 0"><label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fg-dim)"><strong>Shell security (blocklist):</strong></label></div>`;
-    html += cfgInput('shell_allowed_commands', 'Whitelist patterns (JSON array)', JSON.stringify(c.operator?.shell?.allowed_commands || []), 'text');
-    html += cfgInput('shell_blocked_patterns', 'Blacklist patterns (JSON array)', JSON.stringify(c.operator?.shell?.blocked_patterns || []), 'text');
-    html += cfgToggle('tools_enabled', 'Tools master switch', c.tools?.enabled ?? false);
-    const toolList = Object.keys(c.tools || {}).filter(k => !['enabled','webhook_url','browserbox'].includes(k));
-    if (toolList.length) {
-      const toolBadges = toolList.map(n => {
-        const on = c.tools[n]?.enabled !== false;
-        return `<span class="badge ${on ? 'badge-ok' : ''}" style="opacity:${on ? 1 : 0.45}">${esc(n)}</span>`;
-      }).join(' ');
-      html += kv('tools', toolBadges);
-    }
-    // BrowserBox
-    const bbCfg = c.tools?.browserbox || {};
-    const bbOn  = bbCfg.enabled ?? false;
-    html += cfgToggle('browserbox_enabled', 'BrowserBox (live browser API)', bbOn);
-    html += `<div id="sub-browserbox_enabled" style="display:${bbOn?'block':'none'};margin-left:16px;margin-top:4px">`;
-    html += cfgInput('browserbox_ws_url', 'WebSocket relay URL', bbCfg.ws_url ?? 'ws://localhost:9009');
-    html += cfgInput('browserbox_timeout', 'Timeout (s)', bbCfg.timeout ?? 10, 'number');
-    html += '</div>';
-    html += SC;
 
     // ── Local Models Filter ────────────────────────────────────────────────
     html += SO('Local Models', false);
@@ -6815,21 +6790,8 @@ async function loadConfig() {
     loadWasmCfgSection();
 
     // Wire toggle labels + expand/collapse sub-options
-    const toggleIds = [
-      // Features (Phase 1 refactoring)
-      'features_backends','features_decision_llm','features_classifier','features_semantic_cache',
-      'features_operator','features_harness','features_tools','features_cost_tracking',
-      'features_conversation_replay','features_auto_summarization','features_system_context',
-      'features_wiretap','features_payload_log','features_wasm','features_guardrails',
-      'features_amf_mesh','features_voice','features_hooks',
-      // Legacy toggles (backwards compat)
-      'log_conversations','decision_llm_enabled','tools_enabled',
-      'cost_tracking_enabled','cost_track_openrouter','cost_track_local',
-      'harness_enabled','operator_enabled',
-      'conversation_replay_enabled','auto_summarization_enabled',
-      'web_ui_vi_mode','voice_enabled','tts_autoplay','system_context_enabled','gen_force',
-      'force_decision','wasm_enabled','backends_enabled','browserbox_enabled','local_models_filter_enabled',
-    ];
+    // All toggles get visual feedback (label updates) via event delegation
+    // No need to maintain a manual list — handled by the change listener below
     // Use event delegation for better reliability — attach to config-body instead of individual checkboxes
     const configBody = document.getElementById('config-body');
     if (configBody) {
@@ -6842,7 +6804,7 @@ async function loadConfig() {
           // Handle sub-option visibility
           const subEl = document.getElementById(`sub-${id}`);
           if (subEl) subEl.style.display = evt.target.checked ? 'block' : 'none';
-          if (id === 'system_context_enabled' && evt.target.checked) loadSystemContext();
+          if (id === 'features_system_context' && evt.target.checked) loadSystemContext();
         }
       }, true); // use capture phase for better reliability
     }
@@ -6864,20 +6826,15 @@ async function saveConfig() {
 
   const payload = {};
   const bools = [
-    // Features master controls
+    // Features (normalized naming)
     'features_backends','features_decision_llm','features_classifier','features_semantic_cache',
     'features_operator','features_harness','features_tools','features_cost_tracking',
     'features_conversation_replay','features_auto_summarization','features_system_context',
     'features_wiretap','features_payload_log','features_wasm','features_guardrails',
     'features_amf_mesh','features_voice','features_hooks',
-    // Legacy feature toggles (backwards compat)
-    'log_conversations','decision_llm_enabled','tools_enabled',
-    'cost_tracking_enabled','cost_track_openrouter','cost_track_local',
-    'harness_enabled','operator_enabled',
-    'conversation_replay_enabled','auto_summarization_enabled',
-    'web_ui_vi_mode','voice_enabled','tts_autoplay','system_context_enabled','gen_force',
-    'force_decision','wasm_enabled','backends_enabled','browserbox_enabled',
-    'local_models_filter_enabled',
+    // Other toggles
+    'log_conversations','web_ui_vi_mode','voice_enabled','tts_autoplay','system_context_enabled','gen_force',
+    'force_decision','local_models_filter_enabled',
   ];
   const strings = [
     'default_model','force_route','log_level','web_ui_palette',
@@ -6909,21 +6866,6 @@ async function saveConfig() {
         console.error(`Failed to parse JSON for ${k}: ${val}`);
       }
     }
-  });
-
-  // Sync old and new feature toggle names to keep them in sync
-  // (Phase 1 refactoring: transitioning from individual toggles to master feature flags)
-  const syncPairs = [
-    ['features_harness', 'harness_enabled'],
-    ['features_conversation_replay', 'conversation_replay_enabled'],
-    ['features_auto_summarization', 'auto_summarization_enabled'],
-    ['features_operator', 'operator_enabled'],
-    ['features_tools', 'tools_enabled'],
-  ];
-  syncPairs.forEach(([newKey, oldKey]) => {
-    // If either key is in the payload, sync the other one
-    if (newKey in payload) payload[oldKey] = payload[newKey];
-    else if (oldKey in payload) payload[newKey] = payload[oldKey];
   });
 
   try {
