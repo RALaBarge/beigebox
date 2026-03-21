@@ -19,6 +19,7 @@ RUST_MODULES = \
 	json_extractor \
 	markdown_stripper \
 	opener_strip \
+	output_normalizer \
 	passthrough \
 	pii_redactor
 

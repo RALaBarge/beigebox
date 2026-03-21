@@ -632,6 +632,11 @@ wasm:
       path: "./wasm_modules/markdown_stripper.wasm"
       enabled: false
       description: "Strip Markdown formatting for plain-text / TTS output"
+    output_normalizer:
+      path: "./wasm_modules/output_normalizer.wasm"
+      enabled: false
+      description: "Normalize LLM output to consistent markdown format (3 levels available)"
+      level: 2                        # 1=minimal (strip+detect code), 2=medium (add structure), 3=full (headers+emphasis)
   default_module: ""                 # Optional: always run this module regardless of routing
   timeout_ms: 5000                   # PDF parsing can be slow — give it 5s
 
