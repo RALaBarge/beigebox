@@ -11,6 +11,7 @@ Now with:
 import logging
 import time
 from beigebox.config import get_config
+from beigebox.logging import log_tool_call
 from beigebox.tools.web_search import WebSearchTool
 from beigebox.tools.web_scraper import WebScraperTool
 from beigebox.tools.google_search import GoogleSearchTool
@@ -232,12 +233,24 @@ class ToolRegistry:
         try:
             result = tool.run(input_text)
         except Exception as e:
+            elapsed_ms = (time.monotonic() - start) * 1000
             logger.warning("Tool '%s' raised during run: %s", name, e)
+            # Log tool failure
+            try:
+                log_tool_call(name, "error", latency_ms=elapsed_ms)
+            except Exception:
+                pass
             return f"Error: tool '{name}' failed: {e}"
         elapsed_ms = (time.monotonic() - start) * 1000
 
         # Notify webhook
         if result is not None:
             self.notifier.notify(name, input_text, result, elapsed_ms)
+
+        # Log tool success
+        try:
+            log_tool_call(name, "success", latency_ms=elapsed_ms)
+        except Exception:
+            pass
 
         return result

@@ -39,6 +39,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from beigebox.logging import log_error_event
+
 logger = logging.getLogger(__name__)
 
 # Supported format tokens
@@ -315,11 +317,18 @@ class ResponseValidator:
                 source, model or "?", result.format,
             )
         else:
+            error_msg = f"Validation [{source}] {result.format}: {result.error}"
+            if result.schema_errors:
+                error_msg += f" (schema_errors: {result.schema_errors})"
             logger.warning(
                 "ResponseValidator [%s] model=%s fmt=%s: INVALID — %s%s",
                 source, model or "?", result.format, result.error,
                 f" (schema_errors: {result.schema_errors})" if result.schema_errors else "",
             )
+            try:
+                log_error_event("response_validator", error_msg, severity="warning")
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------

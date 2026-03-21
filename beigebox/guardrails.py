@@ -29,6 +29,8 @@ import logging
 import re
 from dataclasses import dataclass
 
+from beigebox.logging import log_error_event
+
 logger = logging.getLogger(__name__)
 
 # ── Built-in PII patterns ──────────────────────────────────────────────────
@@ -135,54 +137,84 @@ class Guardrails:
 
         # Max length
         if self._max_length and len(user_text) > self._max_length:
-            return GuardrailResult.block(
+            result = GuardrailResult.block(
                 f"Input exceeds max length ({len(user_text)} > {self._max_length})",
                 rule_name="max_length",
             )
+            try:
+                log_error_event("guardrails", result.reason, severity="warning")
+            except Exception:
+                pass
+            return result
 
         lower = user_text.lower()
 
         # Keyword blocklist
         for kw in self._block_keywords:
             if kw in lower:
-                return GuardrailResult.block(
+                result = GuardrailResult.block(
                     f"Blocked keyword: {kw!r}",
                     rule_name="keyword_blocklist",
                 )
+                try:
+                    log_error_event("guardrails", result.reason, severity="warning")
+                except Exception:
+                    pass
+                return result
 
         # Topic blocklist
         for topic in self._topic_blocklist:
             if topic in lower:
-                return GuardrailResult.block(
+                result = GuardrailResult.block(
                     f"Blocked topic: {topic!r}",
                     rule_name="topic_blocklist",
                 )
+                try:
+                    log_error_event("guardrails", result.reason, severity="warning")
+                except Exception:
+                    pass
+                return result
 
         # Regex patterns
         for pat in self._block_patterns_in:
             if pat.search(user_text):
-                return GuardrailResult.block(
+                result = GuardrailResult.block(
                     f"Input matches blocked pattern: {pat.pattern[:60]}",
                     rule_name="block_pattern",
                 )
+                try:
+                    log_error_event("guardrails", result.reason, severity="warning")
+                except Exception:
+                    pass
+                return result
 
         # PII detection
         if self._pii_detection:
             for name, pat in _PII_PATTERNS:
                 if pat.search(user_text):
-                    return GuardrailResult.block(
+                    result = GuardrailResult.block(
                         f"PII detected in input: {name}",
                         rule_name=f"pii_{name}",
                     )
+                    try:
+                        log_error_event("guardrails", result.reason, severity="warning")
+                    except Exception:
+                        pass
+                    return result
 
         # Prompt injection
         if self._prompt_injection:
             for pat in _INJECTION_PATTERNS:
                 if pat.search(user_text):
-                    return GuardrailResult.block(
+                    result = GuardrailResult.block(
                         "Potential prompt injection detected",
                         rule_name="prompt_injection",
                     )
+                    try:
+                        log_error_event("guardrails", result.reason, severity="warning")
+                    except Exception:
+                        pass
+                    return result
 
         return GuardrailResult.ok()
 
@@ -199,13 +231,15 @@ class Guardrails:
         # Regex block patterns
         for pat in self._block_patterns_out:
             if pat.search(text):
-                return (
-                    GuardrailResult.block(
-                        f"Output matches blocked pattern: {pat.pattern[:60]}",
-                        rule_name="output_block_pattern",
-                    ),
-                    self._block_message,
+                result = GuardrailResult.block(
+                    f"Output matches blocked pattern: {pat.pattern[:60]}",
+                    rule_name="output_block_pattern",
                 )
+                try:
+                    log_error_event("guardrails", result.reason, severity="warning")
+                except Exception:
+                    pass
+                return (result, self._block_message)
 
         # PII redaction — modifies text in-place rather than blocking
         if self._pii_redaction:
@@ -216,5 +250,9 @@ class Guardrails:
                     logger.debug(
                         "Guardrails: redacted %d %s instance(s) from output", n, name
                     )
+                    try:
+                        log_error_event("guardrails", f"Redacted {n} {name} instance(s)", severity="info")
+                    except Exception:
+                        pass
 
         return GuardrailResult.ok(), text
