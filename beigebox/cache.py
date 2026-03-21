@@ -28,6 +28,8 @@ from typing import Optional
 import httpx
 import numpy as np
 
+from beigebox.logging import log_cache_event
+
 logger = logging.getLogger(__name__)
 
 
@@ -270,10 +272,23 @@ class SemanticCache:
                 "SemanticCache HIT sim=%.3f model=%s msg=%.50s",
                 best_sim, entry.model, user_message,
             )
+            log_cache_event(
+                event_type="hit",
+                cache_type="semantic",
+                key=user_message[:50],
+                similarity=best_sim,
+                ttl_remaining=int(entry.expires_at - time.time()),
+            )
             return entry.response, entry.model
 
         self._misses += 1
         logger.debug("SemanticCache MISS best_sim=%.3f", best_sim)
+        log_cache_event(
+            event_type="miss",
+            cache_type="semantic",
+            key=user_message[:50],
+            similarity=best_sim,
+        )
         return None
 
     def store(self, user_message: str, response: str, model: str) -> None:
@@ -301,6 +316,12 @@ class SemanticCache:
             user_message=user_message,
         ))
         logger.debug("SemanticCache stored (total=%d)", len(self._entries))
+        log_cache_event(
+            event_type="store",
+            cache_type="semantic",
+            key=user_message[:50],
+            ttl_remaining=self.ttl,
+        )
 
     def stats(self) -> dict:
         self._evict_expired()
