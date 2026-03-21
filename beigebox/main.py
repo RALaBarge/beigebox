@@ -330,6 +330,89 @@ async def lifespan(app: FastAPI):
 
         _asyncio.create_task(_auto_build_centroids())
 
+    # Auto-ingest staged documents on startup
+    async def _auto_ingest_staging():
+        """Check 2600/2600-staging/ for new documents and index them."""
+        try:
+            staging_path = Path(__file__).parent.parent / "2600" / "2600-staging"
+            archive_path = Path(__file__).parent.parent / "2600" / "2599"
+            manifest_path = Path(__file__).parent.parent / "2600" / ".upload-manifest.json"
+
+            if not staging_path.exists():
+                return
+
+            # Find markdown files in staging
+            staged_files = list(staging_path.glob("*.md"))
+            if not staged_files:
+                return
+
+            logger.info("Found %d staged document(s) in 2600-staging — indexing…", len(staged_files))
+
+            # Index each file
+            from beigebox.storage.chunker import chunk_text
+            import hashlib
+
+            manifest = {}
+            if manifest_path.exists():
+                manifest = json.load(open(manifest_path))
+
+            if "files" not in manifest:
+                manifest["files"] = {}
+
+            for file_path in staged_files:
+                try:
+                    content = file_path.read_text(encoding="utf-8")
+                    md5 = hashlib.md5(content.encode()).hexdigest()
+
+                    # Chunk the document
+                    chunks = chunk_text(content, source_file=file_path.name)
+
+                    # Add to vector store
+                    for chunk in chunks:
+                        vector_store.add(
+                            text=chunk["text"],
+                            metadata={
+                                "source_type": "document",
+                                "source_path": file_path.name,
+                                "chunk_index": chunk["chunk_index"],
+                                "char_offset": chunk["char_offset"],
+                            }
+                        )
+
+                    # Update manifest
+                    manifest["files"][file_path.name] = {
+                        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                        "md5": md5,
+                        "status": "uploaded"
+                    }
+
+                    # Move to archive
+                    archive_path.mkdir(parents=True, exist_ok=True)
+                    dest = archive_path / file_path.name
+                    file_path.rename(dest)
+                    logger.info("Indexed and archived: %s", file_path.name)
+
+                except Exception as e:
+                    logger.error("Failed to ingest %s: %s", file_path.name, e)
+                    # Update manifest with failure status
+                    manifest["files"][file_path.name] = {
+                        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                        "md5": "",
+                        "status": "failed",
+                        "error": str(e)
+                    }
+
+            # Save updated manifest
+            manifest["last_sync"] = datetime.now(timezone.utc).isoformat()
+            manifest_path.write_text(json.dumps(manifest, indent=2))
+            logger.info("Staging ingest complete — manifest updated")
+
+        except Exception as e:
+            logger.warning("Staging ingest failed: %s", e)
+
+    # Fire-and-forget: ingest in background so startup finishes immediately
+    asyncio.create_task(_auto_ingest_staging())
+
     yield
 
     logger.info("BeigeBox shutting down")
