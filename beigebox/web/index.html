@@ -6858,12 +6858,20 @@ async function saveConfig() {
 
   const payload = {};
   const bools = [
+    // Features master controls
+    'features_backends','features_decision_llm','features_classifier','features_semantic_cache',
+    'features_operator','features_harness','features_tools','features_cost_tracking',
+    'features_conversation_replay','features_auto_summarization','features_system_context',
+    'features_wiretap','features_payload_log','features_wasm','features_guardrails',
+    'features_amf_mesh','features_voice','features_hooks',
+    // Legacy feature toggles (backwards compat)
     'log_conversations','decision_llm_enabled','tools_enabled',
     'cost_tracking_enabled','cost_track_openrouter','cost_track_local',
     'harness_enabled','operator_enabled',
     'conversation_replay_enabled','auto_summarization_enabled',
     'web_ui_vi_mode','voice_enabled','tts_autoplay','system_context_enabled','gen_force',
     'force_decision','wasm_enabled','backends_enabled','browserbox_enabled',
+    'local_models_filter_enabled',
   ];
   const strings = [
     'default_model','force_route','log_level','web_ui_palette',
