@@ -50,13 +50,20 @@ from beigebox.agents.routing_rules import (
     BB_RULE_TAG,
     BB_FORCED_TOOLS,
 )
+from beigebox.logging import (
+    log_routing_decision, log_model_selection, log_token_usage,
+    log_latency_stage, log_cache_event
+)
 from beigebox.backends.openrouter import _COST_SENTINEL_PREFIX
 from beigebox.cache import SemanticCache, ToolResultCache
 from beigebox.payload_log import get_payload_log
 from beigebox.aliases import AliasResolver
 from beigebox.guardrails import Guardrails
 from beigebox.validation.format import ResponseValidator
+
 logger = logging.getLogger(__name__)
+
+
 def _estimate_tokens(text: str) -> int:
     """Rough token estimate: ~4 chars per token for English text."""
     return max(1, len(text) // 4)

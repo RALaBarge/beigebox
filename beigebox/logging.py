@@ -271,3 +271,225 @@ def log_embedding_decision(
         source="classifier",
         meta=meta,
     )
+
+
+# ── Higher-level composite events ──────────────────────────────────────────
+
+def log_request_started(model: str, tokens: int):
+    """Log the start of a request."""
+    wire = _get_tap_logger()
+    if not wire:
+        return
+    
+    meta = {"model": model, "tokens": tokens}
+    content = f"Request start: {model} ({tokens} tokens)"
+    
+    wire.log(
+        direction="inbound",
+        role="request",
+        content=content,
+        event_type="request_started",
+        source="proxy",
+        meta=meta,
+    )
+
+
+def log_request_completed(
+    model: str,
+    latency_ms: float,
+    tokens_in: int,
+    tokens_out: int,
+    cost: Optional[float] = None,
+):
+    """Log request completion with full stats."""
+    wire = _get_tap_logger()
+    if not wire:
+        return
+    
+    meta = {
+        "model": model,
+        "latency_ms": latency_ms,
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
+        "cost": cost,
+    }
+    
+    content = f"Request done: {latency_ms:.0f}ms ({tokens_in}→{tokens_out} tokens) cost=${cost or 0:.6f}"
+    
+    wire.log(
+        direction="outbound",
+        role="request",
+        content=content,
+        event_type="request_completed",
+        source="proxy",
+        meta=meta,
+    )
+
+
+def log_backend_selection(
+    backend: str,
+    model: str,
+    reason: str,  # "session_sticky" | "classifier" | "judge" | "fallback" | "default"
+):
+    """Log which backend was selected and why."""
+    wire = _get_tap_logger()
+    if not wire:
+        return
+    
+    meta = {
+        "backend": backend,
+        "model": model,
+        "reason": reason,
+    }
+    
+    content = f"Backend: {backend} ({model}) — {reason}"
+    
+    wire.log(
+        direction="inbound",
+        role="backend",
+        content=content,
+        event_type="backend_selection",
+        source="router",
+        meta=meta,
+    )
+
+
+def log_classifier_run(scores: dict, chosen_route: str, confidence: float):
+    """Log embedding classifier results."""
+    wire = _get_tap_logger()
+    if not wire:
+        return
+    
+    meta = {
+        "scores": scores,
+        "chosen_route": chosen_route,
+        "confidence": confidence,
+    }
+    
+    score_str = ", ".join(f"{k}={v:.2f}" for k, v in scores.items())
+    content = f"Classifier: {chosen_route} (conf={confidence:.3f}) scores=[{score_str}]"
+    
+    wire.log(
+        direction="inbound",
+        role="classifier",
+        content=content,
+        event_type="classifier_result",
+        source="classifier",
+        meta=meta,
+    )
+
+
+def log_decision_llm_call(
+    prompt_len: int,
+    decision: str,
+    confidence: float,
+    latency_ms: float,
+):
+    """Log decision LLM judge call results."""
+    wire = _get_tap_logger()
+    if not wire:
+        return
+    
+    meta = {
+        "prompt_len": prompt_len,
+        "decision": decision,
+        "confidence": confidence,
+        "latency_ms": latency_ms,
+    }
+    
+    content = f"Judge: {decision} (conf={confidence:.3f}, {latency_ms:.0f}ms)"
+    
+    wire.log(
+        direction="inbound",
+        role="judge",
+        content=content,
+        event_type="decision_llm_result",
+        source="judge",
+        meta=meta,
+    )
+
+
+def log_tool_call(tool_name: str, status: str, latency_ms: float, error: Optional[str] = None):
+    """Log tool invocation and result."""
+    wire = _get_tap_logger()
+    if not wire:
+        return
+    
+    meta = {
+        "tool": tool_name,
+        "status": status,
+        "latency_ms": latency_ms,
+        "error": error,
+    }
+    
+    content = f"Tool {tool_name}: {status} ({latency_ms:.0f}ms)"
+    if error:
+        content += f" error={error[:50]}"
+    
+    wire.log(
+        direction="inbound",
+        role="tool",
+        content=content,
+        event_type="tool_call",
+        source="tools",
+        meta=meta,
+    )
+
+
+def log_harness_turn(
+    run_id: str,
+    turn: int,
+    model: str,
+    tokens_in: int,
+    tokens_out: int,
+    status: str,  # "thinking" | "tool_call" | "response" | "done" | "error"
+):
+    """Log harness/orchestrator turn."""
+    wire = _get_tap_logger()
+    if not wire:
+        return
+    
+    meta = {
+        "run_id": run_id,
+        "turn": turn,
+        "model": model,
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
+        "status": status,
+    }
+    
+    content = f"Harness turn {turn}: {status} ({tokens_in}→{tokens_out} tokens)"
+    
+    wire.log(
+        direction="inbound",
+        role="harness",
+        content=content,
+        event_type="harness_turn",
+        source="harness",
+        run_id=run_id,
+        meta=meta,
+    )
+
+
+def log_error_event(component: str, error: str, severity: str = "error"):
+    """Log errors and exceptions."""
+    wire = _get_tap_logger()
+    if not wire:
+        return
+    
+    meta = {
+        "component": component,
+        "severity": severity,
+        "error": error[:200],
+    }
+    
+    content = f"ERROR {component}: {error[:100]}"
+    
+    wire.log(
+        direction="inbound",
+        role="error",
+        content=content,
+        event_type="error",
+        source=component,
+        meta=meta,
+    )
