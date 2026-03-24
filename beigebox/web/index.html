@@ -66,6 +66,48 @@
     gap: 16px;
     align-items: center;
   }
+
+  /* ── Log ticker ──────────────────────────────────────────────────────── */
+  #log-ticker {
+    flex: 1;
+    min-width: 0;
+    height: 18px;
+    overflow: hidden;
+    margin: 0 20px;
+    position: relative;
+    cursor: pointer;
+  }
+  #log-ticker-track {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    transition: transform 0.6s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+  .log-tick {
+    height: 18px;
+    line-height: 18px;
+    font-size: 10px;
+    font-family: 'Fira Code', monospace;
+    color: var(--fg-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    flex-shrink: 0;
+    opacity: 0.85;
+  }
+  .log-tick .tick-ev {
+    color: var(--lavender);
+    margin-right: 5px;
+    opacity: 0.7;
+  }
+  .log-tick .tick-src {
+    color: var(--fg-dim);
+    margin-right: 5px;
+    font-size: 9px;
+    opacity: 0.55;
+  }
+
   .status-dot {
     width: 7px; height: 7px;
     border-radius: 50%;
@@ -891,6 +933,49 @@
   }
   .harness-target-chip .remove-chip:hover { color: var(--red); }
 
+  /* ── Dashboard config drawer ─────────────────────────────────────────── */
+  #dash-config-drawer {
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    width: 380px;
+    background: var(--bg-panel);
+    border-left: 1px solid var(--lavender-dim);
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.25s cubic-bezier(0.22, 0.61, 0.36, 1);
+    z-index: 10;
+    overflow-y: auto;
+  }
+  #dash-config-drawer.open {
+    transform: translateX(0);
+  }
+  #dash-config-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.35);
+    display: none;
+    z-index: 9;
+  }
+  #dash-config-overlay.open {
+    display: block;
+  }
+  #panel-dashboard {
+    position: relative;
+    overflow: hidden;
+  }
+  #dash-config-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--bg-border);
+    flex-shrink: 0;
+    font-size: 12px;
+    color: var(--lavender);
+    font-weight: 600;
+  }
+
   /* ── Misc ────────────────────────────────────────────────────────────── */
   .empty { color: var(--fg-muted); padding: 20px; text-align: center; font-size: 12px; }
   .error-box {
@@ -1314,6 +1399,11 @@
     <span class="logo">BeigeBox</span>
     <span class="sub" style="margin-left:12px">tap the line · control the carrier</span>
   </div>
+  <div id="log-ticker" title="Recent events — click to open Tap" onclick="switchTab('tap')">
+    <div id="log-ticker-track">
+      <div class="log-tick"><span class="tick-ev">—</span>waiting for events…</div>
+    </div>
+  </div>
   <div class="status-bar">
     <span><span class="status-dot" id="proxy-dot"></span><span id="proxy-status" style="font-size:11px;color:var(--fg-dim)">connecting…</span></span>
     <span id="ctx-usage"></span>
@@ -1332,11 +1422,9 @@
 <div id="tabs">
   <div class="tab active" data-tab="dashboard" onclick="switchTab('dashboard')"><span class="tab-key">1</span>Dashboard</div>
   <div class="tab" data-tab="chat"      onclick="switchTab('chat')">     <span class="tab-key">2</span>Chat</div>
-  <div class="tab" data-tab="convos"    onclick="switchTab('convos')">   <span class="tab-key">3</span>Conversations</div>
-  <div class="tab" data-tab="tap"       onclick="switchTab('tap')">      <span class="tab-key">4</span>Tap</div>
-  <div class="tab" data-tab="operator"  onclick="switchTab('operator')"> <span class="tab-key">5</span>Operator</div>
-  <div class="tab" data-tab="harness"   onclick="switchTab('harness')">  <span class="tab-key">6</span>Harness</div>
-  <div class="tab" data-tab="config"    onclick="switchTab('config')">   <span class="tab-key">7</span>Config</div>
+  <div class="tab" data-tab="tap"       onclick="switchTab('tap')">      <span class="tab-key">3</span>Tap</div>
+  <div class="tab" data-tab="harness"   onclick="switchTab('harness')">  <span class="tab-key">4</span>Harness</div>
+  <div class="tab" data-tab="discovery" onclick="switchTab('discovery')"><span class="tab-key">5</span>Discovery</div>
 </div>
 
 <!-- ── Content ─────────────────────────────────────────────────────────── -->
@@ -1348,66 +1436,169 @@
       <button onclick="loadDashboard()">↺ Refresh</button>
       <span class="toolbar-spacer"></span>
       <span class="last-updated" id="dash-updated"></span>
+      <button onclick="toggleDashConfigDrawer()" title="Settings">⚙ Config</button>
     </div>
     <div class="scroll-area" id="dash-body">
       <div class="empty">Loading…</div>
     </div>
+    <div id="dash-config-overlay" onclick="toggleDashConfigDrawer(false)"></div>
+    <div id="dash-config-drawer">
+      <div id="dash-config-drawer-header">
+        <span>Settings</span>
+        <button onclick="toggleDashConfigDrawer(false)" style="background:none;border:none;color:var(--fg-muted);cursor:pointer;font-size:16px;line-height:1;padding:0">✕</button>
+      </div>
+      <div class="toolbar">
+        <button onclick="loadConfig()">↺ Refresh</button>
+        <span class="toolbar-spacer"></span>
+        <span class="last-updated" id="config-updated"></span>
+        <button onclick="openProbe()" title="Network Probe — fire HTTP requests from server context" style="margin-left:8px;border-color:var(--cyan);color:var(--cyan)">⚡ Probe</button>
+      </div>
+      <div class="scroll-area" id="config-body">
+        <div class="empty">Loading…</div>
+      </div>
+    </div>
   </div>
 
-  <!-- 2. Chat -->
-  <!-- 2. Chat (multi-pane) -->
+  <!-- 2. Chat (direct + agent) -->
   <div class="panel" id="panel-chat">
-    <div class="toolbar">
-      <span class="toolbar-label">Panes:</span>
-      <button onclick="addChatPane()" title="Add output pane (+)">＋</button>
-      <button onclick="removeChatPane()" title="Remove last pane">－</button>
-      <span style="color:var(--fg-muted);font-size:10px;margin-left:4px">max 4/page · [ ] to page</span>
-      <span class="toolbar-spacer"></span>
-      <div id="chat-page-nav">
-        <button onclick="chatPagePrev()" id="chat-prev-btn" title="Previous page [">◀</button>
-        <span id="chat-page-indicator">p1/1</span>
-        <button onclick="chatPageNext()" id="chat-next-btn" title="Next page ]">▶</button>
+    <!-- Sub-view toggle -->
+    <div style="display:flex;gap:0;border-bottom:1px solid var(--bg-border);flex-shrink:0">
+      <button id="chat-sub-direct-btn" onclick="switchChatSub('direct')"
+        style="flex:1;border:none;border-radius:0;padding:6px 0;font-size:11px;background:var(--lavender);color:var(--bg);font-weight:600;cursor:pointer">Direct</button>
+      <button id="chat-sub-agent-btn" onclick="switchChatSub('agent')"
+        style="flex:1;border:none;border-radius:0;padding:6px 0;font-size:11px;background:var(--bg-panel);color:var(--fg-muted);cursor:pointer">Agent</button>
+    </div>
+
+    <!-- Direct sub-view -->
+    <div id="chat-sub-direct" style="display:flex;flex-direction:column;flex:1;min-height:0">
+      <div class="toolbar">
+        <span class="toolbar-label">Panes:</span>
+        <button onclick="addChatPane()" title="Add output pane (+)">＋</button>
+        <button onclick="removeChatPane()" title="Remove last pane">－</button>
+        <span style="color:var(--fg-muted);font-size:10px;margin-left:4px">max 4/page · [ ] to page</span>
+        <span class="toolbar-spacer"></span>
+        <div id="chat-page-nav">
+          <button onclick="chatPagePrev()" id="chat-prev-btn" title="Previous page [">◀</button>
+          <span id="chat-page-indicator">p1/1</span>
+          <button onclick="chatPageNext()" id="chat-next-btn" title="Next page ]">▶</button>
+        </div>
+        <button onclick="clearAllPanes()" style="margin-left:8px">✕ Clear all</button>
       </div>
-      <button onclick="clearAllPanes()" style="margin-left:8px">✕ Clear all</button>
-    </div>
-    <div id="chat-pane-container">
-      <!-- panes injected by JS -->
-    </div>
-    <div class="z-hint">z-commands: <code>z: search</code> <code>z: code</code> <code>z: complex</code> <code>z: help</code> — or target <code>@op</code> to route to Operator</div>
-    <div id="chat-input-area">
-      <div class="z-help-wrap">
-        <button id="z-help-btn">z: ?</button>
-        <div class="z-help-tip" id="z-help-tip">loading…</div>
+      <div id="chat-pane-container" style="flex:1;min-height:0;overflow:hidden">
+        <!-- panes injected by JS -->
       </div>
-      <textarea id="chat-input" placeholder="Send a message… (Enter=send, Shift+Enter=newline, @op prefix=operator)" rows="1"
-        onkeydown="chatKeydown(event)" oninput="autoResize(this)"></textarea>
-      <button id="mic-btn" title="Push to talk (click to toggle, hold to record)">🎙</button>
-      <button class="primary" onclick="sendChat()" id="send-btn">Send</button>
-    </div>
+      <div class="z-hint">z-commands: <code>z: search</code> <code>z: code</code> <code>z: complex</code> <code>z: help</code></div>
+      <div id="chat-input-area">
+        <div class="z-help-wrap">
+          <button id="z-help-btn">z: ?</button>
+          <div class="z-help-tip" id="z-help-tip">loading…</div>
+        </div>
+        <textarea id="chat-input" placeholder="Send a message… (Enter=send, Shift+Enter=newline)" rows="1"
+          onkeydown="chatKeydown(event)" oninput="autoResize(this)"></textarea>
+        <button id="mic-btn" title="Push to talk (click to toggle, hold to record)">🎙</button>
+        <button class="primary" onclick="sendChat()" id="send-btn">Send</button>
+      </div>
+    </div><!-- /chat-sub-direct -->
+
+    <!-- Agent sub-view (was panel-operator) -->
+    <div id="chat-sub-agent" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden">
+      <div class="toolbar">
+        <!-- Mode toggle -->
+        <div style="display:flex;gap:0;border:1px solid var(--bg-border);border-radius:2px;overflow:hidden;flex-shrink:0">
+          <button id="op-mode-agent"   onclick="setOpMode('agent')"
+            style="border-radius:0;border:none;padding:2px 12px;font-size:11px;background:var(--lavender);color:#000">Agent</button>
+          <button id="op-mode-council" onclick="setOpMode('council')"
+            style="border-radius:0;border:none;padding:2px 12px;font-size:11px;background:var(--bg-input);color:var(--fg-dim)">⚖ Council</button>
+        </div>
+        <!-- Agent controls -->
+        <span id="op-agent-controls" style="display:flex;gap:6px;align-items:center">
+          <span class="toolbar-label">Model:</span>
+          <select id="op-target" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
+            <option value="operator">operator (default)</option>
+          </select>
+          <span style="margin-left:6px;padding-left:6px;border-left:1px solid var(--bg-border);display:flex;gap:4px;align-items:center" title="Enable temporal reflection — async insight injected next turn">
+            <input type="checkbox" id="op-reflect" style="margin:0">
+            <span class="toolbar-label">Reflect</span>
+          </span>
+          <span style="margin-left:6px;padding-left:6px;border-left:1px solid var(--bg-border);display:flex;gap:4px;align-items:center" title="Shadow: counterfactual parallel run on turn 0 (requires server-side flag)">
+            <input type="checkbox" id="op-shadow" style="margin:0">
+            <span class="toolbar-label">Shadow</span>
+          </span>
+        </span>
+        <!-- Council controls -->
+        <span id="op-council-controls" style="display:none;gap:6px;align-items:center">
+          <span class="toolbar-label" style="color:var(--lavender)">Proposer:</span>
+          <select id="council-op-model" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
+            <option value="">— operator default —</option>
+          </select>
+        </span>
+        <span class="toolbar-spacer"></span>
+        <span id="op-bg-indicator" style="font-size:11px;color:var(--fg-dim);padding:0 8px;display:none;align-items:center" title="Background operator run in progress">
+          ⟳ <span id="op-bg-status">running</span>
+        </span>
+        <button id="op-history-toggle" onclick="toggleOpHistory()" title="View past operator runs">📋 History</button>
+        <button id="op-notes-toggle" onclick="toggleOpNotes()" title="Persistent operator notes">📝 Notes</button>
+        <button onclick="opClear()">✕ Clear</button>
+      </div>
+
+      <!-- Operator notes panel -->
+      <div id="op-notes-panel" style="display:none;padding:8px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border);flex-shrink:0">
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+          <span style="font-size:11px;color:var(--fg-muted);flex:1">Persistent notes — injected at the start of every operator session</span>
+          <button onclick="saveOpNotes()" style="font-size:11px;padding:1px 8px">Save</button>
+          <span id="op-notes-status" style="font-size:10px;color:var(--fg-dim)"></span>
+        </div>
+        <textarea id="op-notes-area" style="width:100%;height:80px;font-size:11px;font-family:inherit;resize:vertical;background:var(--bg-input);border:1px solid var(--bg-border);color:var(--fg);padding:4px 6px;border-radius:2px;line-height:1.4" placeholder="e.g. User prefers concise answers. Project is BeigeBox. Stack: Python/FastAPI/Ollama."></textarea>
+      </div>
+
+      <!-- Operator run history panel -->
+      <div id="op-history-panel" style="display:none;padding:8px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border);flex-shrink:0;max-height:180px;overflow-y:auto">
+        <div id="op-history-list" style="font-size:11px;color:var(--fg-muted)">Loading…</div>
+      </div>
+
+      <!-- Council: allowed model pool -->
+      <div id="council-model-pool" style="display:none;padding:6px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border)">
+        <div style="font-size:11px;color:var(--fg-muted);margin-bottom:4px">Models the council may use <span style="color:var(--fg-dim)">(leave all unchecked to allow any)</span>:</div>
+        <div id="council-model-list" style="display:flex;flex-wrap:wrap;gap:6px;max-height:70px;overflow-y:auto">
+          <span style="color:var(--fg-muted);font-size:11px">Loading models…</span>
+        </div>
+      </div>
+
+      <!-- Agent mode -->
+      <div id="op-agent-area" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+        <div id="op-log"></div>
+        <div id="op-input-area">
+          <input id="op-input" placeholder="Ask the operator anything…"
+            onkeydown="if(event.key==='Enter'&&!_opAbort)runOp()">
+          <button class="primary" onclick="runOp()" id="op-btn">Run</button>
+          <button onclick="stopOp()" id="op-stop-btn" style="display:none;background:var(--red,#c0392b);color:#fff" title="Stop current run">■ Stop</button>
+        </div>
+      </div>
+
+      <!-- Council mode -->
+      <div id="op-council-area" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+        <div id="council-proposal-area"></div>
+        <div id="council-input-area">
+          <input id="council-input" placeholder="Describe what you need the council to think about…"
+            onkeydown="if(event.key==='Enter'&&!_councilRunning)councilPropose()">
+          <button class="primary" onclick="councilPropose()" id="council-propose-btn">Propose</button>
+        </div>
+      </div>
+    </div><!-- /chat-sub-agent -->
   </div>
 
-  <!-- 3. Conversations -->
-  <div class="panel" id="panel-convos">
-    <div class="toolbar">
-      <input id="search-input" placeholder="Semantic search…" style="width:300px"
-        onkeydown="if(event.key==='Enter')searchConvos()">
-      <button onclick="searchConvos()">Search</button>
-      <span class="toolbar-spacer"></span>
-      <span class="toolbar-label" id="search-status"></span>
-      <select id="export-format" style="background:var(--bg2);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px">
-        <option value="jsonl">JSONL</option>
-        <option value="alpaca">Alpaca</option>
-        <option value="sharegpt">ShareGPT</option>
-      </select>
-      <button onclick="exportConversations()" title="Download conversations for fine-tuning">↓ Export</button>
-    </div>
-    <div class="scroll-area" id="convos-body">
-      <div class="empty">Enter a search query above to search conversations semantically.</div>
-    </div>
-  </div>
-
-  <!-- 4. Tap -->
+  <!-- 3. Tap (includes Conversations) -->
   <div class="panel" id="panel-tap">
+    <!-- Sub-view toggle -->
+    <div style="display:flex;gap:0;border-bottom:1px solid var(--bg-border);flex-shrink:0">
+      <button id="tap-sub-events" onclick="switchTapSub('events')"
+        style="flex:1;border:none;border-radius:0;padding:6px 0;font-size:11px;background:var(--lavender);color:var(--bg);font-weight:600;cursor:pointer">Events</button>
+      <button id="tap-sub-convos" onclick="switchTapSub('convos')"
+        style="flex:1;border:none;border-radius:0;padding:6px 0;font-size:11px;background:var(--bg-panel);color:var(--fg-muted);cursor:pointer">Conversations</button>
+    </div>
+
+    <!-- Events sub-view -->
+    <div id="tap-sub-events-panel" style="display:flex;flex-direction:column;flex:1;min-height:0">
     <div class="toolbar" style="flex-wrap:wrap;gap:4px">
       <button onclick="loadTap()">↺ Refresh</button>
       <span class="toolbar-label" style="margin-left:4px">Source:</span>
@@ -1482,95 +1673,30 @@
     <div class="scroll-area" id="tap-body" style="font-size:11px;line-height:1.6">
       <div class="empty">Loading…</div>
     </div>
+    </div><!-- /tap-sub-events-panel -->
+
+    <!-- Conversations sub-view -->
+    <div id="tap-sub-convos-panel" style="display:none;flex-direction:column;flex:1;min-height:0">
+      <div class="toolbar">
+        <input id="search-input" placeholder="Semantic search…" style="width:300px"
+          onkeydown="if(event.key==='Enter')searchConvos()">
+        <button onclick="searchConvos()">Search</button>
+        <span class="toolbar-spacer"></span>
+        <span class="toolbar-label" id="search-status"></span>
+        <select id="export-format" style="background:var(--bg2);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px">
+          <option value="jsonl">JSONL</option>
+          <option value="alpaca">Alpaca</option>
+          <option value="sharegpt">ShareGPT</option>
+        </select>
+        <button onclick="exportConversations()" title="Download conversations for fine-tuning">↓ Export</button>
+      </div>
+      <div class="scroll-area" id="convos-body">
+        <div class="empty">Enter a search query above to search conversations semantically.</div>
+      </div>
+    </div><!-- /tap-sub-convos-panel -->
   </div>
 
-  <!-- 6. Operator -->
-  <div class="panel" id="panel-operator">
-    <div class="toolbar">
-      <!-- Mode toggle -->
-      <div style="display:flex;gap:0;border:1px solid var(--bg-border);border-radius:2px;overflow:hidden;flex-shrink:0">
-        <button id="op-mode-agent"   onclick="setOpMode('agent')"
-          style="border-radius:0;border:none;padding:2px 12px;font-size:11px;background:var(--lavender);color:#000">Agent</button>
-        <button id="op-mode-council" onclick="setOpMode('council')"
-          style="border-radius:0;border:none;padding:2px 12px;font-size:11px;background:var(--bg-input);color:var(--fg-dim)">⚖ Council</button>
-      </div>
-      <!-- Agent controls -->
-      <span id="op-agent-controls" style="display:flex;gap:6px;align-items:center">
-        <span class="toolbar-label">Model:</span>
-        <select id="op-target" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
-          <option value="operator">operator (default)</option>
-        </select>
-        <span style="margin-left:6px;padding-left:6px;border-left:1px solid var(--bg-border);display:flex;gap:4px;align-items:center" title="Enable temporal reflection — async insight injected next turn">
-          <input type="checkbox" id="op-reflect" style="margin:0">
-          <span class="toolbar-label">Reflect</span>
-        </span>
-        <span style="margin-left:6px;padding-left:6px;border-left:1px solid var(--bg-border);display:flex;gap:4px;align-items:center" title="Shadow: counterfactual parallel run on turn 0 (requires server-side flag)">
-          <input type="checkbox" id="op-shadow" style="margin:0">
-          <span class="toolbar-label">Shadow</span>
-        </span>
-      </span>
-      <!-- Council controls -->
-      <span id="op-council-controls" style="display:none;gap:6px;align-items:center">
-        <span class="toolbar-label" style="color:var(--lavender)">Proposer:</span>
-        <select id="council-op-model" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
-          <option value="">— operator default —</option>
-        </select>
-      </span>
-      <span class="toolbar-spacer"></span>
-      <span id="op-bg-indicator" style="font-size:11px;color:var(--fg-dim);padding:0 8px;display:none;align-items:center" title="Background operator run in progress">
-        ⟳ <span id="op-bg-status">running</span>
-      </span>
-      <button id="op-history-toggle" onclick="toggleOpHistory()" title="View past operator runs">📋 History</button>
-      <button id="op-notes-toggle" onclick="toggleOpNotes()" title="Persistent operator notes">📝 Notes</button>
-      <button onclick="opClear()">✕ Clear</button>
-    </div>
-
-    <!-- Operator notes panel (collapsed by default) -->
-    <div id="op-notes-panel" style="display:none;padding:8px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border);flex-shrink:0">
-      <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
-        <span style="font-size:11px;color:var(--fg-muted);flex:1">Persistent notes — injected at the start of every operator session</span>
-        <button onclick="saveOpNotes()" style="font-size:11px;padding:1px 8px">Save</button>
-        <span id="op-notes-status" style="font-size:10px;color:var(--fg-dim)"></span>
-      </div>
-      <textarea id="op-notes-area" style="width:100%;height:80px;font-size:11px;font-family:inherit;resize:vertical;background:var(--bg-input);border:1px solid var(--bg-border);color:var(--fg);padding:4px 6px;border-radius:2px;line-height:1.4" placeholder="e.g. User prefers concise answers. Project is BeigeBox. Stack: Python/FastAPI/Ollama."></textarea>
-    </div>
-
-    <!-- Operator run history panel (collapsed by default) -->
-    <div id="op-history-panel" style="display:none;padding:8px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border);flex-shrink:0;max-height:180px;overflow-y:auto">
-      <div id="op-history-list" style="font-size:11px;color:var(--fg-muted)">Loading…</div>
-    </div>
-
-    <!-- Council: allowed model pool (shown only in council mode) -->
-    <div id="council-model-pool" style="display:none;padding:6px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border)">
-      <div style="font-size:11px;color:var(--fg-muted);margin-bottom:4px">Models the council may use <span style="color:var(--fg-dim)">(leave all unchecked to allow any)</span>:</div>
-      <div id="council-model-list" style="display:flex;flex-wrap:wrap;gap:6px;max-height:70px;overflow-y:auto">
-        <span style="color:var(--fg-muted);font-size:11px">Loading models…</span>
-      </div>
-    </div>
-
-    <!-- Agent mode -->
-    <div id="op-agent-area" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
-      <div id="op-log"></div>
-      <div id="op-input-area">
-        <input id="op-input" placeholder="Ask the operator anything…"
-          onkeydown="if(event.key==='Enter'&&!_opAbort)runOp()">
-        <button class="primary" onclick="runOp()" id="op-btn">Run</button>
-        <button onclick="stopOp()" id="op-stop-btn" style="display:none;background:var(--red,#c0392b);color:#fff" title="Stop current run">■ Stop</button>
-      </div>
-    </div>
-
-    <!-- Council mode -->
-    <div id="op-council-area" style="display:none;flex-direction:column;flex:1;overflow:hidden">
-      <div id="council-proposal-area"></div>
-      <div id="council-input-area">
-        <input id="council-input" placeholder="Describe what you need the council to think about…"
-          onkeydown="if(event.key==='Enter'&&!_councilRunning)councilPropose()">
-        <button class="primary" onclick="councilPropose()" id="council-propose-btn">Propose</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- 7. Harness — parallel agent runner -->
+  <!-- 4. Harness — parallel agent runner -->
   <div class="panel" id="panel-harness">
     <!-- Mode toggle + toolbar -->
     <div class="toolbar">
@@ -1769,16 +1895,27 @@
     </div>
   </div>
 
-    <!-- 8. Config -->
-  <div class="panel" id="panel-config">
+  <!-- 5. Discovery -->
+  <div class="panel" id="panel-discovery">
     <div class="toolbar">
-      <button onclick="loadConfig()">↺ Refresh</button>
+      <select id="disc-opportunity-select" style="flex:1;max-width:280px">
+        <option value="">Loading opportunities…</option>
+      </select>
+      <select id="disc-candidate-model" style="max-width:180px">
+        <option value="">candidate model…</option>
+      </select>
+      <select id="disc-weight-profile">
+        <option value="general">general</option>
+        <option value="code">code</option>
+        <option value="reasoning">reasoning</option>
+        <option value="safety">safety</option>
+      </select>
+      <button id="disc-run-btn" class="primary" onclick="runDiscoveryExperiment()">▶ Run</button>
+      <button onclick="loadDiscoveryResults()">↺ Results</button>
       <span class="toolbar-spacer"></span>
-      <span class="last-updated" id="config-updated"></span>
-      <button onclick="openProbe()" title="Network Probe — fire HTTP requests from server context" style="margin-left:8px;border-color:var(--cyan);color:var(--cyan)">⚡ Probe</button>
     </div>
-    <div class="scroll-area" id="config-body">
-      <div class="empty">Loading…</div>
+    <div class="scroll-area" id="discovery-body">
+      <div class="empty">Select an opportunity and click Run, or load past results.</div>
     </div>
   </div>
 
@@ -2046,20 +2183,148 @@ function updateClock() {
 setInterval(updateClock, 1000);
 updateClock();
 
+// ── Log ticker ───────────────────────────────────────────────────────────────
+{
+  const TICK_INTERVAL = 2000;
+  const MAX_TICKS     = 8;   // keep a short buffer so rollup has rows to slide through
+  let _tickLastId     = null;
+  let _tickQueue      = [];  // pending items to animate in one at a time
+  let _tickAnimating  = false;
+
+  function _tickLabel(ev) {
+    const src     = ev.source || ev.role || '';
+    const evType  = (ev.event_type || '').replace(/_/g, ' ');
+    const content = (ev.content || '').slice(0, 120);
+    return { src, evType, content };
+  }
+
+  function _buildTickEl(ev) {
+    const { src, evType, content } = _tickLabel(ev);
+    const div = document.createElement('div');
+    div.className = 'log-tick';
+    div.innerHTML = `<span class="tick-ev">${evType}</span><span class="tick-src">${src}</span>${content}`;
+    return div;
+  }
+
+  function _pushTick(ev) {
+    const track = document.getElementById('log-ticker-track');
+    if (!track) return;
+
+    const el = _buildTickEl(ev);
+    // Append below visible row (will be hidden by overflow:hidden)
+    track.appendChild(el);
+
+    // Slide up: shift transform by one row height (18px)
+    const current = parseInt(track.style.transform?.match(/-?\d+/)?.[0] || '0', 10);
+    const next = current - 18;
+    // Use rAF to let the DOM paint the new element first, then trigger transition
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        track.style.transform = `translateY(${next}px)`;
+      });
+    });
+
+    // Prune old nodes after transition so they don't pile up
+    setTimeout(() => {
+      while (track.children.length > MAX_TICKS) track.removeChild(track.firstChild);
+      // Recalculate transform offset to account for removed rows
+      const remaining = track.children.length;
+      const offset = -(remaining - 1) * 18;
+      track.style.transition = 'none';
+      track.style.transform = `translateY(${offset}px)`;
+      requestAnimationFrame(() => {
+        track.style.transition = '';
+      });
+    }, 700);
+  }
+
+  function _drainQueue() {
+    if (_tickQueue.length === 0) { _tickAnimating = false; return; }
+    _tickAnimating = true;
+    const ev = _tickQueue.shift();
+    _pushTick(ev);
+    // Space out animations — one roll per 650ms
+    setTimeout(_drainQueue, 650);
+  }
+
+  async function _pollTicker() {
+    try {
+      const data = await api('/api/v1/tap?n=6');
+      const events = (data.entries || []).slice().reverse(); // oldest first (API returns newest-first)
+      const newEvs = _tickLastId
+        ? events.filter(e => e.id > _tickLastId)
+        : events.slice(-1); // on first load show just the most recent
+
+      if (newEvs.length) {
+        _tickLastId = events[events.length - 1]?.id ?? _tickLastId;
+        _tickQueue.push(...newEvs);
+        if (!_tickAnimating) _drainQueue();
+      }
+    } catch { /* silent */ }
+  }
+
+  // Kick off after a short delay to let the page settle
+  setTimeout(() => {
+    _pollTicker();
+    setInterval(_pollTicker, TICK_INTERVAL);
+  }, 1500);
+}
+
 // ── Tab switching ───────────────────────────────────────────────────────────
+function switchChatSub(sub) {
+  const directPanel = document.getElementById('chat-sub-direct');
+  const agentPanel  = document.getElementById('chat-sub-agent');
+  const directBtn   = document.getElementById('chat-sub-direct-btn');
+  const agentBtn    = document.getElementById('chat-sub-agent-btn');
+  const isAgent = sub === 'agent';
+  directPanel.style.display = isAgent ? 'none' : 'flex';
+  agentPanel.style.display  = isAgent ? 'flex' : 'none';
+  directBtn.style.background = isAgent ? 'var(--bg-panel)' : 'var(--lavender)';
+  directBtn.style.color      = isAgent ? 'var(--fg-muted)' : 'var(--bg)';
+  directBtn.style.fontWeight = isAgent ? 'normal' : '600';
+  agentBtn.style.background  = isAgent ? 'var(--lavender)' : 'var(--bg-panel)';
+  agentBtn.style.color       = isAgent ? 'var(--bg)' : 'var(--fg-muted)';
+  agentBtn.style.fontWeight  = isAgent ? '600' : 'normal';
+  if (isAgent) { loadOpTargets(); hideOpBgIndicator(); }
+}
+
+function switchTapSub(sub) {
+  const evPanel = document.getElementById('tap-sub-events-panel');
+  const coPanel = document.getElementById('tap-sub-convos-panel');
+  const evBtn   = document.getElementById('tap-sub-events');
+  const coBtn   = document.getElementById('tap-sub-convos');
+  const active  = 'background:var(--lavender);color:var(--bg);font-weight:600';
+  const idle    = 'background:var(--bg-panel);color:var(--fg-muted);font-weight:normal';
+  if (sub === 'events') {
+    evPanel.style.display = 'flex';
+    coPanel.style.display = 'none';
+    evBtn.style.cssText += ';' + active;
+    coBtn.style.cssText += ';' + idle;
+  } else {
+    evPanel.style.display = 'none';
+    coPanel.style.display = 'flex';
+    evBtn.style.cssText += ';' + idle;
+    coBtn.style.cssText += ';' + active;
+  }
+}
+
+function toggleDashConfigDrawer(open) {
+  const drawer = document.getElementById('dash-config-drawer');
+  const overlay = document.getElementById('dash-config-overlay');
+  const isOpen = open !== undefined ? open : !drawer.classList.contains('open');
+  drawer.classList.toggle('open', isOpen);
+  overlay.classList.toggle('open', isOpen);
+  if (isOpen) loadConfig();
+}
+
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
   if (name === 'dashboard') loadDashboard();
   if (name === 'tap')       loadTap();
-  if (name === 'config')    loadConfig();
   if (name === 'chat')      { initChatPanes(); loadModels(); }
-  if (name === 'operator')  {
-    loadOpTargets();
-    // Hide background indicator when returning to operator tab
-    hideOpBgIndicator();
-  }
   if (name === 'harness')   { loadModelsForPanes(); setHarnessMode(harnessMode); }
+  if (name === 'discovery') loadDiscoveryOpportunities();
 
   // Show background operator indicator if leaving operator tab while a run is in progress
   if (name !== 'operator' && _lastOpRunId) {
@@ -2069,7 +2334,7 @@ function switchTab(name) {
 
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
-  const map = {'1':'dashboard','2':'chat','3':'convos','4':'tap','5':'operator','6':'harness','7':'config'};
+  const map = {'1':'dashboard','2':'chat','3':'tap','4':'harness','5':'discovery'};
   if (map[e.key]) switchTab(map[e.key]);
   // [ ] to page chat panes
   if (e.key === '[') chatPagePrev();
@@ -2096,7 +2361,7 @@ function featureDisabledMsg(featureName, configKey, extraHint) {
     padding:12px 16px;border-radius:2px;margin:8px 0">
     <div style="color:var(--yellow);font-size:12px;margin-bottom:6px">⚠ ${esc(featureName)} is disabled</div>
     <div style="color:var(--fg-dim);font-size:11px;line-height:1.7">
-      Enable it in the <a href="#" onclick="switchTab('config');return false" style="color:var(--cyan)">Config tab (7)</a>
+      Enable it in the <a href="#" onclick="switchTab('dashboard');toggleDashConfigDrawer(true);return false" style="color:var(--cyan)">Settings (Dashboard ⚙)</a>
       by toggling <code>${esc(configKey)}</code> and clicking Save &amp; Apply.
       ${extraHint ? `<br>${extraHint}` : ''}
     </div>
@@ -2965,6 +3230,7 @@ let _orPinned = new Set(); // currently pinned model IDs
 let _orBrowserOpen = false;
 let _orLoaded = false;
 let _orSort = { col: null, dir: 1 }; // sort state: col = 'name'|'price', dir = 1|-1
+let _aaRankings = null;    // Artificial Analysis rankings cache
 
 // Pane state
 const PANES_PER_PAGE = 4;
@@ -6589,6 +6855,7 @@ async function loadConfig() {
     html += cfgToggle('features_semantic_cache', 'Semantic cache', c.features?.semantic_cache ?? false);
     html += cfgToggle('features_operator', 'Operator (LLM-driven tools)', c.features?.operator ?? true);
     html += `<div id="sub-features_operator" style="display:${c.features?.operator ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
+    html += cfgInput('operator_model', 'Operator model (blank = default)', c.operator?.model || '', 'text');
     html += cfgInput('shell_allowed_commands', 'Whitelist patterns (JSON array)', JSON.stringify(c.operator?.shell?.allowed_commands || []), 'text');
     html += cfgInput('shell_blocked_patterns', 'Blacklist patterns (JSON array)', JSON.stringify(c.operator?.shell?.blocked_patterns || []), 'text');
     html += `</div>`;
@@ -6631,13 +6898,13 @@ async function loadConfig() {
 
     html += `<hr style="border:none;border-top:1px solid var(--bg-border);margin:8px 0">`;
     html += `<div style="margin:8px 0"><strong style="font-size:12px">Tier 2: Embedding Classifier</strong> (fast cosine routing)</div>`;
-    html += cfgToggle('features_classifier', 'Classifier enabled', c.routing?.classifier?.enabled ?? true);
+    html += `<div style="font-size:11px;color:var(--fg-dim);margin-bottom:4px">Toggle: <em>Embedding classifier</em> in Features above</div>`;
     html += cfgInput('classifier_rebuild_interval', 'Centroid rebuild (seconds)', c.routing?.classifier?.centroid_rebuild_interval ?? 3600, 'number');
 
     html += `<hr style="border:none;border-top:1px solid var(--bg-border);margin:8px 0">`;
     html += `<div style="margin:8px 0"><strong style="font-size:12px">Tier 3: Semantic Cache</strong> (deduplication)</div>`;
-    html += cfgToggle('features_semantic_cache', 'Semantic cache enabled', c.routing?.semantic_cache?.enabled ?? false);
-    html += `<div id="sub-features_semantic_cache" style="display:${c.routing?.semantic_cache?.enabled ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
+    html += `<div style="font-size:11px;color:var(--fg-dim);margin-bottom:4px">Toggle: <em>Semantic cache</em> in Features above</div>`;
+    html += `<div style="padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
     html += cfgInput('semantic_cache_threshold', 'Similarity threshold', c.routing?.semantic_cache?.similarity_threshold ?? 0.92, 'number');
     html += cfgInput('semantic_cache_max_entries', 'Max cached entries', c.routing?.semantic_cache?.max_entries ?? 500, 'number');
     html += cfgInput('semantic_cache_ttl', 'Entry TTL (seconds)', c.routing?.semantic_cache?.ttl_seconds ?? 3600, 'number');
@@ -6645,7 +6912,7 @@ async function loadConfig() {
 
     html += `<hr style="border:none;border-top:1px solid var(--bg-border);margin:8px 0">`;
     html += `<div style="margin:8px 0"><strong style="font-size:12px">Tier 4: Decision LLM</strong> (judge/classifier)</div>`;
-    html += cfgToggle('features_decision_llm', 'Judge enabled', c.routing?.decision_llm?.enabled ?? true);
+    html += `<div style="font-size:11px;color:var(--fg-dim);margin-bottom:4px">Toggle: <em>Decision LLM (judge)</em> in Features above</div>`;
     html += cfgInput('decision_llm_temperature', 'Judge temperature', c.routing?.decision_llm?.temperature ?? 0.2, 'number');
 
     html += `<hr style="border:none;border-top:1px solid var(--bg-border);margin:8px 0">`;
@@ -6833,11 +7100,12 @@ async function saveConfig() {
     'features_wiretap','features_payload_log','features_wasm','features_guardrails',
     'features_amf_mesh','features_voice','features_hooks',
     // Other toggles
+    'cost_tracking_enabled','cost_track_openrouter','cost_track_local',
     'log_conversations','web_ui_vi_mode','voice_enabled','tts_autoplay','system_context_enabled','gen_force',
     'force_decision','local_models_filter_enabled',
   ];
   const strings = [
-    'default_model','force_route','log_level','web_ui_palette',
+    'default_model','operator_model','force_route','log_level','web_ui_palette',
     'voice_hotkey','system_prompt_prefix','auto_summary_model',
     'stt_url','tts_url','tts_model','tts_voice',
     'wasm_default_module','browserbox_ws_url',
@@ -7397,7 +7665,12 @@ function renderOrSection() {
 
   const sortArrow = (col) => _orSort.col === col ? (_orSort.dir === 1 ? ' ▲' : ' ▼') : '';
   const thStyle = 'cursor:pointer;padding:4px 8px;color:var(--fg-muted);font-size:11px;user-select:none';
+
+  // Artificial Analysis rankings panel
+  const aaHtml = (_orBrowserOpen && _aaRankings) ? renderAARankings() : '';
+
   const browserHtml = _orBrowserOpen ? `
+    ${aaHtml}
     <div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;overflow:hidden">
       <div style="padding:6px 8px;background:var(--bg2);border-bottom:1px solid var(--border)">
         <input id="or-search" type="text" placeholder="Filter models…"
@@ -7428,19 +7701,64 @@ function renderOrSection() {
   if (_orBrowserOpen && _orLoaded) renderOrModelList(document.getElementById('or-search')?.value || '');
 }
 
+function renderAARankings() {
+  if (!_aaRankings) return '';
+  const aa = _aaRankings;
+  const renderList = (items, field) => items.map((m, i) => {
+    const rank = i + 1;
+    const score = m[field] != null ? m[field].toFixed(1) : '—';
+    const other = field === 'agentic_index' ? m.coding_index : m.agentic_index;
+    const otherStr = other != null ? other.toFixed(1) : '—';
+    const otherLabel = field === 'agentic_index' ? 'cod' : 'agt';
+    return `<div style="display:flex;align-items:center;gap:6px;padding:2px 0;font-size:11px">
+      <span style="color:var(--muted);min-width:18px;text-align:right">${rank}.</span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(m.name)} (${esc(m.creator)})">${esc(m.name)}</span>
+      <span style="min-width:48px;text-align:right;font-weight:600;color:var(--lavender)">${score}</span>
+      <span style="min-width:42px;text-align:right;color:var(--muted);font-size:10px" title="${field === 'agentic_index' ? 'Coding' : 'Agentic'} score">${otherLabel} ${otherStr}</span>
+    </div>`;
+  }).join('');
+
+  return `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;overflow:hidden">
+    <div style="padding:6px 10px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+      <span style="font-size:12px;font-weight:600">Artificial Analysis — Top Models</span>
+      <a href="https://artificialanalysis.ai/models/capabilities/agentic" target="_blank" rel="noopener"
+        style="font-size:10px;color:var(--lavender);text-decoration:none;opacity:0.8" title="Agentic & Coding capability rankings from artificialanalysis.ai">artificialanalysis.ai</a>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border-bottom:1px solid var(--border)">
+      <div style="padding:6px 10px;border-right:1px solid var(--border)">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px">
+          <a href="https://artificialanalysis.ai/models/capabilities/agentic" target="_blank" rel="noopener"
+            style="color:var(--muted);text-decoration:none" title="Composite of GDPval-AA, Tau2-Bench, CRITPt, LCR, IFBench">Agentic Index</a></div>
+        ${renderList(aa.agentic || [], 'agentic_index')}
+      </div>
+      <div style="padding:6px 10px">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px">
+          <a href="https://artificialanalysis.ai/models/capabilities/coding" target="_blank" rel="noopener"
+            style="color:var(--muted);text-decoration:none" title="Composite of TerminalBench Hard, SciCode, LiveCodeBench, HumanEval">Coding Index</a></div>
+        ${renderList(aa.coding || [], 'coding_index')}
+      </div>
+    </div>
+  </div>`;
+}
+
 async function toggleOrBrowser() {
   _orBrowserOpen = !_orBrowserOpen;
   renderOrSection();
   if (_orBrowserOpen && !_orLoaded) {
+    const fetches = [
+      api('/api/v1/openrouter/models').then(d => { _orModels = d.data || []; _orLoaded = true; }),
+    ];
+    if (!_aaRankings) {
+      fetches.push(api('/api/v1/artificial-analysis/rankings').then(d => { _aaRankings = d; }).catch(() => {}));
+    }
     try {
-      const d = await api('/api/v1/openrouter/models');
-      _orModels = d.data || [];
-      _orLoaded = true;
+      await Promise.all(fetches);
     } catch(e) {
       const listEl = document.getElementById('or-model-list');
       if (listEl) listEl.innerHTML = `<div style="padding:12px;color:var(--warn)">Failed to load models: ${esc(e.message)}</div>`;
       return;
     }
+    renderOrSection();
     renderOrModelList('');
   }
 }
@@ -7638,6 +7956,157 @@ loadZHelp();
     if (window.AudioContext || window.webkitAudioContext) _initAudioCtx();
   }, { once: true });
 })();
+
+// ── Discovery tab ─────────────────────────────────────────────────────────────
+
+async function loadDiscoveryOpportunities() {
+  const sel = document.getElementById('disc-opportunity-select');
+  if (!sel || sel.dataset.loaded) return;
+  try {
+    const data = await api('/api/v1/discovery/opportunities');
+    sel.innerHTML = data.opportunities.map(o =>
+      `<option value="${o.opportunity_id}">${o.opportunity_id} — ${o.expected_impact}</option>`
+    ).join('');
+    sel.dataset.loaded = '1';
+  } catch (e) {
+    sel.innerHTML = '<option value="">Failed to load opportunities</option>';
+  }
+
+  // Populate candidate model dropdown from /v1/models
+  const msel = document.getElementById('disc-candidate-model');
+  if (msel && !msel.dataset.loaded) {
+    try {
+      const mdata = await api('/v1/models');
+      const models = (mdata.data || [])
+        .map(m => m.id)
+        .filter(id => !id.includes('embed') && !id.includes('nomic'));
+      msel.innerHTML = models.map(id =>
+        `<option value="${id}"${id.includes('llama3.2:3b') ? ' selected' : ''}>${id}</option>`
+      ).join('');
+      msel.dataset.loaded = '1';
+    } catch (e) {
+      msel.innerHTML = '<option value="">default</option>';
+    }
+  }
+}
+
+async function runDiscoveryExperiment() {
+  const oppId = document.getElementById('disc-opportunity-select').value;
+  const profile = document.getElementById('disc-weight-profile').value;
+  const candidateModel = document.getElementById('disc-candidate-model').value;
+  const body = document.getElementById('discovery-body');
+  const btn = document.getElementById('disc-run-btn');
+  if (!oppId) { body.innerHTML = '<div class="empty">Select an opportunity first.</div>'; return; }
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Running…';
+  body.innerHTML = `<div class="empty">Running <b>${oppId}</b> on <b>${candidateModel || 'default'}</b>…<br><small>This may take several minutes.</small></div>`;
+
+  try {
+    const payload = {opportunity_id: oppId, weight_profile: profile};
+    if (candidateModel) payload.candidate_model = candidateModel;
+    const result = await fetch(BASE + '/api/v1/discovery/run', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await result.json();
+    renderDiscoveryResult(data);
+  } catch (e) {
+    body.innerHTML = `<div class="empty error">Error: ${e.message}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '▶ Run';
+  }
+}
+
+async function loadDiscoveryResults() {
+  const oppId = document.getElementById('disc-opportunity-select').value;
+  const body = document.getElementById('discovery-body');
+  const params = oppId ? `?opportunity_id=${oppId}&n=50` : '?n=50';
+  try {
+    const data = await api('/api/v1/discovery/results' + params);
+    if (!data.results || data.results.length === 0) {
+      body.innerHTML = '<div class="empty">No results yet. Run an experiment first.</div>';
+      return;
+    }
+    // Group by run_id
+    const runs = {};
+    for (const row of data.results) {
+      const rid = row.run_id || 'unknown';
+      if (!runs[rid]) runs[rid] = {run_id: rid, opportunity_id: row.opportunity_id, rows: []};
+      runs[rid].rows.push(row);
+    }
+    let html = '';
+    for (const run of Object.values(runs)) {
+      html += `<div style="margin:12px 0 8px;font-weight:600;color:var(--cyan)">${run.opportunity_id} — run ${run.run_id}</div>`;
+      html += `<table style="width:100%;border-collapse:collapse;font-size:12px">`;
+      html += `<tr style="color:var(--fg-muted)"><th align="left">Variant</th><th>Score</th><th>Accuracy</th><th>Efficiency</th><th>Hallucination</th><th>Oracle</th></tr>`;
+      for (const r of run.rows) {
+        const oracle = r.oracle_passed ? '✓' : '✗';
+        html += `<tr>
+          <td style="padding:3px 8px 3px 0">${r.variant_name}</td>
+          <td align="center">${(r.overall_score||0).toFixed(3)}</td>
+          <td align="center">${(r.accuracy||0).toFixed(1)}</td>
+          <td align="center">${(r.efficiency||0).toFixed(1)}</td>
+          <td align="center">${(r.hallucination||0).toFixed(1)}</td>
+          <td align="center">${oracle}</td>
+        </tr>`;
+      }
+      html += '</table>';
+    }
+    body.innerHTML = html;
+  } catch (e) {
+    body.innerHTML = `<div class="empty error">Error: ${e.message}</div>`;
+  }
+}
+
+function renderDiscoveryResult(data) {
+  const body = document.getElementById('discovery-body');
+  if (data.error) { body.innerHTML = `<div class="empty error">${data.error}</div>`; return; }
+
+  const champion = data.champion || {};
+  const pareto = data.pareto_front || [];
+  const scorecards = data.scorecards || [];
+  const stats = data.statistics || {};
+  const summary = data.summary || {};
+
+  let html = `
+    <div style="margin-bottom:12px">
+      <span style="color:var(--cyan);font-weight:600">${data.opportunity_id}</span>
+      <span style="color:var(--fg-muted);margin-left:8px">run ${data.run_id}</span>
+    </div>
+    <div style="display:flex;gap:24px;margin-bottom:16px;flex-wrap:wrap">
+      <div><span style="color:var(--fg-muted)">Champion</span><br><b>${champion.name || '—'}</b> (${(champion.weighted||0).toFixed(3)})</div>
+      <div><span style="color:var(--fg-muted)">Pareto front</span><br><b>${pareto.length}</b> variant(s)</div>
+      <div><span style="color:var(--fg-muted)">Oracle pass</span><br><b>${((summary.oracle_pass_rate||0)*100).toFixed(0)}%</b></div>
+      <div><span style="color:var(--fg-muted)">Test cases</span><br><b>${summary.n_test_cases || '?'}</b></div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:16px">
+      <tr style="color:var(--fg-muted)">
+        <th align="left">Variant</th><th>Score</th><th>Acc</th><th>Eff</th><th>Hal</th><th>Lat(ms)</th><th align="left" style="padding-left:8px">Significance</th>
+      </tr>`;
+
+  for (const sc of scorecards) {
+    const isChamp = sc.variant === champion.name;
+    const s = sc.scores || {};
+    const stat = stats[sc.variant] || {};
+    const verdict = stat.verdict || (sc.variant === summary.baseline ? 'baseline' : '—');
+    const hilite = isChamp ? 'color:var(--cyan);font-weight:600' : '';
+    html += `<tr style="${hilite}">
+      <td style="padding:3px 0">${sc.variant}${isChamp ? ' ★' : ''}</td>
+      <td align="center">${(sc.overall||0).toFixed(3)}</td>
+      <td align="center">${(s.accuracy||0).toFixed(1)}</td>
+      <td align="center">${(s.efficiency||0).toFixed(1)}</td>
+      <td align="center">${(s.hallucination||0).toFixed(1)}</td>
+      <td align="center">${Math.round(sc.mean_latency_ms||0)}</td>
+      <td style="padding-left:8px;color:var(--fg-muted);font-size:11px">${verdict}</td>
+    </tr>`;
+  }
+  html += '</table>';
+
+  body.innerHTML = html;
+}
 </script>
 </body>
 </html>
