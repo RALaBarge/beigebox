@@ -67,6 +67,32 @@
     align-items: center;
   }
 
+  /* ── Sub-nav (underline tabs) ───────────────────────────────────────── */
+  .subnav {
+    display: flex;
+    border-bottom: 1px solid var(--bg-border);
+    padding: 0 16px;
+    flex-shrink: 0;
+    gap: 0;
+  }
+  .subnav button {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 7px 18px;
+    font-size: 11px;
+    cursor: pointer;
+    color: var(--fg-muted);
+    margin-bottom: -1px;
+    letter-spacing: 0.3px;
+  }
+  .subnav button:hover { color: var(--fg); }
+  .subnav button.subnav-active {
+    color: var(--lavender);
+    border-bottom-color: var(--lavender);
+    font-weight: 600;
+  }
+
   /* ── Log ticker ──────────────────────────────────────────────────────── */
   #log-ticker {
     flex: 1;
@@ -76,11 +102,13 @@
     margin: 0 20px;
     position: relative;
     cursor: pointer;
+    display: flex;
+    justify-content: center;
   }
   #log-ticker-track {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
+    align-items: center;
     transition: transform 0.6s cubic-bezier(0.22, 0.61, 0.36, 1);
   }
   .log-tick {
@@ -1421,10 +1449,10 @@
 <!-- ── Tabs ────────────────────────────────────────────────────────────── -->
 <div id="tabs">
   <div class="tab active" data-tab="dashboard" onclick="switchTab('dashboard')"><span class="tab-key">1</span>Dashboard</div>
-  <div class="tab" data-tab="chat"      onclick="switchTab('chat')">     <span class="tab-key">2</span>Chat</div>
-  <div class="tab" data-tab="tap"       onclick="switchTab('tap')">      <span class="tab-key">3</span>Tap</div>
+  <div class="tab" data-tab="tap"       onclick="switchTab('tap')">      <span class="tab-key">2</span>Tap</div>
+  <div class="tab" data-tab="chat"      onclick="switchTab('chat')">     <span class="tab-key">3</span>Chat</div>
   <div class="tab" data-tab="harness"   onclick="switchTab('harness')">  <span class="tab-key">4</span>Harness</div>
-  <div class="tab" data-tab="discovery" onclick="switchTab('discovery')"><span class="tab-key">5</span>Discovery</div>
+  <div class="tab" data-tab="discovery" onclick="switchTab('discovery')"><span class="tab-key">5</span>Lab</div>
 </div>
 
 <!-- ── Content ─────────────────────────────────────────────────────────── -->
@@ -1461,12 +1489,9 @@
 
   <!-- 2. Chat (direct + agent) -->
   <div class="panel" id="panel-chat">
-    <!-- Sub-view toggle -->
-    <div style="display:flex;gap:0;border-bottom:1px solid var(--bg-border);flex-shrink:0">
-      <button id="chat-sub-direct-btn" onclick="switchChatSub('direct')"
-        style="flex:1;border:none;border-radius:0;padding:6px 0;font-size:11px;background:var(--lavender);color:var(--bg);font-weight:600;cursor:pointer">Direct</button>
-      <button id="chat-sub-agent-btn" onclick="switchChatSub('agent')"
-        style="flex:1;border:none;border-radius:0;padding:6px 0;font-size:11px;background:var(--bg-panel);color:var(--fg-muted);cursor:pointer">Agent</button>
+    <div class="subnav">
+      <button id="chat-sub-direct-btn" class="subnav-active" onclick="switchChatSub('direct')">Direct</button>
+      <button id="chat-sub-agent-btn" onclick="switchChatSub('agent')">Agent</button>
     </div>
 
     <!-- Direct sub-view -->
@@ -1589,12 +1614,9 @@
 
   <!-- 3. Tap (includes Conversations) -->
   <div class="panel" id="panel-tap">
-    <!-- Sub-view toggle -->
-    <div style="display:flex;gap:0;border-bottom:1px solid var(--bg-border);flex-shrink:0">
-      <button id="tap-sub-events" onclick="switchTapSub('events')"
-        style="flex:1;border:none;border-radius:0;padding:6px 0;font-size:11px;background:var(--lavender);color:var(--bg);font-weight:600;cursor:pointer">Events</button>
-      <button id="tap-sub-convos" onclick="switchTapSub('convos')"
-        style="flex:1;border:none;border-radius:0;padding:6px 0;font-size:11px;background:var(--bg-panel);color:var(--fg-muted);cursor:pointer">Conversations</button>
+    <div class="subnav">
+      <button id="tap-sub-events" class="subnav-active" onclick="switchTapSub('events')">Events</button>
+      <button id="tap-sub-convos" onclick="switchTapSub('convos')">Conversations</button>
     </div>
 
     <!-- Events sub-view -->
@@ -1895,27 +1917,69 @@
     </div>
   </div>
 
-  <!-- 5. Discovery -->
-  <div class="panel" id="panel-discovery">
-    <div class="toolbar">
-      <select id="disc-opportunity-select" style="flex:1;max-width:280px">
-        <option value="">Loading opportunities…</option>
-      </select>
-      <select id="disc-candidate-model" style="max-width:180px">
-        <option value="">candidate model…</option>
-      </select>
-      <select id="disc-weight-profile">
-        <option value="general">general</option>
-        <option value="code">code</option>
-        <option value="reasoning">reasoning</option>
-        <option value="safety">safety</option>
-      </select>
-      <button id="disc-run-btn" class="primary" onclick="runDiscoveryExperiment()">▶ Run</button>
-      <button onclick="loadDiscoveryResults()">↺ Results</button>
-      <span class="toolbar-spacer"></span>
+  <!-- 5. Lab -->
+  <div class="panel" id="panel-discovery" style="flex-direction:column">
+    <div class="subnav">
+      <button id="lab-sub-exp-btn" class="subnav-active" onclick="switchLabSub('experiments')">Experiments</button>
+      <button id="lab-sub-bench-btn" onclick="switchLabSub('bench')">Bench</button>
     </div>
-    <div class="scroll-area" id="discovery-body">
-      <div class="empty">Select an opportunity and click Run, or load past results.</div>
+
+    <!-- Experiments sub-panel -->
+    <div id="lab-experiments" style="display:flex;flex-direction:column;flex:1;min-height:0">
+      <div class="toolbar">
+        <select id="disc-opportunity-select" style="flex:1;max-width:280px">
+          <option value="">Loading opportunities…</option>
+        </select>
+        <select id="disc-candidate-model" style="max-width:180px">
+          <option value="">candidate model…</option>
+        </select>
+        <select id="disc-weight-profile">
+          <option value="general">general</option>
+          <option value="code">code</option>
+          <option value="reasoning">reasoning</option>
+          <option value="safety">safety</option>
+        </select>
+        <button id="disc-run-btn" class="primary" onclick="runDiscoveryExperiment()">▶ Run</button>
+        <button onclick="loadDiscoveryResults()">↺ Results</button>
+        <span class="toolbar-spacer"></span>
+      </div>
+      <div class="scroll-area" id="discovery-body">
+        <div class="empty">Select an opportunity and click Run, or load past results.</div>
+      </div>
+    </div>
+
+    <!-- Bench sub-panel -->
+    <div id="lab-bench" style="display:none;flex-direction:column;flex:1;min-height:0">
+      <div class="toolbar">
+        <button id="bench-run-btn" class="primary" onclick="runBench()">▶ Run</button>
+        <button onclick="resetBench()" style="margin-left:4px">↺ Reset</button>
+        <span class="toolbar-spacer"></span>
+        <label style="font-size:11px;color:var(--fg-muted);margin-right:4px">runs</label>
+        <input id="bench-num-runs" type="number" value="5" min="1" max="20"
+               style="width:46px;text-align:center;font-size:11px">
+        <label style="font-size:11px;color:var(--fg-muted);margin:0 4px 0 8px">tokens</label>
+        <input id="bench-num-predict" type="number" value="120" min="10" max="512"
+               style="width:56px;text-align:center;font-size:11px">
+      </div>
+      <div style="display:flex;flex:1;min-height:0;gap:0">
+        <!-- Left: model picker + prompt -->
+        <div style="width:260px;flex-shrink:0;border-right:1px solid var(--bg-border);display:flex;flex-direction:column;padding:12px;gap:8px">
+          <div style="font-size:10px;color:var(--fg-muted);text-transform:uppercase;letter-spacing:0.5px">Models</div>
+          <div id="bench-model-list" style="flex:1;overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:4px">
+            <div class="empty" style="font-size:11px">Loading…</div>
+          </div>
+          <div style="font-size:10px;color:var(--fg-muted);text-transform:uppercase;letter-spacing:0.5px;margin-top:8px">Prompt</div>
+          <textarea id="bench-prompt" rows="5"
+            style="resize:vertical;font-size:11px;font-family:inherit;background:var(--bg-input);border:1px solid var(--bg-border);color:var(--fg);border-radius:4px;padding:6px"
+            placeholder="Leave blank for default prompt…"></textarea>
+        </div>
+        <!-- Right: results -->
+        <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+          <div id="bench-results" class="scroll-area">
+            <div class="empty">Select models and click Run.</div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1943,13 +2007,11 @@
       </div>
       <!-- Presets -->
       <div id="probe-presets">
-        <button class="probe-preset-btn" onclick="probePreset('GET','http://localhost:11434/api/version')">Ollama version</button>
-        <button class="probe-preset-btn" onclick="probePreset('GET','http://localhost:11434/api/tags')">Ollama models</button>
+        <button class="probe-preset-btn" data-ollama="/api/version" onclick="probePreset('GET','http://localhost:11434/api/version')">Ollama version</button>
+        <button class="probe-preset-btn" data-ollama="/api/tags" onclick="probePreset('GET','http://localhost:11434/api/tags')">Ollama models</button>
         <button class="probe-preset-btn" onclick="probePreset('GET','/beigebox/health')">BB health</button>
         <button class="probe-preset-btn" onclick="probePreset('GET','/api/v1/status')">BB status</button>
         <button class="probe-preset-btn" onclick="probePreset('GET','/api/v1/backends')">BB backends</button>
-        <button class="probe-preset-btn" onclick="probePreset('GET','http://localhost:9010/ping')">Relay ping</button>
-        <button class="probe-preset-btn" onclick="probePreset('GET','http://localhost:9010/status')">Relay status</button>
       </div>
       <!-- Headers -->
       <label>Headers <span style="color:var(--bg-border)">(one per line: Key: Value — or JSON object)</span></label>
@@ -2272,39 +2334,191 @@ updateClock();
 
 // ── Tab switching ───────────────────────────────────────────────────────────
 function switchChatSub(sub) {
-  const directPanel = document.getElementById('chat-sub-direct');
-  const agentPanel  = document.getElementById('chat-sub-agent');
-  const directBtn   = document.getElementById('chat-sub-direct-btn');
-  const agentBtn    = document.getElementById('chat-sub-agent-btn');
   const isAgent = sub === 'agent';
-  directPanel.style.display = isAgent ? 'none' : 'flex';
-  agentPanel.style.display  = isAgent ? 'flex' : 'none';
-  directBtn.style.background = isAgent ? 'var(--bg-panel)' : 'var(--lavender)';
-  directBtn.style.color      = isAgent ? 'var(--fg-muted)' : 'var(--bg)';
-  directBtn.style.fontWeight = isAgent ? 'normal' : '600';
-  agentBtn.style.background  = isAgent ? 'var(--lavender)' : 'var(--bg-panel)';
-  agentBtn.style.color       = isAgent ? 'var(--bg)' : 'var(--fg-muted)';
-  agentBtn.style.fontWeight  = isAgent ? '600' : 'normal';
+  document.getElementById('chat-sub-direct').style.display = isAgent ? 'none' : 'flex';
+  document.getElementById('chat-sub-agent').style.display  = isAgent ? 'flex' : 'none';
+  document.getElementById('chat-sub-direct-btn').classList.toggle('subnav-active', !isAgent);
+  document.getElementById('chat-sub-agent-btn').classList.toggle('subnav-active',  isAgent);
   if (isAgent) { loadOpTargets(); hideOpBgIndicator(); }
 }
 
 function switchTapSub(sub) {
-  const evPanel = document.getElementById('tap-sub-events-panel');
-  const coPanel = document.getElementById('tap-sub-convos-panel');
-  const evBtn   = document.getElementById('tap-sub-events');
-  const coBtn   = document.getElementById('tap-sub-convos');
-  const active  = 'background:var(--lavender);color:var(--bg);font-weight:600';
-  const idle    = 'background:var(--bg-panel);color:var(--fg-muted);font-weight:normal';
-  if (sub === 'events') {
-    evPanel.style.display = 'flex';
-    coPanel.style.display = 'none';
-    evBtn.style.cssText += ';' + active;
-    coBtn.style.cssText += ';' + idle;
-  } else {
-    evPanel.style.display = 'none';
-    coPanel.style.display = 'flex';
-    evBtn.style.cssText += ';' + idle;
-    coBtn.style.cssText += ';' + active;
+  const isEvents = sub === 'events';
+  document.getElementById('tap-sub-events-panel').style.display = isEvents ? 'flex' : 'none';
+  document.getElementById('tap-sub-convos-panel').style.display = isEvents ? 'none' : 'flex';
+  document.getElementById('tap-sub-events').classList.toggle('subnav-active',  isEvents);
+  document.getElementById('tap-sub-convos').classList.toggle('subnav-active', !isEvents);
+}
+
+function switchLabSub(sub) {
+  const isBench = sub === 'bench';
+  document.getElementById('lab-experiments').style.display = isBench ? 'none' : 'flex';
+  document.getElementById('lab-bench').style.display       = isBench ? 'flex' : 'none';
+  document.getElementById('lab-sub-exp-btn').classList.toggle('subnav-active',  !isBench);
+  document.getElementById('lab-sub-bench-btn').classList.toggle('subnav-active', isBench);
+  if (isBench) loadBenchModels();
+}
+
+// ── Bench ────────────────────────────────────────────────────────────────────
+let _benchRunning = false;
+
+async function loadBenchModels() {
+  const list = document.getElementById('bench-model-list');
+  // Skip if already populated
+  if (list.querySelectorAll('.bench-model-cb').length > 0) return;
+  try {
+    const data = await api('/api/tags');
+    const models = (data.models || []).map(m => m.name || m).filter(Boolean);
+    if (!models.length) {
+      list.innerHTML = '<div class="empty" style="font-size:11px">No local models found.</div>';
+      return;
+    }
+    list.innerHTML = models.map(m => `
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer">
+        <input type="checkbox" class="bench-model-cb" value="${m}" style="cursor:pointer">
+        <span style="word-break:break-all">${m}</span>
+      </label>`).join('');
+  } catch(e) {
+    list.innerHTML = `<div class="empty" style="font-size:11px">Error loading models: ${e.message}</div>`;
+  }
+}
+
+function resetBench() {
+  _benchRunning = false;
+  document.getElementById('bench-results').innerHTML = '<div class="empty">Select models and click Run.</div>';
+  document.getElementById('bench-run-btn').disabled = false;
+  document.getElementById('bench-run-btn').textContent = '▶ Run';
+}
+
+async function runBench() {
+  if (_benchRunning) return;
+  const models = [...document.querySelectorAll('.bench-model-cb:checked')].map(cb => cb.value);
+  if (!models.length) {
+    document.getElementById('bench-results').innerHTML = '<div class="empty" style="color:var(--yellow)">Select at least one model.</div>';
+    return;
+  }
+  const numRuns = parseInt(document.getElementById('bench-num-runs').value) || 5;
+  const numPredict = parseInt(document.getElementById('bench-num-predict').value) || 120;
+  const promptVal = document.getElementById('bench-prompt').value.trim();
+
+  const body = { models, num_runs: numRuns, num_predict: numPredict };
+  if (promptVal) body.prompt = promptVal;
+
+  _benchRunning = true;
+  const btn = document.getElementById('bench-run-btn');
+  btn.disabled = true;
+  btn.textContent = '⟳ Running…';
+
+  const out = document.getElementById('bench-results');
+  out.innerHTML = '';
+
+  // Progress state per model
+  const modelBlocks = {};
+
+  function getOrCreateBlock(model) {
+    if (modelBlocks[model]) return modelBlocks[model];
+    const div = document.createElement('div');
+    div.style.cssText = 'border-bottom:1px solid var(--bg-border);padding:10px 14px';
+    div.innerHTML = `<div style="font-size:12px;font-weight:600;margin-bottom:4px">${model}</div>
+      <div class="bench-progress" style="font-size:11px;color:var(--fg-muted)">Warming up…</div>
+      <div class="bench-runs" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px"></div>`;
+    out.appendChild(div);
+    modelBlocks[model] = div;
+    return div;
+  }
+
+  try {
+    const resp = await fetch('/api/v1/bench/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        let ev;
+        try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+
+        const etype = ev.event;
+        if (etype === 'start') {
+          // already showing empty state
+        } else if (etype === 'warmup') {
+          const blk = getOrCreateBlock(ev.model);
+          const pg = blk.querySelector('.bench-progress');
+          if (ev.status === 'starting') pg.textContent = 'Warming up…';
+          else if (ev.status === 'done') pg.textContent = `Warm ✓  (load ${(ev.load_ms||0).toFixed(0)} ms)`;
+          else pg.innerHTML = `<span style="color:var(--red)">Warmup error: ${ev.error||''}</span>`;
+        } else if (etype === 'run') {
+          const blk = getOrCreateBlock(ev.model);
+          const pg = blk.querySelector('.bench-progress');
+          pg.textContent = `Run ${ev.run}/${ev.total}`;
+          const runsDiv = blk.querySelector('.bench-runs');
+          const r = ev.result;
+          const chip = document.createElement('span');
+          chip.style.cssText = `font-size:10px;padding:2px 6px;border-radius:3px;background:${r.ok?'var(--bg-border)':'var(--red-dim, #400)'};color:${r.ok?'var(--fg)':'var(--red)'}`;
+          chip.textContent = r.ok ? `${(r.tok_s||0).toFixed(1)} t/s` : '✗';
+          chip.title = r.ok ? `eval ${(r.eval_ms||0).toFixed(0)}ms  ttft ${(r.ttft_ms||0).toFixed(0)}ms` : r.error;
+          runsDiv.appendChild(chip);
+        } else if (etype === 'model_done') {
+          const s = ev.summary;
+          const blk = getOrCreateBlock(ev.model);
+          const pg = blk.querySelector('.bench-progress');
+          const ok = s.runs_ok;
+          pg.innerHTML = ok
+            ? `avg <strong>${s.avg_tokens_per_sec} tok/s</strong>  &nbsp; med ${s.median_tokens_per_sec} tok/s  &nbsp; ttft ${s.avg_ttft_ms} ms  &nbsp; (${ok}/${s.runs_total} ok)`
+            : `<span style="color:var(--red)">All runs failed</span>`;
+        } else if (etype === 'done') {
+          // Summary table
+          const results = ev.results;
+          const tbl = document.createElement('div');
+          tbl.style.cssText = 'padding:12px 14px;border-top:2px solid var(--bg-border)';
+          tbl.innerHTML = `<div style="font-size:11px;font-weight:600;margin-bottom:8px;color:var(--lavender)">Summary — sorted by avg tok/s</div>
+            <table style="width:100%;border-collapse:collapse;font-size:11px">
+              <thead>
+                <tr style="color:var(--fg-muted)">
+                  <th style="text-align:left;padding:2px 8px 4px 0">Model</th>
+                  <th style="text-align:right;padding:2px 8px">avg tok/s</th>
+                  <th style="text-align:right;padding:2px 8px">med tok/s</th>
+                  <th style="text-align:right;padding:2px 8px">TTFT ms</th>
+                  <th style="text-align:right;padding:2px 0">ok</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${results.map((r,i) => `
+                  <tr style="border-top:1px solid var(--bg-border)${i===0?';color:var(--green)':''}">
+                    <td style="padding:3px 8px 3px 0">${r.model}</td>
+                    <td style="text-align:right;padding:3px 8px">${r.avg_tokens_per_sec}</td>
+                    <td style="text-align:right;padding:3px 8px">${r.median_tokens_per_sec}</td>
+                    <td style="text-align:right;padding:3px 8px">${r.avg_ttft_ms}</td>
+                    <td style="text-align:right;padding:3px 0">${r.runs_ok}/${r.runs_total}</td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>`;
+          out.appendChild(tbl);
+        } else if (etype === 'error') {
+          const d = document.createElement('div');
+          d.style.cssText = 'padding:10px 14px;color:var(--red);font-size:11px';
+          d.textContent = 'Error: ' + (ev.message || 'unknown');
+          out.appendChild(d);
+        }
+      }
+    }
+  } catch(e) {
+    out.innerHTML += `<div style="padding:10px 14px;color:var(--red);font-size:11px">Fetch error: ${e.message}</div>`;
+  } finally {
+    _benchRunning = false;
+    btn.disabled = false;
+    btn.textContent = '▶ Run';
   }
 }
 
@@ -2334,7 +2548,7 @@ function switchTab(name) {
 
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
-  const map = {'1':'dashboard','2':'chat','3':'tap','4':'harness','5':'discovery'};
+  const map = {'1':'dashboard','2':'tap','3':'chat','4':'harness','5':'discovery'};
   if (map[e.key]) switchTab(map[e.key]);
   // [ ] to page chat panes
   if (e.key === '[') chatPagePrev();
@@ -2379,7 +2593,12 @@ function apiErrorMsg(e, featureName, configKey, extraHint) {
 
 function fmtTs(iso) {
   if (!iso) return '';
-  try { return new Date(iso).toLocaleTimeString(); } catch { return iso; }
+  try {
+    const d = new Date(iso);
+    const hms = d.toLocaleTimeString();
+    const ms = String(d.getMilliseconds()).padStart(3, '0');
+    return `${hms}.${ms}`;
+  } catch { return iso; }
 }
 
 function badge(ok, yes='enabled', no='disabled') {
@@ -6740,9 +6959,22 @@ function cfgSelect(id, label, value, options) {
 
 // ── Network Probe ────────────────────────────────────────────────────────────
 
-function openProbe() {
+async function openProbe() {
   document.getElementById('probe-modal-overlay').classList.add('open');
   document.getElementById('probe-url').focus();
+  // Patch Ollama preset URLs with the real backend URL from server config
+  // (in Docker, localhost:11434 doesn't reach Ollama — it's at ollama:11434)
+  try {
+    const h = await api('/beigebox/health');
+    const base = (h.backend_url || '').replace(/\/$/, '');
+    if (base && base !== 'http://localhost:11434') {
+      const presets = document.getElementById('probe-presets');
+      presets.querySelectorAll('button[data-ollama]').forEach(btn => {
+        const path = btn.dataset.ollama;
+        btn.onclick = () => probePreset('GET', base + path);
+      });
+    }
+  } catch { /* silent — presets stay as-is */ }
 }
 
 function closeProbe() {
