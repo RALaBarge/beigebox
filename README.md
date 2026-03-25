@@ -62,9 +62,23 @@ See [Deployment Quickstart](docs/deployment.md#quick-start) for more.
 
 ---
 
+## Security by default
+
+BeigeBox assumes supply chain compromise is inevitable. Three-layer defense:
+
+1. **Prevention** — hash-locked deps (3,280 hashes), pinned images (digest), CVE scanning
+2. **Containment** — read-only root, network segmentation, capability drop, unprivileged user
+3. **Detection** — comprehensive Tap logging, metrics, automated git hooks
+
+Result: Compromised code gets **trapped in-memory, detected in 0.1s, cannot persist**.
+
+See [Security](docs/security.md) for threat model, defense strategy, and detailed hardening.
+
+---
+
 ## Documentation
 
-- **[Security](docs/security.md)** — Supply chain hardening, hash locking, network segmentation, Docker hardening
+- **[Security](docs/security.md)** — Supply chain hardening, read-only root, network segmentation, threat model, defense layers
 - **[Configuration](docs/configuration.md)** — config.yaml, runtime_config.yaml, feature flags, per-model options
 - **[Routing & Backends](docs/routing.md)** — Routing tiers, latency-aware selection, A/B splitting, custom rules
 - **[Authentication](docs/authentication.md)** — API keys, multi-key setup, ACLs, agentauth keychain

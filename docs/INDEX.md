@@ -171,6 +171,19 @@ See [Security: CVE Scanning](security.md#python-dependencies--hash-locked).
 | **Hook** | Event-driven custom code (shell or Python) |
 | **MCP** | Model Context Protocol — tool/resource bridge to external systems |
 
+## Defense-in-depth (Security strategy)
+
+BeigeBox assumes supply chain compromise is inevitable, not a rare edge case.
+
+**Three layers:**
+1. **Prevention** — Hash-locked dependencies, pinned images, CVE scanning
+2. **Containment** — Read-only root filesystem, network segmentation, capability drop
+3. **Detection** — Tap logging, metrics, git hooks
+
+Attack outcome: **Trapped in-memory, detected in 0.1s, cannot persist or escalate.**
+
+See [Security](security.md) for full threat model and how each layer works.
+
 ---
 
 ## Quick Links

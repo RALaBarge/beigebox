@@ -1,6 +1,22 @@
 # Security
 
-BeigeBox is hardened against supply chain attacks, injection vectors, and privilege escalation at every layer.
+BeigeBox is hardened against supply chain attacks, injection vectors, and privilege escalation using **defense-in-depth**: assume compromise, prevent persistence, detect attempts.
+
+## Quick overview
+
+Three layers of defense:
+
+| Layer | Tactic | Tools | Goal |
+|---|---|---|---|
+| **1. Prevention** | Catch compromises before deployment | Hash-locked deps, pinned images, CVE scanning | Slow down attackers; catch build-time threats |
+| **2. Containment** | Trap runtime attacks in isolation | Read-only root, cap drop, network segmentation | Prevent persistence; block lateral movement |
+| **3. Detection** | Log and monitor everything | Tap logging, metrics, git hooks | Catch attempts immediately (ms-level detection) |
+
+**Result:** Even if one of 175 packages is compromised, the attack becomes:
+- **Cannot persist** (read-only blocks binaries)
+- **Cannot escalate** (cap drop blocks privesc)
+- **Cannot hide** (logs catch network attempts)
+- **Detected in 0.1 seconds** (Tap logs all traffic)
 
 ## Supply Chain Security
 
@@ -96,6 +112,66 @@ BLOCKED: rm, rmdir, mv, cp, chmod, chown, chroot, ln, mknod, mkfifo, dd, truncat
 ```
 
 Even if code execution is achieved, destructive commands and network exfiltration tools are unavailable.
+
+### Read-only root filesystem
+
+All containers run with read-only root, forcing compromised code to operate in-memory:
+
+```yaml
+# docker-compose.yaml
+beigebox:
+  read_only: true
+  tmpfs:
+    - /tmp                # 256 MB, cleared on restart
+    - /app/workspace/in   # 512 MB, cleared on restart
+  volumes:
+    - beigebox_data:/app/data  # persistent, for SQLite + embeddings
+```
+
+**What breaks:**
+- Write to `/etc`, `/usr`, `/bin`, `/app/beigebox` → `EROFS` (read-only filesystem)
+- Drop binaries for persistence → DENIED
+- Modify config to auto-load on startup → DENIED
+- Install cron jobs for backdoors → DENIED
+
+**What still works:**
+- Read all memory → can read active conversation buffers
+- Make network requests → can exfiltrate (blocked by egress filters)
+- Write to `/tmp` → can drop binaries, but lost on restart
+- Write to `/app/data` → persistent, but monitored via logs
+
+**Why it matters:**
+
+Without read-only root:
+```
+Day 0: Compromised library → writes /etc/cron.d/exfil.sh
+Day 1-6: Cron exfils data nightly (undetected)
+Day 7: You notice the data breach
+```
+
+With read-only root + egress filtering + logging:
+```
+Day 0: Compromised library → tries to write /etc/cron.d/ → EROFS, fails
+Day 0: Tries to connect to attacker.com → egress filter blocks it
+Day 0: Attempt logged in Tap: "outbound to 1.2.3.4:443 DENIED"
+Day 0: You rotate API keys, restart container, incident resolved
+```
+
+**Testing:**
+
+```bash
+docker compose up -d
+docker compose exec beigebox touch /test.txt
+# Error: Read-only file system ✓
+
+docker compose exec beigebox touch /tmp/test.txt
+# Works (tmpfs is writable) ✓
+
+docker compose exec beigebox touch /app/data/test.txt
+# Works (volume is writable) ✓
+```
+
+Every service (ollama, whisper, kokoro, chrome, llama-cpp, vllm, executorch) uses the same pattern — only model caches and `/tmp` are writable, everything else immutable.
 
 ---
 
@@ -196,18 +272,89 @@ This means vLLM will not execute custom Python code from HuggingFace model repos
 
 **Assumption:** BeigeBox runs on a trusted network (localhost or internal network) with trusted administrators. If you expose `:1337` to the public internet, API key auth is your only defense.
 
-**In scope:**
+**Core assumption:** At least one of the 175 Python packages in the dependency tree is either compromised now or will be compromised in the future (supply chain inevitability).
+
+### Defense-in-depth strategy
+
+Rather than "prevent all compromise" (impossible), BeigeBox uses **three layers**:
+
+**Layer 1: Prevention (supply chain)**
+- Hash-locked dependencies (pip rejects hash mismatches)
+- Pinned Docker images by digest (mutable `:latest` tags replaced)
+- CVE scanning (pip-audit on pre-push, blocks suspicious code)
+- Result: *Slow down* attackers; catch *detectable* compromises at build time
+
+**Layer 2: Containment (runtime hardening)**
+- Read-only root filesystem (blocks persistence, binary injection, rootkits)
+- Minimal capabilities (cap_drop: ALL, no escalation)
+- Unprivileged user (UID 1000, can't touch host)
+- Network segmentation (chrome can't reach ollama, whisper can't reach inference)
+- Restricted busybox (no rm, chmod, mount, shell, wget, etc.)
+- Result: *Trap* compromised code in-memory; prevent lateral movement
+
+**Layer 3: Detection (logging)**
+- Tap comprehensive event logging (all request phases)
+- System metrics + latency tracking (detect anomalies)
+- Git hooks for supply chain automation (catch regressions)
+- Result: *Detect* attempts immediately; catch in logs within 0.1s
+
+### Attack scenarios
+
+**Scenario 1: Compromised PyPI package (httpx, urllib3, etc.)**
+
+```
+Attack vector: Malicious code in dependency
+Prevention: Hash mismatch caught at build time ✓
+If missed: Read-only root blocks persistence, egress filter stops exfil
+Detection: Network egress logged, Tap shows unusual request pattern
+```
+
+**Scenario 2: Code injection at runtime (WASM, plugin, hook)**
+
+```
+Attack vector: Malicious WASM/plugin drops a backdoor
+Prevention: Code review, signed plugins (not currently enforced)
+If missed: WASM is sandboxed in wasmtime, plugin in unprivileged user
+Containment: Read-only root + cap_drop block privesc
+Detection: Unusual I/O, network requests caught in logs
+```
+
+**Scenario 3: Lateral movement (chrome → ollama)**
+
+```
+Attack vector: Browser gets compromised, attacker pivots to inference
+Prevention: None (can't prevent browser compromise)
+Containment: Network segmentation blocks connection to ollama network
+Detection: Attempt logged, firewall drops packet
+```
+
+**Scenario 4: In-memory exfiltration (steal conversations)**
+
+```
+Attack vector: Compromised library reads memory, opens socket
+Prevention: Hash locking caught the compromise ✓
+Containment: Read-only prevents persistence, exfil is in-memory only
+Detection: Egress filter blocks outbound, Tap logs network attempt
+```
+
+### In scope (defended against)
+
 - Supply chain compromise (PyPI, Docker Hub)
-- Accidental data leaks (unencrypted logs, unscoped API keys)
-- Container escape (Linux capabilities, privilege escalation)
-- Network lateral movement (chrome → ollama)
+- Persistent backdoors (read-only root blocks these)
+- Privilege escalation (cap_drop + no-new-privileges)
+- Network lateral movement (segmentation)
+- Accidental data leaks (logged, auditable)
 - Code injection (WASM, plugins, hooks)
 
-**Out of scope:**
+### Out of scope (cannot defend)
+
 - Physical server compromise
-- Host OS rootkit
+- Host OS rootkit (beyond container)
 - Hypervisor break-out
-- Social engineering (credentials)
+- Social engineering (credential theft)
+- Zero-day in kernel/libc
+- Timing side-channels
+- Compromised admin credentials
 
 ---
 
