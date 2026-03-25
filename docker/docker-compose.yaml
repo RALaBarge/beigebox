@@ -54,13 +54,15 @@ services:
   # ---------------------------------------------------------------------------
   # For NVIDIA GPU: uncomment the 'deploy' block below and restart.
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama@sha256:0ff452f6a4c3c5bb4ab063a1db190b261d5834741a519189ed5301d50e4434d1
     container_name: beigebox-ollama
     ports:
       - "${OLLAMA_PORT:-11434}:11434"
     volumes:
       - /mnt/storage/ollama:/root/.ollama
     restart: unless-stopped
+    networks:
+      - llm
     environment:
       OLLAMA_NUM_PARALLEL: "3"
     healthcheck:
@@ -81,11 +83,13 @@ services:
   # Model pull — runs once to ensure required models exist
   # ---------------------------------------------------------------------------
   ollama-model-pull:
-    image: curlimages/curl
+    image: curlimages/curl@sha256:d94d07ba9e7d6de898b6d96c1a072f6f8266c687af78a74f380087a0addf5d17
     container_name: beigebox-model-pull
     depends_on:
       ollama:
         condition: service_started
+    networks:
+      - llm
     command: >
       sh -c "sleep 5 &&
       curl -s http://ollama:11434/api/pull -d '{\"name\":\"nomic-embed-text\"}' &&
@@ -108,6 +112,7 @@ services:
       - ../hooks:/app/hooks:ro
       - ../2600/skills:/app/2600/skills:ro
       - ../workspace/out:/app/workspace/out:rw
+      - ..:/app/workspace/out/codebase:ro
       - ../wasm_modules:/app/wasm_modules:ro
       - type: tmpfs
         target: /app/workspace/in
@@ -115,6 +120,10 @@ services:
           size: 536870912   # 512 MB — files never touch disk, auto-cleared on stop
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - llm
+      - tools
+      - inference
     environment:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GOOGLE_CSE_ID=${GOOGLE_CSE_ID:-}
@@ -124,6 +133,10 @@ services:
       ollama:
         condition: service_started
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     deploy:
       resources:
         reservations:
@@ -147,12 +160,14 @@ services:
   # ---------------------------------------------------------------------------
   whisper:
     profiles: [voice]
-    image: fedirz/faster-whisper-server:latest-cpu
+    image: fedirz/faster-whisper-server@sha256:760e5e43d427dc6cfbbc4731934b908b7de9c7e6d5309c6a1f0c8c923a5b6030
     container_name: beigebox-whisper
     ports:
       - "${WHISPER_PORT:-9000}:8000"
     volumes:
       - whisper_cache:/root/.cache/huggingface
+    networks:
+      - tools
     environment:
       - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-whisper-base}
       - WHISPER__DEVICE=cpu
@@ -170,12 +185,14 @@ services:
   # ---------------------------------------------------------------------------
   kokoro:
     profiles: [voice]
-    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    image: ghcr.io/remsky/kokoro-fastapi-cpu@sha256:c8812546d358cbfd6a5c4087a28795b2b001d8e32d7a322eedd246e6bc13cb55
     container_name: beigebox-kokoro
     ports:
       - "${KOKORO_PORT:-8880}:8880"
     volumes:
       - kokoro_models:/app/models
+    networks:
+      - tools
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8880/health"]
@@ -194,10 +211,12 @@ services:
   #                 indexeddb, service workers, cache storage, network throttling
   chrome:
     profiles: [cdp]
-    image: browserless/chrome:latest
+    image: browserless/chrome@sha256:57d19e414d9fe4ae9d2ab12ba768c97f38d51246c5b31af55a009205c136012f
     container_name: beigebox-chrome
     ports:
       - "9222:3000"
+    networks:
+      - tools
     environment:
       # Enable remote debugging for CDP
       DEBUG: "browserless/chrome"
@@ -225,12 +244,14 @@ services:
   # Set MODEL_PATH to GGUF file or dir. BeigeBox will auto-route compatible models.
   llama-cpp:
     profiles: [engines-cpp]
-    image: ghcr.io/abetlen/llama-cpp-python:latest
+    image: ghcr.io/abetlen/llama-cpp-python@sha256:573a6f915ffc6f6420f5b688fd7df19b22b1b97392944dc91f266b65b59109f9
     container_name: beigebox-llama-cpp
     ports:
       - "${LLAMA_CPP_PORT:-8001}:8000"
     volumes:
       - llama_cpp_models:/models
+    networks:
+      - inference
     environment:
       - MODEL_PATH=${LLAMA_CPP_MODEL_PATH:-/models}
       - N_CTX=${LLAMA_CPP_CONTEXT:-4096}
@@ -250,17 +271,19 @@ services:
   # Set MODEL to HuggingFace model ID. GPU support via CUDA image + deploy block.
   vllm:
     profiles: [engines-vllm]
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai@sha256:96c7e88811a07030f27bc44cd71b9007258a15f130cfec2bb4ab057512238b05
     container_name: beigebox-vllm
     ports:
       - "${VLLM_PORT:-8002}:8000"
     volumes:
       - vllm_models:/root/.cache/huggingface
+    networks:
+      - inference
     environment:
       - MODEL=${VLLM_MODEL:-meta-llama/Llama-2-7b-hf}
       - MAX_MODEL_LEN=${VLLM_MAX_MODEL_LEN:-4096}
       - GPU_MEMORY_UTILIZATION=${VLLM_GPU_MEM:-0.9}
-      - TRUST_REMOTE_CODE=${VLLM_TRUST_REMOTE_CODE:-true}
+      - TRUST_REMOTE_CODE=${VLLM_TRUST_REMOTE_CODE:-false}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -284,12 +307,15 @@ services:
   # Generic containerized runtime. Expects pre-compiled .pte models.
   executorch:
     profiles: [engines-executorch]
+    # TODO: pin by digest once image is pulled — run: docker inspect pytorch/executorch:latest --format='{{index .RepoDigests 0}}'
     image: pytorch/executorch:latest
     container_name: beigebox-executorch
     ports:
       - "${EXECUTORCH_PORT:-8003}:8000"
     volumes:
       - executorch_models:/models
+    networks:
+      - inference
     environment:
       - MODEL_PATH=${EXECUTORCH_MODEL_PATH:-/models}
       - TORCH_DTYPE=${EXECUTORCH_DTYPE:-float32}
@@ -310,3 +336,23 @@ volumes:
   vllm_models:
   executorch_models:
   chrome_data:
+
+# ---------------------------------------------------------------------------
+# Network segmentation — isolate blast radius if any service is compromised
+# ---------------------------------------------------------------------------
+# llm:        beigebox ↔ ollama (inference + embeddings)
+# tools:      beigebox ↔ whisper, kokoro, chrome (voice + CDP)
+# inference:  beigebox ↔ llama-cpp, vllm, executorch (alt engines)
+#
+# Chrome, Whisper, and Kokoro cannot reach Ollama directly.
+# Ollama cannot reach Chrome or voice services directly.
+networks:
+  llm:
+    driver: bridge
+    internal: false
+  tools:
+    driver: bridge
+    internal: false
+  inference:
+    driver: bridge
+    internal: false

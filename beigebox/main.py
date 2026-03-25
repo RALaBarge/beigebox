@@ -331,86 +331,80 @@ async def lifespan(app: FastAPI):
         _asyncio.create_task(_auto_build_centroids())
 
     # Auto-ingest staged documents on startup
+    def _sync_ingest_staging():
+        """Synchronous worker: index staged docs. Runs in a thread via run_in_executor."""
+        import hashlib
+        import shutil
+        from beigebox.storage.chunker import chunk_text
+
+        staging_path = Path(__file__).parent.parent / "2600" / "2600-staging"
+        archive_path = Path(__file__).parent.parent / "2600" / "2599"
+        manifest_path = Path(__file__).parent.parent / "2600" / ".upload-manifest.json"
+
+        if not staging_path.exists():
+            return
+
+        staged_files = list(staging_path.glob("*.md"))
+        if not staged_files:
+            return
+
+        logger.info("Found %d staged document(s) in 2600-staging — indexing…", len(staged_files))
+
+        manifest = {}
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text())
+
+        if "files" not in manifest:
+            manifest["files"] = {}
+
+        for file_path in staged_files:
+            try:
+                content = file_path.read_text(encoding="utf-8")
+                md5 = hashlib.md5(content.encode()).hexdigest()
+
+                chunks = chunk_text(content, source_file=file_path.name)
+
+                for chunk in chunks:
+                    vector_store.store_document_chunk(
+                        source_file=file_path.name,
+                        chunk_index=chunk["chunk_index"],
+                        char_offset=chunk["char_offset"],
+                        blob_hash=md5,
+                        text=chunk["text"],
+                    )
+
+                manifest["files"][file_path.name] = {
+                    "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                    "md5": md5,
+                    "status": "uploaded"
+                }
+
+                archive_path.mkdir(parents=True, exist_ok=True)
+                dest = archive_path / file_path.name
+                shutil.move(str(file_path), str(dest))
+                logger.info("Indexed and archived: %s", file_path.name)
+
+            except Exception as e:
+                logger.error("Failed to ingest %s: %s", file_path.name, e)
+                manifest["files"][file_path.name] = {
+                    "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                    "md5": "",
+                    "status": "failed",
+                    "error": str(e)
+                }
+
+        manifest["last_sync"] = datetime.now(timezone.utc).isoformat()
+        manifest_path.write_text(json.dumps(manifest, indent=2))
+        logger.info("Staging ingest complete — manifest updated")
+
     async def _auto_ingest_staging():
-        """Check 2600/2600-staging/ for new documents and index them."""
+        """Fire-and-forget wrapper: runs sync ingest in a thread executor."""
         try:
-            staging_path = Path(__file__).parent.parent / "2600" / "2600-staging"
-            archive_path = Path(__file__).parent.parent / "2600" / "2599"
-            manifest_path = Path(__file__).parent.parent / "2600" / ".upload-manifest.json"
-
-            if not staging_path.exists():
-                return
-
-            # Find markdown files in staging
-            staged_files = list(staging_path.glob("*.md"))
-            if not staged_files:
-                return
-
-            logger.info("Found %d staged document(s) in 2600-staging — indexing…", len(staged_files))
-
-            # Index each file
-            from beigebox.storage.chunker import chunk_text
-            import hashlib
-
-            manifest = {}
-            if manifest_path.exists():
-                manifest = json.load(open(manifest_path))
-
-            if "files" not in manifest:
-                manifest["files"] = {}
-
-            for file_path in staged_files:
-                try:
-                    content = file_path.read_text(encoding="utf-8")
-                    md5 = hashlib.md5(content.encode()).hexdigest()
-
-                    # Chunk the document
-                    chunks = chunk_text(content, source_file=file_path.name)
-
-                    # Add to vector store
-                    for chunk in chunks:
-                        vector_store.add(
-                            text=chunk["text"],
-                            metadata={
-                                "source_type": "document",
-                                "source_path": file_path.name,
-                                "chunk_index": chunk["chunk_index"],
-                                "char_offset": chunk["char_offset"],
-                            }
-                        )
-
-                    # Update manifest
-                    manifest["files"][file_path.name] = {
-                        "uploaded_at": datetime.now(timezone.utc).isoformat(),
-                        "md5": md5,
-                        "status": "uploaded"
-                    }
-
-                    # Move to archive
-                    archive_path.mkdir(parents=True, exist_ok=True)
-                    dest = archive_path / file_path.name
-                    file_path.rename(dest)
-                    logger.info("Indexed and archived: %s", file_path.name)
-
-                except Exception as e:
-                    logger.error("Failed to ingest %s: %s", file_path.name, e)
-                    # Update manifest with failure status
-                    manifest["files"][file_path.name] = {
-                        "uploaded_at": datetime.now(timezone.utc).isoformat(),
-                        "md5": "",
-                        "status": "failed",
-                        "error": str(e)
-                    }
-
-            # Save updated manifest
-            manifest["last_sync"] = datetime.now(timezone.utc).isoformat()
-            manifest_path.write_text(json.dumps(manifest, indent=2))
-            logger.info("Staging ingest complete — manifest updated")
-
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, _sync_ingest_staging)
         except Exception as e:
             logger.warning("Staging ingest failed: %s", e)
 
-    # Fire-and-forget: ingest in background so startup finishes immediately
     asyncio.create_task(_auto_ingest_staging())
 
     yield
@@ -530,6 +524,32 @@ app = FastAPI(
 )
 
 app.add_middleware(ApiKeyMiddleware)
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Attach security headers to every response."""
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        # CSP: self + blob: (audio/image preview) + no inline scripts except index.html
+        # eval is blocked; data: URIs restricted to images only.
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob:; "
+            "media-src 'self' blob:; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none'"
+        )
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 # ---------------------------------------------------------------------------
@@ -781,10 +801,12 @@ async def agent_card():
 async def health():
     """Health check."""
     _st = get_state()
+    cfg = get_config()
     return JSONResponse({
         "status": "ok",
         "version": _BB_VERSION,
         "decision_llm": _st.decision_agent.enabled if _st.decision_agent else False,
+        "backend_url": cfg.get("backend", {}).get("url", "http://localhost:11434").rstrip("/"),
     })
 
 
@@ -3174,8 +3196,8 @@ async def api_ensemble(request: Request):
     """
     try:
         body = await request.json()
-    except:
-        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+    except (ValueError, UnicodeDecodeError) as e:
+        return JSONResponse({"error": f"Invalid JSON: {e}"}, status_code=400)
 
     prompt = body.get("prompt", "").strip()
     models = body.get("models", [])
@@ -3309,11 +3331,16 @@ async def api_workspace():
         for entry in os.scandir(dirpath):
             if entry.name == ".gitkeep":
                 continue
-            stat = entry.stat()
+            try:
+                stat = entry.stat()
+            except (FileNotFoundError, OSError):
+                # Broken symlink or inaccessible entry — skip it
+                continue
             entries.append({
                 "name": entry.name,
                 "size": stat.st_size,
                 "modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                "is_link": entry.is_symlink(),
             })
             total += stat.st_size
         entries.sort(key=lambda e: e["name"])
@@ -3408,6 +3435,132 @@ async def openrouter_balance():
             return JSONResponse(resp.json())
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
+
+
+# ── Artificial Analysis rankings cache ───────────────────────────────────────
+
+_aa_cache: dict = {"data": None, "fetched_at": 0.0}
+_AA_TTL = 3600  # 1 hour cache
+
+async def _fetch_aa_rankings() -> dict:
+    """Scrape Artificial Analysis agentic/coding rankings from the public page."""
+    now = time.time()
+    if _aa_cache["data"] and (now - _aa_cache["fetched_at"]) < _AA_TTL:
+        return _aa_cache["data"]
+
+    log = logging.getLogger(__name__)
+    url = "https://artificialanalysis.ai/models/capabilities/agentic"
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+        html = resp.text
+    except Exception as e:
+        log.warning("AA fetch failed: %s", e)
+        if _aa_cache["data"]:
+            return _aa_cache["data"]
+        return {"agentic": [], "coding": []}
+
+    try:
+        models = _parse_aa_models(html)
+    except Exception as e:
+        log.warning("AA parse failed: %s", e)
+        if _aa_cache["data"]:
+            return _aa_cache["data"]
+        return {"agentic": [], "coding": []}
+
+    active = [m for m in models if not m.get("deprecated") and not m.get("deleted")]
+
+    def _top15(field):
+        scored = [m for m in active if m.get(field) is not None]
+        scored.sort(key=lambda m: m[field], reverse=True)
+        return [
+            {
+                "name": m.get("short_name") or m.get("name", ""),
+                "creator": (m.get("model_creators") or {}).get("name", ""),
+                "slug": m.get("slug", ""),
+                "score": m[field],
+                "agentic_index": m.get("agentic_index"),
+                "coding_index": m.get("coding_index"),
+            }
+            for m in scored[:15]
+        ]
+
+    result = {"agentic": _top15("agentic_index"), "coding": _top15("coding_index")}
+    _aa_cache["data"] = result
+    _aa_cache["fetched_at"] = now
+    log.info("AA rankings refreshed: %d agentic, %d coding", len(result["agentic"]), len(result["coding"]))
+    return result
+
+
+def _parse_aa_models(html: str) -> list[dict]:
+    """Extract model list from Artificial Analysis Next.js RSC payload."""
+    marker = '\\"defaultData\\":'
+    idx = html.find(marker)
+    if idx < 0:
+        raise ValueError("defaultData marker not found")
+
+    # Find the enclosing self.__next_f.push([1,"..."]) call
+    push_prefix = 'self.__next_f.push([1,"'
+    push_start = html.rfind(push_prefix, 0, idx)
+    if push_start < 0:
+        raise ValueError("push() wrapper not found")
+    content_start = push_start + len(push_prefix)
+
+    # Find end of the JS string literal (unescaped " followed by ])
+    i = content_start
+    while i < len(html):
+        if html[i] == '"' and html[i - 1] != '\\':
+            if html[i + 1: i + 3] == '])':
+                break
+        i += 1
+    else:
+        raise ValueError("push() terminator not found")
+
+    js_string = html[content_start:i]
+    unescaped = js_string.replace('\\"', '"').replace('\\\\', '\\').replace('\\n', '\n')
+
+    dd_idx = unescaped.find('"defaultData":')
+    if dd_idx < 0:
+        raise ValueError("defaultData not found in unescaped content")
+    arr_start = dd_idx + len('"defaultData":')
+    remaining = unescaped[arr_start:]
+
+    # JSON-aware bracket tracking to find array end
+    depth = 0
+    in_str = False
+    escape = False
+    end = -1
+    for j, ch in enumerate(remaining):
+        if escape:
+            escape = False
+            continue
+        if ch == '\\':
+            escape = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch == '[':
+            depth += 1
+        elif ch == ']':
+            depth -= 1
+            if depth == 0:
+                end = j + 1
+                break
+
+    if end < 0:
+        raise ValueError("array end not found")
+    return json.loads(remaining[:end])
+
+
+@app.get("/api/v1/artificial-analysis/rankings")
+async def artificial_analysis_rankings():
+    """Return top-15 agentic and coding model rankings from Artificial Analysis."""
+    data = await _fetch_aa_rankings()
+    return JSONResponse(data)
 
 
 def _index_document(file_path: Path, vs, bs) -> None:
@@ -3667,6 +3820,13 @@ async def completions(request: Request):
 # Context Optimization Discovery Framework
 # ---------------------------------------------------------------------------
 
+@app.get("/api/v1/discovery/opportunities")
+async def discovery_list_opportunities():
+    """List all registered discovery opportunities with metadata."""
+    from beigebox.discovery import list_opportunities
+    return JSONResponse({"opportunities": list_opportunities(), "count": len(list_opportunities())})
+
+
 @app.post("/api/v1/discovery/run")
 async def discovery_run(request: Request):
     """
@@ -3674,68 +3834,81 @@ async def discovery_run(request: Request):
 
     POST /api/v1/discovery/run
     {
-        "opportunity_id": "position_sensitivity" | "context_compression" | ...,
-        "variants": [
-            {"name": "baseline", "config": {...}},
-            {"name": "variant_a", "config": {...}},
-        ],
-        "test_cases": [
-            {"input": "...", "expected": "..."},
-        ],
-        "weight_profile": "general" | "code" | "reasoning" | "safety"
+        "opportunity_id": "position_sensitivity",   // use a registered ID to auto-load
+        "weight_profile": "general" | "code" | "reasoning" | "safety",
+
+        // Optional overrides (omit to use the opportunity's built-in variants/test_cases):
+        "variants": [...],
+        "test_cases": [...]
     }
 
     Returns:
     {
-        "run_id": "<uuid>",
+        "run_id": str,
         "pareto_front": [...],
         "champion": {...},
-        "scorecards": [...]
+        "scorecards": [...],
+        "statistics": {...}   // Welch's t-test vs. baseline per challenger
     }
     """
     import uuid
-    from beigebox.eval.judge import JudgeRubric, DimensionScore
-    from beigebox.orchestration.pareto import ParetoOptimizer, ScoredVariant
-    from beigebox.eval.oracle import OracleRegistry
+    from beigebox.discovery import get_opportunity
+    from beigebox.discovery.runner import DiscoveryRunner
 
     state = get_state()
     body = await request.json()
 
-    from beigebox.discovery.runner import DiscoveryRunner
-    import asyncio
-
     opportunity_id = body.get("opportunity_id", "unknown")
-    variants = body.get("variants", [])
-    test_cases = body.get("test_cases", [])
     weight_profile = body.get("weight_profile", "general")
+    candidate_model = body.get("candidate_model") or None  # None → runner uses default
+    judge_model = body.get("judge_model") or None
 
-    if not variants:
+    # Try to resolve a registered opportunity
+    opportunity = get_opportunity(opportunity_id)
+
+    # Custom variants/test_cases override the opportunity's defaults
+    variants_override = body.get("variants")
+    test_cases_override = body.get("test_cases")
+
+    if opportunity is None and not variants_override:
         return JSONResponse(
-            {"error": "variants list required"},
+            {"error": f"Unknown opportunity_id '{opportunity_id}' and no variants provided. "
+                      f"GET /api/v1/discovery/opportunities for valid IDs."},
             status_code=400,
         )
 
     try:
-        # Use DiscoveryRunner to execute opportunity experiment
         runner = DiscoveryRunner(
             sqlite_store=state.sqlite_store,
-            judge_model="claude-opus",
-            backend_url=f"http://{get_config()['server']['host']}:{get_config()['server']['port']}",
+            candidate_model=candidate_model,
+            judge_model=judge_model,
         )
 
-        # Run the experiment (async)
-        result = await runner.run_opportunity(
-            opportunity_id=opportunity_id,
-            opportunity_name=body.get("opportunity_name", opportunity_id),
-            variants=variants,
-            test_cases=test_cases,
-            weight_profile=weight_profile,
-        )
+        if opportunity and not variants_override:
+            # Fully typed path — uses opportunity's transform() and test_cases()
+            if weight_profile != "general":
+                opportunity.WEIGHT_PROFILE = weight_profile
+            result = await runner.run(opportunity)
+        else:
+            # Generic / override path
+            variants = variants_override or (opportunity.VARIANTS if opportunity else [])
+            if not variants:
+                return JSONResponse({"error": "variants list required"}, status_code=400)
+            result = await runner.run_dict(
+                body={
+                    "opportunity_id": opportunity_id,
+                    "opportunity_name": body.get("opportunity_name", opportunity_id),
+                    "variants": variants,
+                    "test_cases": test_cases_override or [],
+                    "weight_profile": weight_profile,
+                },
+                opportunity=opportunity,
+            )
 
         return JSONResponse(result)
 
     except Exception as e:
-        logger.exception(f"Discovery experiment failed: {e}")
+        logger.exception("Discovery experiment failed: %s", e)
         return JSONResponse(
             {"error": f"Discovery failed: {str(e)}", "run_id": str(uuid.uuid4())[:8]},
             status_code=500,
@@ -3772,6 +3945,59 @@ async def discovery_results(
         "results": results,
         "count": len(results),
     })
+
+
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Bench — direct-to-Ollama speed benchmark (bypasses proxy)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/bench/run")
+async def bench_run(request: Request):
+    """
+    Run a speed benchmark directly against Ollama (/api/generate), bypassing BeigeBox proxy.
+
+    POST /api/v1/bench/run
+    {
+        "models": ["llama3.1:8b", "qwen2.5:7b"],
+        "prompt": "...",          // optional, uses default if omitted
+        "num_predict": 120,       // tokens to generate per run
+        "num_runs": 5             // measured runs per model (warmup is extra)
+    }
+
+    Returns Server-Sent Events stream. Each event is a JSON line prefixed "data: ".
+    Event types: start, warmup, run, model_done, done, error
+    """
+    from beigebox.bench import BenchmarkRunner, DEFAULT_PROMPT, DEFAULT_NUM_PREDICT, DEFAULT_NUM_RUNS
+
+    body = await request.json()
+    models = body.get("models", [])
+    if not models:
+        return JSONResponse({"error": "models list required"}, status_code=400)
+
+    prompt = body.get("prompt") or DEFAULT_PROMPT
+    num_predict = int(body.get("num_predict", DEFAULT_NUM_PREDICT))
+    num_runs = int(body.get("num_runs", DEFAULT_NUM_RUNS))
+
+    cfg = get_config()
+    ollama_url = cfg.get("backend", {}).get("url", "http://localhost:11434").rstrip("/")
+
+    runner = BenchmarkRunner(ollama_url=ollama_url)
+
+    async def event_stream():
+        try:
+            async for event in runner.run_stream(
+                models=models,
+                prompt=prompt,
+                num_predict=num_predict,
+                num_runs=num_runs,
+            ):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as exc:
+            logger.exception("bench_run stream error: %s", exc)
+            yield f"data: {json.dumps({'event': 'error', 'message': str(exc)})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 # ---------------------------------------------------------------------------

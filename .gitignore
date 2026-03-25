@@ -26,9 +26,15 @@ workspace/
 !workspace/out/.gitkeep
 !workspace/README.md
 
+# Logs
+logs/
+*.log
+
 # Secrets
 *.key
 *.pem
+*.p12
+*.pfx
 
 # Virtual environments
 .venv/

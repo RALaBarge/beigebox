@@ -1,0 +1,16 @@
+#!/bin/sh
+if git diff --cached --name-only | grep -q "^requirements\.txt$"; then
+    if ! command -v uv >/dev/null 2>&1; then
+        echo "pre-commit: requirements.txt changed but 'uv' is not installed." >&2
+        echo "Install with: pip install uv" >&2
+        exit 1
+    fi
+    echo "pre-commit: requirements.txt changed — regenerating requirements.lock..."
+    uv pip compile requirements.txt --generate-hashes --output-file requirements.lock --quiet
+    if [ $? -ne 0 ]; then
+        echo "pre-commit: uv pip compile failed." >&2
+        exit 1
+    fi
+    git add requirements.lock
+    echo "pre-commit: requirements.lock updated and staged."
+fi

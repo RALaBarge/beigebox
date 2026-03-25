@@ -1,0 +1,17 @@
+#!/bin/sh
+if ! command -v pip-audit >/dev/null 2>&1; then
+    echo "pre-push: pip-audit not found — skipping CVE scan. Install with: pip install pip-audit" >&2
+    exit 0
+fi
+if [ ! -f requirements.lock ]; then
+    echo "pre-push: requirements.lock not found — skipping." >&2
+    exit 0
+fi
+echo "pre-push: scanning requirements.lock for known CVEs..."
+if pip-audit -r requirements.lock --progress-spinner off 2>&1; then
+    echo "pre-push: no known CVEs found."
+    exit 0
+fi
+echo ""
+echo "pre-push: CVEs found. Update affected packages or push with --no-verify to bypass." >&2
+exit 1
