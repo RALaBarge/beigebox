@@ -60,9 +60,12 @@ services:
       - "${OLLAMA_PORT:-11434}:11434"
     volumes:
       - /mnt/storage/ollama:/root/.ollama
+    tmpfs:
+      - /tmp
     restart: unless-stopped
     networks:
       - llm
+    read_only: true
     environment:
       OLLAMA_NUM_PARALLEL: "3"
     healthcheck:
@@ -90,6 +93,9 @@ services:
         condition: service_started
     networks:
       - llm
+    read_only: true
+    tmpfs:
+      - /tmp
     command: >
       sh -c "sleep 5 &&
       curl -s http://ollama:11434/api/pull -d '{\"name\":\"nomic-embed-text\"}' &&
@@ -118,6 +124,10 @@ services:
         target: /app/workspace/in
         tmpfs:
           size: 536870912   # 512 MB — files never touch disk, auto-cleared on stop
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 268435456   # 256 MB — temp buffers, cleared on stop
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -133,6 +143,7 @@ services:
       ollama:
         condition: service_started
     restart: unless-stopped
+    read_only: true
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -166,8 +177,11 @@ services:
       - "${WHISPER_PORT:-9000}:8000"
     volumes:
       - whisper_cache:/root/.cache/huggingface
+    tmpfs:
+      - /tmp
     networks:
       - tools
+    read_only: true
     environment:
       - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-whisper-base}
       - WHISPER__DEVICE=cpu
@@ -191,8 +205,11 @@ services:
       - "${KOKORO_PORT:-8880}:8880"
     volumes:
       - kokoro_models:/app/models
+    tmpfs:
+      - /tmp
     networks:
       - tools
+    read_only: true
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8880/health"]
@@ -215,8 +232,11 @@ services:
     container_name: beigebox-chrome
     ports:
       - "9222:3000"
+    tmpfs:
+      - /tmp
     networks:
       - tools
+    read_only: true
     environment:
       # Enable remote debugging for CDP
       DEBUG: "browserless/chrome"
@@ -250,8 +270,11 @@ services:
       - "${LLAMA_CPP_PORT:-8001}:8000"
     volumes:
       - llama_cpp_models:/models
+    tmpfs:
+      - /tmp
     networks:
       - inference
+    read_only: true
     environment:
       - MODEL_PATH=${LLAMA_CPP_MODEL_PATH:-/models}
       - N_CTX=${LLAMA_CPP_CONTEXT:-4096}
@@ -277,8 +300,11 @@ services:
       - "${VLLM_PORT:-8002}:8000"
     volumes:
       - vllm_models:/root/.cache/huggingface
+    tmpfs:
+      - /tmp
     networks:
       - inference
+    read_only: true
     environment:
       - MODEL=${VLLM_MODEL:-meta-llama/Llama-2-7b-hf}
       - MAX_MODEL_LEN=${VLLM_MAX_MODEL_LEN:-4096}
@@ -314,8 +340,11 @@ services:
       - "${EXECUTORCH_PORT:-8003}:8000"
     volumes:
       - executorch_models:/models
+    tmpfs:
+      - /tmp
     networks:
       - inference
+    read_only: true
     environment:
       - MODEL_PATH=${EXECUTORCH_MODEL_PATH:-/models}
       - TORCH_DTYPE=${EXECUTORCH_DTYPE:-float32}
