@@ -1,3 +1,5 @@
+# ✅ COMPLETE — All 6 fixes applied. Runtime config key added, config endpoint reads it, web UI now has editable operator_model field (2026-03-23), harness supports model override, council mode allows request-body override.
+
 # Operator Model Configuration Audit
 
 ## Problem

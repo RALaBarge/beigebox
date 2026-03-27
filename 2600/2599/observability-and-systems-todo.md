@@ -1,3 +1,5 @@
+# ⚠️ PARTIAL — Some items done: operator background execution, verbose harness logging, VRAM stats via /api/ps. Remaining: orchestration profiles, web search source weighting, ensemble defaults UI, harness window config fixes.
+
 # Observability & Systems Backlog
 
 Items from 2026-03-16 planning session. Quick items are being worked immediately; these are medium and larger scope.

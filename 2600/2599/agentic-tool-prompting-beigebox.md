@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Reference document. 13 agentic tool-prompting patterns noted and available for operator/harness improvements. No further action required.
+
 # agentic tool use: prompting patterns for reliable tool calls
 
 > Compiled from current best practices across OpenAI function calling, Anthropic tool use, BrowserBox integration design, and practitioner patterns from the autoresearch/CDP analysis sessions.

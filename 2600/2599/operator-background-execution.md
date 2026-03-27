@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Implemented (commit f9450a75). Operator runs persist to localStorage + SQLite with run_id tracking, status polling, /api/v1/operator/{run_id} and /api/v1/operator/runs endpoints.
+
 # Operator Background Execution & Persistence
 
 **Version:** v1.3.1+

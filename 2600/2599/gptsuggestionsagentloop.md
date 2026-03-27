@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Reference research. Six-layer architecture patterns noted. No further action required.
+
 Most of them do **not** keep “re-explaining the whole mission” to the bot every loop.
 
 They usually split the problem into a few durable layers:

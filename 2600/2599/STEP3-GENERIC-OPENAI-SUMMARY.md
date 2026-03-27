@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Implemented and archived (pre-2026-03-16)
+
 # Step 3: Generic OpenAI-Compatible Backend
 
 **Problem**: BeigeBox only supports Ollama + OpenRouter. Users running llama.cpp, vLLM, TGI, or Aphrodite can't use them.

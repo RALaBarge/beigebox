@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Routing bugs diagnosed and fixed. Explicit model selection bypass (step 1.8 in _hybrid_route) prevents OpenRouter models from being overridden by embedding classifier. Backend partition logic (_can_attempt_model) verified correct.
+
 # "No backends available" — Root Cause Diagnosis
 
 **Branch:** `fix/ui-tools-bugs`

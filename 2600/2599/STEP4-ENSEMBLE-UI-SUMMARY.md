@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Implemented and archived (pre-2026-03-16)
+
 # Step 4: Ensemble Voting UI Integration
 
 **Problem**: Backend supports ensemble voting (`ensemble_voter.py` exists) but web UI has no way to trigger it.

@@ -801,6 +801,163 @@ def cmd_deployment_plan(args):
     print()
 
 
+def cmd_bench(args):
+    """Run a direct-to-Ollama speed benchmark (bypasses proxy)."""
+    import asyncio
+    import json
+
+    models = args.model or []
+    if not models:
+        print("  ✗  Provide at least one --model/-m <name>")
+        return
+
+    from beigebox.config import get_config
+    from beigebox.bench import BenchmarkRunner, DEFAULT_PROMPT, DEFAULT_NUM_PREDICT, DEFAULT_NUM_RUNS
+
+    cfg = get_config()
+    ollama_url = (args.ollama_url or cfg.get("backend", {}).get("url", "http://localhost:11434")).rstrip("/")
+    num_predict = args.num_predict or DEFAULT_NUM_PREDICT
+    num_runs = args.num_runs or DEFAULT_NUM_RUNS
+    prompt = args.prompt or DEFAULT_PROMPT
+
+    print(f"\n  BeigeBox Bench — direct Ollama speed test")
+    print(f"  Ollama:      {ollama_url}")
+    print(f"  Models:      {', '.join(models)}")
+    print(f"  Runs:        {num_runs} (+ 1 warmup each)")
+    print(f"  num_predict: {num_predict} tokens")
+    print()
+
+    async def _run():
+        runner = BenchmarkRunner(ollama_url=ollama_url)
+        async for event in runner.run_stream(
+            models=models,
+            prompt=prompt,
+            num_predict=num_predict,
+            num_runs=num_runs,
+        ):
+            etype = event.get("event", "")
+            if etype == "warmup":
+                status = event.get("status", "")
+                model = event.get("model", "")
+                if status == "starting":
+                    print(f"  ⟳  {model}  warming up…", flush=True)
+                elif status == "done":
+                    print(f"  ✓  {model}  warm  (load {event.get('load_ms', '?'):.0f} ms)", flush=True)
+                elif status == "error":
+                    print(f"  ✗  {model}  warmup error: {event.get('error', '')}", flush=True)
+            elif etype == "run":
+                r = event.get("result", {})
+                ok = r.get("ok", False)
+                tok_s = r.get("tok_s", 0)
+                ttft = r.get("ttft_ms", 0)
+                sym = "✓" if ok else "✗"
+                run_n = event.get("run", "?")
+                total = event.get("total", "?")
+                print(f"    {sym} run {run_n}/{total}  {tok_s:>7.1f} tok/s   ttft {ttft:.0f} ms", flush=True)
+            elif etype == "model_done":
+                s = event.get("summary", {})
+                print(f"\n  {s['model']}")
+                print(f"    avg  {s['avg_tokens_per_sec']:>7.1f} tok/s")
+                print(f"    med  {s['median_tokens_per_sec']:>7.1f} tok/s")
+                print(f"    ttft {s['avg_ttft_ms']:>7.1f} ms")
+                print()
+            elif etype == "done":
+                results = event.get("results", [])
+                print(f"  {'Model':<40} {'avg tok/s':>10}  {'med tok/s':>10}  {'TTFT ms':>8}  {'OK/Total':>8}")
+                print("  " + "─" * 85)
+                for r in results:
+                    ok_str = f"{r['runs_ok']}/{r['runs_total']}"
+                    print(f"  {r['model']:<40} {r['avg_tokens_per_sec']:>10.1f}  {r['median_tokens_per_sec']:>10.1f}  {r['avg_ttft_ms']:>8.1f}  {ok_str:>8}")
+                print()
+                if args.output:
+                    with open(args.output, "w") as f:
+                        json.dump(results, f, indent=2)
+                    print(f"  Results saved to: {args.output}")
+            elif etype == "error":
+                print(f"  ✗  {event.get('message', 'unknown error')}")
+
+    asyncio.run(_run())
+
+
+def cmd_experiment(args):
+    """Run a context optimization discovery experiment."""
+    import asyncio
+    import json
+    import httpx
+
+    url = getattr(args, "url", None) or "http://localhost:1337"
+    opportunity_id = args.opportunity
+    weight_profile = getattr(args, "weight_profile", "general") or "general"
+    output_file = getattr(args, "output", None)
+
+    # List mode
+    if getattr(args, "list", False):
+        try:
+            resp = httpx.get(f"{url}/api/v1/discovery/opportunities", timeout=10)
+            opps = resp.json().get("opportunities", [])
+            print(f"\n  {'ID':<35} {'Variants':<10} {'Expected Impact'}")
+            print("  " + "─" * 75)
+            for o in opps:
+                print(f"  {o['opportunity_id']:<35} {len(o['variants']):<10} {o['expected_impact']}")
+            print()
+        except Exception as e:
+            print(f"  ✗  Cannot reach BeigeBox at {url}: {e}")
+        return
+
+    if not opportunity_id:
+        print("  ✗  Provide --opportunity <id>  or  --list to see available experiments.")
+        return
+
+    print(f"\n  Running discovery experiment: {opportunity_id}")
+    print(f"  Weight profile: {weight_profile}")
+    print(f"  BeigeBox: {url}\n")
+
+    try:
+        resp = httpx.post(
+            f"{url}/api/v1/discovery/run",
+            json={"opportunity_id": opportunity_id, "weight_profile": weight_profile},
+            timeout=600,  # experiments can take a while
+        )
+        result = resp.json()
+    except Exception as e:
+        print(f"  ✗  Experiment failed: {e}")
+        return
+
+    if "error" in result:
+        print(f"  ✗  {result['error']}")
+        return
+
+    run_id = result.get("run_id", "?")
+    champion = result.get("champion") or {}
+    pareto = result.get("pareto_front", [])
+    scorecards = result.get("scorecards", [])
+    stats = result.get("statistics", {})
+    summary = result.get("summary", {})
+
+    print(f"  Run ID:     {run_id}")
+    print(f"  Champion:   {champion.get('name', 'none')}  (score={champion.get('weighted', 0):.3f})")
+    print(f"  Pareto:     {len(pareto)} variant(s) on frontier")
+    print(f"  Oracle:     {summary.get('oracle_pass_rate', '?'):.0%} pass rate")
+    print()
+
+    print(f"  {'Variant':<35} {'Score':>7}  {'Accuracy':>9}  {'Latency':>10}  Verdict")
+    print("  " + "─" * 85)
+    for sc in scorecards:
+        vname = sc["variant"]
+        score = sc.get("overall", 0)
+        acc = sc.get("scores", {}).get("accuracy", 0)
+        lat = sc.get("mean_latency_ms", 0)
+        stat = stats.get(vname, {})
+        verdict = stat.get("verdict", "baseline")
+        print(f"  {vname:<35} {score:>7.3f}  {acc:>9.1f}  {lat:>9.0f}ms  {verdict}")
+
+    print()
+    if output_file:
+        with open(output_file, "w") as f:
+            json.dump(result, f, indent=2)
+        print(f"  Results saved to: {output_file}")
+
+
 # ---------------------------------------------------------------------------
 # Parser with aliases
 # ---------------------------------------------------------------------------
@@ -939,6 +1096,39 @@ def main():
 
     _add_command(sub, ["deployment-plan", "capacity"],
                  "Print VRAM/RAM capacity plan and OOM risk flags", cmd_deployment_plan, setup_deployment_plan)
+
+    # bench / benchmark / speedtest
+    def setup_bench(p):
+        p.add_argument("--model", "-m", action="append", default=None,
+                       help="Model to benchmark (can specify multiple times)")
+        p.add_argument("--ollama-url", "-u", default=None,
+                       help="Ollama URL (default: from config, e.g. http://ollama:11434)")
+        p.add_argument("--num-runs", "-n", type=int, default=None,
+                       help=f"Measured runs per model (default: 5)")
+        p.add_argument("--num-predict", type=int, default=None,
+                       help=f"Tokens to generate per run (default: 120)")
+        p.add_argument("--prompt", default=None,
+                       help="Custom prompt (default: built-in ML explanation prompt)")
+        p.add_argument("--output", "-o", default=None,
+                       help="Write JSON results to this file")
+    _add_command(sub, ["bench", "benchmark", "speedtest"],
+                 "Direct-to-Ollama speed benchmark (bypasses proxy)", cmd_bench, setup_bench)
+
+    # experiment / exp
+    def setup_experiment(p):
+        p.add_argument("--opportunity", "-o", default=None,
+                       help="Opportunity ID to run (e.g. position_sensitivity)")
+        p.add_argument("--list", "-l", action="store_true",
+                       help="List all available opportunity IDs")
+        p.add_argument("--weight-profile", "-w", default="general",
+                       choices=["general", "code", "reasoning", "safety"],
+                       help="Scoring weight profile (default: general)")
+        p.add_argument("--url", "-u", default=None,
+                       help="BeigeBox URL (default: http://localhost:1337)")
+        p.add_argument("--output", default=None,
+                       help="Write full JSON results to this file")
+    _add_command(sub, ["experiment", "exp"],
+                 "Run a context optimization discovery experiment", cmd_experiment, setup_experiment)
 
     args = parser.parse_args()
     if not args.command:

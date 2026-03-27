@@ -137,23 +137,9 @@ class HarnessOrchestrator:
         elapsed_ms = _meta.get("latency_ms")
         token_estimate = max(1, len(content) // 4) if content else 0
 
-        # SQLite sink
-        if self._wire_db is not None:
-            try:
-                self._wire_db.log_wire_event(
-                    event_type=event_type,
-                    source="harness",
-                    content=content,
-                    role="harness",
-                    model=self.model or "",
-                    run_id=run_id,
-                    turn_id=turn_id,
-                    meta=meta,
-                )
-            except Exception as e:
-                logger.debug("_wire SQLite failed (%s): %s", event_type, e)
-
-        # JSONL sink — mirrors the WireLog.log() call pattern used by proxy.py
+        # WireLog handles both JSONL and SQLite (dual-write) when it has a
+        # sqlite_store.  We only fall back to a direct SQLite write when there
+        # is no WireLog instance at all.
         if self._wire_log is not None:
             try:
                 self._wire_log.log(
@@ -171,6 +157,21 @@ class HarnessOrchestrator:
                 )
             except Exception as e:
                 logger.debug("_wire JSONL failed (%s): %s", event_type, e)
+        elif self._wire_db is not None:
+            # Fallback: no WireLog, write directly to SQLite
+            try:
+                self._wire_db.log_wire_event(
+                    event_type=event_type,
+                    source="harness",
+                    content=content,
+                    role="harness",
+                    model=self.model or "",
+                    run_id=run_id,
+                    turn_id=turn_id,
+                    meta=meta,
+                )
+            except Exception as e:
+                logger.debug("_wire SQLite failed (%s): %s", event_type, e)
 
     # ── Public entry point ────────────────────────────────────────────────────
 

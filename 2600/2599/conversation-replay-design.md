@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Implemented and archived (pre-2026-03-16)
+
 # Conversation Replay Design (v0.6.0)
 
 ## Overview

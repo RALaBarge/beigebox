@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Implemented and archived (pre-2026-03-16)
+
 # Runtime Config Bug Fix — Complete
 
 **Issue**: Users toggle `conversation_replay` and `semantic_map` in the Config tab, save to `runtime_config.yaml`, but the endpoints still check static `config.yaml` and report "disabled".

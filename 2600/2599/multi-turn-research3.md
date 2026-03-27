@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Reference research. Speculative patterns (entropy-gated spawning, market-based token auctions, etc.) — not actionable, filed for reference.
+
 # 🧪 Speculative Multi-Agent Patterns: Ideas That Haven't Been Tried (Yet)
 
 Based on gaps in current frameworks and cross-domain inspiration, here are **15 novel concepts** for multi-agent architecture that push beyond today's documented patterns. These are thought experiments—some may be impractical, but all are designed to provoke new ways of thinking.

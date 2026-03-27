@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Implemented. VRAM discovery (pynvml), real-time metrics (psutil), 2s top-bar polling, passive SQLite discovery, CLI tools all shipped.
+
 ---
 title: Model Resource Visibility
 subtitle: RAM Footprint Discovery & Real-Time System Metrics in UI

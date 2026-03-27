@@ -3583,16 +3583,32 @@ function updateChatPageNav() {
 
 async function loadModelsForPanes() {
   let models = [];
+  let deviceSuffix = '';  // Device indicator for local models (e.g., " [CPU]" or " [GPU]")
+
   try {
     const d = await api('/v1/models');
     models = (d.data || d.models || []).map(m => m.id || m.name || m);
     allModels = models.map(id => ({id}));
+
+    // Fetch backend config to get device preference for local models
+    try {
+      const cfg = await api('/api/v1/config');
+      const backends = cfg.backends || [];
+      const ollamaBackend = backends.find(b => b.provider === 'ollama');
+      if (ollamaBackend && ollamaBackend.device_preference) {
+        const device = ollamaBackend.device_preference.toUpperCase();
+        deviceSuffix = ` [${device}]`;
+      }
+    } catch(e) {
+      // If we can't fetch config, just skip the device indicator
+    }
+
     // Populate council proposer model dropdown + store for council card selects
     _availModels = models;
     const councilSel = document.getElementById('council-op-model');
     if (councilSel) {
       councilSel.innerHTML = '<option value="">— operator default —</option>'
-        + models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+        + models.map(m => `<option value="${esc(m)}">${esc(m + deviceSuffix)}</option>`).join('');
     }
   } catch {}
 
@@ -3604,7 +3620,7 @@ async function loadModelsForPanes() {
     sel.innerHTML = `<option value="">default model</option><option value="@op" ${curVal==='@op'?'selected':''}>@operator</option>`;
     models.forEach(id => {
       const opt = document.createElement('option');
-      opt.value = id; opt.textContent = id;
+      opt.value = id; opt.textContent = id + deviceSuffix;
       if (id === curVal) opt.selected = true;
       sel.appendChild(opt);
     });
@@ -3618,7 +3634,7 @@ async function loadModelsForPanes() {
     opSel.innerHTML = `<option value="operator">operator (default)</option>`;
     models.forEach(id => {
       const opt = document.createElement('option');
-      opt.value = 'model:' + id; opt.textContent = 'model: ' + id;
+      opt.value = 'model:' + id; opt.textContent = 'model: ' + id + deviceSuffix;
       if ('model:' + id === curOp) opt.selected = true;
       opSel.appendChild(opt);
     });
@@ -3630,7 +3646,7 @@ async function loadModelsForPanes() {
     orchAddSel.innerHTML = `<option value="">＋ add target</option><option value="operator">operator</option>`;
     models.forEach(id => {
       const opt = document.createElement('option');
-      opt.value = 'model:' + id; opt.textContent = id;
+      opt.value = 'model:' + id; opt.textContent = id + deviceSuffix;
       orchAddSel.appendChild(opt);
     });
   }
@@ -3640,7 +3656,7 @@ async function loadModelsForPanes() {
     orchModelSel.innerHTML = `<option value="">— use operator default —</option>`;
     models.forEach(id => {
       const opt = document.createElement('option');
-      opt.value = id; opt.textContent = id;
+      opt.value = id; opt.textContent = id + deviceSuffix;
       if (id === cur) opt.selected = true;
       orchModelSel.appendChild(opt);
     });
@@ -3653,7 +3669,7 @@ async function loadModelsForPanes() {
     ensJudgeSel.innerHTML = `<option value="">— use operator default —</option>`;
     models.forEach(id => {
       const opt = document.createElement('option');
-      opt.value = id; opt.textContent = id;
+      opt.value = id; opt.textContent = id + deviceSuffix;
       if (id === cur) opt.selected = true;
       ensJudgeSel.appendChild(opt);
     });
@@ -7649,6 +7665,7 @@ function _bb_enabledChange(checked) {
       _backendsState.backends.unshift({
         name: 'ollama-local', provider: 'ollama',
         url: 'http://ollama:11434', priority: 1, api_key: '', allowed_models: [],
+        local_model: '', device_preference: 'cpu',
       });
     }
     // Auto-add OpenRouter backend if none exists
@@ -7692,6 +7709,13 @@ function renderBackendsSection() {
   </div>`;
 
   el.innerHTML = html;
+
+  // Populate local model dropdowns for Ollama backends
+  backends.forEach((b, i) => {
+    if (b.provider === 'ollama') {
+      populateLocalModelDropdown(i);
+    }
+  });
 }
 
 function _renderBackendCard(b, i) {
@@ -7739,6 +7763,25 @@ function _renderBackendCard(b, i) {
         oninput="_backendsState.backends[${i}].api_key=this.value"
         style="width:100%;font-family:monospace;${_bbInputStyle}">
     </div>` : ''}
+    ${b.provider === 'ollama' ? `<div style="display:flex;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">
+      <div style="display:flex;flex-direction:column;gap:2px;flex:1">
+        <label style="font-size:10px;color:var(--muted)">Default Local Model</label>
+        <select id="bk-local-model-${i}"
+          onchange="_backendsState.backends[${i}].local_model=this.value"
+          style="${_bbInputStyle}">
+          <option value="">— auto-detect —</option>
+          <option id="bk-lm-loading-${i}" disabled>Loading…</option>
+        </select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <label style="font-size:10px;color:var(--muted)">Device</label>
+        <select onchange="_backendsState.backends[${i}].device_preference=this.value"
+          style="${_bbInputStyle}">
+          <option value="cpu" ${(b.device_preference||'cpu')==='cpu'?'selected':''}>CPU</option>
+          <option value="gpu" ${(b.device_preference||'cpu')==='gpu'?'selected':''}>GPU</option>
+        </select>
+      </div>
+    </div>` : ''}`
     <div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
         <label style="font-size:10px;color:var(--muted)">Offered Models
@@ -7769,7 +7812,7 @@ function _renderBackendCard(b, i) {
 
 function addBackend() {
   if (!_backendsState) return;
-  _backendsState.backends.push({ name: '', provider: 'ollama', url: '', priority: 1, api_key: '', allowed_models: [] });
+  _backendsState.backends.push({ name: '', provider: 'ollama', url: '', priority: 1, api_key: '', allowed_models: [], local_model: '', device_preference: 'cpu' });
   renderBackendsSection();
 }
 
@@ -7865,6 +7908,26 @@ async function fetchBackendModels(i) {
     const input = document.getElementById(`bk-model-input-${i}`);
     if (input) input.placeholder = `Error: ${e.message}`;
     datalist.innerHTML = '';
+  }
+}
+
+async function populateLocalModelDropdown(i) {
+  const b = _backendsState.backends[i];
+  if (b.provider !== 'ollama') return;  // Only for Ollama backends
+
+  const select = document.getElementById(`bk-local-model-${i}`);
+  if (!select) return;
+
+  try {
+    const d = await api(`/api/v1/backends/${encodeURIComponent(b.name)}/models`);
+    const models = d.models || [];
+
+    // Rebuild the dropdown with available models
+    const currentValue = b.local_model || '';
+    select.innerHTML = '<option value="">— auto-detect —</option>' +
+      models.map(m => `<option value="${esc(m)}" ${m === currentValue ? 'selected' : ''}>${esc(m)}</option>`).join('');
+  } catch(e) {
+    select.innerHTML = `<option value="">Error: ${e.message}</option>`;
   }
 }
 

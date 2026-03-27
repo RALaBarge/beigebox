@@ -20,7 +20,7 @@ server:
 
 backend:
   default_model: "llama2"
-  url: "http://localhost:11434"  # Ollama default
+  url: "http://${OLLAMA_HOST:-localhost}:11434"  # Ollama — uses OLLAMA_HOST env var in Docker
   timeout: 120
 
 # Multi-backend routing (STEP 2 & 3: Retry logic + Generic OpenAI)
@@ -30,7 +30,7 @@ backends:
   # Primary: Local Ollama with retry logic
   - provider: ollama
     name: ollama-local
-    url: http://localhost:11434
+    url: "http://${OLLAMA_HOST:-localhost}:11434"
     timeout: 120
     priority: 1
     # STEP 2: Retry configuration for transient errors
@@ -321,3 +321,25 @@ advanced:
   # Use compression for wiretap (reduces disk usage)
   wiretap_compress: false
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Observability Egress
+# ─────────────────────────────────────────────────────────────────────────────
+# Fire-and-forget delivery of wire events to external sinks.
+# Events are batched and sent with exponential backoff retry.
+# Duplicate delivery is possible — receivers should be idempotent.
+
+# observability:
+#   egress:
+#     webhooks:
+#       - url: https://my-logging.example.com/ingest
+#         method: post                 # post (default) or put
+#         batch_size: 50               # flush after this many events
+#         batch_timeout_ms: 3000       # flush after this many ms (whichever fires first)
+#         max_retries: 2               # attempts after initial failure
+#         backoff_base: 1.5            # exponential backoff base (seconds)
+#         backoff_max: 10.0            # maximum backoff cap (seconds)
+#       - url: http://prometheus-pushgateway:9091
+#         method: put
+#         batch_size: 100
+#         batch_timeout_ms: 5000

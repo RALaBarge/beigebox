@@ -1,3 +1,5 @@
+# ✅ COMPLETE — CDP enabled by default. All phases complete: browserless/chrome in docker-compose (cdp profile), CDPTool registered in tool registry, operator tools: navigate, screenshot, dom_snapshot, click, type, scroll, eval, network capture, etc.
+
 # chrome devtools protocol for beigebox
 
 > Extracted from [Chrome DevTools MCP blog post](https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session), [HN discussion](https://news.ycombinator.com/item?id=47390817), [chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp), and [pasky/chrome-cdp-skill](https://github.com/pasky/chrome-cdp-skill).

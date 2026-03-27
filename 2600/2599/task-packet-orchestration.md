@@ -1,3 +1,5 @@
+# 🔄 FUTURE — Not implemented. TaskPacket boundary objects, PacketComposer context distillation, ResultValidator, StateMerger, worker profiles designed but not built. On roadmap for multi-agent context management.
+
 # Task Packet Orchestration: Multi-Agent Context Distillation
 
 **Author:** Architecture Team

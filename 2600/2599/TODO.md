@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Implemented and archived (pre-2026-03-16)
+
 # BeigeBox — TODO / Planned Work
 
 Roughly ordered by impact. Nothing here is broken — these are enhancements.

@@ -1,3 +1,5 @@
+# 🚫 WON'T DO — Decision made 2026-03-23: Option B (skip). Current tools: section works fine. Progressive tool disclosure benefit covered by MCP tool limiting (discover_tools) instead. No structural tools: reorganization planned.
+
 ---
 name: Phase 4 Tools Restructuring Strategy
 description: Tool configuration reorganization - core vs advanced vs plugins; tradeoffs analysis

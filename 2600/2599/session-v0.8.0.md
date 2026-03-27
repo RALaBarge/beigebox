@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Implemented and archived (pre-2026-03-16)
+
 # Session Archive — v0.8.0 (Feb 20 2026, evening)
 
 ## What was built this session

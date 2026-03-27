@@ -1,3 +1,5 @@
+# 🔄 FUTURE — Tap redesign documented but not fully implemented. Current WireLog/Tap is functional. Full redesign (structured event taxonomy, egress hooks, compression) partially done via observability egress hooks. Full spec not yet executed.
+
 # Tap Redesign — Interactive Trace Surface
 
 Design doc. Figure out where everything lives before building the pipeline.

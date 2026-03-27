@@ -1,3 +1,5 @@
+# ⚠️ PARTIAL — Duplicate of CODEBASE-AUDIT.md findings. Same status: quick wins applied, strategic refactors deferred.
+
 # Code Quality Audit — 2026-03-16
 
 Audit of three files ordered by complexity (harness → proxy → index.html).

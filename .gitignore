@@ -54,3 +54,4 @@ html_beigebox/
 wasm_modules/*/target/
 
 CLAUDE.md
+.claude/

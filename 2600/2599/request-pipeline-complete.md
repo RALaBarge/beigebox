@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Reference document. The 14-stage pipeline (parse → z-command → session cache → embedding classifier → decision LLM → route → pre-hooks → semantic cache → backend stream → WASM transform → cache store → metrics → Tap) is fully implemented as described.
+
 # Complete Request Pipeline Diagram
 
 Full end-to-end flow of a `/v1/chat/completions` request through BeigeBox.

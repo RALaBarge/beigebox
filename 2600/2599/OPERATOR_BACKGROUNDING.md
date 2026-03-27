@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Planning doc superseded by implementation (commit f9450a75). Hybrid localStorage + backend persistence fully shipped.
+
 # Operator Background Execution & Persistence
 
 ## Current Behavior

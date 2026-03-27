@@ -566,6 +566,27 @@ class Proxy:
                         await self._set_session_model(conversation_id, body.get("model", self.default_model))
                     return body, None
 
+        # 1.8. Explicit model selection — if the user picked a specific model that
+        #       differs from the default, honour their choice and skip the ML
+        #       routing stack (classifier + decision LLM).  This prevents
+        #       OpenRouter models from being overridden to local models, and
+        #       lets users pin any model without the classifier second-guessing.
+        _explicit_model = body.get("model", "")
+        if _explicit_model and _explicit_model != self.default_model:
+            _request_route.set("explicit_model")
+            await self._set_session_model(conversation_id, _explicit_model)
+            self.wire.log(
+                direction="internal",
+                role="decision",
+                content=f"explicit model selection: {_explicit_model} — skipping classifier/decision LLM",
+                model="routing",
+                conversation_id=conversation_id,
+                event_type="routing_decision",
+                source="router",
+                meta={"tier": "explicit", "model_chosen": _explicit_model},
+            )
+            return body, None
+
         # 1.5. Agentic pre-filter — near-zero cost, runs before embedding classifier
         #      High agentic score means the user wants tool use — log it and let
         #      the embedding classifier / decision LLM decide the route, but the

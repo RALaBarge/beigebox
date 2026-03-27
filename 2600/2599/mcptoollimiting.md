@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Implemented 2026-03-23. Progressive tool disclosure: resident set + discover_tools meta-tool + capability index in mcp_server.py.
+
 Yes. That is the right direction.
 
 A literal “click for more” UI is usually the wrong abstraction for the model, but **progressive tool disclosure** is the right system design. With large tool sets, quality tends to get worse when the model sees too many options, and current guidance explicitly recommends deferring rarely used tools rather than always stuffing all schemas into context. OpenAI’s current function-calling docs describe pairing function calling with **tool search** so rarely used tools are loaded only when needed, and recent MCP production guidance similarly recommends ruthlessly curating exposure rather than exposing everything at once. ([OpenAI Developers][1])

@@ -1,3 +1,5 @@
+# 🚫 WON'T DO — Decision made 2026-03-23: Option C (skip). Current storage/wiretap/payload_log sections work. No log retention/archival needed yet. Let it grow until it breaks.
+
 ---
 name: Phase 5 Storage/Persistence Consolidation Strategy
 description: Unify storage, wiretap, payload_log into coherent persistence section; tradeoffs analysis

@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Tested and removed. BitNet b1.58 2B-4T was evaluated and not integrated into BeigeBox.
+
 #!/bin/bash
 ################################################################################
 # BitNet b1.58 2B-4T Quick Start Script

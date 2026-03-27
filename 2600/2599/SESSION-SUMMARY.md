@@ -1,3 +1,5 @@
+# ⚠️ PARTIAL — Config refactoring: Phase 1 (feature flags) complete. Phase 2 (models registry + agents) largely complete. Phase 3 (routing config structure) complete in YAML; code-side tier abstraction skipped (won't fix). Phases 4 and 5 explicitly skipped (options B and C chosen 2026-03-23).
+
 ---
 name: Session Summary - Config Refactoring + Codebase Audit
 description: Complete summary of work completed in one session

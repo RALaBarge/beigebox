@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Implemented. Drop markdown in 2600/2600-staging/, server auto-chunks (1200 chars, 150 overlap), embeds via nomic-embed-text, archives originals, updates .upload-manifest.json on startup. Integrated with operator document_search tool.
+
 # Staging & Auto-Ingest System
 
 Automatic document indexing workflow for BeigeBox design docs.

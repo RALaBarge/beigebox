@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Implemented and archived (pre-2026-03-16)
+
 I see calls going out to the internet and to browserbox but they always say it dun dont work...no records of calls hitting the extension but i do see the log entries going out of beigeboxc
 
 councel needs to have a list of models to choose from -- i dont want a 70b getting picked

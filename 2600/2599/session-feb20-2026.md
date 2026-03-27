@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Implemented and archived (pre-2026-03-16)
+
 # 2600 Archive — Code Review & Session Notes
 
 ## Kimi Code Review (Pre-v0.6)

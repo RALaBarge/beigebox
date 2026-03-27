@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Implemented and archived (pre-2026-03-16)
+
 # Step 2: Backend Retry/Cooldown — Complete Implementation
 
 **Problem**: Ollama models return 404 when still loading. BeigeBox fails immediately instead of retrying.

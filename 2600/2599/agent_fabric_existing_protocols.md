@@ -1,3 +1,5 @@
+# ⚠️ PARTIAL — mDNS/DNS-SD (zeroconf) + SPIFFE identity + NATS heartbeat implemented in amf_mesh.py. AsyncAPI contract definition and MQTT broker not implemented. Low priority until federated multi-node deployment is needed.
+
 # Existing Protocols for Agent Fabric Implementation
 
 This document surveys existing standards and protocols you can repurpose for building an agent fabric—grouped by architectural layer, with notes on how each maps to your agent fabric concept.

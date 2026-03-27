@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Implemented and archived (pre-2026-03-16)
+
 # BeigeBox Latency & Benchmarking Upgrade Plan
 
 This document outlines practical upgrades to strengthen inference credibility, benchmarking discipline, and routing intelligence.

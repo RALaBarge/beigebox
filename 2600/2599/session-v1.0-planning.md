@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Implemented and archived (pre-2026-03-16)
+
 # Session Notes — v1.0 Planning
 *Left by: Claude, end of the v0.9 completion session*
 *Date: February 2026*

@@ -1,3 +1,5 @@
+# ⚠️ PARTIAL — Phase 1 (feature flags): complete. Phase 2 (models registry + agents config): largely complete, operator_model now editable in web UI (2026-03-23). Phase 3: routing YAML structure complete; code-side tier abstraction (router.py/proxy.py) explicitly skipped — no capability gain vs migration cost. Phases 4-5 won't do.
+
 ---
 name: Config Refactoring Phases 1-3 Implementation Guide
 description: Complete guide to feature flags, agents, models, and routing consolidation

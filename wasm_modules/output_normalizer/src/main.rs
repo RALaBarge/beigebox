@@ -48,21 +48,25 @@ fn is_json(text: &str) -> bool {
         && (trimmed.ends_with('}') || trimmed.ends_with(']'))
 }
 
-/// Detect if text is Python code
-fn is_python_code(text: &str) -> bool {
-    let lower = text.to_lowercase();
-    lower.contains("def ") || lower.contains("class ")
-        || lower.contains("import ") || lower.contains("from ")
-        || lower.contains("if __name__")
+/// Check if any line starts with a keyword (case-sensitive).
+fn has_line_starting_with(text: &str, keywords: &[&str]) -> bool {
+    text.lines().any(|line| {
+        let t = line.trim();
+        keywords.iter().any(|kw| t.starts_with(kw))
+    })
 }
 
-/// Detect if text is JavaScript/TypeScript code
+/// Detect if text is Python code.
+/// Uses line-start matching + case-sensitive keywords to avoid false positives
+/// on prose containing "from" or "class".
+fn is_python_code(text: &str) -> bool {
+    has_line_starting_with(text, &["def ", "class ", "import ", "from ", "if __name__"])
+}
+
+/// Detect if text is JavaScript/TypeScript code.
 fn is_js_code(text: &str) -> bool {
-    let lower = text.to_lowercase();
-    lower.contains("function ") || lower.contains("const ")
-        || lower.contains("let ") || lower.contains("var ")
-        || lower.contains("export ") || lower.contains("import ")
-        || lower.contains("=>")
+    has_line_starting_with(text, &["function ", "const ", "let ", "var ", "export ", "import "])
+        || text.contains("=>")
 }
 
 /// Detect if text is Shell/Bash code
@@ -72,12 +76,14 @@ fn is_shell_code(text: &str) -> bool {
         || (text.contains("$") && text.contains("|"))
 }
 
-/// Detect if text is SQL
+/// Detect if text is SQL (requires line-start keywords, case-insensitive)
 fn is_sql(text: &str) -> bool {
-    let upper = text.to_uppercase();
-    upper.contains("SELECT ") || upper.contains("INSERT ")
-        || upper.contains("UPDATE ") || upper.contains("DELETE ")
-        || upper.contains("FROM ") || upper.contains("WHERE ")
+    text.lines().any(|line| {
+        let upper = line.trim().to_uppercase();
+        upper.starts_with("SELECT ") || upper.starts_with("INSERT ")
+            || upper.starts_with("UPDATE ") || upper.starts_with("DELETE ")
+            || upper.starts_with("CREATE ") || upper.starts_with("ALTER ")
+    })
 }
 
 /// Strip common opening phrases
@@ -101,12 +107,18 @@ fn strip_preamble(text: &str) -> String {
 
     let trimmed = text.trim();
     for (preamble, suffix) in preambles {
-        if trimmed.to_lowercase().starts_with(&preamble.to_lowercase()) {
-            let after_preamble = if trimmed.len() > preamble.len() {
-                &trimmed[preamble.len()..]
-            } else {
-                trimmed
-            };
+        // Case-insensitive prefix check using char-by-char comparison
+        // to avoid byte-length mismatch from to_lowercase().
+        let matches = trimmed.chars().zip(preamble.chars())
+            .all(|(a, b)| a.to_lowercase().eq(b.to_lowercase()))
+            && trimmed.chars().count() >= preamble.chars().count();
+        if matches {
+            // Skip by char count, not byte count, to stay on char boundaries
+            let byte_offset: usize = trimmed.char_indices()
+                .nth(preamble.chars().count())
+                .map(|(i, _)| i)
+                .unwrap_or(trimmed.len());
+            let after_preamble = &trimmed[byte_offset..];
 
             let result = after_preamble.trim_start();
             if !suffix.is_empty() && result.contains(suffix) {
@@ -165,7 +177,7 @@ fn normalize_medium(text: &str) -> String {
     let lines: Vec<&str> = minimal.lines().collect();
     let mut result: Vec<String> = Vec::new();
 
-    for (i, line) in lines.iter().enumerate() {
+    for (_i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
         // Empty lines between sections
@@ -182,9 +194,9 @@ fn normalize_medium(text: &str) -> String {
             continue;
         }
 
-        // Detect numbered lists
-        if trimmed.len() > 2 && trimmed.chars().next().unwrap().is_numeric()
-            && trimmed.chars().nth(1) == Some('.') {
+        // Detect numbered lists (handles multi-digit: 1., 10., 100.)
+        if trimmed.chars().next().map_or(false, |c| c.is_ascii_digit())
+            && trimmed.find(". ").map_or(false, |dot_pos| trimmed[..dot_pos].chars().all(|c| c.is_ascii_digit())) {
             result.push(line.to_string());
             continue;
         }
@@ -305,6 +317,9 @@ mod tests {
         assert!(is_python_code("def foo():\n    pass"));
         assert!(is_python_code("class MyClass:\n    pass"));
         assert!(is_python_code("import os"));
+        // Should NOT match prose containing these words mid-sentence
+        assert!(!is_python_code("I imported a package from the store"));
+        assert!(!is_python_code("The class action lawsuit was filed"));
     }
 
     #[test]

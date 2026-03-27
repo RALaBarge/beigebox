@@ -1,3 +1,5 @@
+# ✅ COMPLETE — Reference research. Autoresearch loop patterns for self-tuning classifier/routing documented. Not yet built as a feature but design is captured.
+
 # autoresearch for beigebox
 
 > Adapted from [karpathy/autoresearch](https://github.com/karpathy/autoresearch) and [hwchase17/autoresearch-agents](https://github.com/hwchase17/autoresearch-agents). The Karpathy Loop applied to BeigeBox middleware optimization.
