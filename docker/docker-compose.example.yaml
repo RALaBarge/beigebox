@@ -1,0 +1,213 @@
+# BeigeBox — Full Stack (Middleware + LLM) — EXAMPLE (CPU-only)
+# Tap the line. Control the carrier.
+#
+# QUICKSTART:
+#   cp docker-compose.example.yaml docker-compose.yaml
+#   cp ../config.example.yaml ../config.yaml
+#   docker compose up -d
+#
+# PROFILES:
+#   (default)           Ollama (CPU) + BeigeBox — transparent proxy + integrated UI
+#   voice               adds Whisper (STT) + Kokoro (TTS)
+#   cdp                 adds Chromium with CDP (Chrome DevTools Protocol) for browser automation
+#   engines-cpp         use llama.cpp instead of Ollama (quantized models, minimal resource)
+#   engines-vllm        use vLLM instead of Ollama (production-grade inference)
+#
+# EXAMPLES:
+#   docker compose up -d                              # full stack, Ollama (CPU)
+#   docker compose --profile cdp up -d                # + Chromium for browser automation
+#   docker compose --profile voice up -d              # + voice I/O
+#   docker compose --profile cdp --profile voice up -d # + browser automation + voice
+#   docker compose --profile engines-cpp up -d        # use llama.cpp instead
+#   docker compose --profile engines-vllm up -d       # use vLLM instead
+#   docker compose up -d beigebox                     # proxy only (external Ollama)
+#
+# GPU SUPPORT (NVIDIA only):
+#   1. Uncomment the 'deploy' block on the ollama service below
+#   2. Ensure nvidia-container-toolkit is installed: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+#   3. Run: docker compose up -d
+#
+# CONFIGURATION:
+#   cp env.example .env  → set OLLAMA_DATA, ports, API keys
+#
+# SERVICES:
+#   ollama          → :11434  LLM inference engine (default)
+#   beigebox        → :1337   transparent proxy + integrated web UI
+#   whisper         → :9000   speech-to-text (voice profile)
+#   kokoro          → :8880   text-to-speech (voice profile)
+#   chrome          → :9222   Chrome DevTools Protocol (cdp profile)
+#   llama-cpp       → :8001   C++ inference (engines-cpp profile)
+#   vllm            → :8002   Production inference (engines-vllm profile)
+#
+# ALTERNATIVE FRONTENDS:
+#   BeigeBox exposes OpenAI-compatible /v1 endpoint.
+#   Use any frontend (Open WebUI, LM Studio, etc):
+#   docker run -d -p 3000:8080 \
+#     -e OPENAI_API_BASE_URL=http://host.docker.internal:1337/v1 \
+#     -e OPENAI_API_KEY=any-key \
+#     ghcr.io/open-webui/open-webui:main
+
+services:
+  # ---------------------------------------------------------------------------
+  # Ollama — LLM inference (CPU by default, GPU optional)
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama@sha256:0ff452f6a4c3c5bb4ab063a1db190b261d5834741a519189ed5301d50e4434d1
+    container_name: beigebox-ollama
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - /mnt/storage/ollama:/root/.ollama
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    networks:
+      - llm
+    read_only: true
+    environment:
+      OLLAMA_NUM_PARALLEL: "3"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # ---------------------------------------------------------------------------
+    # GPU SUPPORT: Uncomment the deploy block below if you have NVIDIA GPU
+    # Requires: nvidia-container-toolkit installed on host
+    # ---------------------------------------------------------------------------
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # ---------------------------------------------------------------------------
+  # Model pull — runs once to ensure required models exist
+  # ---------------------------------------------------------------------------
+  ollama-model-pull:
+    image: curlimages/curl@sha256:d94d07ba9e7d6de898b6d96c1a072f6f8266c687af78a74f380087a0addf5d17
+    container_name: beigebox-model-pull
+    depends_on:
+      ollama:
+        condition: service_started
+    networks:
+      - llm
+    read_only: true
+    tmpfs:
+      - /tmp
+    command: >
+      sh -c "sleep 5 &&
+      curl -s http://ollama:11434/api/pull -d '{\"name\":\"llama3.2:3b\"}' > /dev/null &&
+      curl -s http://ollama:11434/api/pull -d '{\"name\":\"nomic-embed-text\"}' > /dev/null &&
+      echo 'Models ready'"
+
+  # ---------------------------------------------------------------------------
+  # BeigeBox — OpenAI-compatible proxy + web UI
+  # ---------------------------------------------------------------------------
+  beigebox:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: beigebox
+    depends_on:
+      ollama:
+        condition: service_started
+      ollama-model-pull:
+        condition: service_completed_successfully
+    ports:
+      - "${BEIGEBOX_PORT:-1337}:8001"
+    volumes:
+      - ../config.yaml:/app/config.yaml:ro         # Mount your local config
+      - ../runtime_config.yaml:/app/runtime_config.yaml:rw  # Hot-reload
+      - beigebox-data:/app/data                   # Persistent storage
+      - beigebox-workspace:/app/workspace         # Agent workspace
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+      PYTHONUNBUFFERED: "1"
+    restart: unless-stopped
+    networks:
+      - llm
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/beigebox/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # Voice (Optional — profile: voice)
+  # STT: Faster-Whisper, TTS: Kokoro
+  # ---------------------------------------------------------------------------
+  whisper:
+    image: openai/whisper-api:latest
+    container_name: beigebox-whisper
+    ports:
+      - "9000:8000"
+    volumes:
+      - whisper-cache:/root/.cache
+    restart: unless-stopped
+    networks:
+      - llm
+    profiles:
+      - voice
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  kokoro:
+    image: hexgrad/kokoro:latest
+    container_name: beigebox-kokoro
+    ports:
+      - "8880:8880"
+    restart: unless-stopped
+    networks:
+      - llm
+    profiles:
+      - voice
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  # ---------------------------------------------------------------------------
+  # CDP — Chromium with Chrome DevTools Protocol (Optional — profile: cdp)
+  # Browser automation for operator tool use
+  # ---------------------------------------------------------------------------
+  chrome:
+    image: ghcr.io/browserless/chrome:latest
+    container_name: beigebox-chrome
+    ports:
+      - "9222:9222"
+    environment:
+      DEBUG: "browserless:*"
+      DEFAULT_LAUNCH_ARGS: '["--no-sandbox"]'
+    restart: unless-stopped
+    networks:
+      - llm
+    profiles:
+      - cdp
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /data
+
+networks:
+  llm:
+    driver: bridge
+
+volumes:
+  beigebox-data:
+    driver: local
+  beigebox-workspace:
+    driver: local
+  whisper-cache:
+    driver: local

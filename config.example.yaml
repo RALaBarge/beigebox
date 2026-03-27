@@ -1,0 +1,278 @@
+# BeigeBox Configuration — Example (CPU-only, minimal setup)
+#
+# QUICKSTART:
+#   1. Copy this file to config.yaml
+#   2. Customize for your setup (GPU, backends, features)
+#   3. For runtime overrides, use runtime_config.yaml (hot-reload, no restart)
+#
+# For the full v1.0+ production config with all options documented, see:
+# https://github.com/yourusername/beigebox/wiki/Configuration
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Features — Minimal defaults (extend as needed)
+# ─────────────────────────────────────────────────────────────────────────────
+
+features:
+  backends: true                  # Multi-backend routing
+  decision_llm: true              # Judge/routing LLM
+  classifier: true                # Embedding classifier
+  semantic_cache: false           # Semantic deduplication cache
+  operator: true                  # LLM-driven tool use
+  harness: true                   # Multi-agent orchestrator
+  tools: true                     # Function calling
+  cost_tracking: false            # Estimate token costs (enable if using APIs)
+  conversation_replay: true       # Replay conversations from SQLite
+  auto_summarization: false       # Compress long contexts
+  system_context: false           # Inject system_context.md into every request
+  wiretap: true                   # Log all requests/responses
+  payload_log: false              # Log full payloads to payload.jsonl
+  wasm: false                     # WASM transform pipeline
+  guardrails: false               # Input/output content filtering
+  amf_mesh: false                 # Service mesh advertisement
+  voice: false                    # Speech-to-text + text-to-speech
+  hooks: false                    # Custom middleware hooks
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Server Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
+server:
+  host: "0.0.0.0"
+  port: 8001
+  log_level: "INFO"
+  log_conversations: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Backend Configuration — Ollama (local inference)
+# ─────────────────────────────────────────────────────────────────────────────
+
+backend:
+  default_model: "llama3.2:3b"  # CPU-friendly default
+  url: "http://${OLLAMA_HOST:-localhost}:11434"
+  timeout: 120
+  model_paths:
+    - "/mnt/storage/models"        # Primary: fast storage
+    - "${HOME}/.ollama/models"     # Fallback: user home
+
+backends_enabled: true
+
+backends:
+  # Primary: Local Ollama (CPU-only by default)
+  - provider: ollama
+    name: ollama-local
+    url: "http://${OLLAMA_HOST:-localhost}:11434"
+    timeout: 120
+    timeout_ms: 120000             # 2 min for slower models
+    priority: 2
+    max_retries: 2
+    backoff_base: 1.5
+    backoff_max: 10.0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Storage Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
+storage:
+  type: sqlite
+  path: ./data/beigebox.db
+  vector_store_path: ./data/chroma
+  vector_backend: chromadb
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Wiretap (Request/Response Logging)
+# ─────────────────────────────────────────────────────────────────────────────
+
+wiretap:
+  enabled: true
+  path: ./data/wire.jsonl
+  max_lines: 100000
+  rotation_enabled: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Models Registry
+# ─────────────────────────────────────────────────────────────────────────────
+
+models:
+  default: "llama3.2:3b"
+  profiles:
+    routing: "llama3.2:3b"         # Decision LLM
+    agentic: "llama3.2:3b"         # Operator
+    summary: "llama3.2:3b"         # Auto-summarization
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Decision LLM (Intelligent Routing)
+# ─────────────────────────────────────────────────────────────────────────────
+
+decision_llm:
+  enabled: true
+  temperature: 0.2
+  system_prompt: "You are a helpful routing assistant."
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Operator (Agentic Tool Use)
+# ─────────────────────────────────────────────────────────────────────────────
+
+operator:
+  enabled: true
+  model: "llama3.2:3b"
+  tool_profiles:
+    minimal:
+      - web_search
+      - calculator
+      - datetime
+    standard:
+      - web_search
+      - web_scraper
+      - calculator
+      - datetime
+      - memory
+      - cdp
+    full:
+      - web_search
+      - web_scraper
+      - calculator
+      - datetime
+      - memory
+      - cdp
+      - document_search
+  model_tool_profiles: {}
+  autonomous:
+    enabled: false
+    max_turns: 5
+  max_iterations: 10
+  timeout: 300
+  run_timeout: 600
+  allowed_tools: []
+  shell:
+    enabled: true
+    shell_binary: "/usr/local/bin/bb"
+    allowed_commands: []
+    blocked_patterns:
+      - "> /home"
+      - ">> /home"
+      - "> ~"
+      - ">> ~"
+      - "^rm "
+      - "^sudo "
+      - "dd "
+      - "mkfs"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Harness Orchestrator (Multi-agent)
+# ─────────────────────────────────────────────────────────────────────────────
+
+harness:
+  enabled: true
+  ralph_enabled: false
+  store_runs: true
+  max_stored_runs: 1000
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tools (Function Calling)
+# ─────────────────────────────────────────────────────────────────────────────
+
+tools:
+  enabled: true
+  registry:
+    - name: web_search
+      description: "Search the web for current information"
+      enabled: true
+    - name: web_scraper
+      description: "Scrape a webpage for content"
+      enabled: true
+    - name: calculator
+      description: "Perform mathematical calculations"
+      enabled: true
+    - name: datetime_tool
+      description: "Get current date/time in any timezone"
+      enabled: true
+    - name: system_info
+      description: "Get system information and run shell commands"
+      enabled: true
+  cdp:
+    enabled: true
+    ws_url: ws://localhost:9222
+    timeout: 10
+  memory:
+    enabled: true
+    max_results: 3
+    min_score: 0.3
+  plugins:
+    enabled: true
+    path: ./plugins
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Embedding & Classification
+# ─────────────────────────────────────────────────────────────────────────────
+
+embedding:
+  model: "nomic-embed-text"
+  backend: "ollama"
+
+classifier:
+  enabled: true
+  centroid_rebuild_interval: 3600
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Routing Pipeline
+# ─────────────────────────────────────────────────────────────────────────────
+
+routing:
+  session_cache:
+    ttl_seconds: 3600
+  classifier:
+    enabled: true
+  semantic_cache:
+    enabled: false
+  decision_llm:
+    enabled: true
+    temperature: 0.2
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Z-Commands (Special syntax like "z: code", "z: search")
+# ─────────────────────────────────────────────────────────────────────────────
+
+zcommands:
+  enabled: true
+  prefix: "z:"
+  commands:
+    - name: "search"
+      description: "Search for information"
+      route_to: "semantic_search"
+    - name: "code"
+      description: "Code generation and analysis"
+      route_to: "operator"
+    - name: "complex"
+      description: "Complex reasoning task"
+      route_to: "harness"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Web UI Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
+web_ui:
+  palette: "dark"
+  vi_mode: false
+  voice_enabled: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging
+# ─────────────────────────────────────────────────────────────────────────────
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "./logs/beigebox.log"
+  max_bytes: 10485760
+  backup_count: 5
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Advanced Settings
+# ─────────────────────────────────────────────────────────────────────────────
+
+advanced:
+  session_cache_ttl: 3600
+  max_concurrent_requests: 10
+  request_timeout: 300
+  embedding_batch_size: 32
+  wiretap_compress: false

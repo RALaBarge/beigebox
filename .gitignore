@@ -1,6 +1,12 @@
 # Local env overrides — machine-specific, never commit
 docker/.env
+docker/docker-compose.yml
+docker/docker-compose.yaml
 .env
+
+# Local configs — copy from *.example.yaml, customize, never commit
+config.yaml
+runtime_config.yaml
 
 # Python
 __pycache__/
