@@ -2484,6 +2484,168 @@ def _reduce_plan_state(workspace_out: Path) -> dict:
     }
 
 
+@app.post("/api/v1/dgm/run")
+async def api_dgm_run(request: Request):
+    """
+    DGM self-improvement loop — iteratively proposes and tests config changes.
+
+    Proposes ONE config change per iteration, runs probe requests before/after,
+    judges the difference with a rotating pairwise rubric, keeps improvements.
+
+    Body:
+        iterations          int   (default 20)  — max iterations to run
+        rotation_interval   int   (default 5)   — rubric rotation cadence
+        confidence_threshold float (default 0.65) — min confidence to keep a change
+        n_probes            int   (default 3)   — probe requests per iteration
+
+    SSE events:
+        {type:"start",         run_id, iterations, rotation_interval, threshold}
+        {type:"iteration_start", iteration, total, rubric, rotate_in}
+        {type:"proposal",      iteration, key, value, reasoning}
+        {type:"kept",          iteration, key, value, rubric, confidence, reasoning}
+        {type:"reverted",      iteration, key, rubric, confidence, winner}
+        {type:"rubric_rotated", iteration, old_rubric, new_rubric}
+        {type:"early_stop",    reason}
+        {type:"complete",      run_id, kept, iterations_run, keep_rate, total_ms}
+        {type:"error",         message}
+    """
+    import json as _json
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    n_iterations        = int(body.get("iterations", 20))
+    rotation_interval   = int(body.get("rotation_interval", 5))
+    confidence_threshold = float(body.get("confidence_threshold", 0.65))
+    n_probes            = int(body.get("n_probes", 3))
+
+    async def _stream():
+        from beigebox.dgm.loop import DGMLoop, Probe, _FALLBACK_PROBES
+        from beigebox.dgm.rubrics import RubricRotator
+        from beigebox.dgm.judge import DGMJudge
+        from beigebox.dgm.proposer import DGMProposer
+        from beigebox.dgm.patcher import ConfigPatcher
+        import uuid
+
+        run_id = str(uuid.uuid4())[:8]
+
+        def emit(obj: dict) -> str:
+            return f"data: {_json.dumps(obj)}\n\n"
+
+        yield emit({"type": "start", "run_id": run_id, "iterations": n_iterations,
+                    "rotation_interval": rotation_interval, "threshold": confidence_threshold})
+
+        cfg = get_config()
+        routing_model = cfg.get("models", {}).get("profiles", {}).get("routing", "llama3.2:3b")
+        proxy_url = f"http://localhost:{cfg.get('server', {}).get('port', 8001)}"
+
+        loop = DGMLoop(
+            judge=DGMJudge(judge_model=routing_model, backend_url=proxy_url),
+            proposer=DGMProposer(proposer_model=routing_model, backend_url=proxy_url),
+            patcher=ConfigPatcher(),
+            rotator=RubricRotator(rotation_interval=rotation_interval),
+            n_probes=n_probes,
+            confidence_threshold=confidence_threshold,
+            patience=max(5, n_iterations // 4),
+            proxy_url=proxy_url,
+        )
+
+        history = []
+        kept_count = 0
+        no_improvement_streak = 0
+        patience = max(5, n_iterations // 4)
+
+        import asyncio as _aio
+        for i in range(n_iterations):
+            rubric = loop._rotator.current()
+            rotate_in = loop._rotator.to_dict()["next_rotation_at"]
+
+            yield emit({"type": "iteration_start", "iteration": i + 1, "total": n_iterations,
+                        "rubric": rubric.name, "rotate_in": rotate_in})
+
+            # Sample probes
+            probes = await loop._sample_probes(run_id)
+            if not probes:
+                probes = _FALLBACK_PROBES[:n_probes]
+
+            # Propose
+            proposal = await loop._proposer.propose(rubric, history)
+            if not proposal:
+                no_improvement_streak += 1
+                if no_improvement_streak >= patience:
+                    yield emit({"type": "early_stop", "reason": f"patience={patience} exhausted"})
+                    break
+                continue
+
+            patch = proposal.patch
+            yield emit({"type": "proposal", "iteration": i + 1, "key": patch.key,
+                        "value": patch.value, "reasoning": patch.reasoning})
+
+            # Apply
+            patch_result = loop._patcher.apply(patch)
+            if not patch_result.ok:
+                no_improvement_streak += 1
+                continue
+
+            await _aio.sleep(0.5)  # let hot-reload settle
+
+            # Re-run probes
+            new_responses = await loop._run_probes(probes, run_id)
+
+            # Judge
+            verdicts = []
+            for probe, new_resp in zip(probes, new_responses):
+                v = await loop._judge.compare(
+                    request=probe.request,
+                    response_a=probe.response,
+                    response_b=new_resp,
+                    rubric=rubric,
+                )
+                verdicts.append(v)
+
+            b_wins = sum(1 for v in verdicts if v.b_wins())
+            avg_conf = sum(v.confidence for v in verdicts) / len(verdicts) if verdicts else 0.0
+            winner = "B" if b_wins > len(verdicts) / 2 else "A"
+            best_reasoning = max(verdicts, key=lambda v: v.confidence).reasoning if verdicts else ""
+
+            keep = (winner == "B" and avg_conf >= confidence_threshold)
+
+            if keep:
+                kept_count += 1
+                no_improvement_streak = 0
+                yield emit({"type": "kept", "iteration": i + 1, "key": patch.key,
+                            "value": patch.value, "rubric": rubric.name,
+                            "confidence": avg_conf, "reasoning": best_reasoning})
+            else:
+                loop._patcher.revert(patch, patch_result.original)
+                no_improvement_streak += 1
+                yield emit({"type": "reverted", "iteration": i + 1, "key": patch.key,
+                            "rubric": rubric.name, "confidence": avg_conf, "winner": winner})
+
+            history.append({"iteration": i + 1, "key": patch.key, "value": patch.value,
+                             "rubric": rubric.name, "winner": winner,
+                             "confidence": avg_conf, "kept": keep})
+
+            # Tick rotator
+            old_rubric = loop._rotator.current().name
+            rotated = loop._rotator.tick()
+            if rotated:
+                yield emit({"type": "rubric_rotated", "iteration": i + 1,
+                            "old_rubric": old_rubric, "new_rubric": loop._rotator.current().name})
+
+            if no_improvement_streak >= patience:
+                yield emit({"type": "early_stop", "reason": f"patience={patience} exhausted"})
+                break
+
+        keep_rate = kept_count / max(len(history), 1)
+        yield emit({"type": "complete", "run_id": run_id, "kept": kept_count,
+                    "iterations_run": len(history), "keep_rate": keep_rate, "total_ms": 0})
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
 @app.post("/api/v1/harness/autonomous")
 async def api_harness_autonomous(request: Request):
     """
