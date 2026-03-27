@@ -30,6 +30,8 @@ flowchart LR
 git clone --recursive https://github.com/ralabarge/beigebox.git
 cd beigebox/docker
 cp env.example .env        # optional — set GPU, ports, API keys
+cp docker-compose.example.yaml docker-compose.yaml
+cp ../config.example.yaml ../config.yaml
 docker compose up -d
 ```
 
