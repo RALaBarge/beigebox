@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from beigebox.mcp_server import McpServer
     from beigebox.amf_mesh import AmfMeshAdvertiser
     from beigebox.observability.egress import EgressHook
+    from beigebox.web_auth import WebAuthManager
 
 
 @dataclass
@@ -40,6 +41,7 @@ class AppState:
     cost_tracker: CostTracker | None = None
     embedding_classifier: Any = None
     auth_registry: MultiKeyAuthRegistry | None = None
+    web_auth: WebAuthManager | None = None
     mcp_server: McpServer | None = None
     amf_advertiser: AmfMeshAdvertiser | None = None
     egress_hooks: list[Any] = field(default_factory=list)  # list[EgressHook]

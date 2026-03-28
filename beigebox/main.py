@@ -19,6 +19,7 @@ Now with:
 import asyncio
 import logging
 import os
+import secrets
 import time
 import json
 from contextlib import asynccontextmanager
@@ -50,6 +51,9 @@ from beigebox.hooks import HookManager
 from beigebox.backends.router import MultiBackendRouter
 from beigebox.costs import CostTracker
 from beigebox.auth import MultiKeyAuthRegistry
+from beigebox.web_auth import WebAuthManager, COOKIE_SESSION, COOKIE_STATE
+
+_COOKIE_VERIFIER = "bb_oauth_cv"  # PKCE code_verifier (short-lived)
 from beigebox.mcp_server import McpServer
 from beigebox.amf_mesh import AmfMeshAdvertiser
 from beigebox.app_state import AppState
@@ -198,6 +202,9 @@ async def lifespan(app: FastAPI):
     # Auth registry (multi-key, agentauth-backed)
     auth_registry = MultiKeyAuthRegistry(cfg.get("auth", {}))
 
+    # Web UI OAuth shim
+    web_auth = WebAuthManager(cfg.get("auth", {}).get("web_ui", {}))
+
     # MCP server — expose operator/run if operator is enabled
     _op_enabled_for_mcp = cfg.get("operator", {}).get("enabled", False)
     _op_mcp_factory = None
@@ -271,6 +278,7 @@ async def lifespan(app: FastAPI):
         cost_tracker=cost_tracker,
         embedding_classifier=embedding_classifier,
         auth_registry=auth_registry,
+        web_auth=web_auth,
         mcp_server=mcp_server,
         amf_advertiser=amf_advertiser,
         egress_hooks=egress_hooks,
@@ -425,8 +433,9 @@ async def lifespan(app: FastAPI):
 # Auth middleware — single API key, disabled when key is empty
 # ---------------------------------------------------------------------------
 
-# Paths that never require auth (web UI + basic health checks)
+# Paths that never require API-key auth (web UI, health checks, OAuth flow)
 _AUTH_EXEMPT = frozenset(["/", "/ui", "/beigebox/health", "/api/v1/status"])
+_AUTH_EXEMPT_PREFIXES = ("/web/", "/auth/")
 
 
 class ApiKeyMiddleware(BaseHTTPMiddleware):
@@ -453,7 +462,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         path = request.url.path
-        if path in _AUTH_EXEMPT or path.startswith("/web/"):
+        if path in _AUTH_EXEMPT or any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIXES):
             return await call_next(request)
 
         # Extract token
@@ -514,6 +523,52 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
 
 
 # ---------------------------------------------------------------------------
+# Web UI auth middleware — session cookie gate for browser paths
+# ---------------------------------------------------------------------------
+
+# Paths that WebAuthMiddleware protects when oauth mode is active
+_WEB_UI_PATHS    = frozenset(["/", "/ui"])
+_WEB_UI_PREFIXES = ("/web/",)
+
+
+class WebAuthMiddleware(BaseHTTPMiddleware):
+    """
+    Gates web UI paths behind a signed session cookie when oauth is enabled.
+
+    API paths (/v1/, /api/) are not touched — those use Bearer token auth.
+    The OAuth flow paths (/auth/*) are always exempt.
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        if _app_state is None or _app_state.web_auth is None or not _app_state.web_auth.is_enabled():
+            return await call_next(request)
+
+        path = request.url.path
+
+        # Auth flow is always exempt
+        if path.startswith("/auth/"):
+            return await call_next(request)
+
+        # Only gate web UI paths
+        is_web = path in _WEB_UI_PATHS or any(path.startswith(p) for p in _WEB_UI_PREFIXES)
+        if not is_web:
+            return await call_next(request)
+
+        # Validate session cookie
+        token = request.cookies.get(COOKIE_SESSION, "")
+        user  = _app_state.web_auth.verify_session(token) if token else None
+
+        if user is None:
+            from starlette.responses import RedirectResponse
+            providers  = _app_state.web_auth.list_providers()
+            login_path = f"/auth/{providers[0]}/login" if providers else "/"
+            return RedirectResponse(url=login_path, status_code=302)
+
+        request.state.web_user = user
+        return await call_next(request)
+
+
+# ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
 app = FastAPI(
@@ -524,6 +579,7 @@ app = FastAPI(
 )
 
 app.add_middleware(ApiKeyMiddleware)
+app.add_middleware(WebAuthMiddleware)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -808,6 +864,123 @@ async def health():
         "decision_llm": _st.decision_agent.enabled if _st.decision_agent else False,
         "backend_url": cfg.get("backend", {}).get("url", "http://localhost:11434").rstrip("/"),
     })
+
+
+# ---------------------------------------------------------------------------
+# OAuth routes — /auth/{provider}/login, /callback, /logout, /me
+# ---------------------------------------------------------------------------
+
+@app.get("/auth/{provider}/login")
+async def oauth_login(provider: str, request: Request):
+    """Redirect browser to the OAuth provider's authorization page."""
+    from starlette.responses import RedirectResponse
+    st = get_state()
+    if st.web_auth is None or not st.web_auth.is_enabled():
+        return JSONResponse({"error": "OAuth not configured"}, status_code=501)
+    prov = st.web_auth.get_provider(provider)
+    if prov is None:
+        return JSONResponse({"error": f"Unknown provider: {provider}"}, status_code=404)
+
+    state        = st.web_auth.make_state()
+    redirect_uri = str(request.url_for("oauth_callback", provider=provider))
+    auth_url, code_verifier = prov.get_authorization_url(redirect_uri=redirect_uri, state=state)
+
+    is_secure = request.url.scheme == "https"
+    resp = RedirectResponse(url=auth_url, status_code=302)
+    resp.set_cookie(COOKIE_STATE, state, httponly=True, samesite="lax", secure=is_secure, max_age=600)
+    resp.set_cookie(_COOKIE_VERIFIER, code_verifier, httponly=True, samesite="lax", secure=is_secure, max_age=600)
+    return resp
+
+
+@app.get("/auth/{provider}/callback", name="oauth_callback")
+async def oauth_callback(
+    provider: str,
+    request: Request,
+    code: str = "",
+    state: str = "",
+    error: str = "",
+):
+    """Exchange OAuth code for a session cookie."""
+    from starlette.responses import RedirectResponse
+    st = get_state()
+    if st.web_auth is None or not st.web_auth.is_enabled():
+        return JSONResponse({"error": "OAuth not configured"}, status_code=501)
+
+    if error:
+        return JSONResponse({"error": f"OAuth error: {error}"}, status_code=400)
+
+    # CSRF state check — constant-time comparison
+    expected = request.cookies.get(COOKIE_STATE, "")
+    if not expected or not secrets.compare_digest(state, expected):
+        return JSONResponse({"error": "Invalid OAuth state — try logging in again"}, status_code=400)
+
+    prov = st.web_auth.get_provider(provider)
+    if prov is None:
+        return JSONResponse({"error": f"Unknown provider: {provider}"}, status_code=404)
+
+    redirect_uri    = str(request.url_for("oauth_callback", provider=provider))
+    code_verifier   = request.cookies.get(_COOKIE_VERIFIER, "")
+
+    try:
+        user_info = await prov.exchange_code(code=code, redirect_uri=redirect_uri, code_verifier=code_verifier)
+    except PermissionError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=403)
+    except Exception as exc:
+        logger.error("OAuth callback error (%s): %s", provider, exc)
+        return JSONResponse({"error": "OAuth exchange failed"}, status_code=500)
+
+    # Persist / update user row
+    if st.sqlite_store:
+        user_id = st.sqlite_store.upsert_user(
+            provider=user_info.provider,
+            sub=user_info.sub,
+            email=user_info.email,
+            name=user_info.name,
+            picture=user_info.picture,
+        )
+    else:
+        import hashlib
+        user_id = hashlib.sha256(f"{user_info.provider}:{user_info.sub}".encode()).hexdigest()[:32]
+
+    session_token = st.web_auth.sign_session(
+        user_id=user_id,
+        email=user_info.email,
+        name=user_info.name,
+        picture=user_info.picture,
+    )
+
+    is_secure = request.url.scheme == "https"
+    resp = RedirectResponse(url="/ui", status_code=302)
+    resp.set_cookie(
+        COOKIE_SESSION, session_token,
+        httponly=True, samesite="lax", secure=is_secure,
+        max_age=60 * 60 * 24 * 7,
+    )
+    resp.delete_cookie(COOKIE_STATE)
+    resp.delete_cookie(_COOKIE_VERIFIER)
+    return resp
+
+
+@app.get("/auth/logout")
+async def oauth_logout():
+    """Clear the session cookie and redirect to the root."""
+    from starlette.responses import RedirectResponse
+    resp = RedirectResponse(url="/", status_code=302)
+    resp.delete_cookie(COOKIE_SESSION)
+    return resp
+
+
+@app.get("/auth/me")
+async def auth_me(request: Request):
+    """Return current web user info, or {authenticated: false}."""
+    st = get_state()
+    if st.web_auth is None or not st.web_auth.is_enabled():
+        return JSONResponse({"authenticated": False, "mode": "none"})
+    token = request.cookies.get(COOKIE_SESSION, "")
+    user  = st.web_auth.verify_session(token) if token else None
+    if user is None:
+        return JSONResponse({"authenticated": False})
+    return JSONResponse({"authenticated": True, **user})
 
 
 # ---------------------------------------------------------------------------

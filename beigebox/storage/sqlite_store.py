@@ -190,6 +190,19 @@ CREATE INDEX IF NOT EXISTS idx_orchestration_profiles_name
     ON orchestration_profiles(name);
 CREATE INDEX IF NOT EXISTS idx_orchestration_profiles_enabled
     ON orchestration_profiles(enabled);
+
+CREATE TABLE IF NOT EXISTS users (
+    id         TEXT PRIMARY KEY,
+    provider   TEXT NOT NULL,
+    sub        TEXT NOT NULL,       -- provider-unique subject ID
+    email      TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    picture    TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    last_seen  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    UNIQUE(provider, sub)
+);
+CREATE INDEX IF NOT EXISTS idx_users_provider_sub ON users(provider, sub);
 """
 
 # Migrations: append-only ALTER TABLE statements that add new columns to
@@ -210,6 +223,8 @@ MIGRATIONS = [
     # CREATE TABLE is in CREATE_TABLES (IF NOT EXISTS), migrations only needed for
     # existing DBs that don't have the table yet — handled by _init_db CREATE_TABLES.
     # Index migrations are also safe (CREATE INDEX IF NOT EXISTS in CREATE_TABLES).
+    # v1.0 — web auth: user tracking
+    "ALTER TABLE conversations ADD COLUMN user_id TEXT DEFAULT NULL",
 ]
 
 
@@ -250,13 +265,47 @@ class SQLiteStore:
         finally:
             conn.close()
 
-    def ensure_conversation(self, conversation_id: str, created_at: str):
+    def ensure_conversation(self, conversation_id: str, created_at: str, user_id: str | None = None):
         """Create conversation record if it doesn't exist."""
         with self._connect() as conn:
             conn.execute(
-                "INSERT OR IGNORE INTO conversations (id, created_at) VALUES (?, ?)",
-                (conversation_id, created_at),
+                "INSERT OR IGNORE INTO conversations (id, created_at, user_id) VALUES (?, ?, ?)",
+                (conversation_id, created_at, user_id),
             )
+
+    # ------------------------------------------------------------------
+    # User management (web auth)
+    # ------------------------------------------------------------------
+
+    def upsert_user(self, provider: str, sub: str, email: str, name: str, picture: str) -> str:
+        """Insert or update a user row; return the stable user_id UUID."""
+        import uuid
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id FROM users WHERE provider=? AND sub=?",
+                (provider, sub),
+            ).fetchone()
+            if row:
+                user_id = row["id"]
+                conn.execute(
+                    "UPDATE users SET email=?, name=?, picture=?, last_seen=? WHERE id=?",
+                    (email, name, picture, now, user_id),
+                )
+            else:
+                user_id = str(uuid.uuid4())
+                conn.execute(
+                    "INSERT INTO users (id, provider, sub, email, name, picture, created_at, last_seen) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (user_id, provider, sub, email, name, picture, now, now),
+                )
+        return user_id
+
+    def get_user(self, user_id: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+            return dict(row) if row else None
 
     def store_message(self, msg: Message, cost_usd: float | None = None, latency_ms: float | None = None, ttft_ms: float | None = None):
         """Store a single message. Creates conversation if needed."""
