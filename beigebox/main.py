@@ -1917,6 +1917,17 @@ async def api_tap(
     return JSONResponse({"entries": entries, "total": total, "filtered": len(entries)})
 
 
+@app.get("/api/v1/inspector")
+async def api_inspector(n: int = 5):
+    """Return the last N outbound LLM requests from the ring buffer, newest-first."""
+    n = min(max(1, n), 5)
+    proxy = get_state().proxy
+    if proxy is None:
+        return JSONResponse({"requests": [], "total": 0})
+    entries = list(reversed(list(proxy._request_inspector)))[:n]
+    return JSONResponse({"requests": entries, "total": len(entries)})
+
+
 # ---------------------------------------------------------------------------
 # Orchestrator (v0.6)
 # ---------------------------------------------------------------------------

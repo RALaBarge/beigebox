@@ -23,6 +23,8 @@ import logging
 import asyncio
 import time
 import fnmatch
+import copy
+from collections import deque
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -127,6 +129,9 @@ class Proxy:
         self.guardrails = Guardrails(self.cfg)
         # Response format validator — optional, non-blocking
         self.response_validator = ResponseValidator(self.cfg)
+        # Request inspector — ring buffer of last N outbound payloads
+        self._request_inspector: deque = deque(maxlen=5)
+        self._inspector_counter: int = 0
 
     # ------------------------------------------------------------------
     # Session cache helpers
@@ -1170,6 +1175,31 @@ class Proxy:
                 conversation_id=conversation_id,
             )
 
+        # Inspector ring buffer — capture final outbound payload
+        _insp_entry = None
+        if not is_synthetic:
+            self._inspector_counter += 1
+            _insp_entry = {
+                "idx": self._inspector_counter,
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "model": body.get("model", model),
+                "backend_url": self.backend_url if not self.backend_router else "(via router)",
+                "conv_id": conversation_id,
+                "messages": copy.deepcopy(body.get("messages", [])),
+                "generation_params": {
+                    k: body[k] for k in
+                    ["temperature", "top_p", "top_k", "max_tokens", "num_ctx",
+                     "repeat_penalty", "seed", "stop", "stream", "options"]
+                    if k in body
+                },
+                "message_count": len(body.get("messages", [])),
+                "total_chars": sum(len(str(m.get("content", ""))) for m in body.get("messages", [])),
+                "latency_ms": None,
+                "ttft_ms": None,
+                "status": "pending",
+            }
+            self._request_inspector.append(_insp_entry)
+
         # Forward to backend — use router if available, otherwise direct
         # H3: response is only assigned inside the router branch; initialise to
         # None here so any future code that references it outside that branch
@@ -1183,6 +1213,10 @@ class Proxy:
             response = await self.backend_router.forward(body)
             _stages["backend"] = (_time.monotonic() - _t_backend) * 1000
             if not response.ok:
+                # Inspector — finalize error
+                if _insp_entry is not None:
+                    _insp_entry["latency_ms"] = round(_stages.get("backend", 0), 1)
+                    _insp_entry["status"] = "error"
                 # Return error as a chat response so clients handle it gracefully
                 return {
                     "choices": [{"message": {"role": "assistant",
@@ -1201,6 +1235,11 @@ class Proxy:
                 resp.raise_for_status()
                 data = resp.json()
             _stages["backend"] = (_time.monotonic() - _t_backend) * 1000
+
+        # Inspector — finalize latency
+        if _insp_entry is not None:
+            _insp_entry["latency_ms"] = round(_stages.get("backend", 0), 1)
+            _insp_entry["status"] = "complete"
 
         # WASM transform (non-streaming) — operates on full response dict
         wasm_mod = decision.wasm_module if decision else ""
@@ -1400,6 +1439,31 @@ class Proxy:
                 conversation_id=conversation_id,
             )
 
+        # Inspector ring buffer — capture final outbound payload
+        _insp_entry = None
+        if not is_synthetic:
+            self._inspector_counter += 1
+            _insp_entry = {
+                "idx": self._inspector_counter,
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "model": body.get("model", model),
+                "backend_url": self.backend_url if not self.backend_router else "(via router)",
+                "conv_id": conversation_id,
+                "messages": copy.deepcopy(body.get("messages", [])),
+                "generation_params": {
+                    k: body[k] for k in
+                    ["temperature", "top_p", "top_k", "max_tokens", "num_ctx",
+                     "repeat_penalty", "seed", "stop", "stream", "options"]
+                    if k in body
+                },
+                "message_count": len(body.get("messages", [])),
+                "total_chars": sum(len(str(m.get("content", ""))) for m in body.get("messages", [])),
+                "latency_ms": None,
+                "ttft_ms": None,
+                "status": "pending",
+            }
+            self._request_inspector.append(_insp_entry)
+
         # full_response accumulates token deltas so we can log and cache the
         # complete assistant message after streaming. It's also the WASM input
         # buffer when a module is active.
@@ -1505,6 +1569,9 @@ class Proxy:
                 })
                 yield f"data: {err_chunk}\n"
                 yield "data: [DONE]\n\n"
+                if _insp_entry is not None:
+                    _insp_entry["latency_ms"] = round((_time.monotonic() - _t_backend) * 1000, 1)
+                    _insp_entry["status"] = "error"
                 return
             except httpx.RequestError as e:
                 logger.error("Backend connection error for model '%s': %s", model, e)
@@ -1514,11 +1581,20 @@ class Proxy:
                 })
                 yield f"data: {err_chunk}\n"
                 yield "data: [DONE]\n\n"
+                if _insp_entry is not None:
+                    _insp_entry["latency_ms"] = round((_time.monotonic() - _t_backend) * 1000, 1)
+                    _insp_entry["status"] = "error"
                 return
 
         # Wall-clock stream duration
         _stages["backend"] = (_time.monotonic() - _t_backend) * 1000
         total_ms = (_time.monotonic() - _t0) * 1000
+
+        # Inspector — finalize latency
+        if _insp_entry is not None:
+            _insp_entry["latency_ms"] = round(total_ms, 1)
+            _insp_entry["ttft_ms"] = round(_stages.get("ttft_ms", 0), 1)
+            _insp_entry["status"] = "complete"
 
         # Log request completion
         try:
