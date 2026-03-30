@@ -1975,6 +1975,7 @@
     <div class="subnav">
       <button id="lab-sub-exp-btn" class="subnav-active" onclick="switchLabSub('experiments')">Experiments</button>
       <button id="lab-sub-bench-btn" onclick="switchLabSub('bench')">Bench</button>
+      <button id="lab-sub-dgm-btn" onclick="switchLabSub('dgm')">⟳ DGM</button>
     </div>
 
     <!-- Experiments sub-panel -->
@@ -2086,6 +2087,40 @@
       </div>
     </div>
   </div>
+
+    <!-- DGM sub-panel -->
+    <div id="lab-dgm" style="display:none;flex-direction:column;flex:1;min-height:0">
+      <div class="toolbar">
+        <button id="dgm-run-btn" class="primary" onclick="dgmRun()" style="background:var(--cyan);color:#000">⟳ Run DGM</button>
+        <button id="dgm-stop-btn" style="display:none" onclick="dgmStop()">◼ Stop</button>
+        <button onclick="dgmClear()">✕ Clear</button>
+        <span class="toolbar-spacer"></span>
+        <label style="font-size:11px;color:var(--fg-muted);margin-right:4px">iterations</label>
+        <input id="dgm-iterations" type="number" value="20" min="1" max="100"
+               style="width:52px;text-align:center;font-size:11px">
+        <label style="font-size:11px;color:var(--fg-muted);margin:0 8px 0 8px">rotate every</label>
+        <input id="dgm-rotation" type="number" value="5" min="1" max="20"
+               style="width:44px;text-align:center;font-size:11px">
+        <label style="font-size:11px;color:var(--fg-muted);margin:0 4px 0 4px">threshold</label>
+        <input id="dgm-threshold" type="number" value="0.65" min="0.1" max="1.0" step="0.05"
+               style="width:52px;text-align:center;font-size:11px">
+        <label style="font-size:11px;color:var(--fg-muted);margin:0 4px 0 8px">probes</label>
+        <input id="dgm-probes" type="number" value="3" min="1" max="10"
+               style="width:40px;text-align:center;font-size:11px">
+      </div>
+      <!-- Stats bar -->
+      <div id="dgm-stats-bar" style="display:none;padding:6px 12px;background:var(--bg-input);border-bottom:1px solid var(--bg-border);font-size:11px;color:var(--fg-muted);display:flex;gap:16px;align-items:center">
+        <span>Iteration: <b id="dgm-stat-iter" style="color:var(--fg)">0</b></span>
+        <span>Kept: <b id="dgm-stat-kept" style="color:var(--green)">0</b></span>
+        <span>Reverted: <b id="dgm-stat-reverted" style="color:var(--red)">0</b></span>
+        <span>Rubric: <b id="dgm-stat-rubric" style="color:var(--cyan)">—</b></span>
+        <span>Rotates in: <b id="dgm-stat-rotate" style="color:var(--yellow)">—</b></span>
+      </div>
+      <!-- Output log -->
+      <div id="dgm-output" class="scroll-area" style="font-size:12px;font-family:monospace;padding:12px;flex:1">
+        <div class="empty">Configure parameters and click Run DGM. The loop will propose config changes, test them against real traffic, and keep improvements.</div>
+      </div>
+    </div>
 </div>
 
 
@@ -2409,12 +2444,128 @@ function switchTapSub(sub) {
 }
 
 function switchLabSub(sub) {
-  const isBench = sub === 'bench';
-  document.getElementById('lab-experiments').style.display = isBench ? 'none' : 'flex';
-  document.getElementById('lab-bench').style.display       = isBench ? 'flex' : 'none';
-  document.getElementById('lab-sub-exp-btn').classList.toggle('subnav-active',  !isBench);
-  document.getElementById('lab-sub-bench-btn').classList.toggle('subnav-active', isBench);
-  if (isBench) loadBenchModels();
+  document.getElementById('lab-experiments').style.display = sub === 'experiments' ? 'flex' : 'none';
+  document.getElementById('lab-bench').style.display       = sub === 'bench'       ? 'flex' : 'none';
+  document.getElementById('lab-dgm').style.display         = sub === 'dgm'         ? 'flex' : 'none';
+  document.getElementById('lab-sub-exp-btn').classList.toggle('subnav-active',   sub === 'experiments');
+  document.getElementById('lab-sub-bench-btn').classList.toggle('subnav-active', sub === 'bench');
+  document.getElementById('lab-sub-dgm-btn').classList.toggle('subnav-active',   sub === 'dgm');
+  if (sub === 'bench') loadBenchModels();
+}
+
+// ── DGM (Darwin Gödel Machine) ───────────────────────────────────────────────
+let _dgmAbort = null;
+
+async function dgmRun() {
+  const iterations       = parseInt(document.getElementById('dgm-iterations').value)  || 20;
+  const rotationInterval = parseInt(document.getElementById('dgm-rotation').value)    || 5;
+  const threshold        = parseFloat(document.getElementById('dgm-threshold').value) || 0.65;
+  const nProbes          = parseInt(document.getElementById('dgm-probes').value)      || 3;
+
+  const out     = document.getElementById('dgm-output');
+  const runBtn  = document.getElementById('dgm-run-btn');
+  const stopBtn = document.getElementById('dgm-stop-btn');
+  const stats   = document.getElementById('dgm-stats-bar');
+
+  out.innerHTML = '';
+  stats.style.display = 'flex';
+  runBtn.style.display = 'none';
+  stopBtn.style.display = '';
+
+  let keptCount = 0, revertedCount = 0;
+
+  function appendLine(html) {
+    const div = document.createElement('div');
+    div.style.cssText = 'padding:2px 0;border-bottom:1px solid var(--bg-border);';
+    div.innerHTML = html;
+    out.appendChild(div);
+    out.scrollTop = out.scrollHeight;
+  }
+
+  _dgmAbort = new AbortController();
+  try {
+    const resp = await fetch('/api/v1/dgm/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ iterations, rotation_interval: rotationInterval, confidence_threshold: threshold, n_probes: nProbes }),
+      signal: _dgmAbort.signal,
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: resp.statusText }));
+      appendLine(`<span style="color:var(--red)">Error: ${err.error || resp.statusText}</span>`);
+      return;
+    }
+
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        let ev;
+        try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+
+        const t = ev.type;
+        if (t === 'start') {
+          appendLine(`<span style="color:var(--cyan)">▶ DGM run <b>${ev.run_id}</b> started — ${ev.iterations} iterations, rotate every ${ev.rotation_interval}, threshold ${ev.threshold}</span>`);
+
+        } else if (t === 'iteration_start') {
+          document.getElementById('dgm-stat-iter').textContent   = `${ev.iteration}/${ev.total}`;
+          document.getElementById('dgm-stat-rubric').textContent = ev.rubric;
+          document.getElementById('dgm-stat-rotate').textContent = `${ev.rotate_in}`;
+
+        } else if (t === 'proposal') {
+          appendLine(`<span style="color:var(--fg-dim)">[${ev.iteration}] Propose: <b style="color:var(--yellow)">${ev.key}</b> → <b>${JSON.stringify(ev.value)}</b> &nbsp;<span style="color:var(--fg-muted)">${ev.reasoning}</span></span>`);
+
+        } else if (t === 'kept') {
+          keptCount++;
+          document.getElementById('dgm-stat-kept').textContent = keptCount;
+          appendLine(`<span style="color:var(--green)">✓ KEPT &nbsp;<b>${ev.key}</b>=${JSON.stringify(ev.value)} &nbsp;[${ev.rubric}] conf=${ev.confidence.toFixed(2)}: ${ev.reasoning}</span>`);
+
+        } else if (t === 'reverted') {
+          revertedCount++;
+          document.getElementById('dgm-stat-reverted').textContent = revertedCount;
+          appendLine(`<span style="color:var(--red)">✗ REVERTED <b>${ev.key}</b> [${ev.rubric}] conf=${ev.confidence.toFixed(2)} winner=${ev.winner}</span>`);
+
+        } else if (t === 'rubric_rotated') {
+          appendLine(`<span style="color:var(--cyan)">↻ Rubric rotated → <b>${ev.new_rubric}</b></span>`);
+          document.getElementById('dgm-stat-rubric').textContent = ev.new_rubric;
+
+        } else if (t === 'early_stop') {
+          appendLine(`<span style="color:var(--yellow)">⏹ Early stop: ${ev.reason}</span>`);
+
+        } else if (t === 'complete') {
+          appendLine(`<span style="color:var(--cyan)">✓ Done: <b>${ev.kept}/${ev.iterations_run}</b> kept (${(ev.keep_rate*100).toFixed(0)}%) in ${(ev.total_ms/1000).toFixed(1)}s</span>`);
+
+        } else if (t === 'error') {
+          appendLine(`<span style="color:var(--red)">Error: ${ev.message}</span>`);
+        }
+      }
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') appendLine(`<span style="color:var(--red)">Stream error: ${e.message}</span>`);
+  } finally {
+    runBtn.style.display = '';
+    stopBtn.style.display = 'none';
+    _dgmAbort = null;
+  }
+}
+
+function dgmStop() {
+  if (_dgmAbort) { _dgmAbort.abort(); _dgmAbort = null; }
+}
+
+function dgmClear() {
+  dgmStop();
+  document.getElementById('dgm-output').innerHTML = '<div class="empty">Configure parameters and click Run DGM.</div>';
+  document.getElementById('dgm-stats-bar').style.display = 'none';
 }
 
 // ── Bench ────────────────────────────────────────────────────────────────────
