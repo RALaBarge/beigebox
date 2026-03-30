@@ -1,0 +1,39 @@
+FROM debian:bookworm-slim
+
+# System tools Claude needs to be useful
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    bash \
+    sudo \
+    python3 \
+    python3-pip \
+    build-essential \
+    jq \
+    ripgrep \
+    fd-find \
+    openssh-client \
+    docker.io \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pre-install Claude Code (native binary)
+# Installer places the versioned binary under /root/.local/share/claude/versions/
+# and symlinks /root/.local/bin/claude → that file. /root is 700 so the jinx user
+# can't traverse it. Copy the resolved binary to /usr/local/bin so it's world-accessible.
+RUN curl -fsSL https://claude.ai/install.sh | bash \
+    && cp "$(readlink -f /root/.local/bin/claude)" /usr/local/bin/claude \
+    && chmod +x /usr/local/bin/claude
+
+# Create jinx user — passwordless sudo is fine, this container is the sandbox
+RUN adduser --disabled-password --gecos "" jinx \
+    && echo "jinx ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers \
+    && mkdir -p /home/jinx/.claude /home/jinx/.local/bin \
+    && ln -s /usr/local/bin/claude /home/jinx/.local/bin/claude \
+    && chown -R jinx:jinx /home/jinx
+
+USER jinx
+WORKDIR /workspace
+
+# Keep alive for exec-based access
+CMD ["sleep", "infinity"]
