@@ -1137,13 +1137,18 @@
     
     /* Chat input: responsive textarea */
     #chat-input-area {
-      flex-direction: column;
-      gap: 8px;
+      flex-direction: row;
+      flex-wrap: wrap;
+      gap: 6px;
       padding: 10px 8px;
+    }
+    .z-help-wrap {
+      display: none; /* Hide on mobile for more input width */
     }
     #chat-input {
       flex: 1;
       min-height: 44px;
+      min-width: 200px; /* Ensure minimum width to prevent squishing */
       padding: 10px 12px;
       font-size: 13px;
       border-radius: 4px;
@@ -1153,6 +1158,21 @@
       outline: none;
       border-color: var(--lavender-dim);
       box-shadow: 0 0 4px var(--lavender-dim);
+    }
+    #mic-btn {
+      min-width: 44px;
+      width: 44px;
+      height: 44px;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    #send-btn {
+      min-width: 80px;
+      height: 44px;
+      flex-shrink: 0;
     }
     
     .button-row {
