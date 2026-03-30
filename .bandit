@@ -1,0 +1,3 @@
+[bandit]
+targets = beigebox
+exclude = .venv,tests,2600,.claude

@@ -1,0 +1,9 @@
+title = "BeigeBox gitleaks config"
+
+[allowlist]
+paths = [
+    '''.venv/.*''',
+    '''2600/.*''',
+    '''.claude/.*''',
+    '''\.lock$''',
+]
