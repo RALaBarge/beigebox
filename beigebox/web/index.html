@@ -5102,6 +5102,22 @@ function renderInspectorCard(req, cardIndex, prevReq, diffMode) {
           ${paramsHtml}
         </div>
       </details>
+
+      <details style="">
+        <summary style="cursor:pointer;padding:6px 10px;font-size:10px;color:var(--fg-dim);
+                        letter-spacing:1px;text-transform:uppercase;list-style:none;
+                        background:var(--bg-panel)">
+          Raw Request
+        </summary>
+        <pre style="margin:4px 8px;padding:6px;background:var(--bg);border-radius:2px;font-size:9px;
+                    line-height:1.4;overflow-x:auto;white-space:pre-wrap;word-break:break-word;
+                    color:var(--fg-dim);border:1px solid var(--bg-border);max-height:400px;overflow-y:auto;
+                    font-family:'Monaco','Menlo','Ubuntu Mono',monospace">${esc(JSON.stringify({
+          model: req.model,
+          messages: req.messages || [],
+          ...req.generation_params
+        }, null, 2))}</pre>
+      </details>
     </div>
   </div>`;
 }
