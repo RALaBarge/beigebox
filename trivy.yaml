@@ -1,0 +1,14 @@
+severity:
+  - CRITICAL
+  - HIGH
+  - MEDIUM
+
+scan:
+  skip-dirs:
+    - .venv
+    - 2600
+    - .claude
+  security-checks:
+    - vuln
+    - secret
+    - misconfig
