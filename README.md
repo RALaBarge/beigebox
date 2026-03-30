@@ -74,6 +74,25 @@ BeigeBox assumes supply chain compromise is inevitable. Three-layer defense:
 
 Result: Compromised code gets **trapped in-memory, detected in 0.1s, cannot persist**.
 
+### Scanning toolchain
+
+Integrated security scanners run via a single command:
+
+```bash
+./scripts/security-scan.sh          # full scan (deps + code + secrets + containers)
+./scripts/security-scan.sh --quick  # Python-only (pip-audit + bandit + semgrep)
+```
+
+| Scanner | What it checks |
+|---|---|
+| **pip-audit** | Known CVEs in Python dependencies |
+| **bandit** | Static security analysis of source code |
+| **semgrep** | Advanced pattern-based vulnerability detection |
+| **gitleaks** | Secrets accidentally committed to git history |
+| **trivy** | OS and app-level CVEs in Docker images |
+
+Security hardening is **feature-complete** as of v1.9. Remaining low-priority items are tracked in [TODO-security.md](TODO-security.md).
+
 See [Security](docs/security.md) for threat model, defense strategy, and detailed hardening.
 
 ---

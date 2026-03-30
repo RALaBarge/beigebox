@@ -22,3 +22,14 @@ XXE risk. It is slower but sufficient for scraping use cases. Trade-off:
 **Fix:** In `web_scraper.py`, change `BeautifulSoup(raw_html, "lxml")` to
 `BeautifulSoup(raw_html, "html.parser")` and remove lxml from dependencies,
 or keep lxml but pin to latest and monitor advisories.
+
+## Secrets management — evaluate replacing agentauth
+API keys are currently passed via `.env` files, with `agentauth` providing OS
+keychain credential management. For multi-user or production deployments,
+evaluate whether a dedicated secrets manager (HashiCorp Vault, Docker secrets,
+SOPS, or cloud KMS) would be more appropriate. If so, agentauth can be retired
+as a dependency.
+
+**Evaluate:** Is agentauth sufficient for the single-operator use case, or does
+the stack benefit from a standard secrets backend? Decision deferred until
+multi-user requirements are clearer.
