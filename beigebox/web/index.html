@@ -1094,7 +1094,20 @@
       border-bottom-width: 3px;
     }
     .tab:active { background: var(--bg-hover); }
-    
+
+    /* Subnav: horizontal scroll on mobile for Inspector button */
+    .subnav {
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+      scroll-behavior: smooth;
+      flex-shrink: 0;
+    }
+    .subnav button {
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+
     /* Main content: single column */
     #main-content {
       flex: 1;
