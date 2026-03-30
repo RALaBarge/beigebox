@@ -32,4 +32,4 @@ if [ "${1:-}" = "--shell" ]; then
     exec docker compose -f "$COMPOSE_FILE" exec -w /workspace -u jinx "$SERVICE" bash
 fi
 
-exec docker compose -f "$COMPOSE_FILE" exec -w /workspace -u jinx "$SERVICE" claude
+exec docker compose -f "$COMPOSE_FILE" exec -w /workspace -u jinx "$SERVICE" claude --dangerously-skip-permissions
