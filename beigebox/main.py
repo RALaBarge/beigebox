@@ -2516,10 +2516,10 @@ async def api_dgm_run(request: Request):
     except Exception:
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
-    n_iterations        = int(body.get("iterations", 20))
-    rotation_interval   = int(body.get("rotation_interval", 5))
-    confidence_threshold = float(body.get("confidence_threshold", 0.65))
-    n_probes            = int(body.get("n_probes", 3))
+    n_iterations         = min(int(body.get("iterations", 20)), 100)
+    rotation_interval    = min(max(1, int(body.get("rotation_interval", 5))), 20)
+    confidence_threshold = max(0.5, min(1.0, float(body.get("confidence_threshold", 0.65))))
+    n_probes             = min(max(1, int(body.get("n_probes", 3))), 10)
 
     async def _stream():
         from beigebox.dgm.loop import DGMLoop, Probe, _FALLBACK_PROBES
