@@ -1579,7 +1579,13 @@ async def api_routing_stats(lines: int = 10000):
 
 @app.get("/api/v1/backends")
 async def api_backends():
-    """Health and status of all configured backends, with rolling latency stats."""
+    """
+    Return backend config (name, provider, url, masked api_key, priority, etc.)
+    merged with health/latency stats.
+
+    API keys are masked as "***" for security — the UI will only send masked keys
+    back to the apply endpoint, where real keys are restored from config.
+    """
     _st = get_state()
     if not _st.backend_router:
         cfg = get_config()
@@ -1588,7 +1594,25 @@ async def api_backends():
             "message": "Multi-backend routing is disabled. Set backends_enabled: true in config.",
             "primary_backend": cfg.get("backend", {}).get("url", ""),
         })
-    backends_list = await _st.backend_router.health()
+
+    # Get effective config (runtime overrides static config)
+    enabled, config_backends = get_effective_backends_config()
+
+    # Get health/latency stats
+    health_list = await _st.backend_router.health()
+    health_by_name = {h.get("name"): h for h in health_list}
+
+    # Merge config with health stats, masking API keys
+    backends_list = []
+    for config_b in config_backends:
+        b = dict(config_b)
+        # Mask API key for security — UI will preserve it on re-apply
+        if b.get("api_key"):
+            b["api_key"] = "***"
+        # Merge in health/latency stats
+        health = health_by_name.get(b.get("name"), {})
+        b.update(health)
+        backends_list.append(b)
 
     # Passive model spec discovery: upsert any loaded models observed in hw_stats
     if _st.sqlite_store:
@@ -1608,7 +1632,7 @@ async def api_backends():
                         logger.debug("model_spec upsert failed for %s: %s", model_name, _e)
 
     return JSONResponse({
-        "enabled": True,
+        "enabled": enabled,
         "backends": backends_list,  # list, not dict
     })
 
