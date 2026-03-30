@@ -30,12 +30,12 @@ flowchart LR
 git clone --recursive https://github.com/ralabarge/beigebox.git
 cd beigebox/docker
 cp env.example .env        # optional — set GPU, ports, API keys
-cp docker-compose.example.yaml docker-compose.yaml
-cp ../config.example.yaml ../config.yaml
 docker compose up -d
 ```
 
-Open **http://localhost:1337** for the web UI. The OpenAI API is at `http://localhost:1337/v1`.
+Open **http://localhost:1337** for the web UI. The OpenAI-compatible API is at `http://localhost:1337/v1`.
+
+See [Deployment](docs/deployment.md#quick-start) for profiles (CDP, voice, alternative engines).
 
 ### Profiles
 

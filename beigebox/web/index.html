@@ -1637,6 +1637,7 @@
     <div class="subnav">
       <button id="tap-sub-events" class="subnav-active" onclick="switchTapSub('events')">Events</button>
       <button id="tap-sub-convos" onclick="switchTapSub('convos')">Conversations</button>
+      <button id="tap-sub-inspector" onclick="switchTapSub('inspector')">Inspector</button>
     </div>
 
     <!-- Events sub-view -->
@@ -1736,6 +1737,25 @@
         <div class="empty">Enter a search query above to search conversations semantically.</div>
       </div>
     </div><!-- /tap-sub-convos-panel -->
+
+    <!-- Inspector sub-view -->
+    <div id="tap-sub-inspector-panel" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden">
+      <div class="toolbar">
+        <button onclick="loadInspector()">&#8634; Refresh</button>
+        <label style="font-size:11px;color:var(--fg-dim);cursor:pointer;display:flex;align-items:center;gap:4px">
+          <input type="checkbox" id="inspector-live" onchange="toggleInspectorLive()"> Live
+        </label>
+        <label style="font-size:11px;color:var(--fg-dim);cursor:pointer;display:flex;align-items:center;gap:4px">
+          <input type="checkbox" id="inspector-diff"> Diff mode
+        </label>
+        <span class="toolbar-spacer"></span>
+        <span class="last-updated" id="inspector-updated"></span>
+      </div>
+      <div id="inspector-body"
+           style="flex:1;overflow-x:auto;overflow-y:hidden;padding:12px 16px;display:flex;gap:12px;align-items:flex-start">
+        <div class="empty">No requests captured yet. Send a request through BeigeBox.</div>
+      </div>
+    </div>
   </div>
 
   <!-- 4. Harness — parallel agent runner -->
@@ -2363,11 +2383,16 @@ function switchChatSub(sub) {
 }
 
 function switchTapSub(sub) {
-  const isEvents = sub === 'events';
-  document.getElementById('tap-sub-events-panel').style.display = isEvents ? 'flex' : 'none';
-  document.getElementById('tap-sub-convos-panel').style.display = isEvents ? 'none' : 'flex';
-  document.getElementById('tap-sub-events').classList.toggle('subnav-active',  isEvents);
-  document.getElementById('tap-sub-convos').classList.toggle('subnav-active', !isEvents);
+  const isEvents    = sub === 'events';
+  const isConvos    = sub === 'convos';
+  const isInspector = sub === 'inspector';
+  document.getElementById('tap-sub-events-panel').style.display    = isEvents    ? 'flex' : 'none';
+  document.getElementById('tap-sub-convos-panel').style.display    = isConvos    ? 'flex' : 'none';
+  document.getElementById('tap-sub-inspector-panel').style.display = isInspector ? 'flex' : 'none';
+  document.getElementById('tap-sub-events').classList.toggle('subnav-active',    isEvents);
+  document.getElementById('tap-sub-convos').classList.toggle('subnav-active',    isConvos);
+  document.getElementById('tap-sub-inspector').classList.toggle('subnav-active', isInspector);
+  if (isInspector) loadInspector();
 }
 
 function switchLabSub(sub) {
@@ -4883,6 +4908,199 @@ function toggleTapLive() {
   } else {
     clearInterval(_tapLiveTimer);
     _tapLiveTimer = null;
+  }
+}
+
+// ── Inspector ──────────────────────────────────────────────────────────────────
+let _inspectorLiveTimer = null;
+
+async function loadInspector() {
+  const el = document.getElementById('inspector-body');
+  const diffMode = document.getElementById('inspector-diff').checked;
+
+  el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
+  try {
+    const d = await api('/api/v1/inspector?n=5');
+    const reqs = d.requests || [];
+
+    document.getElementById('inspector-updated').textContent =
+      'updated ' + new Date().toLocaleTimeString();
+
+    if (!reqs.length) {
+      el.innerHTML = '<div class="empty">No requests captured yet. Send a request through BeigeBox.</div>';
+      return;
+    }
+
+    let html = '';
+    for (let i = 0; i < reqs.length; i++) {
+      const prev = reqs[i + 1] || null;
+      html += renderInspectorCard(reqs[i], i, prev, diffMode);
+    }
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="empty error">Inspector error: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderInspectorCard(req, cardIndex, prevReq, diffMode) {
+  const statusColor = {
+    complete: 'var(--green)',
+    pending:  'var(--yellow)',
+    error:    'var(--red)',
+  }[req.status] || 'var(--fg-dim)';
+
+  let latBadge = '';
+  if (req.latency_ms != null) {
+    const lc = req.latency_ms < 1000 ? 'badge-ok' :
+               req.latency_ms < 5000 ? 'badge-warn' : 'badge-err';
+    latBadge = `<span class="badge ${lc}">${Math.round(req.latency_ms)}ms</span>`;
+  } else if (req.status === 'pending') {
+    latBadge = `<span class="badge badge-warn">in-flight</span>`;
+  }
+
+  let ttftBadge = '';
+  if (req.ttft_ms != null) {
+    ttftBadge = `<span style="color:var(--fg-dim);font-size:10px">TTFT ${Math.round(req.ttft_ms)}ms</span>`;
+  }
+
+  const modelPill = req.model
+    ? `<span class="badge badge-lav">${esc(req.model)}</span>`
+    : `<span class="badge badge-dim">unknown</span>`;
+
+  const statusDot = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;
+    background:${statusColor};margin-right:5px"></span>`;
+
+  const tsStr = req.ts ? new Date(req.ts).toLocaleTimeString() : '';
+
+  const backendDisplay = (req.backend_url || '').replace(/^https?:\/\//, '');
+  const backendTrunc = backendDisplay.length > 40
+    ? backendDisplay.slice(0, 37) + '…' : backendDisplay;
+
+  const msgs = req.messages || [];
+  let msgsHtml = msgs.map((m, mi) => {
+    const role = (m.role || 'unknown').toUpperCase();
+    const roleColor = {
+      USER:      'var(--green)',
+      ASSISTANT: 'var(--cyan)',
+      SYSTEM:    'var(--lavender)',
+      TOOL:      'var(--yellow)',
+    }[role] || 'var(--fg-dim)';
+
+    const content = String(m.content || '');
+    const truncated = content.length > 800 ? content.slice(0, 800) + '…' : content;
+
+    let msgBg = '';
+    if (diffMode && prevReq) {
+      const prevContents = (prevReq.messages || []).map(pm => pm.content);
+      if (!prevContents.includes(m.content)) {
+        msgBg = 'background:rgba(163,190,140,0.08);border-left:2px solid var(--green);';
+      }
+    }
+
+    return `<details style="margin:4px 0;${msgBg}">
+      <summary style="cursor:pointer;list-style:none;display:flex;align-items:baseline;gap:6px;padding:3px 4px">
+        <span style="color:${roleColor};font-size:10px;min-width:70px;font-weight:600">${esc(role)}</span>
+        <span style="color:var(--fg-muted);font-size:9px">${content.length}c</span>
+      </summary>
+      <pre style="margin:4px 8px;padding:6px;background:var(--bg);border-radius:2px;font-size:10px;
+                  line-height:1.5;overflow-x:auto;white-space:pre-wrap;word-break:break-word;
+                  color:var(--fg);border:1px solid var(--bg-border);max-height:300px;overflow-y:auto">${esc(truncated)}</pre>
+    </details>`;
+  }).join('');
+
+  if (!msgsHtml) msgsHtml = '<div style="color:var(--fg-muted);font-size:11px">No messages</div>';
+
+  const params = req.generation_params || {};
+  const paramKeys = ['temperature','top_p','top_k','max_tokens','num_ctx','repeat_penalty','seed','stop','stream','options'];
+  let paramsHtml = '';
+  for (const k of paramKeys) {
+    if (!(k in params)) continue;
+    let val = params[k];
+    if (typeof val === 'object') val = JSON.stringify(val);
+
+    let valStyle = 'color:var(--fg)';
+    if (diffMode && prevReq) {
+      const prevParams = prevReq.generation_params || {};
+      if (!(k in prevParams)) {
+        valStyle = 'color:var(--green);font-weight:600';
+      } else if (JSON.stringify(prevParams[k]) !== JSON.stringify(params[k])) {
+        valStyle = 'color:var(--yellow);font-weight:600';
+      } else {
+        valStyle = 'color:var(--fg-dim)';
+      }
+    }
+
+    paramsHtml += `<div class="kv-row">
+      <span class="kv-key" style="min-width:100px;font-size:11px">${esc(k)}</span>
+      <span class="kv-val" style="${valStyle};font-size:11px">${esc(String(val))}</span>
+    </div>`;
+  }
+  if (!paramsHtml) paramsHtml = '<div style="color:var(--fg-muted);font-size:11px">No generation params</div>';
+
+  const cardId = `inspector-card-${cardIndex}`;
+
+  return `
+  <div id="${cardId}" style="
+    background:var(--bg-panel);
+    border:1px solid var(--bg-border);
+    border-radius:2px;
+    min-width:300px;
+    max-width:360px;
+    flex-shrink:0;
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+  ">
+    <div style="padding:8px 10px;border-bottom:1px solid var(--bg-border);background:var(--bg)">
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px">
+        ${statusDot}
+        <span style="color:var(--fg-muted);font-size:10px;font-family:'VT323',monospace;font-size:14px">#${req.idx}</span>
+        ${modelPill}
+        ${latBadge}
+      </div>
+      <div style="color:var(--fg-muted);font-size:10px;margin-bottom:2px">${esc(tsStr)}</div>
+      <div style="color:var(--fg-dim);font-size:10px;word-break:break-all" title="${esc(req.backend_url || '')}">${esc(backendTrunc)}</div>
+      <div style="display:flex;gap:10px;margin-top:4px;font-size:10px;color:var(--fg-muted)">
+        <span>${req.message_count || 0} msgs</span>
+        <span>${((req.total_chars || 0) / 1000).toFixed(1)}k chars</span>
+        ${ttftBadge}
+      </div>
+    </div>
+
+    <div style="flex:1;overflow-y:auto;max-height:500px">
+      <details open style="border-bottom:1px solid var(--bg-border)">
+        <summary style="cursor:pointer;padding:6px 10px;font-size:10px;color:var(--fg-dim);
+                        letter-spacing:1px;text-transform:uppercase;list-style:none;
+                        background:var(--bg-panel)">
+          Messages (${msgs.length})
+        </summary>
+        <div style="padding:4px 8px">
+          ${msgsHtml}
+        </div>
+      </details>
+
+      <details style="">
+        <summary style="cursor:pointer;padding:6px 10px;font-size:10px;color:var(--fg-dim);
+                        letter-spacing:1px;text-transform:uppercase;list-style:none;
+                        background:var(--bg-panel)">
+          Generation Params
+        </summary>
+        <div style="padding:4px 10px 8px">
+          ${paramsHtml}
+        </div>
+      </details>
+    </div>
+  </div>`;
+}
+
+function toggleInspectorLive() {
+  const live = document.getElementById('inspector-live').checked;
+  if (live) {
+    loadInspector();
+    _inspectorLiveTimer = setInterval(loadInspector, 3000);
+  } else {
+    clearInterval(_inspectorLiveTimer);
+    _inspectorLiveTimer = null;
   }
 }
 

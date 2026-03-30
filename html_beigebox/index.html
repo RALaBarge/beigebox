@@ -218,13 +218,17 @@
         <h3 style="margin-top: 0;">Get running in 2 minutes</h3>
         <p>Full stack with Ollama + BeigeBox — Docker Compose does the rest.</p>
         <div class="codebox" style="margin: 12px 0;">
-          <pre><code>git clone https://github.com/ralabarge/beigebox.git
+          <pre><code>git clone --recursive https://github.com/ralabarge/beigebox.git
 cd beigebox/docker
+cp env.example .env        # optional — set GPU, ports, API keys
 docker compose up -d</code></pre>
         </div>
         <p style="margin: 12px 0 0;">
-          Open <code style="background: rgba(17,19,26,.6); padding: 1px 4px;">localhost:1337</code> and start chatting.
-          Watch the routing, caching, and latency in real time.
+          Open <code style="background: rgba(17,19,26,.6); padding: 1px 4px;">http://localhost:1337</code> for the web UI.
+          The OpenAI-compatible API is at <code style="background: rgba(17,19,26,.6); padding: 1px 4px;">http://localhost:1337/v1</code>.
+        </p>
+        <p style="margin: 8px 0 0; font-size: .9rem; color: var(--muted);">
+          <strong>Optional:</strong> Add profiles for browser automation, voice I/O, or alternative inference engines.
         </p>
       </div>
 
@@ -236,10 +240,12 @@ docker compose up -d</code></pre>
           <h3>Already have Ollama/another provider?</h3>
           <p>Run just BeigeBox in front of it. Set <code>backend.url</code> in <code>config.yaml</code> to your existing provider.</p>
           <div class="codebox" style="margin-top:10px">
-            <pre><code>git clone https://github.com/ralabarge/beigebox.git
+            <pre><code>git clone --recursive https://github.com/ralabarge/beigebox.git
 cd beigebox/docker
+cp env.example .env
 docker compose up -d beigebox</code></pre>
           </div>
+          <p style="margin-top: 8px; font-size: .9rem; color: var(--muted);">Then update <code>config.yaml</code> to point to your Ollama/OpenRouter/custom API endpoint.</p>
         </div>
 
         <div class="panel qs-panel">
@@ -247,10 +253,10 @@ docker compose up -d beigebox</code></pre>
           <p>Edit <code>config.yaml</code> or <code>runtime_config.yaml</code> — changes take effect immediately, no restart.</p>
           <div class="codebox" style="margin-top:10px">
             <pre><code>pip install -e .
-cp config.yaml.example config.yaml
+cp config.example.yaml config.yaml
 beigebox dial</code></pre>
           </div>
-          <p style="margin-top:10px">API on <code>localhost:8000</code></p>
+          <p style="margin-top:10px">FastAPI at <code>localhost:8000</code> · docs at <code>/docs</code></p>
         </div>
 
       </div>
@@ -258,6 +264,16 @@ beigebox dial</code></pre>
       <div style="margin-top: 20px; padding: 12px; background: rgba(17,19,26,.4); border-radius: var(--radius); font-size: .9rem; color: var(--muted);">
         <strong style="color: var(--fg);">Any OpenAI-compatible client works.</strong> Point your tools (ChatGPT UI, LM Studio, Cursor, Aider, Continue) at <code style="background: rgba(0,0,0,.2); padding: 1px 4px;">http://localhost:1337/v1</code> — zero code changes needed.
       </div>
+
+      <details style="margin-top: 20px; padding: 12px; background: rgba(17,19,26,.3); border-radius: var(--radius); cursor: pointer;">
+        <summary style="font-weight: 600; color: var(--fg); user-select: none;">Docker Compose profiles (optional)</summary>
+        <div style="margin-top: 12px; font-size: .9rem; color: var(--muted);">
+          <p><strong style="color: var(--fg);">Browser automation (CDP):</strong> <code style="background: rgba(0,0,0,.2); padding: 1px 4px;">docker compose --profile cdp up -d</code></p>
+          <p style="margin-top: 8px;"><strong style="color: var(--fg);">Voice I/O (STT + TTS):</strong> <code style="background: rgba(0,0,0,.2); padding: 1px 4px;">docker compose --profile voice up -d</code></p>
+          <p style="margin-top: 8px;"><strong style="color: var(--fg);">Both:</strong> <code style="background: rgba(0,0,0,.2); padding: 1px 4px;">docker compose --profile cdp --profile voice up -d</code></p>
+          <p style="margin-top: 8px;"><strong style="color: var(--fg);">Alternative engines:</strong> llama.cpp (<code style="background: rgba(0,0,0,.2); padding: 1px 4px;">engines-cpp</code>), vLLM (<code style="background: rgba(0,0,0,.2); padding: 1px 4px;">engines-vllm</code>), ExecutorTorch (<code style="background: rgba(0,0,0,.2); padding: 1px 4px;">engines-executorch</code>)</p>
+        </div>
+      </details>
     </section>
 
     <!-- ── Deployment Options ────────────────────────────────────────────────── -->
@@ -449,6 +465,10 @@ beigebox dial</code></pre>
         <div class="panel">
           <h3>MCP server</h3>
           <p>Model Context Protocol server at <code>POST /mcp</code>. Expose BeigeBox tools to Claude Desktop, external agents, and third-party MCP clients. All tools + operator/run + skills as resources. Works with header auth.</p>
+        </div>
+        <div class="panel">
+          <h3>OAuth2 web UI auth</h3>
+          <p>Optional OAuth2 authentication for the web UI. Google provider included with PKCE S256. User sessions gated via signed cookies. Expandable provider protocol for GitHub, Discord, etc. Multi-user conversation isolation roadmap.</p>
         </div>
       </div>
     </section>
