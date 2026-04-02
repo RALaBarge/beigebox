@@ -1450,6 +1450,160 @@
     body { background: white; color: black; }
     .msg { max-width: 100%; }
   }
+
+  /* ── Studio tab ──────────────────────────────────────────────────────── */
+  #panel-studio { flex-direction: row; overflow: hidden; padding: 0; }
+
+  #studio-chat-col, #studio-ctx-col, #studio-controls-col {
+    flex: 1; display: flex; flex-direction: column;
+    min-width: 0; overflow: hidden;
+    border-right: 1px solid var(--bg-border);
+  }
+  #studio-controls-col { border-right: none; }
+
+  .studio-col-header {
+    background: var(--bg-panel); border-bottom: 1px solid var(--bg-border);
+    padding: 5px 10px; display: flex; align-items: center; gap: 8px;
+    flex-shrink: 0; font-size: 11px;
+  }
+  .studio-col-title {
+    color: var(--lavender); font-size: 11px; font-weight: 600;
+    letter-spacing: 0.5px; text-transform: uppercase; flex: 1;
+  }
+
+  #studio-msgs {
+    flex: 1; min-height: 0; overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 8px 10px; font-size: 12px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  #studio-msgs::-webkit-scrollbar { width: 4px; }
+  #studio-msgs::-webkit-scrollbar-thumb { background: var(--bg-border); }
+
+  #studio-input-area {
+    padding: 8px 10px; background: var(--bg-panel);
+    border-top: 1px solid var(--bg-border);
+    display: flex; gap: 6px; align-items: flex-end; flex-shrink: 0;
+  }
+  #studio-input {
+    flex: 1; resize: none; min-height: 36px; max-height: 100px;
+    line-height: 1.5; padding: 6px 8px; font-size: 12px;
+  }
+
+  #studio-ctx-col .scroll-area, #studio-controls-col .scroll-area {
+    flex: 1; min-height: 0; overflow-y: auto; padding: 10px;
+  }
+
+  @keyframes studio-flash {
+    0%   { background: rgba(235, 203, 139, 0.2); }
+    100% { background: transparent; }
+  }
+  .studio-ctx-flash { animation: studio-flash 0.9s ease-out forwards; border-radius: 2px; }
+
+  .studio-ctx-card {
+    background: var(--bg-panel); border: 1px solid var(--bg-border);
+    border-radius: 2px; margin-bottom: 8px; overflow: hidden;
+  }
+  .studio-ctx-meta {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding: 6px 8px; border-bottom: 1px solid var(--bg-border); background: var(--bg);
+  }
+  .studio-ctx-stats {
+    padding: 4px 8px; font-size: 10px; color: var(--fg-muted);
+    border-bottom: 1px solid var(--bg-border);
+  }
+  .studio-ctx-params {
+    padding: 4px 8px; font-size: 10px; color: var(--fg-dim);
+    border-bottom: 1px solid var(--bg-border); display: flex; gap: 4px; flex-wrap: wrap;
+  }
+  .studio-ctx-msgs { padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
+  .studio-ctx-msg-item {
+    position: relative; font-size: 11px;
+    display: flex; align-items: center; gap: 6px; padding: 2px 0;
+    cursor: default;
+  }
+  .studio-ctx-msg-body {
+    display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+    margin-top: 2px; padding: 6px 8px; font-size: 10px;
+    white-space: pre-wrap; word-break: break-word;
+    background: var(--bg-panel); border: 1px solid var(--bg-border);
+    border-radius: 2px; color: var(--fg-dim);
+    max-height: 240px; overflow-y: auto;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+  .studio-ctx-msg-item:hover .studio-ctx-msg-body { display: block; }
+
+  .studio-ctrl-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+  .studio-ctrl-label {
+    color: var(--fg-dim); font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.5px; display: flex; align-items: center; justify-content: space-between;
+  }
+  .studio-ctrl-badge {
+    color: var(--cyan); font-size: 11px; font-family: 'Fira Code', monospace;
+    text-transform: none; letter-spacing: 0;
+  }
+  #studio-temp, #studio-topp { width: 100%; cursor: pointer; accent-color: var(--lavender); }
+
+  #studio-mobile-subnav { display: none; }
+
+  @media (max-width: 767px) {
+    #panel-studio { flex-direction: column; }
+    #studio-chat-col, #studio-ctx-col, #studio-controls-col {
+      display: none; flex: 1; border-right: none; border-bottom: 1px solid var(--bg-border);
+    }
+    #studio-chat-col.studio-mobile-active,
+    #studio-ctx-col.studio-mobile-active,
+    #studio-controls-col.studio-mobile-active { display: flex; }
+    #studio-mobile-subnav { display: flex; border-bottom: 1px solid var(--bg-border); flex-shrink: 0; }
+  }
+  @media (min-width: 768px) {
+    #studio-chat-col, #studio-ctx-col, #studio-controls-col { display: flex !important; }
+    #studio-mobile-subnav { display: none !important; }
+  }
+
+  /* ── Studio runs drawer ──────────────────────────────────────────────────── */
+  #studio-chat-col { position: relative; }
+  #studio-runs-drawer {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--bg); z-index: 10;
+    display: none; flex-direction: column;
+  }
+  #studio-runs-drawer.open { display: flex; }
+  #studio-runs-list {
+    flex: 1; min-height: 0; overflow-y: auto;
+    padding: 8px; display: flex; flex-direction: column; gap: 4px;
+  }
+  .studio-run-item {
+    padding: 6px 8px; border: 1px solid var(--bg-border); border-radius: 2px;
+    display: flex; flex-direction: column; gap: 3px; cursor: pointer;
+    transition: background 0.1s;
+  }
+  .studio-run-item:hover { background: var(--bg-hover); }
+  .studio-run-label { font-size: 11px; color: var(--fg); }
+  .studio-run-meta { font-size: 10px; color: var(--fg-muted); display: flex; gap: 6px; }
+  #studio-run-badge {
+    font-size: 10px; color: var(--cyan); padding: 1px 4px;
+    border: 1px solid var(--cyan); border-radius: 2px;
+  }
+  #studio-run-badge:empty { display: none; }
+  #studio-msgs .meta { display: flex; align-items: center; gap: 4px; }
+  .studio-edit-btn {
+    font-size: 9px; padding: 1px 5px; margin-left: auto;
+    color: var(--fg-muted); background: transparent;
+    border: 1px solid var(--bg-border); border-radius: 2px; cursor: pointer;
+    opacity: 0; transition: opacity 0.15s; flex-shrink: 0;
+  }
+  .msg:hover .studio-edit-btn { opacity: 1; }
+  .studio-edit-area {
+    width: 100%; resize: vertical; font-family: inherit; font-size: 12px;
+    background: var(--bg-input,#1e1e1e); border: 1px solid var(--lavender); color: var(--fg);
+    border-radius: 2px; padding: 6px; min-height: 60px; margin-top: 4px; display: block;
+  }
+  .studio-fork-btn {
+    font-size: 9px; padding: 1px 5px; line-height: 14px;
+    color: var(--cyan); background: transparent; border: 1px solid var(--cyan);
+    border-radius: 2px; cursor: pointer; flex-shrink: 0;
+  }
 </style>
 </head>
 <body>
@@ -1486,6 +1640,7 @@
   <div class="tab" data-tab="chat"      onclick="switchTab('chat')">     <span class="tab-key">3</span>Chat</div>
   <div class="tab" data-tab="harness"   onclick="switchTab('harness')">  <span class="tab-key">4</span>Harness</div>
   <div class="tab" data-tab="discovery" onclick="switchTab('discovery')"><span class="tab-key">5</span>Lab</div>
+  <div class="tab" data-tab="studio"    onclick="switchTab('studio')">   <span class="tab-key">6</span>Studio</div>
 </div>
 
 <!-- ── Content ─────────────────────────────────────────────────────────── -->
@@ -1975,6 +2130,7 @@
     <div class="subnav">
       <button id="lab-sub-exp-btn" class="subnav-active" onclick="switchLabSub('experiments')">Experiments</button>
       <button id="lab-sub-bench-btn" onclick="switchLabSub('bench')">Bench</button>
+      <button id="lab-sub-eval-btn" onclick="switchLabSub('eval')">Eval</button>
       <button id="lab-sub-dgm-btn" onclick="switchLabSub('dgm')">⟳ DGM</button>
     </div>
 
@@ -2035,7 +2191,148 @@
         </div>
       </div>
     </div>
+
+    <!-- Eval sub-panel -->
+    <div id="lab-eval" style="display:none;flex-direction:column;flex:1;min-height:0">
+      <div class="toolbar">
+        <select id="eval-suite-select" style="flex:1;max-width:220px" onchange="onEvalSuiteChange()">
+          <option value="">Loading suites…</option>
+        </select>
+        <select id="eval-model-select" style="max-width:220px">
+          <option value="">default model</option>
+        </select>
+        <button id="eval-run-btn" class="primary" onclick="runEval()">▶ Run</button>
+        <button id="eval-stop-btn" onclick="stopEval()" style="display:none">■ Stop</button>
+        <span class="toolbar-spacer"></span>
+        <span id="eval-progress" style="font-size:11px;color:var(--fg-muted)"></span>
+      </div>
+      <!-- Summary bar -->
+      <div id="eval-summary" style="display:none;padding:6px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border);font-size:11px;display:none;gap:16px;align-items:center">
+        <span id="eval-summary-suite" style="color:var(--fg-muted)"></span>
+        <span id="eval-summary-pass" style="color:var(--green);font-weight:600"></span>
+        <span id="eval-summary-fail" style="color:var(--red);font-weight:600"></span>
+        <span id="eval-summary-score" style="color:var(--fg-muted)"></span>
+      </div>
+      <!-- Results table -->
+      <div id="eval-results" class="scroll-area" style="flex:1;min-height:0;font-size:11px">
+        <div class="empty">Select a suite and click Run.</div>
+      </div>
+    </div>
+
   </div>
+
+  <!-- 6. Studio — three-column prompt playground -->
+  <div class="panel" id="panel-studio">
+
+    <!-- Mobile sub-nav (hidden on desktop) -->
+    <div id="studio-mobile-subnav">
+      <button class="subnav-btn subnav-active" onclick="studioMobileActivate('chat')">Chat</button>
+      <button class="subnav-btn" onclick="studioMobileActivate('context')">Context</button>
+      <button class="subnav-btn" onclick="studioMobileActivate('controls')">Controls</button>
+    </div>
+
+    <!-- LEFT: Chat -->
+    <div id="studio-chat-col">
+      <div class="studio-col-header">
+        <span class="studio-col-title">Chat</span>
+        <span id="studio-run-badge"></span>
+        <button onclick="studioOpenRuns()" style="font-size:10px;padding:2px 8px">Runs ▾</button>
+        <button onclick="studioClearChat()" style="font-size:10px;padding:2px 8px">✕ Clear</button>
+      </div>
+      <!-- Runs drawer — overlays chat column -->
+      <div id="studio-runs-drawer">
+        <div class="studio-col-header">
+          <span class="studio-col-title">Runs</span>
+          <button onclick="studioCloseRuns()" style="font-size:10px;padding:2px 8px">✕ Close</button>
+        </div>
+        <div id="studio-runs-list"><div class="empty" style="padding:16px">Loading…</div></div>
+      </div>
+      <div id="studio-msgs"></div>
+      <div id="studio-input-area">
+        <textarea id="studio-input" placeholder="Send a message… (Enter=send, Shift+Enter=newline)"
+          rows="1" onkeydown="studioKeydown(event)" oninput="autoResize(this)"></textarea>
+        <button class="primary" id="studio-send-btn" onclick="studioSend()">Send</button>
+      </div>
+    </div>
+
+    <!-- MIDDLE: Context Viewer -->
+    <div id="studio-ctx-col">
+      <div class="studio-col-header">
+        <span class="studio-col-title">Context</span>
+        <span id="studio-ctx-updated" style="font-size:10px;color:var(--fg-muted)"></span>
+        <label style="font-size:11px;color:var(--fg-muted);display:flex;align-items:center;gap:4px;cursor:pointer">
+          <input type="checkbox" id="studio-ctx-live" checked onchange="studioToggleContextLive()"> live
+        </label>
+      </div>
+      <div class="scroll-area">
+        <div id="studio-ctx-body"><div class="empty">Waiting for a request…</div></div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Controls -->
+    <div id="studio-controls-col">
+      <div class="studio-col-header">
+        <span class="studio-col-title">Controls</span>
+        <span id="studio-apply-status" style="font-size:10px;color:var(--fg-muted)"></span>
+      </div>
+      <div class="scroll-area">
+        <div id="studio-controls-body">
+
+          <div class="studio-ctrl-group">
+            <label class="studio-ctrl-label">Model</label>
+            <select id="studio-model-sel" style="width:100%"><option value="">Loading…</option></select>
+          </div>
+
+          <div class="studio-ctrl-group">
+            <label class="studio-ctrl-label">Temperature <span id="studio-temp-val" class="studio-ctrl-badge">0.70</span></label>
+            <input type="range" id="studio-temp" min="0" max="2" step="0.05" value="0.7"
+              oninput="document.getElementById('studio-temp-val').textContent=parseFloat(this.value).toFixed(2)">
+          </div>
+
+          <div class="studio-ctrl-group">
+            <label class="studio-ctrl-label">Top-P <span id="studio-topp-val" class="studio-ctrl-badge">—</span></label>
+            <input type="range" id="studio-topp" min="0" max="1" step="0.05" value="1"
+              oninput="document.getElementById('studio-topp-val').textContent=parseFloat(this.value).toFixed(2)">
+          </div>
+
+          <div class="studio-ctrl-group">
+            <label class="studio-ctrl-label">Context window (num_ctx)</label>
+            <input type="number" id="studio-numctx" min="512" max="131072" step="512" placeholder="server default" style="width:100%">
+          </div>
+
+          <div class="studio-ctrl-group">
+            <label class="studio-ctrl-label">Max tokens</label>
+            <input type="number" id="studio-maxtok" min="1" max="32768" placeholder="unlimited" style="width:100%">
+          </div>
+
+          <div class="studio-ctrl-group">
+            <label class="studio-ctrl-label">Force route</label>
+            <input type="text" id="studio-force-route" placeholder="blank = auto" style="width:100%;font-family:monospace">
+          </div>
+
+          <div class="studio-ctrl-group">
+            <label class="studio-ctrl-label">System prompt prefix</label>
+            <textarea id="studio-sysprefix" rows="4" placeholder="Injected before system_context.md…"
+              style="width:100%;resize:vertical;font-family:inherit;font-size:11px"></textarea>
+          </div>
+
+          <div class="studio-ctrl-group" style="flex-direction:row;align-items:center;gap:8px">
+            <input type="checkbox" id="studio-sysctx-enabled" onchange="studioSysCtxToggle(this.checked)" style="cursor:pointer">
+            <label for="studio-sysctx-enabled" class="studio-ctrl-label" style="cursor:pointer;margin-bottom:0;text-transform:none;letter-spacing:0;font-size:11px">
+              System context enabled
+            </label>
+          </div>
+
+          <div style="display:flex;gap:8px;padding:4px 0 8px">
+            <button class="primary" onclick="studioApply()" style="flex:1">Apply</button>
+            <button onclick="studioReset()">Reset</button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /panel-studio -->
 
 </div>
 
@@ -2131,6 +2428,15 @@ let chatHistory = [];
 let currentModel = localStorage.getItem('bb_model') || '';
 let viModeActive = false;
 let allModels = [];
+
+// ── Studio tab state ────────────────────────────────────────────────────────
+let _studioHistory      = [];
+let _studioCtxPollTimer = null;
+let _studioLastReqIdx   = null;
+let _studioStreaming     = false;
+let _studioCurrentRunId = null;   // conv_id of loaded run (null = fresh)
+let _studioRunLabels    = {};     // conv_id → display label cache
+let _studioCtxMessages  = [];     // last context panel messages[] for forking
 
 // Persist and restore chat history across tab switches
 function saveChatHistory() {
@@ -2446,11 +2752,14 @@ function switchTapSub(sub) {
 function switchLabSub(sub) {
   document.getElementById('lab-experiments').style.display = sub === 'experiments' ? 'flex' : 'none';
   document.getElementById('lab-bench').style.display       = sub === 'bench'       ? 'flex' : 'none';
+  document.getElementById('lab-eval').style.display        = sub === 'eval'        ? 'flex' : 'none';
   document.getElementById('lab-dgm').style.display         = sub === 'dgm'         ? 'flex' : 'none';
   document.getElementById('lab-sub-exp-btn').classList.toggle('subnav-active',   sub === 'experiments');
   document.getElementById('lab-sub-bench-btn').classList.toggle('subnav-active', sub === 'bench');
+  document.getElementById('lab-sub-eval-btn').classList.toggle('subnav-active',  sub === 'eval');
   document.getElementById('lab-sub-dgm-btn').classList.toggle('subnav-active',   sub === 'dgm');
   if (sub === 'bench') loadBenchModels();
+  if (sub === 'eval')  loadEvalSuites();
 }
 
 // ── DGM (Darwin Gödel Machine) ───────────────────────────────────────────────
@@ -2748,6 +3057,10 @@ function switchTab(name) {
   if (name === 'chat')      { initChatPanes(); loadModels(); }
   if (name === 'harness')   { loadModelsForPanes(); setHarnessMode(harnessMode); }
   if (name === 'discovery') loadDiscoveryOpportunities();
+  if (name === 'studio')    loadStudio();
+
+  // Stop Studio context polling when leaving Studio tab
+  if (name !== 'studio') stopStudio();
 
   // Show background operator indicator if leaving operator tab while a run is in progress
   if (name !== 'operator' && _lastOpRunId) {
@@ -2757,12 +3070,143 @@ function switchTab(name) {
 
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
-  const map = {'1':'dashboard','2':'tap','3':'chat','4':'harness','5':'discovery'};
+  const map = {'1':'dashboard','2':'tap','3':'chat','4':'harness','5':'discovery','6':'studio'};
   if (map[e.key]) switchTab(map[e.key]);
   // [ ] to page chat panes
   if (e.key === '[') chatPagePrev();
   if (e.key === ']') chatPageNext();
 });
+
+// ── Eval ─────────────────────────────────────────────────────────────────────
+let _evalAbort = null;
+
+async function loadEvalSuites() {
+  const sel = document.getElementById('eval-suite-select');
+  if (sel.dataset.loaded) return;
+  try {
+    const suites = await api('/api/v1/eval/suites').then(r => r.json());
+    sel.innerHTML = suites.length
+      ? suites.map(s => `<option value="${s.path}">${s.label}</option>`).join('')
+      : '<option value="">No suites found</option>';
+    sel.dataset.loaded = '1';
+    onEvalSuiteChange();
+  } catch(e) { sel.innerHTML = '<option value="">Error loading suites</option>'; }
+
+  // Populate model picker
+  const msel = document.getElementById('eval-model-select');
+  if (!msel.dataset.loaded) {
+    try {
+      const r = await fetch('/api/tags'); // Ollama tags via proxy passthrough
+      const tags = r.ok ? (await r.json()).models || [] : [];
+      msel.innerHTML = '<option value="">default model</option>' +
+        tags.map(m => `<option value="${m.name}">${m.name}</option>`).join('');
+      msel.dataset.loaded = '1';
+    } catch(_) {}
+  }
+}
+
+function onEvalSuiteChange() {
+  const sel = document.getElementById('eval-suite-select');
+  const label = sel.options[sel.selectedIndex]?.text || '';
+  document.getElementById('eval-progress').textContent = label ? `suite: ${label}` : '';
+}
+
+async function runEval() {
+  const suite = document.getElementById('eval-suite-select').value;
+  if (!suite) return;
+  const model = document.getElementById('eval-model-select').value;
+
+  document.getElementById('eval-run-btn').style.display  = 'none';
+  document.getElementById('eval-stop-btn').style.display = '';
+  document.getElementById('eval-summary').style.display  = 'none';
+
+  const body = document.getElementById('eval-results');
+  body.innerHTML = '';
+
+  _evalAbort = new AbortController();
+
+  let total = 0, passed = 0, scoreSum = 0, count = 0;
+
+  try {
+    const resp = await fetch('/api/v1/eval/run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ suite, model, base_url: window.location.origin }),
+      signal: _evalAbort.signal,
+    });
+
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        let ev;
+        try { ev = JSON.parse(line.slice(6)); } catch(_) { continue; }
+
+        if (ev.event === 'start') {
+          total = ev.total;
+          document.getElementById('eval-progress').textContent =
+            `0 / ${total} · suite: ${ev.suite}${ev.model ? ' · ' + ev.model : ''}`;
+
+        } else if (ev.event === 'result') {
+          count++;
+          scoreSum += ev.score || 0;
+          if (ev.ok) passed++;
+          document.getElementById('eval-progress').textContent =
+            `${count} / ${total} · ${passed} passed`;
+
+          const color = ev.ok ? 'var(--green)' : (ev.error ? 'var(--yellow)' : 'var(--red)');
+          const icon  = ev.ok ? '✓' : (ev.error ? '⚠' : '✗');
+          const row = document.createElement('div');
+          row.style.cssText = 'display:flex;gap:8px;padding:3px 12px;border-bottom:1px solid var(--bg-border);align-items:baseline;font-family:monospace';
+          row.innerHTML =
+            `<span style="color:${color};width:14px;flex-shrink:0">${icon}</span>` +
+            `<span style="color:var(--fg-muted);width:28px;flex-shrink:0;text-align:right">${count}</span>` +
+            `<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)" title="${esc(ev.case_id)}">${esc(ev.case_id)}</span>` +
+            `<span style="color:var(--fg-muted);flex-shrink:0">${(ev.score*100).toFixed(0)}%</span>` +
+            `<span style="color:var(--fg-muted);flex-shrink:0;width:54px;text-align:right">${ev.latency_ms ? ev.latency_ms.toFixed(0)+'ms' : ''}</span>` +
+            `<span style="color:${color};flex-shrink:0;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(ev.reason||ev.error||'')}">${esc(ev.reason||ev.error||'')}</span>`;
+          body.appendChild(row);
+          body.scrollTop = body.scrollHeight;
+
+        } else if (ev.event === 'done') {
+          const avgScore = count ? (scoreSum / count * 100).toFixed(1) : '0';
+          const sumEl = document.getElementById('eval-summary');
+          sumEl.style.display = 'flex';
+          document.getElementById('eval-summary-suite').textContent = suite.split('/').pop();
+          document.getElementById('eval-summary-pass').textContent  = `✓ ${ev.passed} passed`;
+          document.getElementById('eval-summary-fail').textContent  = ev.failed ? `✗ ${ev.failed} failed` : '';
+          document.getElementById('eval-summary-score').textContent = `avg score ${avgScore}%`;
+          document.getElementById('eval-progress').textContent = `Done · ${ev.passed}/${ev.total} passed`;
+
+        } else if (ev.event === 'error') {
+          body.innerHTML += `<div style="padding:8px 12px;color:var(--red)">${esc(ev.message)}</div>`;
+        }
+      }
+    }
+  } catch(e) {
+    if (e.name !== 'AbortError')
+      body.innerHTML += `<div style="padding:8px 12px;color:var(--red)">Stream error: ${esc(String(e))}</div>`;
+  }
+
+  document.getElementById('eval-run-btn').style.display  = '';
+  document.getElementById('eval-stop-btn').style.display = 'none';
+  _evalAbort = null;
+}
+
+function stopEval() {
+  if (_evalAbort) { _evalAbort.abort(); _evalAbort = null; }
+  document.getElementById('eval-run-btn').style.display  = '';
+  document.getElementById('eval-stop-btn').style.display = 'none';
+  document.getElementById('eval-progress').textContent   = 'Stopped';
+}
 
 // ── API helpers ─────────────────────────────────────────────────────────────
 async function api(path, opts={}) {
@@ -8819,6 +9263,503 @@ function renderDiscoveryResult(data) {
   html += '</table>';
 
   body.innerHTML = html;
+}
+
+// ── Studio tab ───────────────────────────────────────────────────────────────
+
+async function loadStudio() {
+  await studioLoadModels();
+  await studioLoadControls();
+  studioStartContextPoll();
+  studioFetchContext();
+  studioMobileActivate('chat');
+}
+
+function stopStudio() {
+  if (_studioCtxPollTimer) { clearInterval(_studioCtxPollTimer); _studioCtxPollTimer = null; }
+}
+
+function studioStartContextPoll() {
+  studioStopContextPoll();
+  _studioCtxPollTimer = setInterval(studioFetchContext, 2000);
+}
+function studioStopContextPoll() {
+  if (_studioCtxPollTimer) { clearInterval(_studioCtxPollTimer); _studioCtxPollTimer = null; }
+}
+function studioToggleContextLive() {
+  const live = document.getElementById('studio-ctx-live')?.checked;
+  if (live) studioStartContextPoll(); else studioStopContextPoll();
+}
+
+async function studioFetchContext() {
+  const el = document.getElementById('studio-ctx-body');
+  if (!el) return;
+  const upd = document.getElementById('studio-ctx-updated');
+  try {
+    const d = await api('/api/v1/inspector?n=1');
+    if (upd) upd.textContent = new Date().toLocaleTimeString();
+    const reqs = d.requests || [];
+    if (!reqs.length) {
+      el.innerHTML = '<div class="empty">No requests yet — send a message.</div>';
+      return;
+    }
+    const req = reqs[0];
+    const isNew = req.idx !== _studioLastReqIdx;
+    _studioLastReqIdx = req.idx;
+    el.innerHTML = renderStudioContext(req);
+    if (isNew) {
+      const card = el.querySelector('.studio-ctx-card');
+      if (card) { card.classList.remove('studio-ctx-flash'); void card.offsetWidth; card.classList.add('studio-ctx-flash'); }
+    }
+  } catch(e) {
+    if (upd) upd.textContent = 'err ' + new Date().toLocaleTimeString();
+    // Preserve last valid content — don't overwrite on poll error
+  }
+}
+
+function renderStudioContext(req) {
+  const roleColor = { system: 'var(--yellow)', user: 'var(--green)', assistant: 'var(--blue)', tool: 'var(--peach)' };
+  const statusColor = req.status === 'complete' ? 'var(--green)' : req.status === 'error' ? 'var(--red)' : 'var(--yellow)';
+  const latMs = req.latency_ms != null ? req.latency_ms : null;
+  const latBadge = latMs == null
+    ? '<span class="badge badge-dim">in-flight</span>'
+    : `<span class="badge" style="background:${latMs<1000?'var(--green)':latMs<5000?'var(--yellow)':'var(--red)'}20;color:${latMs<1000?'var(--green)':latMs<5000?'var(--yellow)':'var(--red)'}">${latMs<1000?(latMs.toFixed(0)+'ms'):(latMs/1000).toFixed(1)+'s'}</span>`;
+  const ttftBadge = req.ttft_ms != null ? `<span class="badge badge-dim" title="Time to first token">ttft ${req.ttft_ms.toFixed(0)}ms</span>` : '';
+
+  const nMsgs = (req.messages || []).length;
+  const nChars = req.total_chars || 0;
+  const nTok = Math.round(nChars / 4);
+  const tokStr = nTok >= 1000 ? `~${(nTok/1000).toFixed(1)}k tok` : `~${nTok} tok`;
+
+  const gp = req.generation_params || {};
+  const paramPills = ['temperature','top_p','top_k','num_ctx','max_tokens']
+    .filter(k => gp[k] != null)
+    .map(k => `<span class="badge badge-dim" style="font-family:monospace">${k}=${gp[k]}</span>`)
+    .join('');
+
+  _studioCtxMessages = req.messages || [];
+  const msgsHtml = (req.messages || []).map((m, idx) => {
+    const c = (m.content || '');
+    const preview = c.length > 1200 ? esc(c.slice(0,1200)) + '\n… +'+(c.length-1200)+' chars' : esc(c);
+    return `<div class="studio-ctx-msg-item">
+      <span class="badge" style="background:${roleColor[m.role]||'var(--fg-muted)'}20;color:${roleColor[m.role]||'var(--fg-muted)'}">${m.role}</span>
+      <span style="color:var(--fg-muted);font-size:10px">${c.length} chars</span>
+      <button class="studio-fork-btn" onclick="studioForkAt(${idx})" title="Fork context here">⑂</button>
+      <div class="studio-ctx-msg-body">${preview}</div>
+    </div>`;
+  }).join('');
+
+  return `<div class="studio-ctx-card">
+    <div class="studio-ctx-meta">
+      <span style="width:8px;height:8px;border-radius:50%;background:${statusColor};flex-shrink:0;display:inline-block"></span>
+      <span class="badge badge-lav">${esc(req.model || '?')}</span>
+      ${latBadge}${ttftBadge}
+      <span style="color:var(--fg-muted);font-size:10px;margin-left:auto">${req.backend_url ? esc(req.backend_url.length>35?req.backend_url.slice(0,35)+'…':req.backend_url) : ''}</span>
+    </div>
+    <div class="studio-ctx-stats">${nMsgs} messages · ${nChars.toLocaleString()} chars · ${tokStr}</div>
+    ${paramPills ? `<div class="studio-ctx-params">${paramPills}</div>` : ''}
+    <div class="studio-ctx-msgs">${msgsHtml}</div>
+  </div>`;
+}
+
+async function studioLoadModels() {
+  const sel = document.getElementById('studio-model-sel');
+  if (!sel) return;
+  try {
+    const d = await api('/v1/models');
+    const models = (d.data || d.models || []).map(m => m.id || m.name || m).filter(Boolean);
+    sel.innerHTML = '<option value="">— server default —</option>'
+      + models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+    try {
+      const cfg = await api('/api/v1/config');
+      if (cfg.default_model) sel.value = cfg.default_model;
+    } catch {}
+  } catch {
+    sel.innerHTML = '<option value="">no models available</option>';
+  }
+}
+
+async function studioLoadControls() {
+  try {
+    const cfg = await api('/api/v1/config');
+    const temp = cfg.gen_temperature ?? 0.7;
+    const tempEl = document.getElementById('studio-temp');
+    if (tempEl) { tempEl.value = temp; document.getElementById('studio-temp-val').textContent = parseFloat(temp).toFixed(2); }
+    const topP = cfg.gen_top_p;
+    const toppEl = document.getElementById('studio-topp');
+    if (toppEl) { toppEl.value = topP ?? 1.0; document.getElementById('studio-topp-val').textContent = topP != null ? parseFloat(topP).toFixed(2) : '—'; }
+    const ctxEl = document.getElementById('studio-numctx');
+    if (ctxEl) ctxEl.value = cfg.gen_num_ctx != null ? cfg.gen_num_ctx : '';
+    const maxtokEl = document.getElementById('studio-maxtok');
+    if (maxtokEl) maxtokEl.value = cfg.gen_max_tokens != null ? cfg.gen_max_tokens : '';
+    const frEl = document.getElementById('studio-force-route');
+    if (frEl) frEl.value = cfg.force_route || '';
+    const spEl = document.getElementById('studio-sysprefix');
+    if (spEl) spEl.value = cfg.system_prompt_prefix || '';
+    const scEl = document.getElementById('studio-sysctx-enabled');
+    if (scEl) scEl.checked = !!cfg.system_context?.enabled;
+    // Set model selector if not already populated
+    const msel = document.getElementById('studio-model-sel');
+    if (msel && cfg.default_model && !msel.value) msel.value = cfg.default_model;
+  } catch(e) {
+    studioSetApplyStatus('Load error: ' + e.message, 'err');
+  }
+}
+
+async function studioApply() {
+  studioSetApplyStatus('Applying…', 'dim');
+  const body = {};
+  const tempEl = document.getElementById('studio-temp');
+  if (tempEl) body.gen_temperature = parseFloat(tempEl.value);
+  const toppEl = document.getElementById('studio-topp');
+  if (toppEl) body.gen_top_p = parseFloat(toppEl.value);
+  const ctxEl = document.getElementById('studio-numctx');
+  if (ctxEl && ctxEl.value !== '') body.gen_num_ctx = parseInt(ctxEl.value);
+  const maxtokEl = document.getElementById('studio-maxtok');
+  body.gen_max_tokens = (maxtokEl && maxtokEl.value !== '') ? parseInt(maxtokEl.value) : null;
+  const frEl = document.getElementById('studio-force-route');
+  if (frEl) body.force_route = frEl.value.trim() || null;
+  const spEl = document.getElementById('studio-sysprefix');
+  if (spEl) body.system_prompt_prefix = spEl.value;
+  const scEl = document.getElementById('studio-sysctx-enabled');
+  if (scEl) body.system_context_enabled = scEl.checked;
+  const msel = document.getElementById('studio-model-sel');
+  if (msel && msel.value) body.default_model = msel.value;
+  try {
+    await api('/api/v1/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    studioSetApplyStatus('Applied ✓', 'ok');
+    setTimeout(() => studioSetApplyStatus('', ''), 3000);
+  } catch(e) {
+    studioSetApplyStatus('Error: ' + e.message, 'err');
+  }
+}
+
+async function studioReset() {
+  studioSetApplyStatus('Resetting…', 'dim');
+  try {
+    await api('/api/v1/config', { method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ force_route: null, system_prompt_prefix: '', gen_max_tokens: null }) });
+    await studioLoadControls();
+    studioSetApplyStatus('Reset ✓', 'ok');
+    setTimeout(() => studioSetApplyStatus('', ''), 2000);
+  } catch(e) {
+    studioSetApplyStatus('Reset error: ' + e.message, 'err');
+  }
+}
+
+function studioSetApplyStatus(msg, type) {
+  const el = document.getElementById('studio-apply-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = type === 'ok' ? 'var(--green)' : type === 'err' ? 'var(--red)' : 'var(--fg-muted)';
+}
+
+async function studioSysCtxToggle(enabled) {
+  try {
+    await api('/api/v1/config', { method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ system_context_enabled: enabled }) });
+    studioSetApplyStatus(enabled ? 'Sys ctx on' : 'Sys ctx off', 'ok');
+    setTimeout(() => studioSetApplyStatus('', ''), 1500);
+  } catch(e) {
+    studioSetApplyStatus('Error: ' + e.message, 'err');
+  }
+}
+
+async function studioSend() {
+  const input = document.getElementById('studio-input');
+  const text = input?.value.trim();
+  if (!text || _studioStreaming) return;
+  input.value = '';
+  input.style.height = 'auto';
+  const sendBtn = document.getElementById('studio-send-btn');
+  if (sendBtn) sendBtn.disabled = true;
+  _studioStreaming = true;
+
+  _studioHistory.push({ role: 'user', content: text });
+  studioAppendMsg('user', text, '', _studioHistory.length - 1);
+
+  const area = document.getElementById('studio-msgs');
+  const typingId = 'studio-typing-' + Date.now();
+  area.insertAdjacentHTML('beforeend',
+    `<div class="typing-indicator" id="${typingId}"><span></span><span></span><span></span></div>`);
+  area.scrollTop = area.scrollHeight;
+
+  try {
+    const model = document.getElementById('studio-model-sel')?.value || '';
+    const msgs = _studioHistory.map(m => ({ role: m.role, content: m.content }));
+    const bodyObj = { messages: msgs, stream: true, _beigebox_direct: true };
+    if (model) bodyObj.model = model;
+
+    const resp = await fetch(BASE + '/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer beigebox' },
+      body: JSON.stringify(bodyObj),
+    });
+    document.getElementById(typingId)?.remove();
+    if (!resp.ok) throw new Error(resp.status + ' ' + resp.statusText);
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = '';
+    let assistantDiv = null;
+    let bubble = null;
+    let routedModel = model;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      for (const line of chunk.split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6).trim();
+        if (data === '[DONE]') break;
+        try {
+          const j = JSON.parse(data);
+          if (j.bb_type === 'routing') {
+            const rm = j.model || '';
+            if (rm && rm !== model) {
+              routedModel = rm;
+              const badge = document.createElement('div');
+              badge.style.cssText = 'font-size:10px;color:var(--lavender);padding:1px 6px;opacity:0.8';
+              badge.textContent = '↪ rerouted → ' + rm;
+              area.appendChild(badge);
+            }
+            continue;
+          }
+          if (j.model === 'beigebox-error') {
+            const errText = (j.choices?.[0]?.delta?.content || 'Backend error').replace(/^\n+/,'');
+            const errDiv = document.createElement('div');
+            errDiv.className = 'error-box'; errDiv.textContent = errText;
+            area.appendChild(errDiv); area.scrollTop = area.scrollHeight;
+            continue;
+          }
+          const delta = j.choices?.[0]?.delta?.content || '';
+          if (delta) {
+            fullText += delta;
+            if (!assistantDiv) {
+              assistantDiv = studioAppendMsg('assistant', '', j.model || routedModel || 'assistant');
+              if (assistantDiv) assistantDiv.dataset.streaming = 'true';
+              bubble = assistantDiv?.querySelector('.bubble');
+            }
+            if (bubble) { bubble.textContent = fullText; area.scrollTop = area.scrollHeight; }
+          }
+        } catch {}
+      }
+    }
+
+    if (fullText) {
+      if (assistantDiv) delete assistantDiv.dataset.streaming;
+      _studioHistory.push({ role: 'assistant', content: fullText });
+      const aIdx = _studioHistory.length - 1;
+      if (assistantDiv) {
+        const meta = assistantDiv.querySelector('.meta');
+        const tok = Math.round(fullText.length / 4);
+        if (meta) {
+          meta.appendChild(document.createTextNode(' · ~' + (tok >= 1000 ? (tok/1000).toFixed(1)+'k' : tok) + ' tok'));
+          const eb = document.createElement('button');
+          eb.className = 'studio-edit-btn'; eb.textContent = 'edit';
+          eb.onclick = () => studioEditMsg(eb, aIdx);
+          meta.appendChild(eb);
+        }
+        // Render markdown on final text
+        const bub = assistantDiv.querySelector('.bubble');
+        if (bub) bub.innerHTML = _formatOutput(fullText);
+      }
+    }
+  } catch(e) {
+    document.getElementById(typingId)?.remove();
+    studioAppendMsg('assistant', 'Error: ' + e.message, 'error');
+  } finally {
+    _studioStreaming = false;
+    if (sendBtn) sendBtn.disabled = false;
+    document.getElementById('studio-input')?.focus();
+  }
+}
+
+function studioAppendMsg(role, text, model, histIdx) {
+  const area = document.getElementById('studio-msgs');
+  if (!area) return null;
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  const label = role === 'user' ? 'you' : (model || role);
+  const content = role === 'assistant' && text ? _formatOutput(text) : esc(text);
+  const editBtn = (histIdx !== undefined && histIdx >= 0)
+    ? `<button class="studio-edit-btn" onclick="studioEditMsg(this,${histIdx})">edit</button>`
+    : '';
+  div.innerHTML = `<div class="meta">${esc(label)} · ${new Date().toLocaleTimeString()}${editBtn}</div><div class="bubble">${content}</div>`;
+  area.appendChild(div);
+  area.scrollTop = area.scrollHeight;
+  return div;
+}
+
+function studioClearChat() {
+  _studioHistory = [];
+  _studioCurrentRunId = null;
+  const badge = document.getElementById('studio-run-badge');
+  if (badge) badge.textContent = '';
+  const area = document.getElementById('studio-msgs');
+  if (area) area.innerHTML = '';
+}
+
+function studioKeydown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); studioSend(); }
+}
+
+function studioMobileActivate(col) {
+  if (window.innerWidth > 767) return;
+  const colMap = { chat: 'studio-chat-col', context: 'studio-ctx-col', controls: 'studio-controls-col' };
+  Object.entries(colMap).forEach(([name, id]) => {
+    document.getElementById(id)?.classList.toggle('studio-mobile-active', name === col);
+  });
+  const btns = document.querySelectorAll('#studio-mobile-subnav .subnav-btn');
+  const names = ['chat', 'context', 'controls'];
+  btns.forEach((btn, i) => btn.classList.toggle('subnav-active', names[i] === col));
+}
+
+// ── Studio runs ──────────────────────────────────────────────────────────────
+
+function studioOpenRuns() {
+  const drawer = document.getElementById('studio-runs-drawer');
+  if (!drawer) return;
+  drawer.classList.add('open');
+  studioLoadRuns();
+}
+
+function studioCloseRuns() {
+  document.getElementById('studio-runs-drawer')?.classList.remove('open');
+}
+
+async function studioLoadRuns() {
+  const list = document.getElementById('studio-runs-list');
+  if (!list) return;
+  list.innerHTML = '<div class="empty" style="padding:16px">Loading…</div>';
+  try {
+    const d = await api('/api/v1/tap?n=200&event_type=message');
+    const entries = d.entries || [];
+    // Group by conv_id (API returns newest-first, so first seen = newest for that conv)
+    const byConv = new Map();
+    for (const e of entries) {
+      if (!e.conv_id) continue;
+      if (!byConv.has(e.conv_id)) {
+        byConv.set(e.conv_id, { conv_id: e.conv_id, ts: e.ts, count: 0, preview: '' });
+      }
+      const c = byConv.get(e.conv_id);
+      c.count++;
+      if (!c.preview && e.role === 'user' && e.content) c.preview = e.content.slice(0, 80);
+    }
+    const convs = [...byConv.values()];
+    if (!convs.length) {
+      list.innerHTML = '<div class="empty" style="padding:16px">No runs yet — send a message in the Chat column first.</div>';
+      return;
+    }
+    list.innerHTML = convs.map(c => {
+      const label = _studioRunLabels[c.conv_id] || ('Run ' + c.conv_id.slice(0, 8));
+      const ts = c.ts ? new Date(c.ts).toLocaleString() : '';
+      const active = c.conv_id === _studioCurrentRunId ? 'border-color:var(--lavender)' : '';
+      return `<div class="studio-run-item" style="${active}" onclick="studioLoadRun('${esc(c.conv_id)}')">
+        <div class="studio-run-label">${esc(label)}</div>
+        <div class="studio-run-meta">
+          <span>${ts}</span>
+          <span>${c.count} msg${c.count !== 1 ? 's' : ''}</span>
+        </div>
+        ${c.preview ? `<div class="studio-run-meta" style="color:var(--fg-dim);font-style:italic">${esc(c.preview)}${c.preview.length >= 80 ? '…' : ''}</div>` : ''}
+      </div>`;
+    }).join('');
+  } catch(e) {
+    list.innerHTML = `<div class="empty" style="padding:16px">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+async function studioLoadRun(convId) {
+  studioCloseRuns();
+  const area = document.getElementById('studio-msgs');
+  if (!area) return;
+  area.innerHTML = '<div class="empty" style="padding:16px">Loading…</div>';
+  try {
+    const d = await api(`/api/v1/tap?n=500&conv_id=${encodeURIComponent(convId)}`);
+    const entries = (d.entries || [])
+      .filter(e => e.role === 'user' || e.role === 'assistant')
+      .reverse(); // API returns newest-first; flip to chronological
+    _studioHistory = entries.map(e => ({ role: e.role, content: e.content || '' }));
+    _studioCurrentRunId = convId;
+    const badge = document.getElementById('studio-run-badge');
+    if (badge) badge.textContent = _studioRunLabels[convId] || convId.slice(0, 8);
+    area.innerHTML = '';
+    for (let i = 0; i < _studioHistory.length; i++) {
+      studioAppendMsg(_studioHistory[i].role, _studioHistory[i].content,
+        _studioHistory[i].role === 'assistant' ? 'assistant' : '', i);
+    }
+    area.scrollTop = area.scrollHeight;
+  } catch(e) {
+    area.innerHTML = `<div class="empty" style="padding:16px">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+// ── Studio fork / edit ───────────────────────────────────────────────────────
+
+function studioForkAt(idx) {
+  // Load context panel messages up to idx (user/assistant only) into chat history
+  const msgs = _studioCtxMessages.slice(0, idx + 1)
+    .filter(m => m.role === 'user' || m.role === 'assistant');
+  if (!msgs.length) return;
+  _studioHistory = msgs.map(m => ({ role: m.role, content: m.content || '' }));
+  _studioCurrentRunId = null;
+  const badge = document.getElementById('studio-run-badge');
+  if (badge) badge.textContent = 'fork@' + idx;
+  const area = document.getElementById('studio-msgs');
+  if (!area) return;
+  area.innerHTML = '';
+  for (let i = 0; i < _studioHistory.length; i++) {
+    studioAppendMsg(_studioHistory[i].role, _studioHistory[i].content,
+      _studioHistory[i].role === 'assistant' ? 'assistant' : '', i);
+  }
+  area.scrollTop = area.scrollHeight;
+  document.getElementById('studio-input')?.focus();
+}
+
+function studioEditMsg(btn, histIdx) {
+  const msgDiv = btn.closest('.msg');
+  if (!msgDiv || histIdx < 0 || histIdx >= _studioHistory.length) return;
+  const bubble = msgDiv.querySelector('.bubble');
+  if (!bubble) return;
+  const current = _studioHistory[histIdx]?.content || '';
+  bubble.innerHTML = `<textarea class="studio-edit-area" id="studio-edit-ta-${histIdx}">${esc(current)}</textarea>
+    <div style="display:flex;gap:6px;margin-top:4px">
+      <button class="primary" style="font-size:10px;padding:2px 8px" onclick="studioApplyEdit(${histIdx})">Apply & Branch</button>
+      <button style="font-size:10px;padding:2px 8px" onclick="studioCancelEdit()">Cancel</button>
+    </div>`;
+  document.getElementById(`studio-edit-ta-${histIdx}`)?.focus();
+}
+
+function studioCancelEdit() {
+  const area = document.getElementById('studio-msgs');
+  if (!area) return;
+  area.innerHTML = '';
+  for (let i = 0; i < _studioHistory.length; i++) {
+    studioAppendMsg(_studioHistory[i].role, _studioHistory[i].content,
+      _studioHistory[i].role === 'assistant' ? 'assistant' : '', i);
+  }
+}
+
+function studioApplyEdit(histIdx) {
+  const ta = document.getElementById(`studio-edit-ta-${histIdx}`);
+  if (!ta) return;
+  const newContent = ta.value;
+  const role = _studioHistory[histIdx]?.role || 'user';
+  // Truncate history at this point and replace with edited message
+  _studioHistory = _studioHistory.slice(0, histIdx);
+  _studioHistory.push({ role, content: newContent });
+  _studioCurrentRunId = null;
+  const badge = document.getElementById('studio-run-badge');
+  if (badge) badge.textContent = 'branch@' + histIdx;
+  const area = document.getElementById('studio-msgs');
+  if (!area) return;
+  area.innerHTML = '';
+  for (let i = 0; i < _studioHistory.length; i++) {
+    studioAppendMsg(_studioHistory[i].role, _studioHistory[i].content,
+      _studioHistory[i].role === 'assistant' ? 'assistant' : '', i);
+  }
+  document.getElementById('studio-input')?.focus();
 }
 </script>
 </body>

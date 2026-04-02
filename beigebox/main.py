@@ -51,7 +51,12 @@ from beigebox.hooks import HookManager
 from beigebox.backends.router import MultiBackendRouter
 from beigebox.costs import CostTracker
 from beigebox.auth import MultiKeyAuthRegistry
-from beigebox.web_auth import WebAuthManager, COOKIE_SESSION, COOKIE_STATE
+try:
+    from beigebox.web_auth import WebAuthManager, COOKIE_SESSION, COOKIE_STATE
+except ImportError:
+    WebAuthManager = None  # type: ignore[assignment,misc]
+    COOKIE_SESSION = "bb_session"
+    COOKIE_STATE   = "bb_oauth_state"
 
 _COOKIE_VERIFIER = "bb_oauth_cv"  # PKCE code_verifier (short-lived)
 from beigebox.mcp_server import McpServer
@@ -202,8 +207,8 @@ async def lifespan(app: FastAPI):
     # Auth registry (multi-key, agentauth-backed)
     auth_registry = MultiKeyAuthRegistry(cfg.get("auth", {}))
 
-    # Web UI OAuth shim
-    web_auth = WebAuthManager(cfg.get("auth", {}).get("web_ui", {}))
+    # Web UI OAuth shim (optional — requires itsdangerous)
+    web_auth = WebAuthManager(cfg.get("auth", {}).get("web_ui", {})) if WebAuthManager else None
 
     # MCP server — expose operator/run if operator is enabled
     _op_enabled_for_mcp = cfg.get("operator", {}).get("enabled", False)
@@ -2123,6 +2128,7 @@ async def api_inspector(n: int = 5):
     if proxy is None:
         return JSONResponse({"requests": [], "total": 0})
     entries = list(reversed(list(proxy._request_inspector)))[:n]
+    logger.debug("inspector: returning %d entries (ring buffer size=%d)", len(entries), len(proxy._request_inspector))
     return JSONResponse({"requests": entries, "total": len(entries)})
 
 
@@ -4367,6 +4373,87 @@ async def bench_run(request: Request):
         except Exception as exc:
             logger.exception("bench_run stream error: %s", exc)
             yield f"data: {json.dumps({'event': 'error', 'message': str(exc)})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+# ---------------------------------------------------------------------------
+# Eval Suite Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v1/eval/suites")
+async def eval_list_suites():
+    """
+    List available eval suite YAML files from the evals/ directory.
+
+    Returns: [{"name": "smoke", "path": "evals/smoke.yaml", "label": "smoke"}]
+    """
+    from pathlib import Path
+    evals_dir = Path("evals")
+    suites = []
+    if evals_dir.is_dir():
+        for p in sorted(evals_dir.glob("*.yaml")):
+            suites.append({"name": p.stem, "path": str(p), "label": p.stem})
+    return JSONResponse(suites)
+
+
+@app.post("/api/v1/eval/run")
+async def eval_run(request: Request):
+    """
+    Run an eval suite and stream results as SSE.
+
+    POST /api/v1/eval/run
+    {
+        "suite": "evals/smoke.yaml",   // path to suite file
+        "model": "llama3.2:3b",        // optional model override
+        "base_url": "http://..."       // optional proxy URL override
+    }
+
+    SSE events: start, result, done, error
+    """
+    import asyncio
+    from beigebox.eval.runner import EvalRunner
+
+    body = await request.json()
+    suite_path = body.get("suite", "")
+    if not suite_path:
+        return JSONResponse({"error": "suite path required"}, status_code=400)
+
+    model_override = body.get("model", "")
+    base_url = body.get("base_url", "http://localhost:1337")
+
+    cfg = get_config()
+    judge_model = cfg.get("decision_llm", {}).get("model", "")
+    judge_backend = cfg.get("decision_llm", {}).get("backend_url", base_url)
+
+    async def event_stream():
+        loop = asyncio.get_event_loop()
+        try:
+            suite = await loop.run_in_executor(None, EvalRunner.load_suite, suite_path)
+        except Exception as exc:
+            yield f"data: {json.dumps({'event': 'error', 'message': f'Failed to load suite: {exc}'})}\n\n"
+            return
+
+        if model_override:
+            suite.model = model_override
+
+        total = len(suite.cases)
+        yield f"data: {json.dumps({'event': 'start', 'suite': suite.name, 'total': total, 'model': suite.model})}\n\n"
+
+        runner = EvalRunner(
+            base_url=base_url,
+            judge_model=judge_model,
+            judge_backend_url=judge_backend,
+        )
+
+        passed = 0
+        for i, case in enumerate(suite.cases):
+            result = await loop.run_in_executor(None, runner._run_case, case, suite, base_url, "webui")
+            if result.passed:
+                passed += 1
+            yield f"data: {json.dumps({'event': 'result', 'index': i, 'total': total, 'passed': passed, 'case_id': result.case_id, 'ok': result.passed, 'score': result.score, 'scorer': result.scorer, 'latency_ms': result.latency_ms, 'reason': result.reason, 'error': result.error})}\n\n"
+
+        yield f"data: {json.dumps({'event': 'done', 'total': total, 'passed': passed, 'failed': total - passed})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

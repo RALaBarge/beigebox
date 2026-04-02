@@ -76,11 +76,15 @@ class CDPClient:
     - Hard timeout per command (never blocks forever)
     """
 
-    def __init__(self, ws_url: str, timeout: float = _DEFAULT_TIMEOUT) -> None:
+    def __init__(self, ws_url: str, timeout: float = _DEFAULT_TIMEOUT,
+                 session_id: str | None = None) -> None:
         self._ws_url = ws_url
         self._timeout = timeout
         self._ws = None
         self._cmd_id = 0
+        # When set, all commands are routed through this CDP session (flattened sessions mode).
+        # Used when connecting via the browser-level WS URL with Target.attachToTarget.
+        self._session_id = session_id
 
     async def connect(self) -> None:
         """Open (or re-open) the WebSocket to the CDP target."""
@@ -99,7 +103,7 @@ class CDPClient:
             ),
             timeout=connect_timeout + 1,
         )
-        logger.debug("CDPClient connected to %s", self._ws_url)
+        logger.debug("CDPClient connected to %s (session=%s)", self._ws_url, self._session_id)
 
     async def close(self) -> None:
         """Close the WebSocket if open."""
@@ -110,20 +114,37 @@ class CDPClient:
                 pass
             self._ws = None
 
+    def _is_closed(self) -> bool:
+        """Return True if the WebSocket is closed/closing. Handles websockets v10–v16 API changes."""
+        if self._ws is None:
+            return True
+        # websockets ≤13: .closed property
+        if hasattr(self._ws, "closed"):
+            return self._ws.closed  # type: ignore[attr-defined]
+        # websockets ≥14: .state enum (OPEN=1, CLOSING=2, CLOSED=3)
+        if hasattr(self._ws, "state"):
+            import websockets.connection as _wsc
+            return self._ws.state != _wsc.State.OPEN
+        # Fallback: assume open
+        return False
+
     async def send(self, method: str, params: dict | None = None) -> dict:
         """
         Send a CDP command and await the response.
 
         Reconnects automatically if the socket is closed/None.
         Raises TimeoutError if the response doesn't arrive within self._timeout.
+        When self._session_id is set, uses flattened CDP sessions (Target.attachToTarget mode).
         """
-        if self._ws is None or self._ws.closed:
+        if self._ws is None or self._is_closed():
             logger.debug("CDPClient: (re)connecting to %s", self._ws_url)
             await self.connect()
 
         self._cmd_id += 1
         msg_id = self._cmd_id
-        payload = {"id": msg_id, "method": method, "params": params or {}}
+        payload: dict = {"id": msg_id, "method": method, "params": params or {}}
+        if self._session_id:
+            payload["sessionId"] = self._session_id
 
         try:
             await self._ws.send(json.dumps(payload))
@@ -137,7 +158,7 @@ class CDPClient:
             payload["id"] = msg_id
             await self._ws.send(json.dumps(payload))
 
-        # Read until we get the response for our command id
+        # Read until we get the response for our command id (and matching sessionId if set)
         deadline = time.monotonic() + self._timeout
         while True:
             remaining = deadline - time.monotonic()
@@ -153,11 +174,14 @@ class CDPClient:
 
             msg = json.loads(raw)
 
-            # CDP events (method key present) — skip, they're async notifications
+            # CDP events (method key present, no id) — skip
             if "method" in msg and "id" not in msg:
                 continue
 
             if msg.get("id") == msg_id:
+                # In session mode, also require sessionId to match
+                if self._session_id and msg.get("sessionId") != self._session_id:
+                    continue
                 if "error" in msg:
                     raise RuntimeError(f"CDP error: {msg['error']}")
                 return msg.get("result", {})
@@ -222,16 +246,22 @@ class CDPTool:
         ws_url: str = _DEFAULT_WS_URL,
         timeout: float = _DEFAULT_TIMEOUT,
     ) -> None:
+        import threading
         self._ws_url = ws_url.rstrip("/")
         self._timeout = timeout
         # Derive the HTTP base URL for tab discovery from the WebSocket URL
         http_base = ws_url.replace("ws://", "http://").replace("wss://", "https://")
-        # Strip any path (e.g. /devtools/browser/...)
         from urllib.parse import urlparse
         parsed = urlparse(http_base)
         self._http_base = f"{parsed.scheme}://{parsed.netloc}"
-        # Per-session CDP client (reused across calls; reconnected on stale socket)
+        # CDP client (lives in _loop; never touched from other threads directly)
         self._client: CDPClient | None = None
+        # Persistent background event loop so the WebSocket session survives across calls.
+        self._loop = asyncio.new_event_loop()
+        self._loop_thread = threading.Thread(
+            target=self._loop.run_forever, daemon=True, name="cdp-loop"
+        )
+        self._loop_thread.start()
 
     # ------------------------------------------------------------------
     # Sync entry point for the tool registry
@@ -250,14 +280,14 @@ class CDPTool:
         if not tool:
             return "Error: missing 'tool' field"
 
-        # Strip the 'cdp.' prefix to get the method name
         method = tool.removeprefix("cdp.") if tool.startswith("cdp.") else tool
 
         inp_repr = json.dumps(inp) if not isinstance(inp, str) else inp
         logger.info("cdp: %s (input=%.80s)", method, inp_repr[:80])
 
         try:
-            return asyncio.run(self._dispatch(method, inp))
+            future = asyncio.run_coroutine_threadsafe(self._dispatch(method, inp), self._loop)
+            return future.result(timeout=self._timeout + 5)
         except Exception as exc:
             logger.error("cdp: unexpected error in %s: %s", method, exc)
             return f"Error: {exc}"
@@ -331,51 +361,63 @@ class CDPTool:
 
         lines = ["Open tabs:"]
         for tab in tabs:
-            tab_id = tab.get("id", "?")[:12]
+            # /json/list uses "id" on standard Chrome but "targetId" on Puppeteer/browserless
+            tab_id = (tab.get("id") or tab.get("targetId") or "?")
+            tab_id = tab_id[-12:] if len(tab_id) > 12 else tab_id
             tab_type = tab.get("type", "?")
             tab_url = tab.get("url", "?")[:80]
             title = tab.get("title", "")[:60]
             lines.append(f"  [{tab_id}] ({tab_type}) {title!r} — {tab_url}")
         return "\n".join(lines)
 
-    async def _get_first_page_ws_url(self) -> str:
-        """
-        Discover the WebSocket URL for the first page-type tab.
-
-        If self._ws_url already looks like a full debugger URL
-        (contains '/devtools/page/'), use it directly. Otherwise query
-        /json/list and pick the first 'page' target.
-        """
-        if "/devtools/page/" in self._ws_url or "/devtools/browser/" in self._ws_url:
-            return self._ws_url
-
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(f"{self._http_base}/json/list")
-                resp.raise_for_status()
-                tabs = resp.json()
-        except Exception as exc:
-            raise RuntimeError(
-                f"Could not connect to Chrome at {self._http_base}: {exc}. "
-                "Start Chrome with --remote-debugging-port=9222"
-            )
-
-        for tab in tabs:
-            if tab.get("type") == "page":
-                ws = tab.get("webSocketDebuggerUrl", "")
-                if ws:
-                    return ws
-
-        raise RuntimeError(
-            "No 'page' type tab found. "
-            "Open a tab in Chrome with remote debugging enabled."
-        )
-
     async def _get_client(self) -> CDPClient:
-        """Get or create a CDPClient for the first available page tab."""
-        if self._client is None:
-            ws_url = await self._get_first_page_ws_url()
-            self._client = CDPClient(ws_url=ws_url, timeout=self._timeout)
+        """
+        Get or create a CDPClient connected to the first page tab.
+
+        Uses flattened CDP sessions (Target.attachToTarget) so that only
+        the browser-level WS URL is required. This works with Puppeteer,
+        browserless.io, and standard Chrome --remote-debugging-port setups.
+
+        Target discovery uses Target.getTargets (CDP) rather than /json/list
+        because some backends (Puppeteer/browserless) return path-style strings
+        in /json/list that are not valid targetIds for Target.attachToTarget.
+        """
+        if self._client is not None:
+            return self._client
+
+        # Strip any tab-specific path — always use the browser-level WS endpoint.
+        browser_ws = self._ws_url
+        if "/devtools/page/" in browser_ws or "/devtools/browser/" in browser_ws:
+            from urllib.parse import urlparse
+            p = urlparse(browser_ws)
+            browser_ws = f"{p.scheme}://{p.netloc}"
+
+        # Browser-level connection (no session yet).
+        browser_client = CDPClient(ws_url=browser_ws, timeout=self._timeout)
+
+        # Use Target.getTargets to get proper UUID targetIds.
+        result = await browser_client.send("Target.getTargets")
+        targets = result.get("targetInfos", [])
+        page_targets = [t for t in targets if t.get("type") == "page"]
+        if not page_targets:
+            raise RuntimeError(
+                "No 'page' type target found. "
+                "Open a tab in Chrome with remote debugging enabled."
+            )
+        target_id = page_targets[0]["targetId"]
+
+        attach_result = await browser_client.send(
+            "Target.attachToTarget",
+            {"targetId": target_id, "flatten": True},
+        )
+        session_id = attach_result.get("sessionId")
+        if not session_id:
+            raise RuntimeError("Target.attachToTarget returned no sessionId")
+
+        # Reuse the same WS connection, routing page commands via sessionId.
+        browser_client._session_id = session_id
+        self._client = browser_client
+        logger.debug("CDPTool: attached to target %s (session=%s)", target_id, session_id)
         return self._client
 
     # ------------------------------------------------------------------

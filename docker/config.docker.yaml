@@ -153,10 +153,14 @@ operator:
 hooks:
   directory: "./hooks"
 
+# --- Advanced ---
+advanced:
+  stream_stall_timeout_seconds: 120   # Give Ollama time to cold-load models from disk
+
 # --- Logging ---
 logging:
-  level: "INFO"
-  file: "./data/beigebox.log"
+  level: "DEBUG"
+  file: "/app/logs/beigebox.log"
 
 # --- Wiretap ---
 wiretap:

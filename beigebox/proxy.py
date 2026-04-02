@@ -1032,8 +1032,13 @@ class Proxy:
                 body = self._inject_tool_context(body, tool_results)
 
         # Hybrid routing: session cache → z-command → routing rules → embedding classifier → decision LLM
+        # _beigebox_direct=true skips routing entirely (used by Studio tab for direct model access)
         _t_route = _time.monotonic()
-        body, decision = await self._hybrid_route(body, zcmd, conversation_id)
+        if body.pop("_beigebox_direct", False):
+            decision = None
+            logger.debug("Direct mode: skipping hybrid routing")
+        else:
+            body, decision = await self._hybrid_route(body, zcmd, conversation_id)
         model = body.get("model", model)
         stages["routing"] = (_time.monotonic() - _t_route) * 1000
 
