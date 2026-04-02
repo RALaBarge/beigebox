@@ -260,6 +260,102 @@ docker compose exec -T beigebox test -d /app/workspace/out \
   && _ok "/app/workspace/out exists in container" \
   || _fail "/app/workspace/out not found"
 
+WSAPI=$(curl -fsS "$BB/api/v1/workspace")
+echo "$WSAPI" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); assert 'in' in d and 'out' in d" 2>/dev/null \
+  && _ok "GET /api/v1/workspace returns in/out keys" \
+  || _fail "GET /api/v1/workspace unexpected shape: $WSAPI"
+
+# ── 20. Request Inspector ─────────────────────────────────────────────────────
+_hdr "Request Inspector"
+INSP=$(curl -fsS "$BB/api/v1/inspector")
+echo "$INSP" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); assert 'requests' in d and 'total' in d" 2>/dev/null \
+  && _ok "GET /api/v1/inspector returns expected shape" \
+  || _fail "GET /api/v1/inspector unexpected shape: $INSP"
+
+# ── 21. Eval API ──────────────────────────────────────────────────────────────
+_hdr "Eval API"
+SUITES=$(curl -fsS "$BB/api/v1/eval/suites")
+echo "$SUITES" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); assert isinstance(d, list)" 2>/dev/null \
+  && _ok "GET /api/v1/eval/suites returns list" \
+  || _fail "GET /api/v1/eval/suites unexpected shape: $SUITES"
+
+# ── 22. Routing stats ─────────────────────────────────────────────────────────
+_hdr "Routing stats"
+RSTATS=$(curl -fsS "$BB/api/v1/routing-stats")
+echo "$RSTATS" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); assert 'cache_hits' in d and 'total' in d" 2>/dev/null \
+  && _ok "GET /api/v1/routing-stats returns expected shape" \
+  || _fail "GET /api/v1/routing-stats unexpected shape: $RSTATS"
+
+# ── 23. System metrics ────────────────────────────────────────────────────────
+_hdr "System metrics"
+SYSM=$(curl -fsS "$BB/api/v1/system-metrics")
+echo "$SYSM" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); assert 'cpu' in d or 'error' not in d" 2>/dev/null \
+  && _ok "GET /api/v1/system-metrics responds" \
+  || _fail "GET /api/v1/system-metrics failed: $SYSM"
+
+# ── 24. CDP status ────────────────────────────────────────────────────────────
+_hdr "CDP status"
+CDPS=$(curl -fsS "$BB/api/v1/cdp/status")
+echo "$CDPS" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); assert 'available' in d" 2>/dev/null \
+  && _ok "GET /api/v1/cdp/status returns available key" \
+  || _fail "GET /api/v1/cdp/status unexpected shape: $CDPS"
+
+# ── 25. Z-commands ────────────────────────────────────────────────────────────
+_hdr "Z-commands"
+ZC=$(curl -fsS "$BB/api/v1/zcommands")
+echo "$ZC" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); assert 'routes' in d or isinstance(d, dict)" 2>/dev/null \
+  && _ok "GET /api/v1/zcommands responds" \
+  || _fail "GET /api/v1/zcommands failed: $ZC"
+
+# ── 26. Model options ─────────────────────────────────────────────────────────
+_hdr "Model options"
+MOPT=$(curl -fsS "$BB/api/v1/model-options")
+echo "$MOPT" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); assert 'model_options' in d" 2>/dev/null \
+  && _ok "GET /api/v1/model-options returns model_options key" \
+  || _fail "GET /api/v1/model-options unexpected shape: $MOPT"
+
+# ── 27. Orchestrations ────────────────────────────────────────────────────────
+_hdr "Orchestrations"
+ORCH=$(curl -fsS "$BB/api/v1/orchestrations")
+echo "$ORCH" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); assert isinstance(d, list) or 'orchestrations' in d" 2>/dev/null \
+  && _ok "GET /api/v1/orchestrations responds" \
+  || _fail "GET /api/v1/orchestrations failed: $ORCH"
+
+# ── 28. Agent card ────────────────────────────────────────────────────────────
+_hdr "Agent card"
+CARD=$(curl -fsS "$BB/.well-known/agent-card.json")
+echo "$CARD" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); assert 'name' in d or 'url' in d" 2>/dev/null \
+  && _ok "GET /.well-known/agent-card.json returns agent card" \
+  || _fail "GET /.well-known/agent-card.json unexpected shape: $CARD"
+
+# ── 29. Auth endpoint ─────────────────────────────────────────────────────────
+_hdr "Auth"
+AUTHME=$(curl -fsS "$BB/auth/me")
+echo "$AUTHME" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); assert 'authenticated' in d" 2>/dev/null \
+  && _ok "GET /auth/me returns authenticated key" \
+  || _fail "GET /auth/me unexpected shape: $AUTHME"
+
+# ── 30. MCP server ────────────────────────────────────────────────────────────
+_hdr "MCP server"
+MCP=$(curl -fsS -X POST "$BB/mcp" \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}')
+echo "$MCP" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); assert d.get('jsonrpc')=='2.0' and 'result' in d" 2>/dev/null \
+  && _ok "POST /mcp initialize handshake succeeds" \
+  || _fail "POST /mcp initialize failed: $MCP"
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo
 echo "────────────────────────────────────────────"
