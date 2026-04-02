@@ -372,11 +372,25 @@ See [Observability](observability.md) for querying logs.
 
 ---
 
+## Known Limitations & Open Items
+
+### uvicorn — ANSI escape injection in access logs
+
+All versions of uvicorn are vulnerable to ANSI escape sequence injection in the request access logger. A malicious request path can embed terminal escape codes that execute when logs are viewed in a terminal emulator.
+
+**Mitigation:** Run behind a reverse proxy (nginx/caddy) that sanitizes request lines before they reach uvicorn. For production, use a structured JSON log formatter (`python-json-logger`) to strip ANSI escapes.
+
+### Secrets management
+
+API keys are passed via `.env` files, with `agentauth` providing OS keychain credential management for single-operator deployments. For multi-user or production environments, a dedicated secrets manager (HashiCorp Vault, Docker secrets, SOPS, or cloud KMS) is more appropriate. Deferred until multi-user requirements are clear.
+
+---
+
 ## Reporting Security Issues
 
 ⚠️ **Do not open a public GitHub issue for security vulnerabilities.**
 
-Email security concerns to: **[maintainer email — see CONTRIBUTING.md]**
+Open a [GitHub Security Advisory](https://github.com/ralabarge/beigebox/security/advisories/new) or email the maintainer (see profile).
 
 Include:
 - Description of the issue

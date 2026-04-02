@@ -5,8 +5,7 @@
 #   2. Customize for your setup (GPU, backends, features)
 #   3. For runtime overrides, use runtime_config.yaml (hot-reload, no restart)
 #
-# For the full v1.0+ production config with all options documented, see:
-# https://github.com/yourusername/beigebox/wiki/Configuration
+# For the full annotated config reference, see docs/configuration.md
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Features — Minimal defaults (extend as needed)

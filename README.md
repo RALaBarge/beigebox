@@ -91,9 +91,7 @@ Integrated security scanners run via a single command:
 | **gitleaks** | Secrets accidentally committed to git history |
 | **trivy** | OS and app-level CVEs in Docker images |
 
-Security hardening is **feature-complete** as of v1.9. Remaining low-priority items are tracked in [TODO-security.md](TODO-security.md).
-
-See [Security](docs/security.md) for threat model, defense strategy, and detailed hardening.
+See [Security](docs/security.md) for threat model, defense strategy, hardening details, and known limitations.
 
 ---
 
@@ -174,4 +172,4 @@ See [LICENSE.md](LICENSE.md) and [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md).
 
 ---
 
-**Want to contribute?** See [CONTRIBUTING.md](CONTRIBUTING.md) (if present) or open an issue.
+**Want to contribute?** Open an issue or pull request — contributions welcome.

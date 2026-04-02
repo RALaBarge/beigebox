@@ -133,7 +133,7 @@ class WebScraperTool:
             resp.raise_for_status()
 
             raw_html = resp.text
-            soup = BeautifulSoup(raw_html, "lxml")
+            soup = BeautifulSoup(raw_html, "html.parser")
 
             # decompose() removes each tag and its subtree from the parse tree
             # entirely, so get_text() below never sees script/style content.

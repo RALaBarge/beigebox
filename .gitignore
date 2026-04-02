@@ -50,6 +50,10 @@ env/
 # Website source (separate deployment)
 html_beigebox/
 
+# Design docs / session notes — internal only
+2600/
+evals/hle.yaml
+
 # Rust/WASM build artifacts
 wasm_modules/*/target/
 
