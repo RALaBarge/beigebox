@@ -54,6 +54,10 @@ html_beigebox/
 2600/
 evals/hle.yaml
 
+# Claude Code dev tooling — internal only
+docker/Dockerfile.claude
+scripts/claude-sandbox.sh
+
 # Rust/WASM build artifacts
 wasm_modules/*/target/
 
