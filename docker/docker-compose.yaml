@@ -122,6 +122,7 @@ services:
       - ../2600/skills:/app/2600/skills:ro
       - ../workspace/out:/app/workspace/out:rw
       - ../workspace/mounts:/app/workspace/mounts:rw
+      - ../beigebox/web:/app/beigebox/web:ro
       - ../wasm_modules:/app/wasm_modules:ro
       - ./logs:/app/logs
       - type: tmpfs
