@@ -1070,6 +1070,13 @@ class Proxy:
         except Exception as _e:
             logger.debug("auto_summarizer skipped: %s", _e)
 
+        # Aggressive summarization — bullet-compress history on every request
+        try:
+            from beigebox.summarizer import aggressive_summarize
+            body["messages"] = await aggressive_summarize(body.get("messages", []), self.cfg)
+        except Exception as _e:
+            logger.debug("aggressive_summarizer skipped: %s", _e)
+
         # Operator pre-hook — enrich/modify message before it reaches the LLM
         body = await self._run_operator_pre_hook(body)
 

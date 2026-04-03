@@ -27,7 +27,7 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "server", "backend", "backends", "backends_enabled", "embedding",
     "storage", "logging", "auth", "decision_llm", "operator", "tools",
     "routing", "cost_tracking", "harness", "conversation_replay",
-    "auto_summarization", "system_context", "generation", "models",
+    "auto_summarization", "aggressive_summarization", "system_context", "generation", "models",
     "wasm", "web_ui", "voice", "wiretap", "semantic_cache", "classifier",
     "model_advertising", "zcommands", "advanced", "runtime", "skills",
     "workspace", "hooks", "connections", "amf_mesh",
@@ -49,6 +49,7 @@ class _FeaturesCfg(BaseModel):
     cost_tracking: bool = True
     conversation_replay: bool = True
     auto_summarization: bool = False
+    aggressive_summarization: bool = False
     system_context: bool = False
     wiretap: bool = True
     payload_log: bool = False
@@ -112,6 +113,12 @@ class _AutoSumCfg(BaseModel):
     token_budget: int = 3000
     keep_last: int = 4
 
+class _AggSumCfg(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    enabled: bool = False
+    keep_last: int = 2
+    model: str = ""
+
 class _BeigeBoxConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
     backends_enabled: bool = False
@@ -124,6 +131,7 @@ class _BeigeBoxConfig(BaseModel):
     generation: _GenerationCfg = _GenerationCfg()
     cost_tracking: _CostTrackingCfg = _CostTrackingCfg()
     auto_summarization: _AutoSumCfg = _AutoSumCfg()
+    aggressive_summarization: _AggSumCfg = _AggSumCfg()
 
 
 def _validate_config(cfg: dict) -> None:

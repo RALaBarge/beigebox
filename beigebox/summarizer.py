@@ -146,3 +146,77 @@ async def maybe_summarize(
         len(to_summarise), keep_last, estimated, new_tokens,
     )
     return result
+
+
+async def aggressive_summarize(
+    messages: list[dict[str, Any]],
+    cfg: dict,
+) -> list[dict[str, Any]]:
+    """
+    Compress older messages into tight bullet points on every request.
+
+    Unlike maybe_summarize(), this runs unconditionally (no token-budget check).
+    Replaces all history older than keep_last turns with a single system message
+    of bullet points — maximally concise, preserving exact values.
+
+    Config (aggressive_summarization section):
+        enabled: false
+        keep_last: 2      # verbatim recent turns to preserve
+        model: ""         # blank = fall through to summary model / default
+    """
+    agg_cfg = cfg.get("aggressive_summarization", {})
+    if not agg_cfg.get("enabled", False):
+        return messages
+
+    keep_last = int(agg_cfg.get("keep_last", 2))
+
+    rt = get_runtime_config()
+    models_cfg = cfg.get("models", {})
+    model = (
+        rt.get("agg_sum_model")
+        or agg_cfg.get("model")
+        or models_cfg.get("profiles", {}).get("summary")
+        or models_cfg.get("default")
+        or cfg.get("backend", {}).get("default_model", "")
+    )
+    backend_url = cfg.get("backend", {}).get("url", "http://localhost:11434")
+
+    if not model:
+        logger.warning("aggressive_summarizer: no model configured, skipping")
+        return messages
+
+    system_msgs = [m for m in messages if m.get("role") == "system"]
+    non_system  = [m for m in messages if m.get("role") != "system"]
+
+    if len(non_system) <= keep_last:
+        return messages  # nothing old enough to compress
+
+    to_compress = non_system[:-keep_last]
+    to_keep     = non_system[-keep_last:]
+
+    history_text = "\n".join(
+        f"{m.get('role', '?').upper()}: {str(m.get('content', ''))[:500]}"
+        for m in to_compress
+    )
+    prompt = (
+        "Compress the following conversation into bullet points.\n"
+        "Rules:\n"
+        "- Each bullet \u2264 10 words\n"
+        "- Preserve exact names, numbers, dates, file paths, URLs, code identifiers\n"
+        "- Omit small talk, filler, and repetition\n"
+        "- Output ONLY the bullets, no preamble\n\n"
+        f"{history_text}"
+    )
+
+    bullets = await _call_llm(prompt, model, backend_url)
+    if not bullets:
+        logger.warning("aggressive_summarizer: empty response, keeping original messages")
+        return messages
+
+    summary_msg = {"role": "system", "content": f"Compressed history:\n{bullets}"}
+    result = system_msgs + [summary_msg] + to_keep
+    logger.info(
+        "aggressive_summarizer: compressed %d msgs → bullets + %d recent",
+        len(to_compress), keep_last,
+    )
+    return result

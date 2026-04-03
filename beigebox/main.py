@@ -1070,6 +1070,7 @@ async def api_config():
             "cost_tracking":         rt.get("features_cost_tracking", cfg.get("features", {}).get("cost_tracking", cfg.get("cost_tracking", {}).get("enabled", False))),
             "conversation_replay":   rt.get("features_conversation_replay", cfg.get("features", {}).get("conversation_replay", cfg.get("conversation_replay", {}).get("enabled", False))),
             "auto_summarization":    rt.get("features_auto_summarization", cfg.get("features", {}).get("auto_summarization", cfg.get("auto_summarization", {}).get("enabled", False))),
+            "aggressive_summarization": rt.get("features_aggressive_summarization", cfg.get("features", {}).get("aggressive_summarization", cfg.get("aggressive_summarization", {}).get("enabled", False))),
             "system_context":        rt.get("features_system_context", cfg.get("features", {}).get("system_context", cfg.get("system_context", {}).get("enabled", False))),
             "wiretap":               rt.get("features_wiretap", cfg.get("features", {}).get("wiretap", cfg.get("wiretap", {}).get("enabled", True))),
             "payload_log":           rt.get("features_payload_log", cfg.get("features", {}).get("payload_log", False)),
@@ -1173,6 +1174,12 @@ async def api_config():
             "token_budget": rt.get("auto_token_budget", cfg.get("auto_summarization", {}).get("token_budget", 3000)),
             "summary_model": rt.get("auto_summary_model", cfg.get("auto_summarization", {}).get("summary_model", "")),
             "keep_last": rt.get("auto_keep_last", cfg.get("auto_summarization", {}).get("keep_last", 4)),
+        },
+        "aggressive_summarization": {
+            **cfg.get("aggressive_summarization", {}),
+            "enabled":   rt.get("agg_sum_enabled",   cfg.get("aggressive_summarization", {}).get("enabled", False)),
+            "keep_last": rt.get("agg_sum_keep_last",  cfg.get("aggressive_summarization", {}).get("keep_last", 2)),
+            "model":     rt.get("agg_sum_model",      cfg.get("aggressive_summarization", {}).get("model", "")),
         },
         # ── Routing — Tier Pipeline (Phase 3 refactoring) ────────────────
         "routing": {
@@ -1355,6 +1362,11 @@ async def api_config_save(request: Request):
         "auto_token_budget":            "auto_token_budget",
         "auto_summary_model":           "auto_summary_model",
         "auto_keep_last":               "auto_keep_last",
+        # Aggressive summarization
+        "features_aggressive_summarization": "features_aggressive_summarization",
+        "agg_sum_enabled":              "agg_sum_enabled",
+        "agg_sum_keep_last":            "agg_sum_keep_last",
+        "agg_sum_model":                "agg_sum_model",
         # System context
         "system_context_enabled":       "system_context_enabled",
         # Operator

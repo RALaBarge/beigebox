@@ -3339,6 +3339,8 @@ const TOOLTIPS = {
   auto_token_budget:           'Trigger summarization when the conversation exceeds this many tokens.',
   auto_summary_model:          'Model used to generate the summary. Leave blank to reuse the active model.',
   auto_keep_last:              'Number of most-recent messages preserved verbatim after summarization.',
+  agg_sum_keep_last:           'Most-recent messages kept verbatim; everything older is bullet-compressed on every request.',
+  agg_sum_model:               'Model for aggressive summarization. Blank = reuse summary model.',
   // Routing (Phase 3)
   tier1_ttl:                   'Tier 1: Keep user sticky to their chosen model for this many seconds.',
   classifier_rebuild_interval: 'Tier 2: Rebuild classifier centroids every N seconds.',
@@ -8037,6 +8039,12 @@ async function loadConfig() {
     html += cfgInput('auto_keep_last',     'Keep last N messages',   c.auto_summarization?.keep_last ?? 4, 'number');
     html += `<div style="font-size:11px;color:var(--fg-dim);margin-top:6px">Model: See <strong>Models Registry</strong> section for summary model.</div>`;
     html += `</div>`;
+    html += cfgToggle('features_aggressive_summarization', 'Aggressive summarization', c.features?.aggressive_summarization ?? false);
+    html += `<div id="sub-features_aggressive_summarization" style="display:${c.features?.aggressive_summarization ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
+    html += cfgInput('agg_sum_keep_last', 'Keep last N messages', c.aggressive_summarization?.keep_last ?? 2, 'number');
+    html += cfgInput('agg_sum_model', 'Model (blank = summary model)', c.aggressive_summarization?.model ?? '', 'text');
+    html += `<div style="font-size:11px;color:var(--fg-dim);margin-top:6px">Runs on <strong>every</strong> request — bullets, not sentences.</div>`;
+    html += `</div>`;
     html += cfgToggle('features_system_context', 'System context injection', c.features?.system_context ?? false);
     html += cfgToggle('features_wiretap', 'Request/response logging', c.features?.wiretap ?? true);
     html += cfgToggle('features_payload_log', 'Full payload logging', c.features?.payload_log ?? false);
@@ -8264,7 +8272,7 @@ async function saveConfig() {
     // Features (normalized naming)
     'features_backends','features_decision_llm','features_classifier','features_semantic_cache',
     'features_operator','features_harness','features_tools','features_cost_tracking',
-    'features_conversation_replay','features_auto_summarization','features_system_context',
+    'features_conversation_replay','features_auto_summarization','features_aggressive_summarization','features_system_context',
     'features_wiretap','features_payload_log','features_wasm','features_guardrails',
     'features_amf_mesh','features_voice','features_hooks',
     // Other toggles
@@ -8274,13 +8282,13 @@ async function saveConfig() {
   ];
   const strings = [
     'default_model','operator_model','force_route','log_level','web_ui_palette',
-    'voice_hotkey','system_prompt_prefix','auto_summary_model',
+    'voice_hotkey','system_prompt_prefix','auto_summary_model','agg_sum_model',
     'stt_url','tts_url','tts_model','tts_voice',
     'wasm_default_module','browserbox_ws_url',
   ];
   const numbers = [
     'orchestrator_max_parallel','orchestrator_task_timeout','orchestrator_total_timeout',
-    'auto_token_budget','auto_keep_last',
+    'auto_token_budget','auto_keep_last','agg_sum_keep_last',
     'gen_temperature','gen_top_p','gen_top_k','gen_num_ctx',
     'gen_repeat_penalty','gen_max_tokens','gen_seed',
     'tts_speed',
