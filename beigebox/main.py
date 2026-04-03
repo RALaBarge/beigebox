@@ -134,8 +134,31 @@ async def _preload_embedding_model(cfg: dict):
     embed_cfg = cfg.get("embedding", {})
     model = embed_cfg.get("model", "")
     url = embed_cfg.get("backend_url", cfg["backend"]["url"]).rstrip("/")
-    if model:
-        await _preload_model(url, model, "Embedding")
+    if not model:
+        return
+    _log = logging.getLogger(__name__)
+    # Embedding-only models (e.g. nomic-embed-text) reject /api/generate with 400.
+    # Use /api/embed to warm them up instead.
+    for attempt in range(5):
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                resp = await client.post(
+                    f"{url}/api/embed",
+                    json={"model": model, "input": "warmup", "keep_alive": -1},
+                )
+                resp.raise_for_status()
+            _log.info("Embedding model '%s' preloaded and pinned", model)
+            return
+        except Exception as e:
+            delay = 5.0 * (2 ** attempt)
+            if attempt < 4:
+                _log.warning(
+                    "Embedding preload attempt %d/5 failed (%s) — retrying in %.0fs",
+                    attempt + 1, e, delay,
+                )
+                await asyncio.sleep(delay)
+            else:
+                _log.warning("Embedding preload failed after 5 attempts: %s", e)
 
 
 @asynccontextmanager
@@ -2742,121 +2765,127 @@ async def api_dgm_run(request: Request):
         from beigebox.dgm.judge import DGMJudge
         from beigebox.dgm.proposer import DGMProposer
         from beigebox.dgm.patcher import ConfigPatcher
-        import uuid
+        import uuid, time as _time
 
         run_id = str(uuid.uuid4())[:8]
+        _t_run_start = _time.monotonic()
 
         def emit(obj: dict) -> str:
             return f"data: {_json.dumps(obj)}\n\n"
 
-        yield emit({"type": "start", "run_id": run_id, "iterations": n_iterations,
-                    "rotation_interval": rotation_interval, "threshold": confidence_threshold})
+        try:
+            yield emit({"type": "start", "run_id": run_id, "iterations": n_iterations,
+                        "rotation_interval": rotation_interval, "threshold": confidence_threshold})
 
-        cfg = get_config()
-        routing_model = cfg.get("models", {}).get("profiles", {}).get("routing", "llama3.2:3b")
-        proxy_url = f"http://localhost:{cfg.get('server', {}).get('port', 8001)}"
+            cfg = get_config()
+            routing_model = cfg.get("models", {}).get("profiles", {}).get("routing", "llama3.2:3b")
+            proxy_url = f"http://localhost:{cfg.get('server', {}).get('port', 8001)}"
 
-        loop = DGMLoop(
-            judge=DGMJudge(judge_model=routing_model, backend_url=proxy_url),
-            proposer=DGMProposer(proposer_model=routing_model, backend_url=proxy_url),
-            patcher=ConfigPatcher(),
-            rotator=RubricRotator(rotation_interval=rotation_interval),
-            n_probes=n_probes,
-            confidence_threshold=confidence_threshold,
-            patience=max(5, n_iterations // 4),
-            proxy_url=proxy_url,
-        )
+            loop = DGMLoop(
+                judge=DGMJudge(judge_model=routing_model, backend_url=proxy_url),
+                proposer=DGMProposer(proposer_model=routing_model, backend_url=proxy_url),
+                patcher=ConfigPatcher(),
+                rotator=RubricRotator(rotation_interval=rotation_interval),
+                n_probes=n_probes,
+                confidence_threshold=confidence_threshold,
+                patience=max(5, n_iterations // 4),
+                proxy_url=proxy_url,
+            )
 
-        history = []
-        kept_count = 0
-        no_improvement_streak = 0
-        patience = max(5, n_iterations // 4)
+            history = []
+            kept_count = 0
+            no_improvement_streak = 0
+            patience = max(5, n_iterations // 4)
 
-        import asyncio as _aio
-        for i in range(n_iterations):
-            rubric = loop._rotator.current()
-            rotate_in = loop._rotator.to_dict()["next_rotation_at"]
+            import asyncio as _aio
+            for i in range(n_iterations):
+                rubric = loop._rotator.current()
+                rotate_in = loop._rotator.to_dict()["next_rotation_at"]
 
-            yield emit({"type": "iteration_start", "iteration": i + 1, "total": n_iterations,
-                        "rubric": rubric.name, "rotate_in": rotate_in})
+                yield emit({"type": "iteration_start", "iteration": i + 1, "total": n_iterations,
+                            "rubric": rubric.name, "rotate_in": rotate_in})
 
-            # Sample probes
-            probes = await loop._sample_probes(run_id)
-            if not probes:
-                probes = _FALLBACK_PROBES[:n_probes]
+                # Sample probes
+                probes = await loop._sample_probes(run_id)
+                if not probes:
+                    probes = _FALLBACK_PROBES[:n_probes]
 
-            # Propose
-            proposal = await loop._proposer.propose(rubric, history)
-            if not proposal:
-                no_improvement_streak += 1
+                # Propose
+                proposal = await loop._proposer.propose(rubric, history)
+                if not proposal:
+                    no_improvement_streak += 1
+                    if no_improvement_streak >= patience:
+                        yield emit({"type": "early_stop", "reason": f"patience={patience} exhausted"})
+                        break
+                    continue
+
+                patch = proposal.patch
+                yield emit({"type": "proposal", "iteration": i + 1, "key": patch.key,
+                            "value": patch.value, "reasoning": patch.reasoning})
+
+                # Apply
+                patch_result = loop._patcher.apply(patch)
+                if not patch_result.ok:
+                    no_improvement_streak += 1
+                    continue
+
+                await _aio.sleep(0.5)  # let hot-reload settle
+
+                # Re-run probes
+                new_responses = await loop._run_probes(probes, run_id)
+
+                # Judge
+                verdicts = []
+                for probe, new_resp in zip(probes, new_responses):
+                    v = await loop._judge.compare(
+                        request=probe.request,
+                        response_a=probe.response,
+                        response_b=new_resp,
+                        rubric=rubric,
+                    )
+                    verdicts.append(v)
+
+                b_wins = sum(1 for v in verdicts if v.b_wins())
+                avg_conf = sum(v.confidence for v in verdicts) / len(verdicts) if verdicts else 0.0
+                winner = "B" if b_wins > len(verdicts) / 2 else "A"
+                best_reasoning = max(verdicts, key=lambda v: v.confidence).reasoning if verdicts else ""
+
+                keep = (winner == "B" and avg_conf >= confidence_threshold)
+
+                if keep:
+                    kept_count += 1
+                    no_improvement_streak = 0
+                    yield emit({"type": "kept", "iteration": i + 1, "key": patch.key,
+                                "value": patch.value, "rubric": rubric.name,
+                                "confidence": avg_conf, "reasoning": best_reasoning})
+                else:
+                    loop._patcher.revert(patch, patch_result.original)
+                    no_improvement_streak += 1
+                    yield emit({"type": "reverted", "iteration": i + 1, "key": patch.key,
+                                "rubric": rubric.name, "confidence": avg_conf, "winner": winner})
+
+                history.append({"iteration": i + 1, "key": patch.key, "value": patch.value,
+                                 "rubric": rubric.name, "winner": winner,
+                                 "confidence": avg_conf, "kept": keep})
+
+                # Tick rotator
+                old_rubric = loop._rotator.current().name
+                rotated = loop._rotator.tick()
+                if rotated:
+                    yield emit({"type": "rubric_rotated", "iteration": i + 1,
+                                "old_rubric": old_rubric, "new_rubric": loop._rotator.current().name})
+
                 if no_improvement_streak >= patience:
                     yield emit({"type": "early_stop", "reason": f"patience={patience} exhausted"})
                     break
-                continue
 
-            patch = proposal.patch
-            yield emit({"type": "proposal", "iteration": i + 1, "key": patch.key,
-                        "value": patch.value, "reasoning": patch.reasoning})
+            keep_rate = kept_count / max(len(history), 1)
+            total_ms = (_time.monotonic() - _t_run_start) * 1000
+            yield emit({"type": "complete", "run_id": run_id, "kept": kept_count,
+                        "iterations_run": len(history), "keep_rate": keep_rate, "total_ms": total_ms})
 
-            # Apply
-            patch_result = loop._patcher.apply(patch)
-            if not patch_result.ok:
-                no_improvement_streak += 1
-                continue
-
-            await _aio.sleep(0.5)  # let hot-reload settle
-
-            # Re-run probes
-            new_responses = await loop._run_probes(probes, run_id)
-
-            # Judge
-            verdicts = []
-            for probe, new_resp in zip(probes, new_responses):
-                v = await loop._judge.compare(
-                    request=probe.request,
-                    response_a=probe.response,
-                    response_b=new_resp,
-                    rubric=rubric,
-                )
-                verdicts.append(v)
-
-            b_wins = sum(1 for v in verdicts if v.b_wins())
-            avg_conf = sum(v.confidence for v in verdicts) / len(verdicts) if verdicts else 0.0
-            winner = "B" if b_wins > len(verdicts) / 2 else "A"
-            best_reasoning = max(verdicts, key=lambda v: v.confidence).reasoning if verdicts else ""
-
-            keep = (winner == "B" and avg_conf >= confidence_threshold)
-
-            if keep:
-                kept_count += 1
-                no_improvement_streak = 0
-                yield emit({"type": "kept", "iteration": i + 1, "key": patch.key,
-                            "value": patch.value, "rubric": rubric.name,
-                            "confidence": avg_conf, "reasoning": best_reasoning})
-            else:
-                loop._patcher.revert(patch, patch_result.original)
-                no_improvement_streak += 1
-                yield emit({"type": "reverted", "iteration": i + 1, "key": patch.key,
-                            "rubric": rubric.name, "confidence": avg_conf, "winner": winner})
-
-            history.append({"iteration": i + 1, "key": patch.key, "value": patch.value,
-                             "rubric": rubric.name, "winner": winner,
-                             "confidence": avg_conf, "kept": keep})
-
-            # Tick rotator
-            old_rubric = loop._rotator.current().name
-            rotated = loop._rotator.tick()
-            if rotated:
-                yield emit({"type": "rubric_rotated", "iteration": i + 1,
-                            "old_rubric": old_rubric, "new_rubric": loop._rotator.current().name})
-
-            if no_improvement_streak >= patience:
-                yield emit({"type": "early_stop", "reason": f"patience={patience} exhausted"})
-                break
-
-        keep_rate = kept_count / max(len(history), 1)
-        yield emit({"type": "complete", "run_id": run_id, "kept": kept_count,
-                    "iterations_run": len(history), "keep_rate": keep_rate, "total_ms": 0})
+        except Exception as _exc:
+            yield emit({"type": "error", "message": str(_exc)})
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
 
@@ -3735,7 +3764,7 @@ async def api_workspace():
                 continue
             is_link = entry.is_symlink()
             target = str(os.readlink(entry.path)) if is_link else None
-            broken = is_link and not entry.exists()
+            broken = is_link and not Path(entry.path).exists()
             entries.append({
                 "name": entry.name,
                 "is_link": is_link,
