@@ -3726,13 +3726,95 @@ async def api_workspace():
     in_files, in_bytes = scan_dir(ws_path / "in")
     out_files, out_bytes = scan_dir(ws_path / "out")
 
+    def scan_mounts(dirpath: Path) -> list[dict]:
+        entries = []
+        if not dirpath.exists():
+            return entries
+        for entry in os.scandir(dirpath):
+            if entry.name == ".gitkeep":
+                continue
+            is_link = entry.is_symlink()
+            target = str(os.readlink(entry.path)) if is_link else None
+            broken = is_link and not entry.exists()
+            entries.append({
+                "name": entry.name,
+                "is_link": is_link,
+                "target": target,
+                "broken": broken,
+                "is_dir": entry.is_dir(),
+            })
+        entries.sort(key=lambda e: e["name"])
+        return entries
+
+    mounts = scan_mounts(ws_path / "mounts")
+
     return JSONResponse({
         "in": in_files,
         "out": out_files,
+        "mounts": mounts,
         "in_bytes": in_bytes,
         "out_bytes": out_bytes,
         "max_mb": max_mb,
     })
+
+
+@app.post("/api/v1/workspace/mounts")
+async def api_workspace_mounts_add(request: Request):
+    """
+    Create a symlink in workspace/mounts/ pointing to a host path.
+
+    Body: {"name": "myproject", "target": "/home/jinx/myproject"}
+    The symlink is created on the host via the bind-mounted mounts/ directory.
+    Takes effect immediately — no restart required.
+    """
+    body = await request.json()
+    name = body.get("name", "").strip()
+    target = body.get("target", "").strip()
+
+    if not name or not target:
+        return JSONResponse({"ok": False, "error": "name and target required"}, status_code=400)
+    if "/" in name or ".." in name:
+        return JSONResponse({"ok": False, "error": "Invalid name"}, status_code=400)
+
+    cfg = get_config()
+    ws_path_raw = cfg.get("workspace", {}).get("path", "./workspace")
+    app_root = Path(__file__).parent.parent
+    mounts_dir = (app_root / ws_path_raw / "mounts").resolve()
+    link_path = mounts_dir / name
+
+    if link_path.exists() or link_path.is_symlink():
+        return JSONResponse({"ok": False, "error": f"'{name}' already exists"}, status_code=409)
+
+    try:
+        os.symlink(target, link_path)
+    except OSError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    broken = not link_path.exists()
+    return JSONResponse({"ok": True, "name": name, "target": target, "broken": broken})
+
+
+@app.delete("/api/v1/workspace/mounts/{name}")
+async def api_workspace_mounts_delete(name: str):
+    """Remove a symlink from workspace/mounts/."""
+    if "/" in name or ".." in name:
+        return JSONResponse({"ok": False, "error": "Invalid name"}, status_code=400)
+
+    cfg = get_config()
+    ws_path_raw = cfg.get("workspace", {}).get("path", "./workspace")
+    app_root = Path(__file__).parent.parent
+    mounts_dir = (app_root / ws_path_raw / "mounts").resolve()
+    link_path = mounts_dir / name
+
+    if not link_path.is_symlink() and not link_path.exists():
+        return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
+
+    # Only remove symlinks — never rm -rf a real directory from here
+    if not link_path.is_symlink():
+        return JSONResponse({"ok": False, "error": "Not a symlink — remove manually"}, status_code=400)
+
+    link_path.unlink()
+    return JSONResponse({"ok": True})
 
 
 @app.delete("/api/v1/workspace/out/{filename}")

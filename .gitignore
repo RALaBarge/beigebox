@@ -28,8 +28,10 @@ workspace/
 !workspace/
 !workspace/in/
 !workspace/out/
+!workspace/mounts/
 !workspace/in/.gitkeep
 !workspace/out/.gitkeep
+!workspace/mounts/.gitkeep
 !workspace/README.md
 
 # Logs

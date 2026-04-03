@@ -3567,6 +3567,8 @@ async function loadDashboard() {
         return p;
       };
       html += `<input type="file" id="ws-file-input" multiple style="display:none" onchange="uploadWorkspaceFiles(this.files)">`;
+
+      // IN + OUT row
       html += `<div style="display:flex;gap:12px;align-items:flex-start">`;
       html += `<div style="flex:1;min-width:0" ondragover="event.preventDefault();event.dataTransfer.dropEffect='copy';this.querySelector('.ws-in-box').style.borderColor='var(--lavender)'" ondragleave="this.querySelector('.ws-in-box').style.borderColor='var(--bg-border)'" ondrop="event.preventDefault();this.querySelector('.ws-in-box').style.borderColor='var(--bg-border)';uploadWorkspaceFiles(event.dataTransfer.files)">
         <div style="font-size:11px;color:var(--fg-muted);margin-bottom:4px">IN · <span style="color:var(--lavender);cursor:pointer" onclick="document.getElementById('ws-file-input').click()">drop or click to upload</span></div>
@@ -3576,6 +3578,7 @@ async function loadDashboard() {
       </div>`;
       html += renderWsPanel(ws.out, 'OUT (writable by agents)', true);
       html += `</div>`;
+
       // Totals row
       const maxBytes = (ws.max_mb || 0) * 1024 * 1024;
       const pct = maxBytes > 0 ? ws.out_bytes / maxBytes : 0;
@@ -3583,6 +3586,35 @@ async function loadDashboard() {
       html += `<div style="display:flex;gap:12px;font-size:10px;color:var(--fg-muted);margin-top:4px">`;
       html += `<div style="flex:1">Total: ${fmtB(ws.in_bytes)}</div>`;
       html += `<div style="flex:1">Total: ${fmtB(ws.out_bytes)}${warnStr}</div>`;
+      html += `</div>`;
+
+      // MOUNTS row
+      html += `<div style="margin-top:10px">`;
+      html += `<div style="font-size:11px;color:var(--fg-muted);margin-bottom:4px">MOUNTS · <span style="font-style:italic">read-only links into the container — drop folders in workspace/mounts/ or add by path</span></div>`;
+      html += `<div style="border:1px solid var(--bg-border);border-radius:2px;padding:4px 6px;min-height:40px;font-size:11px">`;
+      if (!(ws.mounts || []).length) {
+        html += `<div style="color:var(--fg-muted);font-style:italic">(none — drop a folder into workspace/mounts/ or add a link below)</div>`;
+      } else {
+        (ws.mounts || []).forEach(m => {
+          const brokenBadge = m.broken ? `<span style="color:var(--red);margin-left:4px" title="Target not found">⚠ broken</span>` : '';
+          const typeBadge = m.is_link ? `<span style="color:var(--fg-muted)">→ ${esc(m.target||'')}</span>` : `<span style="color:var(--fg-muted)">${m.is_dir ? 'dir' : 'file'}</span>`;
+          const delBtn = m.is_link ? `<button data-mname="${esc(m.name)}" onclick="deleteMountLink(this.dataset.mname)" style="font-size:10px;padding:0 5px;line-height:1.6;flex-shrink:0" title="Remove link">✕</button>` : '';
+          html += `<div style="display:flex;align-items:center;gap:6px;padding:2px 0">`;
+          html += `<span style="flex-shrink:0;font-weight:500">${esc(m.name)}</span>`;
+          html += `<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px">${typeBadge}${brokenBadge}</span>`;
+          html += delBtn;
+          html += `</div>`;
+        });
+      }
+      html += `</div>`;
+
+      // Add link form
+      html += `<div style="display:flex;gap:6px;margin-top:6px;align-items:center">`;
+      html += `<input id="mount-name-input" type="text" placeholder="name (e.g. myproject)" style="width:130px;font-size:11px;padding:3px 6px;background:var(--bg-input);border:1px solid var(--bg-border);color:var(--fg);border-radius:2px">`;
+      html += `<input id="mount-target-input" type="text" placeholder="host path (e.g. /home/you/myproject)" style="flex:1;font-size:11px;padding:3px 6px;background:var(--bg-input);border:1px solid var(--bg-border);color:var(--fg);border-radius:2px">`;
+      html += `<button onclick="addMountLink()" style="font-size:11px;padding:3px 10px;flex-shrink:0">+ Link</button>`;
+      html += `</div>`;
+      html += `<div id="mount-msg" style="font-size:10px;color:var(--fg-muted);margin-top:3px;min-height:14px"></div>`;
       html += `</div>`;
     } catch(_) { /* workspace endpoint unavailable — skip section */ }
 
@@ -9042,6 +9074,29 @@ async function uploadWorkspaceFiles(files) {
   loadDashboard();
   const failed = results.filter(r => r.startsWith('✗'));
   if (failed.length) alert('Upload issues:\n' + failed.join('\n'));
+}
+
+async function addMountLink() {
+  const name = document.getElementById('mount-name-input').value.trim();
+  const target = document.getElementById('mount-target-input').value.trim();
+  const msg = document.getElementById('mount-msg');
+  if (!name || !target) { msg.style.color = 'var(--red)'; msg.textContent = 'Both name and path are required.'; return; }
+  msg.style.color = 'var(--fg-muted)'; msg.textContent = 'Adding…';
+  try {
+    const r = await api('/api/v1/workspace/mounts', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name, target }) });
+    if (!r.ok) { msg.style.color = 'var(--red)'; msg.textContent = r.error || 'Failed'; return; }
+    if (r.broken) { msg.style.color = 'var(--yellow)'; msg.textContent = `Linked — but target path not visible inside container yet. Drop it in workspace/mounts/ or ensure it's mounted.`; }
+    else { msg.style.color = 'var(--green)'; msg.textContent = `✓ Linked as "${name}"`; }
+    document.getElementById('mount-name-input').value = '';
+    document.getElementById('mount-target-input').value = '';
+    setTimeout(loadDashboard, 800);
+  } catch(e) { msg.style.color = 'var(--red)'; msg.textContent = String(e); }
+}
+
+async function deleteMountLink(name) {
+  if (!confirm(`Remove link "${name}"?`)) return;
+  const r = await api(`/api/v1/workspace/mounts/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  if (r.ok) loadDashboard();
 }
 
 async function deleteWorkspaceOut(filename) {
