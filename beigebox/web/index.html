@@ -7997,6 +7997,12 @@ document.addEventListener('keydown', e => {
 
 // ── Config tab ───────────────────────────────────────────────────────────────
 
+// ── Config panel: adding a new field (prevent regressions) ─────────────────
+// To add a new editable setting you MUST update 3 places, in this order:
+//   1. HERE in loadConfig()  — read from c.section.field and pass to cfgToggle/cfgInput
+//   2. saveConfig() below    — add the key to bools[], strings[], or numbers[]
+//   3. main.py               — add to POST `allowed` dict AND add rt.get() in GET response
+// Skipping any step causes silent save failures or stale UI after reload.
 async function loadConfig() {
   const el = document.getElementById('config-body');
   el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
@@ -8286,6 +8292,10 @@ async function saveConfig() {
     'tts_speed',
     'decision_llm_timeout','wasm_timeout_ms',
     'border_threshold','agentic_threshold','browserbox_timeout',
+    // Routing tier params — previously missing, caused silent save failures
+    'tier1_ttl','classifier_rebuild_interval',
+    'semantic_cache_threshold','semantic_cache_max_entries','semantic_cache_ttl',
+    'decision_llm_temperature',
   ];
   const jsonArrays = [
     'shell_allowed_commands','shell_blocked_patterns','local_models_allowed_models',
@@ -8325,23 +8335,33 @@ async function saveConfig() {
     try { const fresh = await api('/api/v1/config'); updateTTSConfig(fresh); } catch {}
 
     if (status) {
-      const saved = d.saved?.length || 0;
-      const errors = d.errors?.length || 0;
-      if (errors > 0 && saved === 0) {
-        status.textContent = `✗ save failed — ${errors} key(s) could not be written. Check server logs.`;
+      const nChanged = d.changed?.length || 0;
+      const nSaved   = d.saved?.length   || 0;
+      const nErrors  = d.errors?.length  || 0;
+      const clearStatus = (ms) => setTimeout(() => { if (status) { status.textContent = ''; status.style.color = ''; } }, ms);
+
+      if (nErrors > 0 && nSaved === 0) {
+        status.textContent = `✗ ${nErrors} field(s) failed to write — check server logs`;
         status.style.color = 'var(--red, #f44)';
-        setTimeout(() => { if (status) { status.textContent = ''; status.style.color = ''; } }, 6000);
-      } else if (errors > 0) {
-        status.textContent = `⚠ saved ${saved} key(s), ${errors} failed`;
+        clearStatus(6000);
+      } else if (nErrors > 0) {
+        status.textContent = `⚠ ${nChanged} changed, ${nErrors} failed`;
         status.style.color = 'var(--yellow, #fa0)';
-        setTimeout(() => { if (status) { status.textContent = ''; status.style.color = ''; } }, 4000);
-        // Reload config to reflect what was actually saved
-        setTimeout(() => { loadConfig(); }, 1500);
+        clearStatus(5000);
+        // Reload to reflect what was actually saved
+        loadConfig();
       } else {
-        status.textContent = `✓ saved (${saved} keys)`;
-        setTimeout(() => { if (status) status.textContent = ''; }, 3000);
-        // Reload config panel to reflect saved changes
-        setTimeout(() => { loadConfig(); }, 500);
+        // Success — show how many fields actually changed value (not just how many were sent)
+        if (nChanged === 0) {
+          status.textContent = `— no changes`;
+          status.style.color = 'var(--fg-muted)';
+        } else {
+          status.textContent = `✓ ${nChanged} field${nChanged !== 1 ? 's' : ''} changed`;
+          status.style.color = 'var(--green)';
+        }
+        clearStatus(4000);
+        // Reload immediately — backend already wrote; GET will return fresh runtime values
+        loadConfig();
       }
     }
   } catch(e) {
