@@ -3,574 +3,1008 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="color-scheme" content="dark light" />
-  <title>BeigeBox — LLM Middleware Control Plane</title>
-  <meta name="description" content="BeigeBox: OpenAI-compatible LLM middleware with 4-tier intelligent routing, semantic response caching, WASM post-processing, multi-model harness, and local-first conversation history." />
-  <meta property="og:title" content="BeigeBox — LLM Middleware Control Plane" />
-  <meta property="og:description" content="4-tier routing, semantic cache, WASM transforms, latency-aware multi-backend, and durable local history. One proxy, your models, your rules." />
+  <meta name="color-scheme" content="dark" />
+  <title>BeigeBox — Tap the line. Control the carrier.</title>
+  <meta name="description" content="BeigeBox: OpenAI-compatible LLM middleware proxy. Smart 4-tier routing, semantic cache, multi-backend failover, built-in web UI, MCP server, WASM transforms. Self-hosted, local-first." />
+  <meta property="og:title" content="BeigeBox — Tap the line. Control the carrier." />
+  <meta property="og:description" content="LLM middleware that sits between any OpenAI-compatible client and any backend. Smart routing, semantic cache, full observability, orchestration — zero frontend changes." />
   <meta property="og:type" content="website" />
-  <meta property="og:image" content="beigebox-ui.png" />
-  <link rel="preload" as="image" href="beigebox-ui.png" />
-  <link rel="stylesheet" href="styles.css" />
+  <meta property="og:image" content="screenshot-dashboard.png" />
   <style>
-    .standout  { border-left: 3px solid var(--accent);  padding-left: 13px; }
-    .standout h3 { color: var(--accent); }
-    .standout2 { border-left: 3px solid var(--accent2); padding-left: 13px; }
-    .standout2 h3 { color: var(--accent2); }
-    .diff-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-    .stat-strip { display: flex; gap: 12px; flex-wrap: wrap; margin: 0 0 20px; }
-    .stat { padding: 16px 14px; border-radius: var(--radius); border: 1px solid rgba(34,38,53,.95); background: rgba(17,19,26,.58); flex: 1; min-width: 130px; text-align: center; }
-    .stat-num   { font-size: 1.8rem; font-weight: 700; color: var(--accent); line-height: 1.1; }
-    .stat-label { font-size: .82rem; color: var(--muted); margin-top: 4px; }
-    .section-sub { font-size: .95rem; color: var(--muted); margin: 0 0 16px; }
-    .tier-list { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-direction: column; gap: 6px; }
-    .tier-list li { display: flex; gap: 10px; align-items: baseline; font-size: .9rem; color: var(--muted); }
-    .tier-badge { font-family: var(--mono); font-size: .76rem; background: rgba(182,155,255,.1); border: 1px solid rgba(182,155,255,.25); color: var(--accent); border-radius: 6px; padding: 1px 6px; flex-shrink: 0; }
-    .z-showcase { background: rgba(17,19,26,.72); border: 1px solid rgba(34,38,53,.95); border-radius: var(--radius); padding: 4px 18px; }
-    .z-row { display: flex; gap: 14px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid rgba(34,38,53,.55); }
-    .z-row:last-child { border-bottom: none; }
-    .z-cmd  { font-family: var(--mono); color: var(--accent); font-size: .9rem; min-width: 200px; flex-shrink: 0; }
-    .z-desc { color: var(--muted); font-size: .9rem; }
-    @media (max-width: 980px) {
-      .diff-grid { grid-template-columns: 1fr; }
-      .z-cmd { min-width: 150px; }
+    /* ── Reset & tokens ──────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:       #0b0c10;
+      --surface:  #101217;
+      --panel:    #13151e;
+      --panel2:   #181b26;
+      --border:   rgba(255,255,255,.07);
+      --border2:  rgba(255,255,255,.12);
+      --fg:       #e4e6f0;
+      --muted:    #8a8fa8;
+      --dim:      #5a5f76;
+      --accent:   #b69bff;
+      --accent2:  #7ec8e3;
+      --green:    #5ccb8a;
+      --mono:     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --sans:     ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --radius:   10px;
+      --radius-lg: 14px;
+      --shadow:   0 8px 40px rgba(0,0,0,.5);
+      --glow:     0 0 60px rgba(182,155,255,.08);
+      --max:      1100px;
+    }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.6;
+      color: var(--fg);
+      background: var(--bg);
+      background-image:
+        radial-gradient(ellipse 900px 500px at 10% -5%, rgba(182,155,255,.12) 0%, transparent 60%),
+        radial-gradient(ellipse 700px 400px at 90% 5%, rgba(126,200,227,.08) 0%, transparent 55%);
+      background-attachment: fixed;
+    }
+    a { color: inherit; text-decoration: none; }
+    a:hover { opacity: .85; }
+    img { display: block; max-width: 100%; height: auto; }
+    code, pre { font-family: var(--mono); }
+
+    /* ── Utilities ───────────────────────────────────────────────────────── */
+    .wrap     { max-width: var(--max); margin: 0 auto; padding: 0 20px; }
+    .muted    { color: var(--muted); }
+    .accent   { color: var(--accent); }
+    .mono     { font-family: var(--mono); }
+    .skip     { position: absolute; left: -9999px; top: auto; }
+    .skip:focus { left: 16px; top: 14px; width: auto; padding: 8px 12px; background: var(--panel); border: 1px solid var(--border2); border-radius: var(--radius); z-index: 100; }
+
+    /* ── Top nav ─────────────────────────────────────────────────────────── */
+    .top {
+      position: sticky; top: 0; z-index: 50;
+      background: rgba(11,12,16,.82);
+      backdrop-filter: blur(16px) saturate(180%);
+      border-bottom: 1px solid var(--border);
+    }
+    .top-inner {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; padding: 13px 20px; max-width: var(--max); margin: 0 auto;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand-mark {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, rgba(182,155,255,.3), rgba(126,200,227,.2));
+      border: 1px solid rgba(182,155,255,.3);
+      border-radius: 9px;
+      display: grid; place-items: center;
+      font-size: 14px; font-weight: 700; color: var(--accent);
+      box-shadow: 0 0 20px rgba(182,155,255,.1);
+    }
+    .brand-name { font-weight: 700; letter-spacing: -.2px; font-size: 15px; }
+    .brand-sub  { font-size: 11px; color: var(--dim); }
+    .nav { display: flex; align-items: center; gap: 4px; }
+    .nav a {
+      font-size: 13px; color: var(--muted); padding: 6px 10px;
+      border-radius: 8px; transition: color .15s, background .15s;
+    }
+    .nav a:hover { color: var(--fg); background: rgba(255,255,255,.05); }
+    .nav-cta {
+      margin-left: 6px; padding: 7px 14px;
+      background: linear-gradient(135deg, rgba(182,155,255,.18), rgba(126,200,227,.1));
+      border: 1px solid rgba(182,155,255,.35);
+      border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--fg);
+    }
+    .nav-cta:hover { background: linear-gradient(135deg, rgba(182,155,255,.28), rgba(126,200,227,.18)); opacity: 1; }
+
+    /* ── Hero ────────────────────────────────────────────────────────────── */
+    .hero {
+      padding: 72px 0 52px;
+      text-align: center;
+      position: relative;
+    }
+    .hero-eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+      color: var(--accent); background: rgba(182,155,255,.08);
+      border: 1px solid rgba(182,155,255,.2);
+      border-radius: 999px; padding: 5px 12px; margin-bottom: 22px;
+    }
+    .hero-eyebrow::before { content: ''; width: 6px; height: 6px; background: var(--accent); border-radius: 50%; flex-shrink: 0; }
+    .hero h1 {
+      font-size: clamp(2.4rem, 5vw, 4rem);
+      font-weight: 800; line-height: 1.08;
+      letter-spacing: -.03em;
+      color: var(--fg);
+      max-width: 680px; margin: 0 auto 20px;
+    }
+    .hero h1 em { font-style: normal; color: var(--accent); }
+    .hero-sub {
+      font-size: clamp(1rem, 2vw, 1.15rem);
+      color: var(--muted); max-width: 520px;
+      margin: 0 auto 32px; line-height: 1.65;
+    }
+    .hero-actions {
+      display: flex; align-items: center; justify-content: center;
+      gap: 10px; flex-wrap: wrap; margin-bottom: 48px;
+    }
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 12px 22px; font-size: 14px; font-weight: 600;
+      background: linear-gradient(135deg, rgba(182,155,255,.22), rgba(126,200,227,.14));
+      border: 1px solid rgba(182,155,255,.45); border-radius: 10px; color: var(--fg);
+      box-shadow: 0 0 24px rgba(182,155,255,.12);
+    }
+    .btn-primary:hover { opacity: 1; background: linear-gradient(135deg, rgba(182,155,255,.32), rgba(126,200,227,.22)); }
+    .btn-ghost {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 12px 22px; font-size: 14px; font-weight: 600;
+      background: rgba(255,255,255,.04); border: 1px solid var(--border2);
+      border-radius: 10px; color: var(--muted);
+    }
+    .btn-ghost:hover { opacity: 1; color: var(--fg); background: rgba(255,255,255,.07); }
+
+    /* Hero screenshot */
+    .hero-shot {
+      max-width: 960px; margin: 0 auto;
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border2);
+      overflow: hidden;
+      box-shadow: var(--shadow), var(--glow);
+      position: relative;
+    }
+    .hero-shot img { width: 100%; height: auto; display: block; }
+    .hero-shot-caption {
+      padding: 10px 16px;
+      background: var(--panel);
+      border-top: 1px solid var(--border);
+      font-size: 12px; color: var(--dim);
+      text-align: left;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .tab-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); opacity: .6; }
+
+    /* ── Position label ──────────────────────────────────────────────────── */
+    .position-block {
+      padding: 52px 0;
+      border-top: 1px solid var(--border);
+    }
+    .position-inner {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center;
+    }
+    .position-copy h2 {
+      font-size: 1.8rem; font-weight: 700; line-height: 1.2;
+      letter-spacing: -.02em; margin-bottom: 16px;
+    }
+    .position-copy p { color: var(--muted); font-size: .95rem; margin-bottom: 12px; }
+    .position-copy p:last-child { margin-bottom: 0; }
+
+    /* Architecture diagram */
+    .arch-diagram {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      font-size: 12px;
+    }
+    .arch-row {
+      display: flex; align-items: center; gap: 0;
+      margin-bottom: 12px;
+    }
+    .arch-row:last-child { margin-bottom: 0; }
+    .arch-node {
+      padding: 8px 14px; border-radius: 8px;
+      border: 1px solid var(--border2);
+      background: var(--panel2);
+      font-size: 12px; font-weight: 500; color: var(--fg);
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .arch-node.highlight {
+      border-color: rgba(182,155,255,.4);
+      background: rgba(182,155,255,.08);
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .arch-arrow {
+      flex: 1; height: 1px;
+      background: linear-gradient(90deg, var(--border2), transparent);
+      position: relative; margin: 0 4px;
+    }
+    .arch-arrow::after {
+      content: '→'; position: absolute; right: -6px; top: 50%;
+      transform: translateY(-50%); color: var(--dim); font-size: 11px;
+    }
+    .arch-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+      margin-top: 16px;
+    }
+    .arch-store {
+      padding: 8px 12px; border-radius: 8px;
+      border: 1px dashed rgba(126,200,227,.25);
+      background: rgba(126,200,227,.04);
+      font-size: 11px; color: var(--muted); text-align: center;
+    }
+    .arch-store strong { color: var(--accent2); display: block; font-size: 12px; }
+    .arch-label {
+      font-size: 10px; color: var(--dim); text-align: center;
+      margin-top: 10px; letter-spacing: .06em; text-transform: uppercase;
+    }
+
+    /* ── Screenshot showcase ─────────────────────────────────────────────── */
+    .showcase { padding: 52px 0; border-top: 1px solid var(--border); }
+    .showcase-header { margin-bottom: 40px; }
+    .showcase-header h2 { font-size: 1.7rem; font-weight: 700; letter-spacing: -.02em; margin-bottom: 8px; }
+    .showcase-header p { color: var(--muted); max-width: 480px; }
+
+    .tab-switcher {
+      display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 24px;
+    }
+    .tab-btn {
+      padding: 6px 14px; font-size: 13px; font-weight: 500;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--muted); cursor: pointer;
+      transition: all .15s;
+    }
+    .tab-btn.active {
+      background: rgba(182,155,255,.1); border-color: rgba(182,155,255,.35);
+      color: var(--accent);
+    }
+
+    .screenshot-card {
+      border-radius: var(--radius-lg); overflow: hidden;
+      border: 1px solid var(--border2);
+      box-shadow: var(--shadow);
+      background: var(--panel);
+    }
+    .screenshot-card img { width: 100%; display: block; }
+    .screenshot-meta {
+      padding: 14px 18px 16px;
+      border-top: 1px solid var(--border);
+      display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: start;
+    }
+    .screenshot-meta h3 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+    .screenshot-meta p  { font-size: 13px; color: var(--muted); }
+    .screenshot-badge {
+      font-size: 11px; font-weight: 600; padding: 3px 8px;
+      border-radius: 6px; background: rgba(182,155,255,.1);
+      border: 1px solid rgba(182,155,255,.2); color: var(--accent);
+      white-space: nowrap;
+    }
+    .screenshot-tab-content { display: none; }
+    .screenshot-tab-content.active { display: block; }
+
+    /* ── Feature grid ────────────────────────────────────────────────────── */
+    .features-block { padding: 52px 0; border-top: 1px solid var(--border); }
+    .features-block h2 { font-size: 1.7rem; font-weight: 700; letter-spacing: -.02em; margin-bottom: 8px; }
+    .features-block > .wrap > p { color: var(--muted); margin-bottom: 36px; }
+    .feat-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+      background: var(--border); border-radius: var(--radius-lg); overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .feat-cell {
+      background: var(--panel); padding: 22px 20px;
+      transition: background .15s;
+    }
+    .feat-cell:hover { background: var(--panel2); }
+    .feat-icon {
+      width: 32px; height: 32px; border-radius: 8px;
+      background: rgba(182,155,255,.08); border: 1px solid rgba(182,155,255,.15);
+      display: grid; place-items: center; font-size: 14px; margin-bottom: 12px;
+    }
+    .feat-cell h3 { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+    .feat-cell p  { font-size: 12px; color: var(--muted); line-height: 1.55; }
+    .feat-cell code { font-size: 11px; background: rgba(0,0,0,.3); padding: 1px 4px; border-radius: 4px; }
+
+    /* ── Routing section ─────────────────────────────────────────────────── */
+    .routing-block { padding: 52px 0; border-top: 1px solid var(--border); }
+    .routing-block h2 { font-size: 1.7rem; font-weight: 700; letter-spacing: -.02em; margin-bottom: 8px; }
+    .routing-block > .wrap > p { color: var(--muted); margin-bottom: 36px; }
+    .routing-tiers {
+      display: flex; flex-direction: column; gap: 0;
+      border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden;
+    }
+    .tier {
+      display: grid; grid-template-columns: 100px 1fr auto;
+      gap: 0; align-items: stretch;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+    .tier:last-child { border-bottom: none; }
+    .tier:hover { background: var(--panel2); }
+    .tier-num {
+      padding: 18px 20px; font-size: 11px; font-weight: 700; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--accent); border-right: 1px solid var(--border);
+      display: flex; align-items: center;
+    }
+    .tier-body { padding: 18px 20px; }
+    .tier-body h3 { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+    .tier-body p  { font-size: 12px; color: var(--muted); }
+    .tier-cost {
+      padding: 18px 20px; border-left: 1px solid var(--border);
+      display: flex; align-items: center;
+      font-size: 11px; color: var(--dim); font-family: var(--mono); white-space: nowrap;
+    }
+
+    /* Z-commands */
+    .zcommands-block { padding: 52px 0; border-top: 1px solid var(--border); }
+    .zcommands-block h2 { font-size: 1.7rem; font-weight: 700; letter-spacing: -.02em; margin-bottom: 8px; }
+    .zcommands-block > .wrap > p { color: var(--muted); margin-bottom: 28px; }
+    .zcmd-grid {
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px;
+      border: 1px solid var(--border); border-radius: var(--radius-lg);
+      overflow: hidden; background: var(--border);
+    }
+    .zcmd-row {
+      display: flex; align-items: baseline; gap: 16px;
+      padding: 12px 18px; background: var(--panel);
+      transition: background .12s;
+    }
+    .zcmd-row:hover { background: var(--panel2); }
+    .zcmd-cmd  { font-family: var(--mono); font-size: 12px; color: var(--accent); min-width: 170px; flex-shrink: 0; }
+    .zcmd-desc { font-size: 12px; color: var(--muted); }
+
+    /* ── Quick start ─────────────────────────────────────────────────────── */
+    .quickstart-block { padding: 52px 0; border-top: 1px solid var(--border); }
+    .quickstart-block h2 { font-size: 1.7rem; font-weight: 700; letter-spacing: -.02em; margin-bottom: 8px; }
+    .quickstart-block > .wrap > p { color: var(--muted); margin-bottom: 32px; }
+    .qs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .qs-card {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); padding: 22px;
+    }
+    .qs-card h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+    .qs-card p  { font-size: 13px; color: var(--muted); margin-bottom: 14px; }
+    .qs-card.featured { border-color: rgba(182,155,255,.3); background: rgba(182,155,255,.04); }
+    .qs-card.featured h3 { color: var(--accent); }
+    .codebox {
+      background: rgba(0,0,0,.4); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden;
+    }
+    .codebox pre {
+      padding: 14px 16px; font-size: 12px; color: #c9d1e0;
+      overflow-x: auto; line-height: 1.6;
+    }
+    .codebox pre .cm  { color: var(--dim); }
+    .codebox pre .kw  { color: var(--accent2); }
+    .qs-note {
+      margin-top: 20px; padding: 14px 16px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: var(--radius); font-size: 13px; color: var(--muted);
+    }
+    .qs-note strong { color: var(--fg); }
+    .qs-note code { font-size: 12px; background: rgba(0,0,0,.3); padding: 1px 5px; border-radius: 4px; }
+
+    /* Profiles table */
+    .profiles-table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 13px; }
+    .profiles-table th {
+      text-align: left; padding: 8px 12px;
+      color: var(--dim); font-weight: 500; font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+      border-bottom: 1px solid var(--border);
+    }
+    .profiles-table td { padding: 10px 12px; color: var(--muted); border-bottom: 1px solid var(--border); }
+    .profiles-table td:first-child { color: var(--fg); font-weight: 500; font-family: var(--mono); font-size: 12px; }
+    .profiles-table tr:last-child td { border-bottom: none; }
+
+    /* ── Stats bar ───────────────────────────────────────────────────────── */
+    .stats-bar { border-top: 1px solid var(--border); padding: 40px 0; }
+    .stats-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+    .stat-cell { background: var(--panel); padding: 24px 16px; text-align: center; }
+    .stat-val { font-size: 2rem; font-weight: 800; color: var(--accent); letter-spacing: -.04em; line-height: 1; margin-bottom: 6px; }
+    .stat-key { font-size: 11px; color: var(--dim); letter-spacing: .04em; }
+
+    /* ── Security ────────────────────────────────────────────────────────── */
+    .security-block { padding: 52px 0; border-top: 1px solid var(--border); }
+    .security-block h2 { font-size: 1.7rem; font-weight: 700; letter-spacing: -.02em; margin-bottom: 8px; }
+    .security-block > .wrap > p { color: var(--muted); margin-bottom: 28px; }
+    .security-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .sec-card {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); padding: 20px;
+    }
+    .sec-num {
+      font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+      color: var(--accent); margin-bottom: 8px;
+    }
+    .sec-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+    .sec-card p  { font-size: 12px; color: var(--muted); line-height: 1.55; }
+
+    /* ── Footer ──────────────────────────────────────────────────────────── */
+    .footer {
+      border-top: 1px solid var(--border);
+      padding: 36px 0 30px;
+    }
+    .footer-inner {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      gap: 20px; flex-wrap: wrap; margin-bottom: 24px;
+    }
+    .footer-brand .brand-name { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+    .footer-brand p { font-size: 12px; color: var(--dim); max-width: 280px; line-height: 1.5; }
+    .footer-links {
+      display: flex; gap: 6px; flex-wrap: wrap;
+    }
+    .footer-links a {
+      font-size: 13px; color: var(--muted); padding: 4px 10px;
+      border-radius: 6px; border: 1px solid transparent;
+    }
+    .footer-links a:hover { color: var(--fg); border-color: var(--border); }
+    .footer-copy { font-size: 11px; color: var(--dim); }
+
+    /* ── Responsive ──────────────────────────────────────────────────────── */
+    @media (max-width: 900px) {
+      .position-inner { grid-template-columns: 1fr; gap: 28px; }
+      .feat-grid       { grid-template-columns: 1fr 1fr; }
+      .qs-grid         { grid-template-columns: 1fr; }
+      .stats-grid      { grid-template-columns: repeat(3, 1fr); }
+      .security-grid   { grid-template-columns: 1fr; }
+      .zcmd-grid       { grid-template-columns: 1fr; }
+      .nav a:not(.nav-cta):not(:last-child) { display: none; }
+    }
+    @media (max-width: 640px) {
+      .hero { padding: 48px 0 36px; }
+      .hero h1 { font-size: 2.2rem; }
+      .feat-grid { grid-template-columns: 1fr; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .routing-tiers .tier { grid-template-columns: 80px 1fr; }
+      .tier-cost { display: none; }
     }
   </style>
 </head>
 <body>
-  <a class="skip" href="#main">Skip to content</a>
+<a class="skip" href="#main">Skip to content</a>
 
-  <header class="top">
-    <div class="wrap">
-      <div class="brand">
-        <div class="logo" aria-hidden="true">▣</div>
-        <div>
-          <div class="name">BeigeBox</div>
-          <div class="tagline">OpenAI-compatible LLM middleware • routing • observability • local history</div>
-        </div>
+<!-- ── Navigation ──────────────────────────────────────────────────────── -->
+<header class="top">
+  <div class="top-inner">
+    <div class="brand">
+      <div class="brand-mark">▣</div>
+      <div>
+        <div class="brand-name">BeigeBox</div>
+        <div class="brand-sub">LLM middleware proxy</div>
       </div>
-
-      <nav class="nav" aria-label="Primary">
-        <a href="#unique-features">Unique Features</a>
-        <a href="#how-it-works">How it works</a>
-        <a href="#quickstart">Quick start</a>
-        <a href="#different">What's different</a>
-        <a href="#features">Features</a>
-        <a href="#zcommands">Z-commands</a>
-        <a href="#ui">UI</a>
-        <a class="btn" href="https://github.com/ralabarge/beigebox" rel="noopener noreferrer">GitHub</a>
-      </nav>
     </div>
-  </header>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="#how-it-works">How it works</a>
+      <a href="#ui-tour">UI tour</a>
+      <a href="#features">Features</a>
+      <a href="#routing">Routing</a>
+      <a href="#quickstart">Quick start</a>
+      <a class="nav-cta" href="https://github.com/ralabarge/beigebox" rel="noopener noreferrer">GitHub →</a>
+    </nav>
+  </div>
+</header>
 
-  <main id="main" class="wrap">
+<main id="main">
 
-    <!-- ── Hero ─────────────────────────────────────────────────────────── -->
-    <section class="hero">
-      <div class="hero-copy">
-        <h1>Stop rebuilding LLM integrations.<br>Smart routing. Local. Open.</h1>
-        <p class="lede">
-          BeigeBox sits between your app and any language model—automatically routing to cheaper models,
-          caching expensive responses, and switching backends without touching your code.
-          <strong>Zero frontend changes.</strong> Transparent to clients, invisible to backends.
-        </p>
-
-        <div class="cta">
-          <a class="btn primary" href="#quickstart">Try it now (2 minutes)</a>
-          <a class="btn ghost" href="#different">Why BeigeBox</a>
-        </div>
-
-        <ul class="pills" aria-label="Highlights">
-          <li>🎯 Smart routing · automatic model selection</li>
-          <li>💾 Response cache · no redundant API calls</li>
-          <li>🧩 Multi-backend support · OpenRouter + Ollama + OpenAI-compatible</li>
-          <li>⚡ Local-first storage · SQLite + ChromaDB</li>
-          <li>🚀 One HTML file UI · no build step</li>
-          <li>✅ Production-ready · Apache 2.0 license</li>
-        </ul>
+  <!-- ── Hero ──────────────────────────────────────────────────────────── -->
+  <section class="hero">
+    <div class="wrap">
+      <div class="hero-eyebrow">v1.9 · OpenAI-compatible · self-hosted</div>
+      <h1>Tap the line.<br><em>Control the carrier.</em></h1>
+      <p class="hero-sub">
+        BeigeBox is a proxy that sits between any OpenAI-compatible client and any model backend.
+        Smart routing, semantic caching, full observability — zero changes to your frontend.
+      </p>
+      <div class="hero-actions">
+        <a class="btn-primary" href="#quickstart">Get running in 2 minutes</a>
+        <a class="btn-ghost"   href="https://github.com/ralabarge/beigebox" rel="noopener noreferrer">View on GitHub</a>
       </div>
 
-      <div class="hero-card" role="img" aria-label="BeigeBox UI screenshot">
+      <!-- Main hero screenshot: Dashboard tab -->
+      <div class="hero-shot">
         <img
-          src="beigebox-ui.png"
-          width="1400"
-          height="906"
-          loading="eager"
-          decoding="async"
-          alt="BeigeBox dashboard UI screenshot"
+          src="screenshot-dashboard.png"
+          width="1920" height="1080"
+          loading="eager" decoding="async"
+          alt="BeigeBox dashboard — P50/P95/P99 latency charts, TTFT, token throughput, backend health, cost breakdown"
         />
-      </div>
-    </section>
-
-    <!-- ── Unique Features ───────────────────────────────────────────────── -->
-    <section id="unique-features" class="section">
-      <h2>Unique Features</h2>
-      <p class="section-sub">Capabilities you won't find assembled anywhere else.</p>
-
-      <div class="diff-grid">
-        <div class="standout">
-          <h3>Semantic response cache</h3>
-          <p>Responses are cached by <em>meaning</em> using cosine similarity, not by exact string or TTL. Near-identical questions return instantly — no backend round-trip, no model load.</p>
-        </div>
-        <div class="standout">
-          <h3>WASM post-processing pipeline</h3>
-          <p>Drop any WASI-compiled module into <code>wasm_modules/</code>. BeigeBox buffers the stream, pipes it through your transform (stdin → stdout), and re-emits the clean result. Any language, zero Python deps.</p>
-        </div>
-        <div class="standout">
-          <h3>Council mode with model affinity batching</h3>
-          <p>Fan a single prompt out to multiple models simultaneously, then vote, merge, or surface the best answer. Model-affinity ensures each council member stays on the backend it performs best on.</p>
-        </div>
-        <div class="standout">
-          <h3>Trajectory evaluation scoring</h3>
-          <p>Every agentic run is scored end-to-end: tool selection, reasoning chain, and final answer quality. Scores surface in the dashboard so you can compare models on real tasks, not synthetic benchmarks.</p>
-        </div>
-        <div class="standout">
-          <h3>Session-sticky multi-turn routing</h3>
-          <p>The routing decision for turn 1 is cached for the whole conversation. A code session stays on the code model; a chat session stays on the fast model — no mid-conversation backend flips.</p>
-        </div>
-        <div class="standout">
-          <h3>Operator with persistent notes</h3>
-          <p>The operator agent writes structured notes to a persistent memory store between runs. Across sessions it recalls context, tool results, and prior reasoning — no re-discovery from scratch each time.</p>
+        <div class="hero-shot-caption">
+          <span class="tab-dot"></span>
+          Dashboard — P50 / P95 / P99 latency · TTFT · tokens/sec · backend health · cost tracking
         </div>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <!-- ── How it works ──────────────────────────────────────────────────── -->
-    <section id="how-it-works" class="section">
-      <h2>How it works</h2>
+  <!-- ── Position / architecture ───────────────────────────────────────── -->
+  <section id="how-it-works" class="position-block">
+    <div class="wrap">
+      <div class="position-inner">
+        <div class="position-copy">
+          <h2>Sits in the middle.<br>Transparent to both sides.</h2>
+          <p>
+            Any OpenAI-compatible client — Open WebUI, LM Studio, Cursor, Aider, Continue, or your own app —
+            points at BeigeBox instead of your model provider. BeigeBox handles the rest.
+          </p>
+          <p>
+            Requests flow through a deterministic 7-stage pipeline: parse → cache check → classify & route →
+            inject context → forward → transform → log. Each stage is independently configurable and hot-reloadable.
+          </p>
+          <p>
+            The backend sees a plain OpenAI-compatible request. Your client sees an OpenAI-compatible response.
+            BeigeBox does everything in between without either side needing to change.
+          </p>
+        </div>
+        <div class="arch-diagram" role="img" aria-label="Architecture: clients connect to BeigeBox, which routes to Ollama or OpenRouter, and writes async to SQLite and ChromaDB">
+          <div style="font-size:11px;color:var(--dim);margin-bottom:16px;letter-spacing:.06em;text-transform:uppercase;">Request flow</div>
 
-      <figure class="flow-figure" aria-label="BeigeBox request flow">
-        <svg viewBox="0 0 760 88" xmlns="http://www.w3.org/2000/svg"
-             role="img" aria-label="Request flows from Client through BeigeBox to Providers, with async writes to SQLite and ChromaDB"
-             style="width:100%;display:block;max-width:760px;margin:0 auto 6px">
-          <defs>
-            <marker id="ah" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
-              <path d="M0,0 L0,6 L7,3 z" fill="#b69bff" opacity="0.6"/>
-            </marker>
-            <marker id="ahd" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
-              <path d="M0,0 L0,6 L7,3 z" fill="#8bd5ff" opacity="0.5"/>
-            </marker>
-          </defs>
-          <rect x="2"   y="26" width="110" height="36" rx="6" fill="#11131a" stroke="#222635" stroke-width="1.2"/>
-          <rect x="162" y="20" width="148" height="48" rx="6" fill="#11131a" stroke="rgba(182,155,255,0.35)" stroke-width="1.4"/>
-          <rect x="378" y="2"  width="110" height="36" rx="6" fill="#11131a" stroke="#222635" stroke-width="1.2"/>
-          <rect x="378" y="50" width="110" height="36" rx="6" fill="#11131a" stroke="#222635" stroke-width="1.2"/>
-          <rect x="554" y="2"  width="110" height="36" rx="6" fill="#11131a" stroke="#222635" stroke-width="1.2"/>
-          <rect x="554" y="50" width="110" height="36" rx="6" fill="#11131a" stroke="#222635" stroke-width="1.2"/>
-          <rect x="162" y="20" width="4"   height="48" rx="3" fill="#b69bff" opacity="0.55"/>
-          <g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" text-anchor="middle" fill="#e8eaf0">
-            <text x="57"  y="47" font-size="11">Client / UI</text>
-            <text x="237" y="38" font-size="11" font-weight="600" fill="#b69bff">BeigeBox</text>
-            <text x="237" y="53" font-size="9.5" fill="#a8adbd">route · cache · log · transform</text>
-            <text x="433" y="18" font-size="10" fill="#a8adbd">SQLite</text>
-            <text x="433" y="31" font-size="10">history</text>
-            <text x="433" y="66" font-size="10" fill="#a8adbd">ChromaDB</text>
-            <text x="433" y="79" font-size="10">vectors</text>
-            <text x="609" y="18" font-size="10" fill="#a8adbd">Ollama</text>
-            <text x="609" y="31" font-size="10">local</text>
-            <text x="609" y="66" font-size="10" fill="#a8adbd">OpenRouter</text>
-            <text x="609" y="79" font-size="10">cloud</text>
-          </g>
-          <line x1="113" y1="44" x2="159" y2="44" stroke="#b69bff" stroke-width="1.5" stroke-opacity="0.6" marker-end="url(#ah)"/>
-          <line x1="311" y1="34" x2="551" y2="20" stroke="#b69bff" stroke-width="1.4" stroke-opacity="0.5" marker-end="url(#ah)"/>
-          <line x1="311" y1="54" x2="551" y2="68" stroke="#b69bff" stroke-width="1.4" stroke-opacity="0.5" marker-end="url(#ah)"/>
-          <line x1="311" y1="38" x2="375" y2="22" stroke="#8bd5ff" stroke-width="1.2" stroke-opacity="0.45" stroke-dasharray="5 3" marker-end="url(#ahd)"/>
-          <line x1="311" y1="50" x2="375" y2="66" stroke="#8bd5ff" stroke-width="1.2" stroke-opacity="0.45" stroke-dasharray="5 3" marker-end="url(#ahd)"/>
-        </svg>
-        <figcaption style="text-align:center;font-size:.82rem;color:#a8adbd;margin-bottom:20px">
-          Solid — request path &nbsp;·&nbsp; Dashed — async writes
-        </figcaption>
-      </figure>
+          <div class="arch-row">
+            <div class="arch-node">Open WebUI</div>
+            <div class="arch-arrow"></div>
+            <div class="arch-node highlight">BeigeBox :1337</div>
+          </div>
+          <div class="arch-row" style="margin-top:6px;">
+            <div class="arch-node">LM Studio</div>
+            <div class="arch-arrow"></div>
+            <div class="arch-node" style="opacity:0;pointer-events:none;">spacer</div>
+          </div>
+          <div class="arch-row" style="margin-top:6px;margin-bottom:16px;">
+            <div class="arch-node">Your app /v1</div>
+            <div class="arch-arrow"></div>
+            <div class="arch-node" style="opacity:0;pointer-events:none;">spacer</div>
+          </div>
 
-      <ol class="how-steps">
-        <li>
-          <strong>Ingest.</strong>
-          Any OpenAI-compatible client hits <code>localhost:1337/v1</code>. No changes to your client, frontend, or tools required.
-        </li>
-        <li>
-          <strong>Cache check.</strong>
-          The request is embedded and checked against the semantic cache. A sufficiently similar previous query returns the cached response immediately — no backend round-trip, no model load.
-        </li>
-        <li>
-          <strong>Classify &amp; route.</strong>
-          A 4-tier pipeline picks the right model: Z-command overrides → agentic keyword scorer → embedding classifier (~50 ms) → decision LLM for borderline cases. Session-sticky so conversations stay on one model.
-        </li>
-        <li>
-          <strong>Execute.</strong>
-          The request forwards to the chosen provider — Ollama, OpenRouter, or any OpenAI-compatible endpoint. BeigeBox streams the response back transparently with latency-aware failover.
-        </li>
-        <li>
-          <strong>Transform.</strong>
-          If a WASM module is active, BeigeBox buffers the full stream, runs the transform, and re-emits. The client always sees the final output — not raw intermediate fragments.
-        </li>
-        <li>
-          <strong>Log, embed &amp; measure.</strong>
-          Every event writes to a structured JSONL wire log and SQLite. Responses embed into ChromaDB for semantic memory. Latency, TTFT, token counts, and cost surface in the dashboard.
-        </li>
-      </ol>
-    </section>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:16px;">
+            <div class="arch-arrow" style="width:40px;flex:none;transform:rotate(0deg);"></div>
+            <div class="arch-node">Ollama (local)</div>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:16px;">
+            <div class="arch-arrow" style="width:40px;flex:none;"></div>
+            <div class="arch-node">OpenRouter / OpenAI</div>
+          </div>
 
-    <!-- ── Quick start ───────────────────────────────────────────────────── -->
-    <section id="quickstart" class="section">
+          <div class="arch-grid">
+            <div class="arch-store"><strong>SQLite</strong>conversations · metrics</div>
+            <div class="arch-store"><strong>ChromaDB</strong>vectors · semantic cache</div>
+          </div>
+          <div class="arch-label">async writes</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Stats bar ──────────────────────────────────────────────────────── -->
+  <div class="stats-bar">
+    <div class="wrap">
+      <div class="stats-grid">
+        <div class="stat-cell"><div class="stat-val">4</div><div class="stat-key">routing tiers</div></div>
+        <div class="stat-cell"><div class="stat-val">3</div><div class="stat-key">cache layers</div></div>
+        <div class="stat-cell"><div class="stat-val">~50ms</div><div class="stat-key">classifier latency</div></div>
+        <div class="stat-cell"><div class="stat-val">0</div><div class="stat-key">JS dependencies</div></div>
+        <div class="stat-cell"><div class="stat-val">1</div><div class="stat-key">HTML file UI</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── UI tour / screenshots ──────────────────────────────────────────── -->
+  <section id="ui-tour" class="showcase">
+    <div class="wrap">
+      <div class="showcase-header">
+        <h2>The built-in UI</h2>
+        <p>Seven tabs, no build step, no framework. One self-contained HTML file — edit it directly.</p>
+      </div>
+
+      <div class="tab-switcher" role="tablist">
+        <button class="tab-btn active" onclick="showShot(this,'shot-dashboard')" role="tab" aria-selected="true">Dashboard</button>
+        <button class="tab-btn" onclick="showShot(this,'shot-chat')" role="tab">Chat</button>
+        <button class="tab-btn" onclick="showShot(this,'shot-tap')" role="tab">Tap</button>
+        <button class="tab-btn" onclick="showShot(this,'shot-harness')" role="tab">Harness</button>
+        <button class="tab-btn" onclick="showShot(this,'shot-operator')" role="tab">Operator</button>
+        <button class="tab-btn" onclick="showShot(this,'shot-studio')" role="tab">Studio</button>
+      </div>
+
+      <!-- Dashboard -->
+      <div id="shot-dashboard" class="screenshot-tab-content active">
+        <div class="screenshot-card">
+          <img
+            src="screenshot-dashboard.png"
+            width="1920" height="1080"
+            loading="lazy" decoding="async"
+            alt="Dashboard tab — latency charts, TTFT, token throughput, backend health indicators, cost breakdown by model"
+          />
+          <div class="screenshot-meta">
+            <div>
+              <h3>Dashboard</h3>
+              <p>P50 / P95 / P99 latency histograms, TTFT per model, tokens/sec, backend health, cost breakdown. Live refresh on demand.</p>
+            </div>
+            <span class="screenshot-badge">Tab 1</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat -->
+      <div id="shot-chat" class="screenshot-tab-content">
+        <div class="screenshot-card">
+          <img
+            src="screenshot-chat-multipane.png"
+            width="1920" height="1080"
+            loading="lazy" decoding="async"
+            alt="Chat tab — two side-by-side chat panes sending the same message to different models simultaneously, with per-pane settings drawer open showing temperature, top-p, context window, GPU layers, and force-reload controls"
+          />
+          <div class="screenshot-meta">
+            <div>
+              <h3>Chat — multi-pane</h3>
+              <p>Fan a message out to N models simultaneously. Per-pane temperature, top-p/k, context window, GPU layer count, force-reload to evict model from VRAM. Direct and Agent sub-modes.</p>
+            </div>
+            <span class="screenshot-badge">Tab 3</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tap -->
+      <div id="shot-tap" class="screenshot-tab-content">
+        <div class="screenshot-card">
+          <img
+            src="screenshot-tap-events.png"
+            width="1920" height="1080"
+            loading="lazy" decoding="async"
+            alt="Tap tab — live event stream showing request events with timestamps, event types, model names, latency values, and a filter bar for source, event type, role, and run ID"
+          />
+          <div class="screenshot-meta">
+            <div>
+              <h3>Tap — live wire log</h3>
+              <p>Every request event in real time. Filter by source, event type, role, or run ID. Includes Conversations sub-view for browsing stored history and Inspector for deep per-request trace.</p>
+            </div>
+            <span class="screenshot-badge">Tab 2</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Harness -->
+      <div id="shot-harness" class="screenshot-tab-content">
+        <div class="screenshot-card">
+          <img
+            src="screenshot-harness.png"
+            width="1920" height="1080"
+            loading="lazy" decoding="async"
+            alt="Harness tab — parallel model runner with a prompt submitted to three models, showing responses side-by-side with timing, and an ensemble judge result below"
+          />
+          <div class="screenshot-meta">
+            <div>
+              <h3>Harness — parallel model runner</h3>
+              <p>Run the same prompt against multiple models simultaneously. Compare responses side-by-side. Ensemble mode adds an LLM judge that picks the best answer with reasoning.</p>
+            </div>
+            <span class="screenshot-badge">Tab 4</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Operator -->
+      <div id="shot-operator" class="screenshot-tab-content">
+        <div class="screenshot-card">
+          <img
+            src="screenshot-operator.png"
+            width="1920" height="1080"
+            loading="lazy" decoding="async"
+            alt="Operator tab — agentic JSON tool loop showing thought/tool/answer steps, tool calls to web search and calculator, persistent notes panel on the right, and run history list"
+          />
+          <div class="screenshot-meta">
+            <div>
+              <h3>Operator — agentic tool loop</h3>
+              <p>JSON thought/tool/answer protocol. Tools: web search, web scraper, calculator, datetime, system info, memory recall, shell (sandboxed). Persistent notes survive across sessions.</p>
+            </div>
+            <span class="screenshot-badge">Tab 3 · Agent</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Studio -->
+      <div id="shot-studio" class="screenshot-tab-content">
+        <div class="screenshot-card">
+          <img
+            src="screenshot-studio.png"
+            width="1920" height="1080"
+            loading="lazy" decoding="async"
+            alt="Studio (Lab) tab — eval suite runner showing a YAML eval file editor on the left and run results with pass/fail scores and LLM judge reasoning on the right"
+          />
+          <div class="screenshot-meta">
+            <div>
+              <h3>Studio / Lab — eval runner</h3>
+              <p>Run eval suites against your models from the UI. YAML-defined test cases, LLM judge scoring, per-run history. Compare model quality on real tasks — not synthetic benchmarks.</p>
+            </div>
+            <span class="screenshot-badge">Tab 6</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Features grid ──────────────────────────────────────────────────── -->
+  <section id="features" class="features-block">
+    <div class="wrap">
+      <h2>What's in the box</h2>
+      <p>Capabilities that come enabled or are one config flag away.</p>
+
+      <div class="feat-grid">
+
+        <div class="feat-cell">
+          <div class="feat-icon">⇄</div>
+          <h3>Smart routing</h3>
+          <p>4-tier pipeline: Z-command overrides → keyword scorer → embedding classifier (~50 ms) → decision LLM. Session-sticky so a conversation stays on one backend.</p>
+        </div>
+
+        <div class="feat-cell">
+          <div class="feat-icon">◈</div>
+          <h3>Semantic cache</h3>
+          <p>Responses cached by <em>meaning</em> via cosine similarity, not by string or TTL. Near-identical queries return instantly — no backend round-trip, no model load.</p>
+        </div>
+
+        <div class="feat-cell">
+          <div class="feat-icon">⟳</div>
+          <h3>Multi-backend router</h3>
+          <p>Ollama, OpenRouter, or any OpenAI-compatible endpoint. Rolling P95 latency tracker auto-deprioritises slow backends. A/B traffic splitting with configurable weights.</p>
+        </div>
+
+        <div class="feat-cell">
+          <div class="feat-icon">◎</div>
+          <h3>Full observability</h3>
+          <p>Structured JSONL wire log, SQLite conversation history, per-model TTFT and P50/P90/P95/P99 latency, GPU layer stats, cost tracking, Grafana dashboards.</p>
+        </div>
+
+        <div class="feat-cell">
+          <div class="feat-icon">⊞</div>
+          <h3>Orchestration modes</h3>
+          <p>Side-by-side harness comparison. Ensemble voting with LLM arbiter + reasoning. Goal-driven Ralph loop: plan → dispatch → test → iterate via SSE stream.</p>
+        </div>
+
+        <div class="feat-cell">
+          <div class="feat-icon">⬡</div>
+          <h3>MCP server</h3>
+          <p>Model Context Protocol at <code>POST /mcp</code>. Exposes the full tool registry to Claude Desktop, external agents, or any MCP client. Progressive disclosure to avoid context flooding.</p>
+        </div>
+
+        <div class="feat-cell">
+          <div class="feat-icon">⬡</div>
+          <h3>WASM transforms</h3>
+          <p>Drop a WASI-compiled <code>.wasm</code> into <code>wasm_modules/</code>. BeigeBox buffers the stream, pipes it stdin→stdout, re-emits. Any language, zero Python deps. Timeout-safe.</p>
+        </div>
+
+        <div class="feat-cell">
+          <div class="feat-icon">⚙</div>
+          <h3>Hot-reload config</h3>
+          <p>Two-file design. <code>config.yaml</code> loaded once at startup. <code>runtime_config.yaml</code> mtime-checked per request — change model, temperature, toggles without restarting.</p>
+        </div>
+
+        <div class="feat-cell">
+          <div class="feat-icon">◑</div>
+          <h3>Browser automation</h3>
+          <p>Operator agent controls Chrome via DevTools Protocol. Navigate, screenshot, click, read DOM, type. Full I/O captured in context. Enabled via the CDP Docker Compose profile.</p>
+        </div>
+
+        <div class="feat-cell">
+          <div class="feat-icon">⬒</div>
+          <h3>Voice I/O</h3>
+          <p>Whisper (STT) + Kokoro (TTS) via the voice Docker Compose profile. Push-to-talk with configurable hotkey, auto-play TTS after each response. No changes to core proxy.</p>
+        </div>
+
+        <div class="feat-cell">
+          <div class="feat-icon">⊕</div>
+          <h3>Plugins &amp; hooks</h3>
+          <p>Drop a <code>*Tool</code> class in <code>plugins/</code> to auto-register. Pre/post request hooks for prompt injection detection, RAG injection, custom policy. Egress hooks for external metrics.</p>
+        </div>
+
+        <div class="feat-cell">
+          <div class="feat-icon">▤</div>
+          <h3>Local-first storage</h3>
+          <p>SQLite for conversations, metrics, cost. ChromaDB embedded (no separate service) for vectors and semantic memory. Portable files — no cloud dependency, no vendor lock-in.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Routing detail ─────────────────────────────────────────────────── -->
+  <section id="routing" class="routing-block">
+    <div class="wrap">
+      <h2>4-tier routing pipeline</h2>
+      <p>Every request cascades through this sequence. Simpler requests short-circuit early — only borderline cases reach the decision LLM.</p>
+
+      <div class="routing-tiers">
+        <div class="tier">
+          <div class="tier-num">Tier 1</div>
+          <div class="tier-body">
+            <h3>Z-command overrides</h3>
+            <p>User types <code>z: complex</code> or <code>z: code</code> as a message prefix. Parsed before anything else. Zero compute, immediate dispatch.</p>
+          </div>
+          <div class="tier-cost">cost: ~0 ms</div>
+        </div>
+        <div class="tier">
+          <div class="tier-num">Tier 2</div>
+          <div class="tier-body">
+            <h3>Keyword scorer</h3>
+            <p>Agentic keyword pattern matching. Catches obvious code / tool / complex signals without embedding. Exits early for clear-cut cases.</p>
+          </div>
+          <div class="tier-cost">cost: ~1 ms</div>
+        </div>
+        <div class="tier">
+          <div class="tier-num">Tier 3</div>
+          <div class="tier-body">
+            <h3>Embedding classifier</h3>
+            <p>Embeds the query with <code>nomic-embed-text</code> and checks cosine similarity against pre-built centroids per tier. Covers the bulk of requests reliably.</p>
+          </div>
+          <div class="tier-cost">cost: ~50 ms</div>
+        </div>
+        <div class="tier">
+          <div class="tier-num">Tier 4</div>
+          <div class="tier-body">
+            <h3>Decision LLM</h3>
+            <p>A small, fast model (e.g. <code>llama3.2:3b</code>) judges ambiguous cases that didn't classify cleanly. Optional — disable to cap at tier 3.</p>
+          </div>
+          <div class="tier-cost">cost: ~200–800 ms</div>
+        </div>
+      </div>
+
+      <p style="margin-top:16px; font-size:13px; color:var(--dim);">
+        Routing decisions are session-sticky: the first classification for a conversation is reused for all subsequent turns, preventing mid-conversation backend flips.
+      </p>
+    </div>
+  </section>
+
+  <!-- ── Z-commands ─────────────────────────────────────────────────────── -->
+  <section class="zcommands-block">
+    <div class="wrap">
+      <h2>Z-commands</h2>
+      <p>Prefix any message with <code style="font-size:13px;background:rgba(0,0,0,.3);padding:1px 5px;border-radius:4px;">z:</code> to override routing, invoke tools, or branch the conversation inline — no UI needed.</p>
+
+      <div class="zcmd-grid">
+        <div class="zcmd-row"><span class="zcmd-cmd">z: simple</span><span class="zcmd-desc">Route to the fast / cheap model</span></div>
+        <div class="zcmd-row"><span class="zcmd-cmd">z: complex</span><span class="zcmd-desc">Route to the large / capable model</span></div>
+        <div class="zcmd-row"><span class="zcmd-cmd">z: code</span><span class="zcmd-desc">Route to the code-specialist model</span></div>
+        <div class="zcmd-row"><span class="zcmd-cmd">z: llama3.2:3b</span><span class="zcmd-desc">Route to an exact model by name</span></div>
+        <div class="zcmd-row"><span class="zcmd-cmd">z: search</span><span class="zcmd-desc">Force web search, inject results before sending</span></div>
+        <div class="zcmd-row"><span class="zcmd-cmd">z: memory</span><span class="zcmd-desc">Recall relevant past conversations and inject context</span></div>
+        <div class="zcmd-row"><span class="zcmd-cmd">z: calc 2^32</span><span class="zcmd-desc">Evaluate a math expression inline (sandboxed)</span></div>
+        <div class="zcmd-row"><span class="zcmd-cmd">z: sysinfo</span><span class="zcmd-desc">Inject current system resource stats</span></div>
+        <div class="zcmd-row"><span class="zcmd-cmd">z: fork</span><span class="zcmd-desc">Branch this conversation into a new thread</span></div>
+        <div class="zcmd-row"><span class="zcmd-cmd">z: complex,search</span><span class="zcmd-desc">Chain multiple directives in one prefix</span></div>
+        <div class="zcmd-row"><span class="zcmd-cmd">z: help</span><span class="zcmd-desc">Show all available commands in the chat</span></div>
+        <div class="zcmd-row"><span class="zcmd-cmd">z: sysinfo</span><span class="zcmd-desc">Inject real-time CPU, RAM, GPU stats</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Quick start ────────────────────────────────────────────────────── -->
+  <section id="quickstart" class="quickstart-block">
+    <div class="wrap">
       <h2>Quick start</h2>
+      <p>Full stack — Ollama + BeigeBox — running in under 2 minutes via Docker Compose.</p>
 
-      <div class="panel" style="margin-bottom: 20px; border: 2px solid rgba(182,155,255,.4); padding: 20px;">
-        <h3 style="margin-top: 0;">Get running in 2 minutes</h3>
-        <p>Full stack with Ollama + BeigeBox — Docker Compose does the rest.</p>
-        <div class="codebox" style="margin: 12px 0;">
-          <pre><code>git clone --recursive https://github.com/ralabarge/beigebox.git
-cd beigebox/docker
-cp env.example .env        # optional — set GPU, ports, API keys
-docker compose up -d</code></pre>
-        </div>
-        <p style="margin: 12px 0 0;">
-          Open <code style="background: rgba(17,19,26,.6); padding: 1px 4px;">http://localhost:1337</code> for the web UI.
-          The OpenAI-compatible API is at <code style="background: rgba(17,19,26,.6); padding: 1px 4px;">http://localhost:1337/v1</code>.
-        </p>
-        <p style="margin: 8px 0 0; font-size: .9rem; color: var(--muted);">
-          <strong>Optional:</strong> Add profiles for browser automation, voice I/O, or alternative inference engines.
-        </p>
-      </div>
-
-      <p class="section-sub">Other setups:</p>
-
-      <div class="grid2">
-
-        <div class="panel qs-panel">
-          <h3>Already have Ollama/another provider?</h3>
-          <p>Run just BeigeBox in front of it. Set <code>backend.url</code> in <code>config.yaml</code> to your existing provider.</p>
-          <div class="codebox" style="margin-top:10px">
-            <pre><code>git clone --recursive https://github.com/ralabarge/beigebox.git
+      <div class="qs-grid">
+        <div class="qs-card featured">
+          <h3>Docker Compose (recommended)</h3>
+          <p>Pulls Ollama, starts BeigeBox, wires everything up. GPU passthrough configured via <code>.env</code>.</p>
+          <div class="codebox"><pre><span class="cm"># clone with submodules</span>
+git clone --recursive \
+  https://github.com/ralabarge/beigebox.git
 cd beigebox/docker
 cp env.example .env
-docker compose up -d beigebox</code></pre>
-          </div>
-          <p style="margin-top: 8px; font-size: .9rem; color: var(--muted);">Then update <code>config.yaml</code> to point to your Ollama/OpenRouter/custom API endpoint.</p>
+docker compose up -d</pre></div>
+          <p style="margin-top:12px;font-size:12px;color:var(--dim);">
+            Web UI → <code>http://localhost:1337</code><br>
+            API endpoint → <code>http://localhost:1337/v1</code>
+          </p>
         </div>
 
-        <div class="panel qs-panel">
-          <h3>Dev mode (hot-reload)</h3>
-          <p>Edit <code>config.yaml</code> or <code>runtime_config.yaml</code> — changes take effect immediately, no restart.</p>
-          <div class="codebox" style="margin-top:10px">
-            <pre><code>pip install -e .
+        <div class="qs-card">
+          <h3>Dev mode (bare metal)</h3>
+          <p>Editable install with hot-reload. Changes to <code>runtime_config.yaml</code> take effect on next request — no restart.</p>
+          <div class="codebox"><pre>pip install -e .
 cp config.example.yaml config.yaml
-beigebox dial</code></pre>
-          </div>
-          <p style="margin-top:10px">FastAPI at <code>localhost:8000</code> · docs at <code>/docs</code></p>
-        </div>
-
-      </div>
-
-      <div style="margin-top: 20px; padding: 12px; background: rgba(17,19,26,.4); border-radius: var(--radius); font-size: .9rem; color: var(--muted);">
-        <strong style="color: var(--fg);">Any OpenAI-compatible client works.</strong> Point your tools (ChatGPT UI, LM Studio, Cursor, Aider, Continue) at <code style="background: rgba(0,0,0,.2); padding: 1px 4px;">http://localhost:1337/v1</code> — zero code changes needed.
-      </div>
-
-      <details style="margin-top: 20px; padding: 12px; background: rgba(17,19,26,.3); border-radius: var(--radius); cursor: pointer;">
-        <summary style="font-weight: 600; color: var(--fg); user-select: none;">Docker Compose profiles (optional)</summary>
-        <div style="margin-top: 12px; font-size: .9rem; color: var(--muted);">
-          <p><strong style="color: var(--fg);">Browser automation (CDP):</strong> <code style="background: rgba(0,0,0,.2); padding: 1px 4px;">docker compose --profile cdp up -d</code></p>
-          <p style="margin-top: 8px;"><strong style="color: var(--fg);">Voice I/O (STT + TTS):</strong> <code style="background: rgba(0,0,0,.2); padding: 1px 4px;">docker compose --profile voice up -d</code></p>
-          <p style="margin-top: 8px;"><strong style="color: var(--fg);">Both:</strong> <code style="background: rgba(0,0,0,.2); padding: 1px 4px;">docker compose --profile cdp --profile voice up -d</code></p>
-          <p style="margin-top: 8px;"><strong style="color: var(--fg);">Alternative engines:</strong> llama.cpp (<code style="background: rgba(0,0,0,.2); padding: 1px 4px;">engines-cpp</code>), vLLM (<code style="background: rgba(0,0,0,.2); padding: 1px 4px;">engines-vllm</code>), ExecutorTorch (<code style="background: rgba(0,0,0,.2); padding: 1px 4px;">engines-executorch</code>)</p>
-        </div>
-      </details>
-    </section>
-
-    <!-- ── Deployment Options ────────────────────────────────────────────────── -->
-    <section class="section">
-      <h2>Deploy anywhere</h2>
-      <p class="section-sub">BeigeBox is self-hosted and portable. Choose your platform:</p>
-
-      <div class="grid3">
-        <div class="panel">
-          <h3>🐳 Docker Compose</h3>
-          <p>The simplest path. Includes Ollama, BeigeBox, and all dependencies. <code>.env</code> controls everything — GPU, ports, model pulls.</p>
-          <p style="margin-top:8px; font-size:.9rem; color:var(--muted);">See <code>deploy/docker/</code> for production variant with volume mounts.</p>
-        </div>
-        <div class="panel">
-          <h3>☸ Kubernetes</h3>
-          <p>Deployments, Services, ConfigMaps, PVCs ready to go. Includes resource requests/limits, liveness + readiness probes, and security context.</p>
-          <p style="margin-top:8px; font-size:.9rem; color:var(--muted);">See <code>deploy/k8s/</code> for YAML manifests.</p>
-        </div>
-        <div class="panel">
-          <h3>🖥 Bare Metal</h3>
-          <p>Systemd unit file for Linux servers. Virtual environment support, security hardening, and environment variable overrides included.</p>
-          <p style="margin-top:8px; font-size:.9rem; color:var(--muted);">See <code>deploy/systemd/</code> for unit template.</p>
+<span class="cm"># edit config.yaml — set your backend URL</span>
+beigebox dial</pre></div>
+          <p style="margin-top:12px;font-size:12px;color:var(--dim);">FastAPI at <code>localhost:8000</code> · auto-docs at <code>/docs</code></p>
         </div>
       </div>
 
-      <div style="margin-top: 20px; padding: 12px; background: rgba(17,19,26,.4); border-radius: var(--radius); font-size: .9rem; color: var(--muted);">
-        <strong style="color: var(--fg);">Your data, local-first.</strong> All conversations, embeddings, and metrics stay in SQLite + ChromaDB — no cloud dependency, no vendor lock-in. Portable files across machines.
-      </div>
-    </section>
-
-    <!-- ── Who is this for ────────────────────────────────────────────────── -->
-    <section class="section">
-      <h2>Who is this for</h2>
-
-      <div class="grid2">
-        <div class="panel standout">
-          <h3>Perfect for you if:</h3>
-          <ul style="list-style: none; padding: 0; margin: 10px 0; display: flex; flex-direction: column; gap: 8px;">
-            <li style="color: var(--muted);">✓ Running Ollama or multiple LLM providers</li>
-            <li style="color: var(--muted);">✓ Building LLM-powered features in an app</li>
-            <li style="color: var(--muted);">✓ Want to reduce LLM API costs (route to cheaper models)</li>
-            <li style="color: var(--muted);">✓ Need observability into LLM usage (latency, cost, tokens)</li>
-            <li style="color: var(--muted);">✓ Self-hosted teams keeping data on-prem</li>
-            <li style="color: var(--muted);">✓ Evaluating how different models perform on your workload</li>
-          </ul>
-        </div>
-
-        <div class="panel standout2">
-          <h3>Not for you if:</h3>
-          <ul style="list-style: none; padding: 0; margin: 10px 0; display: flex; flex-direction: column; gap: 8px;">
-            <li style="color: var(--muted);">✗ You only use OpenAI (no multi-model benefit)</li>
-            <li style="color: var(--muted);">✗ Your only concern is latency (caching helps but isn't the main goal)</li>
-            <li style="color: var(--muted);">✗ You prefer managed cloud solutions (BeigeBox is self-hosted)</li>
-            <li style="color: var(--muted);">✗ You have minimal LLM usage (overhead of routing > gains)</li>
-          </ul>
-        </div>
-      </div>
-    </section>
-
-    <!-- ── What's different ──────────────────────────────────────────────── -->
-    <section id="different" class="section">
-      <h2>What makes it different</h2>
-      <p class="section-sub">Most LLM proxies do passthrough and load balancing. BeigeBox goes further.</p>
-
-      <div class="stat-strip" aria-label="Key numbers">
-        <div class="stat"><div class="stat-num">4</div><div class="stat-label">routing tiers</div></div>
-        <div class="stat"><div class="stat-num">3</div><div class="stat-label">cache layers</div></div>
-        <div class="stat"><div class="stat-num">3</div><div class="stat-label">multi-model modes</div></div>
-        <div class="stat"><div class="stat-num">~50ms</div><div class="stat-label">classifier latency</div></div>
-        <div class="stat"><div class="stat-num">0</div><div class="stat-label">JS dependencies</div></div>
-        <div class="stat"><div class="stat-num">1</div><div class="stat-label">HTML file for the UI</div></div>
+      <div class="qs-note">
+        <strong>Any OpenAI-compatible client works out of the box.</strong>
+        Point Open WebUI, LM Studio, Cursor, Aider, or Continue at
+        <code>http://localhost:1337/v1</code> — no code changes required.
       </div>
 
-      <div class="diff-grid">
+      <table class="profiles-table">
+        <thead>
+          <tr>
+            <th>Profile</th>
+            <th>Command</th>
+            <th>Adds</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>default</td>
+            <td>docker compose up -d</td>
+            <td>Ollama + BeigeBox full stack</td>
+          </tr>
+          <tr>
+            <td>cdp</td>
+            <td>--profile cdp up -d</td>
+            <td>Chrome browser automation for Operator</td>
+          </tr>
+          <tr>
+            <td>voice</td>
+            <td>--profile voice up -d</td>
+            <td>Whisper STT + Kokoro TTS</td>
+          </tr>
+          <tr>
+            <td>engines-cpp</td>
+            <td>--profile engines-cpp up -d</td>
+            <td>llama.cpp alternative inference</td>
+          </tr>
+          <tr>
+            <td>engines-vllm</td>
+            <td>--profile engines-vllm up -d</td>
+            <td>vLLM high-throughput inference</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
 
-        <div class="panel standout">
-          <h3>An LLM that routes to other LLMs</h3>
-          <p>The routing pipeline has four tiers. Simple cases never touch a model. Borderline cases get evaluated by a small, fast decision LLM before dispatch. Session-sticky so a conversation stays on one model.</p>
-          <ul class="tier-list">
-            <li><span class="tier-badge">tier 1</span> Z-command user overrides (instant, inline)</li>
-            <li><span class="tier-badge">tier 2</span> Agentic keyword scorer (zero-cost pre-filter)</li>
-            <li><span class="tier-badge">tier 3</span> Embedding classifier (~50 ms cosine distance)</li>
-            <li><span class="tier-badge">tier 4</span> Decision LLM for borderline cases</li>
-          </ul>
-        </div>
+  <!-- ── Security ──────────────────────────────────────────────────────── -->
+  <section class="security-block">
+    <div class="wrap">
+      <h2>Security by default</h2>
+      <p>Designed on the assumption that supply chain compromise is inevitable. Three independent defense layers.</p>
 
-        <div class="panel standout">
-          <h3>Semantic response cache</h3>
-          <p>Not a TTL cache. Every query is embedded with <code>nomic-embed-text</code> and checked against stored responses by cosine similarity. A sufficiently similar question gets an instant answer — no model load, no backend round-trip.</p>
-          <p style="margin-top:8px">Combined with an embedding dedup cache (avoids redundant embeds) and a tool result cache (SHA-256 keyed, short TTL for deterministic tools).</p>
+      <div class="security-grid">
+        <div class="sec-card">
+          <div class="sec-num">Layer 1 · Prevention</div>
+          <h3>Hash-locked dependencies</h3>
+          <p>3,280 pip hashes. Pinned Docker image digests. CVE scanning on every build via pip-audit, bandit, semgrep, gitleaks, and trivy.</p>
         </div>
-
-        <div class="panel standout">
-          <h3>WASM post-processing pipeline</h3>
-          <p>Drop a compiled <code>.wasm</code> (WASI target) into <code>wasm_modules/</code>. BeigeBox buffers the full response stream, runs the transform (stdin → stdout), and re-emits. The client always sees the transformed output.</p>
-          <p style="margin-top:8px">Any WASI-targeting language: Rust, C, Go, AssemblyScript. Timeout-enforced — if the module hangs, the original response passes through unmodified. Included: <code>opener_strip</code> removes sycophantic openers.</p>
+        <div class="sec-card">
+          <div class="sec-num">Layer 2 · Containment</div>
+          <h3>Read-only root, dropped capabilities</h3>
+          <p>Docker runs read-only root filesystem, network segmentation, capability drop, and an unprivileged user. Compromised code cannot persist to disk.</p>
         </div>
-
-        <div class="panel standout2">
-          <h3>Latency-aware multi-backend routing</h3>
-          <p>Each backend tracks a rolling P95 latency window over 100 samples. Backends that exceed a configurable threshold are automatically deprioritised to second-pass fallback — traffic returns when they recover.</p>
-          <p style="margin-top:8px">A/B traffic splitting via <code>traffic_split</code> weights. Weighted random selection among healthy backends for percentage-based distribution.</p>
-        </div>
-
-        <div class="panel standout2">
-          <h3>Three multi-model orchestration modes</h3>
-          <p>Run the same prompt across N models simultaneously and compare, vote, or iterate:</p>
-          <ul class="tier-list">
-            <li><span class="tier-badge">harness</span> Side-by-side comparison, no arbiter</li>
-            <li><span class="tier-badge">ensemble</span> LLM judge picks the best response with reasoning</li>
-            <li><span class="tier-badge">orchestrate</span> Goal-driven loop: plan → dispatch → evaluate → iterate (SSE stream)</li>
-          </ul>
-        </div>
-
-        <div class="panel standout2">
-          <h3>Built-in UI — one HTML file</h3>
-          <p>Seven-tab interface with no build step, no JavaScript framework, no dependencies. Dashboard, multi-pane Chat, Conversations, Tap (live wire log), Operator, Harness, Config.</p>
-          <p style="margin-top:8px">Per-pane chat settings: temperature, top-p/k, context window, repeat penalty, GPU layer count, force-reload (evicts model from VRAM for immediate effect), and per-pane system prompt.</p>
-        </div>
-
-      </div>
-    </section>
-
-    <!-- ── Full feature set ──────────────────────────────────────────────── -->
-    <section id="features" class="section">
-      <h2>Full feature set</h2>
-
-      <div class="grid3">
-        <div class="panel">
-          <h3>Routing &amp; delegation</h3>
-          <p>4-tier pipeline with session-sticky assignment. Per-backend priority ordering with automatic health-check failover. Force a route with a Z-command at any time.</p>
-        </div>
-        <div class="panel">
-          <h3>Semantic + tool caching</h3>
-          <p>Semantic cache (cosine similarity), embedding dedup cache, and SHA-256 tool result cache. Three layers, all in-process, zero extra services.</p>
-        </div>
-        <div class="panel">
-          <h3>Multi-backend with A/B splitting</h3>
-          <p>Ollama, OpenRouter, or any OpenAI-compatible endpoint. Weighted traffic distribution. Rolling P95 auto-deprioritization with automatic recovery.</p>
-        </div>
-        <div class="panel">
-          <h3>Observability</h3>
-          <p>Structured JSONL wire log (TTFT, P50/P90/P95/P99, tokens/sec, cost), SQLite conversation history, per-model hardware stats (GPU layers, VRAM, context window), verbose agentic logging (thoughts, tool calls, iterations), and live backend health dashboard with latency tracking.</p>
-        </div>
-        <div class="panel">
-          <h3>Harness + ensemble + orchestration</h3>
-          <p>Three multi-model modes. Ensemble voting with an LLM arbiter that returns reasoning. Goal-driven orchestration via SSE stream for long-running tasks.</p>
-        </div>
-        <div class="panel">
-          <h3>Operator agent</h3>
-          <p>JSON tool-loop agent with web search, calculator, datetime, system info, memory recall, and ensemble. Shell execution through a 4-layer bubblewrap sandbox (no network, no home dir).</p>
-        </div>
-        <div class="panel">
-          <h3>Conversation replay &amp; fork</h3>
-          <p>Any stored conversation reconstructed and re-run against a different model or config. Fork a conversation mid-thread without affecting the original branch.</p>
-        </div>
-        <div class="panel">
-          <h3>Local-first storage</h3>
-          <p>SQLite for conversations, metrics, and cost. ChromaDB (embedded, no separate service) for vectors. Portable files — your data, no cloud dependency.</p>
-        </div>
-        <div class="panel">
-          <h3>Per-model GPU options</h3>
-          <p>Set <code>options.num_gpu</code> per model in <code>config.yaml</code>. Override per chat pane. Force-reload evicts from VRAM and reloads immediately — no restart required.</p>
-        </div>
-        <div class="panel">
-          <h3>Hooks &amp; plugins</h3>
-          <p>Pre/post request interceptors for prompt injection detection, RAG injection, and custom policy. Drop a <code>*Tool</code> class in <code>plugins/</code> to auto-register a new tool.</p>
-        </div>
-        <div class="panel">
-          <h3>System context injection</h3>
-          <p>Hot-reloaded <code>system_context.md</code> prepended to every request. Override per chat pane with a window-specific system prompt — the ⚙ button glows when active.</p>
-        </div>
-        <div class="panel">
-          <h3>Voice (optional profile)</h3>
-          <p>Whisper (STT) + Kokoro (TTS) via Docker Compose voice profile. Push-to-talk with configurable hotkey. Auto-play TTS after each response. No changes to core proxy required.</p>
-        </div>
-        <div class="panel">
-          <h3>Per-endpoint timeouts</h3>
-          <p>Configure <code>timeout_ms</code> per backend. Ollama on slow hardware? Use 120s. OpenRouter? 60s. Prevents one slow backend from stalling the router. Overrides per-backend, hot-reloadable.</p>
-        </div>
-        <div class="panel">
-          <h3>Response format validation</h3>
-          <p>Optional JSON/XML/YAML schema enforcement. Validates final responses before caching. Non-blocking — validation failures logged but responses still forwarded. Helps catch malformed outputs early.</p>
-        </div>
-        <div class="panel">
-          <h3>Browser automation (CDP)</h3>
-          <p>Operator agent can control Chrome via DevTools Protocol. Navigate pages, take screenshots, click elements, read DOM, type text. Full I/O captured for cross-task context. Phase 1 live, more coming.</p>
-        </div>
-        <div class="panel">
-          <h3>MCP server</h3>
-          <p>Model Context Protocol server at <code>POST /mcp</code>. Expose BeigeBox tools to Claude Desktop, external agents, and third-party MCP clients. All tools + operator/run + skills as resources. Works with header auth.</p>
-        </div>
-        <div class="panel">
-          <h3>OAuth2 web UI auth</h3>
-          <p>Optional OAuth2 authentication for the web UI. Google provider included with PKCE S256. User sessions gated via signed cookies. Expandable provider protocol for GitHub, Discord, etc. Multi-user conversation isolation roadmap.</p>
+        <div class="sec-card">
+          <div class="sec-num">Layer 3 · Detection</div>
+          <p>Full Tap wire logging (18+ event types), metrics, and automated git hooks. Anomalies surface in the dashboard within 0.1s of occurrence.</p>
+          <h3>Comprehensive Tap logging</h3>
         </div>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <!-- ── Z-commands ────────────────────────────────────────────────────── -->
-    <section id="zcommands" class="section">
-      <h2>Z-commands</h2>
-      <p class="section-sub">Prefix any message with <code>z:</code> to override routing, force tools, or branch a conversation — without leaving the chat.</p>
+</main>
 
-      <div class="z-showcase">
-        <div class="z-row"><span class="z-cmd">z: simple</span><span class="z-desc">Route this message to the fast model</span></div>
-        <div class="z-row"><span class="z-cmd">z: complex</span><span class="z-desc">Route to the large / capable model</span></div>
-        <div class="z-row"><span class="z-cmd">z: code</span><span class="z-desc">Route to the code-specialist model</span></div>
-        <div class="z-row"><span class="z-cmd">z: llama3.2:3b</span><span class="z-desc">Route to an exact model by name</span></div>
-        <div class="z-row"><span class="z-cmd">z: search</span><span class="z-desc">Force web search and inject results before sending</span></div>
-        <div class="z-row"><span class="z-cmd">z: memory</span><span class="z-desc">Search past conversations and inject relevant context</span></div>
-        <div class="z-row"><span class="z-cmd">z: calc 2^32</span><span class="z-desc">Evaluate a math expression inline (sandboxed)</span></div>
-        <div class="z-row"><span class="z-cmd">z: sysinfo</span><span class="z-desc">Inject current system resource stats</span></div>
-        <div class="z-row"><span class="z-cmd">z: fork</span><span class="z-desc">Branch this conversation into a new thread</span></div>
-        <div class="z-row"><span class="z-cmd">z: complex,search</span><span class="z-desc">Chain multiple directives in one prefix</span></div>
-        <div class="z-row"><span class="z-cmd">z: help</span><span class="z-desc">Show all available commands</span></div>
+<!-- ── Footer ──────────────────────────────────────────────────────────── -->
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <div class="brand-name">BeigeBox</div>
+        <p>OpenAI-compatible LLM middleware proxy. Self-hosted, local-first, dual-licensed AGPL-3.0 / Commercial.</p>
       </div>
-    </section>
-
-    <!-- ── UI ────────────────────────────────────────────────────────────── -->
-    <section id="ui" class="section">
-      <h2>UI snapshots</h2>
-      <p>Built-in seven-tab web interface. No build step, no framework, one HTML file.</p>
-      <figure class="figure" style="margin-bottom:12px">
-        <img
-          src="beigebox-ui.png"
-          width="1400"
-          height="906"
-          loading="lazy"
-          decoding="async"
-          alt="BeigeBox dashboard UI screenshot"
-        />
-        <figcaption>Dashboard — storage stats, P50/P90/P99 latency charts, TTFT, cost breakdown, backend health.</figcaption>
-      </figure>
-      <figure class="figure">
-        <img
-          src="multichat.png"
-          width="1400"
-          height="906"
-          loading="lazy"
-          decoding="async"
-          alt="BeigeBox multi-pane chat screenshot"
-        />
-        <figcaption>Chat — multi-pane view, fan out to N models simultaneously, per-pane settings with GPU layer control and force-reload.</figcaption>
-      </figure>
-    </section>
-
-    <!-- ── Licensing ──────────────────────────────────────────────────────── -->
-    <section class="section">
-      <h2>Licensing</h2>
-      <p class="section-sub">BeigeBox is dual-licensed to support both open-source and commercial use.</p>
-
-      <div class="grid2">
-        <div class="panel standout">
-          <h3>AGPL-3.0 (Free)</h3>
-          <p style="margin: 10px 0;">Use, modify, and distribute freely.</p>
-          <ul style="list-style: none; padding: 0; margin: 10px 0; display: flex; flex-direction: column; gap: 8px; font-size: .9rem;">
-            <li style="color: var(--muted);">✓ Open-source projects</li>
-            <li style="color: var(--muted);">✓ Internal use</li>
-            <li style="color: var(--muted);">✓ Non-commercial use</li>
-            <li style="color: var(--muted);">✓ Public modifications required</li>
-          </ul>
-          <p style="margin-top: 12px; font-size: .85rem; color: var(--muted);">If you modify BeigeBox and run it as a service, you must share your modifications.</p>
-          <a href="https://github.com/ralabarge/beigebox/blob/main/LICENSE.md" style="display: inline-block; margin-top: 12px; color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent);">Read full AGPL terms →</a>
-        </div>
-
-        <div class="panel standout2">
-          <h3>Commercial License (Paid)</h3>
-          <p style="margin: 10px 0;">Use in proprietary products.</p>
-          <ul style="list-style: none; padding: 0; margin: 10px 0; display: flex; flex-direction: column; gap: 8px; font-size: .9rem;">
-            <li style="color: var(--muted);">✓ Proprietary/closed-source use</li>
-            <li style="color: var(--muted);">✓ SaaS & managed services</li>
-            <li style="color: var(--muted);">✓ Keep modifications private</li>
-            <li style="color: var(--muted);">✓ No open-source obligations</li>
-          </ul>
-          <p style="margin-top: 12px; font-size: .85rem; color: var(--muted);">For enterprise deployments, commercial products, or proprietary modifications.</p>
-          <a href="https://github.com/ralabarge/beigebox/blob/main/COMMERCIAL_LICENSE.md" style="display: inline-block; margin-top: 12px; color: var(--accent);">Learn more about commercial licensing →</a>
-        </div>
+      <div class="footer-links">
+        <a href="https://beigeboxoss.com/" rel="noopener noreferrer">beigeboxoss.com</a>
+        <a href="https://github.com/ralabarge/beigebox" rel="noopener noreferrer">GitHub</a>
+        <a href="https://github.com/ralabarge/beigebox/blob/main/LICENSE.md" rel="noopener noreferrer">AGPL License</a>
+        <a href="https://github.com/ralabarge/beigebox/blob/main/COMMERCIAL_LICENSE.md" rel="noopener noreferrer">Commercial</a>
+        <a href="https://github.com/ralabarge/beigebox/issues" rel="noopener noreferrer">Issues</a>
       </div>
-    </section>
+    </div>
+    <div class="footer-copy">
+      Dual-licensed: AGPL-3.0 (open source) and Commercial (proprietary). For closed-source or SaaS use, see commercial license.
+    </div>
+  </div>
+</footer>
 
-    <footer class="footer">
-      <div class="footer-grid">
-        <div>
-          <div class="name">BeigeBox</div>
-          <div class="muted">LLM middleware control plane • local-first • OpenAI-compatible • dual-licensed</div>
-        </div>
-        <div class="links">
-          <a href="https://beigeboxoss.com/" rel="noopener noreferrer">beigeboxoss.com</a>
-          <a href="https://github.com/ralabarge/beigebox" rel="noopener noreferrer">GitHub</a>
-          <a href="https://github.com/ralabarge/beigebox/blob/main/LICENSE.md" rel="noopener noreferrer">AGPL License</a>
-          <a href="https://github.com/ralabarge/beigebox/blob/main/COMMERCIAL_LICENSE.md" rel="noopener noreferrer">Commercial</a>
-        </div>
-      </div>
-      <div class="fineprint">Built for fast loads: no JS, one CSS file, semantic HTML, responsive images. Open-source by default, commercial licensing available.</div>
-    </footer>
-
-  </main>
+<script>
+  /* Tab switcher for UI tour */
+  function showShot(btn, id) {
+    document.querySelectorAll('.tab-btn').forEach(function(b) {
+      b.classList.remove('active');
+      b.setAttribute('aria-selected', 'false');
+    });
+    document.querySelectorAll('.screenshot-tab-content').forEach(function(el) {
+      el.classList.remove('active');
+    });
+    btn.classList.add('active');
+    btn.setAttribute('aria-selected', 'true');
+    var target = document.getElementById(id);
+    if (target) target.classList.add('active');
+  }
+</script>
 </body>
 </html>
