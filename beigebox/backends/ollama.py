@@ -133,22 +133,22 @@ class OllamaBackend(BaseBackend):
             name = entry.get("name", "")
             model_info = entry.get("model", {})
 
-            # GPU layers
-            gpu_layers: int = int(model_info.get("num_gpu", 0))
-            total_layers: int = int(model_info.get("num_layer", 0))
+            # GPU layers — Ollama returns None for CPU-only models
+            gpu_layers: int = int(model_info.get("num_gpu") or 0)
+            total_layers: int = int(model_info.get("num_layer") or 0)
 
             # VRAM: prefer direct measurement from /api/ps
-            size_vram_bytes: int = int(entry.get("size_vram", 0))
+            size_vram_bytes: int = int(entry.get("size_vram") or 0)
             if size_vram_bytes > 0:
                 vram_used_mb = size_vram_bytes // (1024 * 1024)
             elif gpu_layers > 0 and total_layers > 0:
                 # back-of-envelope: gpu_layers * (total_size / total_layers)
-                total_size_bytes: int = int(entry.get("size", 0))
+                total_size_bytes: int = int(entry.get("size") or 0)
                 vram_used_mb = int(gpu_layers * (total_size_bytes / total_layers) / (1024 * 1024))
             else:
                 vram_used_mb = 0
 
-            context_window: int = int(model_info.get("context_length", 0))
+            context_window: int = int(model_info.get("context_length") or 0)
 
             result.append({
                 "model": name,
