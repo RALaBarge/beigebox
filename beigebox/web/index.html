@@ -145,7 +145,8 @@
   }
   .status-dot.ok  { background: var(--green); box-shadow: 0 0 6px var(--green); }
   .status-dot.err { background: var(--red);   box-shadow: 0 0 6px var(--red);   }
-  .sys-m { font-size: 10px; color: var(--fg-muted); font-family: inherit; letter-spacing: 0.3px; }
+  .sys-m { font-size: 10px; color: var(--fg-muted); font-family: inherit; letter-spacing: 0.3px; min-width: 52px; display: inline-block; text-align: left; }
+  #sys-gpu { min-width: 80px; }
   #clock { color: var(--fg-muted); font-size: 11px; }
 
   /* ── Tabs ────────────────────────────────────────────────────────────── */
@@ -207,11 +208,12 @@
     font-size: 11px;
     letter-spacing: 2px;
     text-transform: uppercase;
-    margin: 16px 0 8px;
+    margin: 24px 0 8px;
+    border-top: 1px solid var(--bg-border);
     border-bottom: 1px solid var(--bg-border);
-    padding-bottom: 4px;
+    padding: 8px 0 4px;
   }
-  .section-header:first-child { margin-top: 0; }
+  .section-header:first-child { margin-top: 0; border-top: none; padding-top: 0; }
   details.cfg-section { margin-top: 10px; }
   details.cfg-section > summary.section-header {
     cursor: pointer;
@@ -3472,7 +3474,8 @@ async function pollSystemMetrics() {
         gpuEl.textContent = loadStr + memStr;
         gpuEl.style.color = _sysColor(Math.max(g.load_percent, memPct ?? 0));
       } else {
-        gpuEl.textContent = '';
+        gpuEl.textContent = 'GPU —';
+        gpuEl.style.color = 'var(--fg-muted)';
       }
     }
 
@@ -3549,8 +3552,8 @@ async function loadDashboard() {
         ↑ example — proxy is still starting up or not reachable</div>`;
     }
     if (st.proxy) {
-      html += subsystem('Proxy',              true,                   `backend: ${esc(st.proxy.backend_url || '—')}`);
-      html += subsystem('Storage · SQLite',   st.storage?.sqlite,     st.storage?.stats ? `${st.storage.stats.total_messages ?? 0} messages` : '');
+      html += subsystem('Proxy',              true,                   `transparent passthrough · ${esc(st.proxy.backend_url || '—')}`);
+      html += subsystem('Storage · SQLite',   st.storage?.sqlite,     st.storage?.stats ? `${st.storage.stats.messages ?? st.storage.stats.total_messages ?? 0} messages` : '');
       html += subsystem('Storage · ChromaDB', st.storage?.vector,     '');
       html += subsystem('Decision LLM',       st.routing?.decision_llm?.enabled, st.routing?.decision_llm?.model ? `model: ${esc(st.routing.decision_llm.model)}` : 'disabled');
       const ecOk = st.routing?.embedding_classifier?.ready;
@@ -9106,7 +9109,7 @@ async function addMountLink() {
   if (!name || !target) { msg.style.color = 'var(--red)'; msg.textContent = 'Both name and path are required.'; return; }
   msg.style.color = 'var(--fg-muted)'; msg.textContent = 'Adding…';
   try {
-    const r = await api('/api/v1/workspace/mounts', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name, target }) });
+    const r = await api('/api/v1/workspace/mounts', { method: 'POST', headers: {'Content-Type':'application/json', ...(window._bbApiKey ? {'Authorization':`Bearer ${window._bbApiKey}`} : {})}, body: JSON.stringify({ name, target }) });
     if (!r.ok) { msg.style.color = 'var(--red)'; msg.textContent = r.error || 'Failed'; return; }
     if (r.broken) { msg.style.color = 'var(--yellow)'; msg.textContent = `Linked — but target path not visible inside container yet. Drop it in workspace/mounts/ or ensure it's mounted.`; }
     else { msg.style.color = 'var(--green)'; msg.textContent = `✓ Linked as "${name}"`; }
@@ -9118,7 +9121,7 @@ async function addMountLink() {
 
 async function deleteMountLink(name) {
   if (!confirm(`Remove link "${name}"?`)) return;
-  const r = await api(`/api/v1/workspace/mounts/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  const r = await api(`/api/v1/workspace/mounts/${encodeURIComponent(name)}`, { method: 'DELETE', headers: {...(window._bbApiKey ? {'Authorization':`Bearer ${window._bbApiKey}`} : {})} });
   if (r.ok) loadDashboard();
 }
 
