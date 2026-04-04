@@ -10106,7 +10106,7 @@ async function studioSend() {
     let fullText = '';
     let assistantDiv = null;
     let bubble = null;
-    let routedModel = model;
+    let routedModel = document.getElementById('studio-model-sel')?.value || '';
 
     while (true) {
       const { done, value } = await reader.read();
@@ -10120,7 +10120,7 @@ async function studioSend() {
           const j = JSON.parse(data);
           if (j.bb_type === 'routing') {
             const rm = j.model || '';
-            if (rm && rm !== model) {
+            if (rm && rm !== routedModel) {
               routedModel = rm;
               const badge = document.createElement('div');
               badge.style.cssText = 'font-size:10px;color:var(--lavender);padding:1px 6px;opacity:0.8';
