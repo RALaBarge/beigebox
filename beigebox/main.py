@@ -2731,22 +2731,30 @@ async def api_dgm_run(request: Request):
     judges the difference with a rotating pairwise rubric, keeps improvements.
 
     Body:
-        iterations          int   (default 20)  — max iterations to run
-        rotation_interval   int   (default 5)   — rubric rotation cadence
-        confidence_threshold float (default 0.65) — min confidence to keep a change
-        n_probes            int   (default 3)   — probe requests per iteration
+        iterations           int    (default 20)    — max iterations to run
+        rotation_interval    int    (default 5)     — rubric rotation cadence
+        confidence_threshold float  (default 0.65)  — min confidence to keep a change
+        n_probes             int    (default 3)     — probe requests per iteration
+        patience             int    (default auto)  — stop after N consecutive non-improvements
+        goal                 str    (default "")    — user objective to steer proposals
+        judge_model          str    (default auto)  — model for judge + proposer
+        probe_model          str    (default "")    — model to evaluate (blank = config default)
+        start_rubric         str    (default "")    — rubric name to start from
 
     SSE events:
-        {type:"start",         run_id, iterations, rotation_interval, threshold}
+        {type:"start",          run_id, iterations, rotation_interval, threshold, goal}
         {type:"iteration_start", iteration, total, rubric, rotate_in}
-        {type:"proposal",      iteration, key, value, reasoning}
-        {type:"kept",          iteration, key, value, rubric, confidence, reasoning}
-        {type:"reverted",      iteration, key, rubric, confidence, winner}
+        {type:"probes",         iteration, probes: [{request, source}]}
+        {type:"proposal",       iteration, key, value, reasoning}
+        {type:"patch_failed",   iteration, key, error}
+        {type:"kept",           iteration, key, value, rubric, confidence, reasoning}
+        {type:"reverted",       iteration, key, rubric, confidence, winner}
         {type:"rubric_rotated", iteration, old_rubric, new_rubric}
-        {type:"early_stop",    reason}
-        {type:"complete",      run_id, kept, iterations_run, keep_rate, total_ms}
-        {type:"error",         message}
+        {type:"early_stop",     reason}
+        {type:"complete",       run_id, kept, iterations_run, keep_rate, total_ms}
+        {type:"error",          message}
     """
+    import copy as _copy
     import json as _json
 
     try:
@@ -2758,10 +2766,16 @@ async def api_dgm_run(request: Request):
     rotation_interval    = min(max(1, int(body.get("rotation_interval", 5))), 20)
     confidence_threshold = max(0.5, min(1.0, float(body.get("confidence_threshold", 0.65))))
     n_probes             = min(max(1, int(body.get("n_probes", 3))), 10)
+    goal                 = str(body.get("goal", "")).strip()
+    judge_model          = str(body.get("judge_model", "")).strip()
+    probe_model          = str(body.get("probe_model", "")).strip()
+    start_rubric         = str(body.get("start_rubric", "")).strip()
+    patience_raw         = body.get("patience")
+    patience_override    = int(patience_raw) if patience_raw is not None else None
 
     async def _stream():
         from beigebox.dgm.loop import DGMLoop, Probe, _FALLBACK_PROBES
-        from beigebox.dgm.rubrics import RubricRotator
+        from beigebox.dgm.rubrics import RubricRotator, RUBRIC_BANK
         from beigebox.dgm.judge import DGMJudge
         from beigebox.dgm.proposer import DGMProposer
         from beigebox.dgm.patcher import ConfigPatcher
@@ -2774,28 +2788,47 @@ async def api_dgm_run(request: Request):
             return f"data: {_json.dumps(obj)}\n\n"
 
         try:
-            yield emit({"type": "start", "run_id": run_id, "iterations": n_iterations,
-                        "rotation_interval": rotation_interval, "threshold": confidence_threshold})
-
             cfg = get_config()
             routing_model = cfg.get("models", {}).get("profiles", {}).get("routing", "llama3.2:3b")
             proxy_url = f"http://localhost:{cfg.get('server', {}).get('port', 8001)}"
 
+            # Snapshot runtime config before any changes (used by revert endpoint)
+            baseline_config = _copy.deepcopy(get_runtime_config() or {})
+
+            effective_judge_model = judge_model or routing_model
+            patience = patience_override if patience_override is not None else max(5, n_iterations // 4)
+
+            # Resolve start rubric index
+            start_index = 0
+            if start_rubric:
+                for idx, r in enumerate(RUBRIC_BANK):
+                    if r.name == start_rubric:
+                        start_index = idx
+                        break
+
+            # Build workspace context for proposer (read-only snapshot of workspace files)
+            workspace_context = _build_workspace_context()
+
             loop = DGMLoop(
-                judge=DGMJudge(judge_model=routing_model, backend_url=proxy_url),
-                proposer=DGMProposer(proposer_model=routing_model, backend_url=proxy_url),
+                judge=DGMJudge(judge_model=effective_judge_model, backend_url=proxy_url),
+                proposer=DGMProposer(proposer_model=effective_judge_model, backend_url=proxy_url),
                 patcher=ConfigPatcher(),
-                rotator=RubricRotator(rotation_interval=rotation_interval),
+                rotator=RubricRotator(rotation_interval=rotation_interval, start_index=start_index),
                 n_probes=n_probes,
                 confidence_threshold=confidence_threshold,
-                patience=max(5, n_iterations // 4),
+                patience=patience,
                 proxy_url=proxy_url,
+                probe_model=probe_model,
             )
+
+            yield emit({"type": "start", "run_id": run_id, "iterations": n_iterations,
+                        "rotation_interval": rotation_interval, "threshold": confidence_threshold,
+                        "patience": patience, "goal": goal or None,
+                        "judge_model": effective_judge_model, "probe_model": probe_model or None})
 
             history = []
             kept_count = 0
             no_improvement_streak = 0
-            patience = max(5, n_iterations // 4)
 
             import asyncio as _aio
             for i in range(n_iterations):
@@ -2807,11 +2840,21 @@ async def api_dgm_run(request: Request):
 
                 # Sample probes
                 probes = await loop._sample_probes(run_id)
-                if not probes:
+                using_fallback = not probes
+                if using_fallback:
                     probes = _FALLBACK_PROBES[:n_probes]
 
-                # Propose
-                proposal = await loop._proposer.propose(rubric, history)
+                # Emit probe visibility event
+                yield emit({"type": "probes", "iteration": i + 1,
+                            "probes": [{"request": p.request[:120], "source": "fallback" if using_fallback else "history"}
+                                       for p in probes]})
+
+                # Propose (pass goal and workspace context)
+                proposal = await loop._proposer.propose(
+                    rubric, history,
+                    goal=goal,
+                    workspace_context=workspace_context,
+                )
                 if not proposal:
                     no_improvement_streak += 1
                     if no_improvement_streak >= patience:
@@ -2827,6 +2870,8 @@ async def api_dgm_run(request: Request):
                 patch_result = loop._patcher.apply(patch)
                 if not patch_result.ok:
                     no_improvement_streak += 1
+                    yield emit({"type": "patch_failed", "iteration": i + 1,
+                                "key": patch.key, "error": patch_result.error})
                     continue
 
                 await _aio.sleep(0.5)  # let hot-reload settle
@@ -2856,8 +2901,9 @@ async def api_dgm_run(request: Request):
                     kept_count += 1
                     no_improvement_streak = 0
                     yield emit({"type": "kept", "iteration": i + 1, "key": patch.key,
-                                "value": patch.value, "rubric": rubric.name,
-                                "confidence": avg_conf, "reasoning": best_reasoning})
+                                "value": patch.value, "old_value": patch_result.original,
+                                "rubric": rubric.name, "confidence": avg_conf,
+                                "reasoning": best_reasoning})
                 else:
                     loop._patcher.revert(patch, patch_result.original)
                     no_improvement_streak += 1
@@ -2881,13 +2927,148 @@ async def api_dgm_run(request: Request):
 
             keep_rate = kept_count / max(len(history), 1)
             total_ms = (_time.monotonic() - _t_run_start) * 1000
-            yield emit({"type": "complete", "run_id": run_id, "kept": kept_count,
-                        "iterations_run": len(history), "keep_rate": keep_rate, "total_ms": total_ms})
+
+            summary = {
+                "run_id": run_id, "kept": kept_count, "iterations_run": len(history),
+                "keep_rate": keep_rate, "total_ms": total_ms,
+                "goal": goal or None, "judge_model": effective_judge_model,
+                "probe_model": probe_model or None,
+                "timestamp": _time.time(),
+            }
+            yield emit({"type": "complete", **summary})
+
+            # Persist run metadata to app state
+            try:
+                state = get_state()
+                state.dgm_run_history.append(summary)
+                if len(state.dgm_run_history) > 20:
+                    state.dgm_run_history = state.dgm_run_history[-20:]
+                state.dgm_baselines[run_id] = baseline_config
+                # Keep baselines for last 20 runs too
+                if len(state.dgm_baselines) > 20:
+                    oldest = next(iter(state.dgm_baselines))
+                    del state.dgm_baselines[oldest]
+            except Exception:
+                pass
 
         except Exception as _exc:
             yield emit({"type": "error", "message": str(_exc)})
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+def _build_workspace_context() -> str:
+    """
+    Build a brief summary of active workspace files for the DGM proposer.
+
+    Reads the workspace mounts directory and returns a compact listing of
+    file names + first few lines of text files. Capped for context budget.
+    """
+    import os, pathlib
+    mounts_dir = pathlib.Path("workspace/mounts")
+    if not mounts_dir.exists():
+        return ""
+    lines = []
+    for f in sorted(mounts_dir.iterdir()):
+        if f.is_symlink() or f.is_file():
+            try:
+                target = f.resolve()
+                if target.is_file() and target.stat().st_size < 8192:
+                    content = target.read_text(errors="replace")[:500].strip()
+                    lines.append(f"--- {f.name} ---\n{content}")
+                else:
+                    lines.append(f"--- {f.name} --- (binary or large file)")
+            except Exception:
+                lines.append(f"--- {f.name} --- (unreadable)")
+    return "\n\n".join(lines[:6])  # cap at 6 files to stay within context
+
+
+@app.get("/api/v1/dgm/history")
+async def api_dgm_history():
+    """Return the last 20 DGM run summaries (in-memory, resets on server restart)."""
+    try:
+        state = get_state()
+        return JSONResponse({"runs": list(reversed(state.dgm_run_history))})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.post("/api/v1/dgm/revert")
+async def api_dgm_revert(request: Request):
+    """
+    Revert all config changes made by a DGM run by restoring the pre-run snapshot.
+
+    Body: {"run_id": "abc12345"}  — the run_id from the start/complete SSE events.
+    Passing run_id="latest" reverts the most recent run.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    run_id = str(body.get("run_id", "")).strip()
+    if not run_id:
+        return JSONResponse({"error": "run_id required"}, status_code=400)
+
+    try:
+        state = get_state()
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    if run_id == "latest":
+        if not state.dgm_baselines:
+            return JSONResponse({"error": "no runs in history"}, status_code=404)
+        run_id = next(reversed(state.dgm_baselines))
+
+    baseline = state.dgm_baselines.get(run_id)
+    if baseline is None:
+        return JSONResponse({"error": f"no baseline found for run_id={run_id!r}"}, status_code=404)
+
+    # Write the baseline back as the full runtime config
+    from beigebox.config import write_runtime_config
+    try:
+        ok = write_runtime_config(baseline)
+        if not ok:
+            return JSONResponse({"error": "write_runtime_config returned False"}, status_code=500)
+        return JSONResponse({"ok": True, "run_id": run_id,
+                             "message": "Runtime config restored to pre-run state"})
+    except Exception as exc:
+        return JSONResponse({"error": f"revert failed: {exc}"}, status_code=500)
+
+
+@app.get("/api/v1/dgm/config")
+async def api_dgm_config():
+    """
+    Return current values of all DGM-allowed config keys from runtime_config.yaml.
+
+    Useful for seeing what DGM has changed vs. the baseline.
+    """
+    from beigebox.dgm.patcher import ALLOWED_KEYS
+
+    rt = get_runtime_config() or {}
+
+    def get_nested(d, dotkey):
+        parts = dotkey.split(".")
+        cur = d
+        for p in parts:
+            if not isinstance(cur, dict):
+                return None
+            cur = cur.get(p)
+        return cur
+
+    result = {}
+    for key in sorted(ALLOWED_KEYS):
+        result[key] = get_nested(rt, key)
+
+    return JSONResponse({"config": result})
+
+
+@app.get("/api/v1/dgm/rubrics")
+async def api_dgm_rubrics():
+    """Return the list of available DGM evaluation rubrics."""
+    from beigebox.dgm.rubrics import RUBRIC_BANK
+    return JSONResponse({"rubrics": [{"name": r.name, "focus": r.focus, "description": r.description}
+                                      for r in RUBRIC_BANK]})
 
 
 @app.post("/api/v1/harness/autonomous")

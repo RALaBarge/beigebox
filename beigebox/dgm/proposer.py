@@ -42,16 +42,17 @@ Rules:
 - Only use keys from the provided allowed list
 - Do not repeat changes that have already been tried
 - Consider the active evaluation rubric when deciding what to improve
+- If a USER OBJECTIVE is provided, bias proposals toward achieving it
 - Output format: {"key": "...", "value": ..., "reasoning": "one sentence"}"""
 
 _PROPOSER_PROMPT = """\
-ACTIVE RUBRIC: {rubric_name}
+{goal_section}ACTIVE RUBRIC: {rubric_name}
 Rubric description: {rubric_description}
 
 CURRENT CONFIG STATE (runtime overrides only):
 {runtime_config}
 
-RECENT ITERATION HISTORY (last {n_history} iterations):
+{workspace_section}RECENT ITERATION HISTORY (last {n_history} iterations):
 {history}
 
 ALLOWED CONFIG KEYS:
@@ -99,14 +100,18 @@ class DGMProposer:
         rubric: Rubric,
         history: list[dict],
         n_history: int = 10,
+        goal: str = "",
+        workspace_context: str = "",
     ) -> Proposal | None:
         """
         Ask the model to propose one config change.
 
         Args:
-            rubric:    Active rubric — tells the model what "better" means.
-            history:   List of past iteration dicts (most recent last).
-            n_history: How many recent iterations to show the model.
+            rubric:            Active rubric — tells the model what "better" means.
+            history:           List of past iteration dicts (most recent last).
+            n_history:         How many recent iterations to show the model.
+            goal:              Optional user objective to steer proposals toward.
+            workspace_context: Optional workspace file summary to inform proposals.
 
         Returns:
             Proposal if parsing succeeded, None if the model output was unusable.
@@ -122,13 +127,22 @@ class DGMProposer:
             f"  {k}: {desc}" for k, (_, desc) in sorted(ALLOWED_KEYS.items())
         )
 
+        goal_section = f"USER OBJECTIVE: {goal.strip()}\n\n" if goal and goal.strip() else ""
+        workspace_section = (
+            f"ACTIVE WORKSPACE FILES:\n{workspace_context}\n\n"
+            if workspace_context and workspace_context.strip()
+            else ""
+        )
+
         prompt = _PROPOSER_PROMPT.format(
+            goal_section=goal_section,
             rubric_name=rubric.name,
             rubric_description=rubric.description,
             runtime_config=json.dumps(rt, indent=2) if rt else "{}",
             n_history=len(recent),
             history=history_text or "  (no history yet)",
             allowed_keys=keys_text,
+            workspace_section=workspace_section,
         )
 
         t_start = time.monotonic()
