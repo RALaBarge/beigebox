@@ -3214,7 +3214,11 @@ async function dgmRun() {
           appendLine(`<span style="color:var(--bg-border)">[${ev.iteration}] Probes${src}: ${previews}</span>`);
 
         } else if (t === 'proposal') {
-          appendLine(`<span style="color:var(--fg-dim)">[${ev.iteration}] Propose: <b style="color:var(--yellow)">${ev.key}</b> → <b>${JSON.stringify(ev.value)}</b> &nbsp;<span style="color:var(--fg-muted)">${ev.reasoning}</span></span>`);
+          if (ev.proposal_type === 'file') {
+            appendLine(`<span style="color:var(--fg-dim)">[${ev.iteration}] Propose file: <b style="color:var(--yellow)">${ev.path}</b> (${ev.content_len} chars) &nbsp;<span style="color:var(--fg-muted)">${ev.reasoning}</span></span>`);
+          } else {
+            appendLine(`<span style="color:var(--fg-dim)">[${ev.iteration}] Propose: <b style="color:var(--yellow)">${ev.key}</b> → <b>${JSON.stringify(ev.value)}</b> &nbsp;<span style="color:var(--fg-muted)">${ev.reasoning}</span></span>`);
+          }
 
         } else if (t === 'patch_failed') {
           appendLine(`<span style="color:var(--red)">[${ev.iteration}] Patch failed: ${ev.key} — ${ev.error}</span>`);
@@ -3222,14 +3226,22 @@ async function dgmRun() {
         } else if (t === 'kept') {
           keptCount++;
           document.getElementById('dgm-stat-kept').textContent = keptCount;
-          const oldVal = ev.old_value !== undefined ? ` (was ${JSON.stringify(ev.old_value)})` : '';
-          appendLine(`<span style="color:var(--green)">✓ KEPT &nbsp;<b>${ev.key}</b>=${JSON.stringify(ev.value)}${oldVal} &nbsp;[${ev.rubric}] conf=${ev.confidence.toFixed(2)}: ${ev.reasoning}</span>`);
+          if (ev.proposal_type === 'file') {
+            appendLine(`<span style="color:var(--green)">✓ KEPT file &nbsp;<b>${ev.path}</b> (${ev.content_len} chars) &nbsp;[${ev.rubric}] conf=${ev.confidence.toFixed(2)}: ${ev.reasoning} → archived to workspace/out/</span>`);
+          } else {
+            const oldVal = ev.old_value !== undefined ? ` (was ${JSON.stringify(ev.old_value)})` : '';
+            appendLine(`<span style="color:var(--green)">✓ KEPT &nbsp;<b>${ev.key}</b>=${JSON.stringify(ev.value)}${oldVal} &nbsp;[${ev.rubric}] conf=${ev.confidence.toFixed(2)}: ${ev.reasoning}</span>`);
+          }
           dgmUpdateKeepRate(keptCount, keptCount + revertedCount);
 
         } else if (t === 'reverted') {
           revertedCount++;
           document.getElementById('dgm-stat-reverted').textContent = revertedCount;
-          appendLine(`<span style="color:var(--red)">✗ REVERTED <b>${ev.key}</b> [${ev.rubric}] conf=${ev.confidence.toFixed(2)} winner=${ev.winner}</span>`);
+          if (ev.proposal_type === 'file') {
+            appendLine(`<span style="color:var(--red)">✗ REVERTED file <b>${ev.path}</b> [${ev.rubric}] conf=${ev.confidence.toFixed(2)} winner=${ev.winner}</span>`);
+          } else {
+            appendLine(`<span style="color:var(--red)">✗ REVERTED <b>${ev.key}</b> [${ev.rubric}] conf=${ev.confidence.toFixed(2)} winner=${ev.winner}</span>`);
+          }
           dgmUpdateKeepRate(keptCount, keptCount + revertedCount);
 
         } else if (t === 'rubric_rotated') {

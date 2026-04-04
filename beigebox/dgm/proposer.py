@@ -25,7 +25,7 @@ from dataclasses import dataclass
 import httpx
 
 from beigebox.config import get_config, get_runtime_config
-from beigebox.dgm.patcher import ALLOWED_KEYS, Patch
+from beigebox.dgm.patcher import ALLOWED_FILE_PATHS, ALLOWED_KEYS, FilePatch, Patch
 from beigebox.dgm.rubrics import Rubric
 from beigebox.utils.json_parse import extract_json_object
 
@@ -34,16 +34,22 @@ logger = logging.getLogger(__name__)
 # System prompt for the proposer model. Tight and directive — 3B models work
 # best with clear, short instructions rather than long prose.
 _PROPOSER_SYSTEM = """\
-You are an AI system optimizer. You propose ONE config change that may improve \
-response quality. You must output valid JSON and nothing else.
+You are an AI system optimizer. You propose ONE change — either a config key \
+change or a file content edit — that may improve response quality. \
+Output valid JSON and nothing else.
 
 Rules:
 - Propose exactly one change per response
-- Only use keys from the provided allowed list
+- Only use keys/paths from the provided allowed lists
 - Do not repeat changes that have already been tried
 - Consider the active evaluation rubric when deciding what to improve
 - If a USER OBJECTIVE is provided, bias proposals toward achieving it
-- Output format: {"key": "...", "value": ..., "reasoning": "one sentence"}"""
+
+Output format — config change:
+  {{"type": "config", "key": "...", "value": ..., "reasoning": "one sentence"}}
+
+Output format — file edit (e.g. system_context.md):
+  {{"type": "file", "path": "...", "content": "full new file content", "reasoning": "one sentence"}}"""
 
 _PROPOSER_PROMPT = """\
 {goal_section}ACTIVE RUBRIC: {rubric_name}
@@ -58,18 +64,27 @@ CURRENT CONFIG STATE (runtime overrides only):
 ALLOWED CONFIG KEYS:
 {allowed_keys}
 
-Based on the history and rubric, propose one config change to try next.
-Avoid keys that have been recently tried with no improvement.
-Output JSON only: {{"key": "...", "value": ..., "reasoning": "..."}}"""
+ALLOWED FILE PATHS (for file edits):
+{allowed_files}
+
+Based on the history and rubric, propose one change to try next.
+Avoid keys/paths that have been recently tried with no improvement.
+For file edits, write the FULL replacement content (not a diff).
+Output JSON only."""
 
 
 @dataclass
 class Proposal:
-    """A proposed config change from the proposer model."""
+    """A proposed change from the proposer model — either a config key or file patch."""
 
-    patch: Patch
-    raw_response: str       # raw LLM output (for debugging)
+    patch: Patch | None            # set for config proposals
+    file_patch: FilePatch | None   # set for file proposals
+    raw_response: str              # raw LLM output (for debugging)
     latency_ms: float
+
+    @property
+    def is_file(self) -> bool:
+        return self.file_patch is not None
 
 
 class DGMProposer:
@@ -126,6 +141,9 @@ class DGMProposer:
         keys_text = "\n".join(
             f"  {k}: {desc}" for k, (_, desc) in sorted(ALLOWED_KEYS.items())
         )
+        files_text = "\n".join(
+            f"  {path}: {desc}" for path, desc in sorted(ALLOWED_FILE_PATHS.items())
+        )
 
         goal_section = f"USER OBJECTIVE: {goal.strip()}\n\n" if goal and goal.strip() else ""
         workspace_section = (
@@ -142,6 +160,7 @@ class DGMProposer:
             n_history=len(recent),
             history=history_text or "  (no history yet)",
             allowed_keys=keys_text,
+            allowed_files=files_text or "  (none)",
             workspace_section=workspace_section,
         )
 
@@ -172,16 +191,33 @@ class DGMProposer:
         return self._parse(raw, latency_ms)
 
     def _parse(self, raw: str, latency_ms: float) -> Proposal | None:
-        """Parse the model's JSON output into a Proposal."""
+        """Parse the model's JSON output into a Proposal (config or file type)."""
         try:
             parsed = extract_json_object(raw)
         except Exception as exc:
             logger.warning("dgm.proposer.parse_failed raw=%r error=%s", raw[:200], exc)
             return None
 
+        proposal_type = parsed.get("type", "config")
+        reasoning = str(parsed.get("reasoning", ""))
+
+        if proposal_type == "file":
+            path = str(parsed.get("path", "")).strip()
+            content = parsed.get("content", "")
+            if not path or not isinstance(content, str):
+                logger.warning("dgm.proposer.file_missing_fields parsed=%r", parsed)
+                return None
+            if path not in ALLOWED_FILE_PATHS:
+                logger.warning("dgm.proposer.file_not_allowed path=%r", path)
+                return None
+            fp = FilePatch(path=path, content=content, reasoning=reasoning)
+            logger.info("dgm.proposer.proposed type=file path=%s len=%d latency_ms=%.0f",
+                        path, len(content), latency_ms)
+            return Proposal(patch=None, file_patch=fp, raw_response=raw, latency_ms=latency_ms)
+
+        # Default: config key change
         key = parsed.get("key", "")
         value = parsed.get("value")
-        reasoning = str(parsed.get("reasoning", ""))
 
         if not key or value is None:
             logger.warning("dgm.proposer.missing_fields parsed=%r", parsed)
@@ -201,11 +237,9 @@ class DGMProposer:
                 return None
 
         patch = Patch(key=key, value=value, reasoning=reasoning)
-        logger.info(
-            "dgm.proposer.proposed key=%s value=%r latency_ms=%.0f",
-            key, value, latency_ms,
-        )
-        return Proposal(patch=patch, raw_response=raw, latency_ms=latency_ms)
+        logger.info("dgm.proposer.proposed type=config key=%s value=%r latency_ms=%.0f",
+                    key, value, latency_ms)
+        return Proposal(patch=patch, file_patch=None, raw_response=raw, latency_ms=latency_ms)
 
     def _format_history(self, history: list[dict]) -> str:
         """Format iteration history as a compact text block for the prompt."""
@@ -214,11 +248,18 @@ class DGMProposer:
         lines = []
         for i, h in enumerate(history, 1):
             outcome = "KEPT" if h.get("kept") else "REVERTED"
-            lines.append(
-                f"  [{i}] {outcome} key={h.get('key')} "
-                f"value={h.get('value')} "
-                f"rubric={h.get('rubric')} "
-                f"winner={h.get('winner')} "
-                f"confidence={h.get('confidence', 0):.2f}"
-            )
+            if h.get("type") == "file":
+                lines.append(
+                    f"  [{i}] {outcome} type=file path={h.get('path')} "
+                    f"rubric={h.get('rubric')} winner={h.get('winner')} "
+                    f"confidence={h.get('confidence', 0):.2f}"
+                )
+            else:
+                lines.append(
+                    f"  [{i}] {outcome} type=config key={h.get('key')} "
+                    f"value={h.get('value')} "
+                    f"rubric={h.get('rubric')} "
+                    f"winner={h.get('winner')} "
+                    f"confidence={h.get('confidence', 0):.2f}"
+                )
         return "\n".join(lines)

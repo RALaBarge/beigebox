@@ -2862,16 +2862,25 @@ async def api_dgm_run(request: Request):
                         break
                     continue
 
-                patch = proposal.patch
-                yield emit({"type": "proposal", "iteration": i + 1, "key": patch.key,
-                            "value": patch.value, "reasoning": patch.reasoning})
+                # Emit proposal event (config or file)
+                if proposal.is_file:
+                    fp = proposal.file_patch
+                    yield emit({"type": "proposal", "iteration": i + 1, "proposal_type": "file",
+                                "path": fp.path, "content_len": len(fp.content),
+                                "reasoning": fp.reasoning})
+                    patch_result = loop._patcher.apply_file(fp)
+                    patch_key_label = f"file:{fp.path}"
+                else:
+                    patch = proposal.patch
+                    yield emit({"type": "proposal", "iteration": i + 1, "proposal_type": "config",
+                                "key": patch.key, "value": patch.value, "reasoning": patch.reasoning})
+                    patch_result = loop._patcher.apply(patch)
+                    patch_key_label = patch.key
 
-                # Apply
-                patch_result = loop._patcher.apply(patch)
                 if not patch_result.ok:
                     no_improvement_streak += 1
                     yield emit({"type": "patch_failed", "iteration": i + 1,
-                                "key": patch.key, "error": patch_result.error})
+                                "key": patch_key_label, "error": patch_result.error})
                     continue
 
                 await _aio.sleep(0.5)  # let hot-reload settle
@@ -2900,19 +2909,44 @@ async def api_dgm_run(request: Request):
                 if keep:
                     kept_count += 1
                     no_improvement_streak = 0
-                    yield emit({"type": "kept", "iteration": i + 1, "key": patch.key,
-                                "value": patch.value, "old_value": patch_result.original,
-                                "rubric": rubric.name, "confidence": avg_conf,
-                                "reasoning": best_reasoning})
+                    if proposal.is_file:
+                        fp = proposal.file_patch
+                        loop._patcher.archive_to_out(fp, run_id, i + 1)
+                        yield emit({"type": "kept", "iteration": i + 1, "proposal_type": "file",
+                                    "path": fp.path, "content_len": len(fp.content),
+                                    "rubric": rubric.name, "confidence": avg_conf,
+                                    "reasoning": best_reasoning})
+                    else:
+                        patch = proposal.patch
+                        yield emit({"type": "kept", "iteration": i + 1, "proposal_type": "config",
+                                    "key": patch.key, "value": patch.value,
+                                    "old_value": patch_result.original,
+                                    "rubric": rubric.name, "confidence": avg_conf,
+                                    "reasoning": best_reasoning})
                 else:
-                    loop._patcher.revert(patch, patch_result.original)
-                    no_improvement_streak += 1
-                    yield emit({"type": "reverted", "iteration": i + 1, "key": patch.key,
-                                "rubric": rubric.name, "confidence": avg_conf, "winner": winner})
+                    if proposal.is_file:
+                        fp = proposal.file_patch
+                        loop._patcher.revert_file(fp, patch_result.original)
+                        no_improvement_streak += 1
+                        yield emit({"type": "reverted", "iteration": i + 1, "proposal_type": "file",
+                                    "path": fp.path, "rubric": rubric.name,
+                                    "confidence": avg_conf, "winner": winner})
+                    else:
+                        patch = proposal.patch
+                        loop._patcher.revert(patch, patch_result.original)
+                        no_improvement_streak += 1
+                        yield emit({"type": "reverted", "iteration": i + 1, "proposal_type": "config",
+                                    "key": patch.key, "rubric": rubric.name,
+                                    "confidence": avg_conf, "winner": winner})
 
-                history.append({"iteration": i + 1, "key": patch.key, "value": patch.value,
-                                 "rubric": rubric.name, "winner": winner,
-                                 "confidence": avg_conf, "kept": keep})
+                hist_entry = {"iteration": i + 1, "rubric": rubric.name,
+                               "winner": winner, "confidence": avg_conf, "kept": keep}
+                if proposal.is_file:
+                    hist_entry.update({"type": "file", "path": proposal.file_patch.path})
+                else:
+                    hist_entry.update({"type": "config", "key": proposal.patch.key,
+                                       "value": proposal.patch.value})
+                history.append(hist_entry)
 
                 # Tick rotator
                 old_rubric = loop._rotator.current().name
@@ -2937,17 +2971,28 @@ async def api_dgm_run(request: Request):
             }
             yield emit({"type": "complete", **summary})
 
-            # Persist run metadata to app state
+            # Persist run metadata to app state and workspace/out/
             try:
                 state = get_state()
                 state.dgm_run_history.append(summary)
                 if len(state.dgm_run_history) > 20:
                     state.dgm_run_history = state.dgm_run_history[-20:]
                 state.dgm_baselines[run_id] = baseline_config
-                # Keep baselines for last 20 runs too
                 if len(state.dgm_baselines) > 20:
                     oldest = next(iter(state.dgm_baselines))
                     del state.dgm_baselines[oldest]
+            except Exception:
+                pass
+
+            # Write run summary to workspace/out/
+            try:
+                import pathlib as _pl
+                out_dir = _pl.Path("workspace/out")
+                out_dir.mkdir(parents=True, exist_ok=True)
+                summary_with_history = dict(summary, history=history)
+                (out_dir / f"dgm_{run_id}_summary.json").write_text(
+                    _json.dumps(summary_with_history, indent=2), encoding="utf-8"
+                )
             except Exception:
                 pass
 
@@ -2961,26 +3006,47 @@ def _build_workspace_context() -> str:
     """
     Build a brief summary of active workspace files for the DGM proposer.
 
-    Reads the workspace mounts directory and returns a compact listing of
-    file names + first few lines of text files. Capped for context budget.
+    Reads workspace/mounts (symlinked input files) and workspace/out (DGM outputs).
+    Returns a compact listing of file names + first few lines of text files.
+    Capped for context budget.
     """
-    import os, pathlib
+    import pathlib
+    sections = []
+
+    # Input: workspace/mounts/ (symlinked read-only files)
     mounts_dir = pathlib.Path("workspace/mounts")
-    if not mounts_dir.exists():
-        return ""
-    lines = []
-    for f in sorted(mounts_dir.iterdir()):
-        if f.is_symlink() or f.is_file():
+    if mounts_dir.exists():
+        mount_lines = []
+        for f in sorted(mounts_dir.iterdir()):
+            if f.is_symlink() or f.is_file():
+                try:
+                    target = f.resolve()
+                    if target.is_file() and target.stat().st_size < 8192:
+                        content = target.read_text(errors="replace")[:400].strip()
+                        mount_lines.append(f"--- mounts/{f.name} ---\n{content}")
+                    else:
+                        mount_lines.append(f"--- mounts/{f.name} --- (binary or large file)")
+                except Exception:
+                    mount_lines.append(f"--- mounts/{f.name} --- (unreadable)")
+        if mount_lines:
+            sections.extend(mount_lines[:4])
+
+    # Output: workspace/out/ — show recent DGM-archived file patches (not summary JSONs)
+    out_dir = pathlib.Path("workspace/out")
+    if out_dir.exists():
+        out_files = sorted(
+            (f for f in out_dir.iterdir()
+             if f.is_file() and not f.name.endswith("_summary.json") and not f.name.endswith(".json")),
+            key=lambda f: f.stat().st_mtime, reverse=True
+        )
+        for f in out_files[:2]:
             try:
-                target = f.resolve()
-                if target.is_file() and target.stat().st_size < 8192:
-                    content = target.read_text(errors="replace")[:500].strip()
-                    lines.append(f"--- {f.name} ---\n{content}")
-                else:
-                    lines.append(f"--- {f.name} --- (binary or large file)")
+                content = f.read_text(errors="replace")[:300].strip()
+                sections.append(f"--- out/{f.name} (DGM output) ---\n{content}")
             except Exception:
-                lines.append(f"--- {f.name} --- (unreadable)")
-    return "\n\n".join(lines[:6])  # cap at 6 files to stay within context
+                pass
+
+    return "\n\n".join(sections[:6])
 
 
 @app.get("/api/v1/dgm/history")
