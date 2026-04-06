@@ -1176,26 +1176,26 @@ async def api_config():
         },
         # ── Routing — Tier Pipeline (Phase 3 refactoring) ────────────────
         "routing": {
-            # Tier 1: Session cache
+            # Tier 1: Session cache — rt.get() allows runtime override via POST /api/v1/config
             "session_cache": {
-                "ttl_seconds": cfg.get("routing", {}).get("session_cache", {}).get("ttl_seconds", 3600),
+                "ttl_seconds": rt.get("tier1_ttl", cfg.get("routing", {}).get("session_cache", {}).get("ttl_seconds", 3600)),
             },
             # Tier 2: Embedding classifier
             "classifier": {
                 "enabled": rt.get("features_classifier", cfg.get("features", {}).get("classifier", cfg.get("classifier", {}).get("enabled", True))),
-                "centroid_rebuild_interval": cfg.get("routing", {}).get("classifier", {}).get("centroid_rebuild_interval", cfg.get("classifier", {}).get("centroid_rebuild_interval", 3600)),
+                "centroid_rebuild_interval": rt.get("classifier_rebuild_interval", cfg.get("routing", {}).get("classifier", {}).get("centroid_rebuild_interval", cfg.get("classifier", {}).get("centroid_rebuild_interval", 3600))),
             },
             # Tier 3: Semantic cache
             "semantic_cache": {
                 "enabled": rt.get("features_semantic_cache", cfg.get("features", {}).get("semantic_cache", cfg.get("semantic_cache", {}).get("enabled", False))),
-                "similarity_threshold": cfg.get("routing", {}).get("semantic_cache", {}).get("similarity_threshold", cfg.get("semantic_cache", {}).get("similarity_threshold", 0.92)),
-                "max_entries": cfg.get("routing", {}).get("semantic_cache", {}).get("max_entries", cfg.get("semantic_cache", {}).get("max_entries", 500)),
-                "ttl_seconds": cfg.get("routing", {}).get("semantic_cache", {}).get("ttl_seconds", cfg.get("semantic_cache", {}).get("ttl_seconds", 3600)),
+                "similarity_threshold": rt.get("semantic_cache_threshold", cfg.get("routing", {}).get("semantic_cache", {}).get("similarity_threshold", cfg.get("semantic_cache", {}).get("similarity_threshold", 0.92))),
+                "max_entries": rt.get("semantic_cache_max_entries", cfg.get("routing", {}).get("semantic_cache", {}).get("max_entries", cfg.get("semantic_cache", {}).get("max_entries", 500))),
+                "ttl_seconds": rt.get("semantic_cache_ttl", cfg.get("routing", {}).get("semantic_cache", {}).get("ttl_seconds", cfg.get("semantic_cache", {}).get("ttl_seconds", 3600))),
             },
             # Tier 4: Decision LLM (judge)
             "decision_llm": {
                 "enabled": rt.get("features_decision_llm", cfg.get("features", {}).get("decision_llm", cfg.get("decision_llm", {}).get("enabled", True))),
-                "temperature": cfg.get("routing", {}).get("decision_llm", {}).get("temperature", cfg.get("decision_llm", {}).get("temperature", 0.2)),
+                "temperature": rt.get("decision_llm_temperature", cfg.get("routing", {}).get("decision_llm", {}).get("temperature", cfg.get("decision_llm", {}).get("temperature", 0.2))),
             },
             # Routing control
             "force_route":         rt.get("force_route", ""),
@@ -1280,18 +1280,19 @@ async def api_config_save(request: Request):
     Save runtime-adjustable settings to runtime_config.yaml.
     All keys are hot-reloaded — no restart required.
 
-    Accepted keys:
-        # Web UI
-        web_ui_vi_mode, web_ui_palette, voice_enabled, voice_hotkey
-        # Routing
-        default_model, force_route, border_threshold, agentic_threshold
-        # Features
-        decision_llm_enabled, tools_enabled, log_conversations, log_level
-        # Session
-        system_prompt_prefix, tools_disabled
-        # Feature flags (bool)
-        cost_tracking_enabled, harness_enabled,
-        conversation_replay_enabled, auto_summarization_enabled
+    ── Adding a new field (checklist to prevent regressions) ──────────────────
+    When adding a new config field that should be editable from the UI, you
+    must update THREE places or the UI will silently fail / show stale values:
+
+    1. POST allowed dict below  →  add  "your_key": "your_key"
+    2. GET /api/v1/config above →  add  rt.get("your_key", cfg.get(..., default))
+                                   in the appropriate section of the response
+    3. index.html saveConfig()  →  add "your_key" to bools/strings/numbers list
+                                   AND read it from the correct c.section.field path
+                                   in loadConfig()
+
+    Skipping any step causes the "saved but UI still shows old value" regression.
+    The GET path and POST key must reference the same runtime_config.yaml key.
     """
     try:
         body = await request.json()
@@ -1299,7 +1300,10 @@ async def api_config_save(request: Request):
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
     updated = []
+    changed = []   # subset of updated where value actually differed from current runtime
     errors = []
+
+    rt_before = get_runtime_config()  # snapshot before writes — used to compute "changed"
 
     # All runtime-adjustable keys
     allowed = {
@@ -1389,7 +1393,14 @@ async def api_config_save(request: Request):
         "wasm_timeout_ms":              "wasm_timeout_ms",
         # Decision LLM tuning
         "decision_llm_timeout":         "decision_llm_timeout",
-        # Routing
+        # Routing — tier params (these override config.yaml values at runtime)
+        "tier1_ttl":                    "tier1_ttl",
+        "classifier_rebuild_interval":  "classifier_rebuild_interval",
+        "semantic_cache_threshold":     "semantic_cache_threshold",
+        "semantic_cache_max_entries":   "semantic_cache_max_entries",
+        "semantic_cache_ttl":           "semantic_cache_ttl",
+        "decision_llm_temperature":     "decision_llm_temperature",
+        # Routing — control
         "force_decision":               "force_decision",
         "allow_openrouter_for_plain_models": "allow_openrouter_for_plain_models",
         # Multi-backend
@@ -1404,9 +1415,12 @@ async def api_config_save(request: Request):
 
     for key, rt_key in allowed.items():
         if key in body:
-            ok = update_runtime_config(rt_key, body[key])
+            new_val = body[key]
+            ok = update_runtime_config(rt_key, new_val)
             if ok:
                 updated.append(key)
+                if new_val != rt_before.get(rt_key):
+                    changed.append(key)
             else:
                 errors.append(key)
 
@@ -1434,8 +1448,8 @@ async def api_config_save(request: Request):
             _st.proxy.wasm_runtime.disable()
 
     if errors:
-        return JSONResponse({"saved": updated, "errors": errors}, status_code=207)
-    return JSONResponse({"saved": updated, "ok": True})
+        return JSONResponse({"saved": updated, "changed": changed, "errors": errors}, status_code=207)
+    return JSONResponse({"saved": updated, "changed": changed, "ok": True})
 
 
 @app.post("/api/v1/wasm/reload")
