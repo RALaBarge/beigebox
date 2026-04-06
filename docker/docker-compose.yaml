@@ -75,7 +75,7 @@ services:
     ports:
       - "${OLLAMA_PORT:-11434}:11434"
     volumes:
-      - /mnt/storage/ollama:/root/.ollama
+      - ${OLLAMA_DATA:-ollama_data}:/root/.ollama
     tmpfs:
       - /tmp
     restart: unless-stopped
