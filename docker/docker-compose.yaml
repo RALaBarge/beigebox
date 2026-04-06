@@ -70,7 +70,7 @@ services:
   # ---------------------------------------------------------------------------
   # For NVIDIA GPU: uncomment the 'deploy' block below and restart.
   ollama:
-    image: ollama/ollama@sha256:7d6a418c59f7caae7bc0c5f15f169d6ca0a59510f60b8a251639b44b11fe16b2  # v0.19.0
+    image: ollama/ollama:latest
     container_name: beigebox-ollama
     ports:
       - "${OLLAMA_PORT:-11434}:11434"
@@ -103,7 +103,7 @@ services:
   # Model pull — runs once to ensure required models exist
   # ---------------------------------------------------------------------------
   ollama-model-pull:
-    image: curlimages/curl@sha256:d94d07ba9e7d6de898b6d96c1a072f6f8266c687af78a74f380087a0addf5d17
+    image: curlimages/curl:latest
     container_name: beigebox-model-pull
     depends_on:
       ollama:
