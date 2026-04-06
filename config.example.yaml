@@ -5,7 +5,7 @@
 #   2. Customize for your setup (GPU, backends, features)
 #   3. For runtime overrides, use runtime_config.yaml (hot-reload, no restart)
 #
-# For the full annotated config reference, see docs/configuration.md
+# For the full annotated config reference, see d0cs/configuration.md
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Features — Minimal defaults (extend as needed)
