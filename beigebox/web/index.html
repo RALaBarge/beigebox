@@ -1535,6 +1535,47 @@
   }
   .studio-ctx-msg-item:hover .studio-ctx-msg-body { display: block; }
 
+  /* ── Payload editor widget ───────────────────────────────────────────── */
+  .pe-section {
+    border: 1px solid var(--bg-border); border-radius: 3px;
+    margin-top: 10px; overflow: hidden; font-size: 11px;
+  }
+  .pe-header {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 8px; background: var(--bg); cursor: pointer;
+    user-select: none; border-bottom: 1px solid var(--bg-border);
+  }
+  .pe-header:hover { background: var(--bg-hover); }
+  .pe-header-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--fg-dim); flex: 1; }
+  .pe-header-badges { display: flex; gap: 4px; align-items: center; }
+  .pe-body { padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .pe-body.pe-collapsed { display: none; }
+  .pe-json-view {
+    font-family: 'Fira Code', monospace; font-size: 10px; color: var(--fg);
+    background: var(--bg); border: 1px solid var(--bg-border); border-radius: 2px;
+    padding: 6px; white-space: pre; overflow-x: auto; overflow-y: auto;
+    max-height: 240px; line-height: 1.5;
+  }
+  .pe-json-view .pe-key   { color: var(--lavender); }
+  .pe-json-view .pe-str   { color: var(--green); }
+  .pe-json-view .pe-num   { color: var(--cyan); }
+  .pe-json-view .pe-bool  { color: var(--yellow); }
+  .pe-json-view .pe-null  { color: var(--fg-muted); }
+  .pe-override-row { display: flex; align-items: center; gap: 6px; }
+  .pe-override-ta {
+    font-family: 'Fira Code', monospace; font-size: 10px; color: var(--fg);
+    background: var(--bg-input,#1a1a1a); border: 1px solid var(--lavender);
+    border-radius: 2px; padding: 6px; width: 100%; resize: vertical;
+    min-height: 80px; line-height: 1.5;
+  }
+  .pe-override-ta.pe-err { border-color: var(--red); }
+  .pe-override-ta:disabled { border-color: var(--bg-border); opacity: 0.5; }
+  .pe-status { font-size: 10px; padding: 2px 0; }
+  .pe-status.ok  { color: var(--green); }
+  .pe-status.err { color: var(--red); }
+  .pe-status.dim { color: var(--fg-muted); }
+  .pe-btn-row { display: flex; gap: 6px; }
+
   .studio-ctrl-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
   .studio-ctrl-label {
     color: var(--fg-dim); font-size: 10px; text-transform: uppercase;
@@ -2302,6 +2343,8 @@
       </div>
       <div class="scroll-area">
         <div id="studio-ctx-body"><div class="empty">Waiting for a request…</div></div>
+        <!-- Payload editor — reusable widget, rendered by _studioPayloadEditor -->
+        <div id="studio-payload-editor"></div>
       </div>
     </div>
 
@@ -2456,6 +2499,207 @@ function rafAppend(container, html, scroll = true) {
   }
 }
 
+// ── PayloadEditor — reusable widget ─────────────────────────────────────────
+//
+// Renders a "Next Request" payload preview + optional JSON override textarea
+// into any container element.  Designed for reuse across Studio panes, Chat
+// panes, and Harness views.
+//
+// Usage:
+//   const editor = makePayloadEditor('my-container-id', getBasePayloadFn);
+//   editor.refresh();                  // re-render preview from current payload
+//   editor.getEffectivePayload();      // returns override JSON (if active) or base
+//   editor.isOverrideActive();         // true when user has a valid override set
+//
+// The `getBasePayload` callback is called each time refresh() needs to display
+// or send the current payload.  It should return the plain JS object that WOULD
+// be sent if no override were present.
+//
+function makePayloadEditor(containerId, getBasePayload) {
+  let _open         = true;   // payload preview collapsed state
+  let _overrideOpen = false;  // override textarea collapsed state
+  let _overrideText = '';
+  let _overrideActive = false;  // checkbox
+  let _parseError   = '';
+
+  // ── Syntax-highlight JSON (lightweight, no external deps) ──────────────
+  function _hlJson(obj) {
+    const raw = JSON.stringify(obj, null, 2);
+    return raw.replace(
+      /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+\.?\d*([eE][+-]?\d+)?)/g,
+      match => {
+        if (/^"/.test(match)) {
+          return /:$/.test(match)
+            ? `<span class="pe-key">${esc(match)}</span>`
+            : `<span class="pe-str">${esc(match)}</span>`;
+        }
+        if (/true|false/.test(match)) return `<span class="pe-bool">${match}</span>`;
+        if (/null/.test(match))       return `<span class="pe-null">${match}</span>`;
+        return `<span class="pe-num">${match}</span>`;
+      }
+    );
+  }
+
+  function _render() {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    const base   = getBasePayload() || {};
+    const nMsgs  = (base.messages || []).length;
+    const nChars = (base.messages || []).reduce((s, m) => s + (m.content || '').length, 0);
+    const nTok   = Math.round(nChars / 4);
+    const tokStr = nTok >= 1000 ? `~${(nTok/1000).toFixed(1)}k` : `~${nTok}`;
+    const modelStr = base.model || '(server default)';
+
+    // Effective payload = override if active & valid, else base
+    let displayPayload = base;
+    if (_overrideActive && _overrideText.trim()) {
+      try {
+        displayPayload = JSON.parse(_overrideText);
+        _parseError = '';
+      } catch(e) {
+        _parseError = e.message;
+      }
+    } else {
+      _parseError = '';
+    }
+
+    const overrideBadge = _overrideActive
+      ? (_parseError
+          ? `<span class="badge" style="background:var(--red)20;color:var(--red)">override ✗</span>`
+          : `<span class="badge" style="background:var(--yellow)20;color:var(--yellow)">override ✓</span>`)
+      : '';
+
+    const msgSummary = `${nMsgs} msg${nMsgs !== 1 ? 's' : ''} · ${tokStr} tok`;
+
+    const htmlPayload = _hlJson(displayPayload);
+
+    container.innerHTML = `
+      <div class="pe-section">
+        <div class="pe-header" onclick="_peToggle('${containerId}','preview')">
+          <span class="pe-header-title">Next Request</span>
+          <span class="pe-header-badges">
+            <span class="badge badge-dim">${esc(modelStr.length > 20 ? modelStr.slice(0,18)+'…' : modelStr)}</span>
+            <span class="badge badge-dim">${msgSummary}</span>
+            ${overrideBadge}
+            <span style="font-size:9px;color:var(--fg-muted)">${_open ? '▾' : '▸'}</span>
+          </span>
+        </div>
+        <div class="pe-body ${_open ? '' : 'pe-collapsed'}">
+          <div class="pe-json-view" id="${containerId}-json">${htmlPayload}</div>
+          <div class="pe-btn-row">
+            <button style="font-size:10px;padding:2px 8px" onclick="_peCopyPayload('${containerId}')">Copy JSON</button>
+            <button style="font-size:10px;padding:2px 8px" onclick="_peToggle('${containerId}','override')">${_overrideOpen ? 'Hide override' : 'Override…'}</button>
+          </div>
+        </div>
+      </div>
+      <div class="pe-section" id="${containerId}-override-wrap" style="${_overrideOpen ? '' : 'display:none'}">
+        <div class="pe-header" style="cursor:default">
+          <span class="pe-header-title">Payload Override</span>
+          <span class="pe-header-badges">
+            <label style="font-size:10px;display:flex;align-items:center;gap:4px;cursor:pointer">
+              <input type="checkbox" id="${containerId}-override-chk" ${_overrideActive ? 'checked' : ''}
+                onchange="_peOverrideToggle('${containerId}',this.checked)">
+              active
+            </label>
+          </span>
+        </div>
+        <div class="pe-body">
+          <div class="pe-status dim">Paste a complete JSON payload. When active, this replaces everything sent to the backend.</div>
+          <textarea class="pe-override-ta ${_parseError ? 'pe-err' : ''}"
+            id="${containerId}-override-ta"
+            placeholder='{"model":"qwen3.5:3b","messages":[...],"stream":true}'
+            rows="6"
+            oninput="_peOverrideInput('${containerId}',this.value)">${esc(_overrideText)}</textarea>
+          ${_parseError ? `<div class="pe-status err">✗ ${esc(_parseError)}</div>` : (_overrideActive && !_parseError && _overrideText ? '<div class="pe-status ok">✓ valid JSON — will be sent as-is</div>' : '')}
+          <div class="pe-btn-row">
+            <button style="font-size:10px;padding:2px 8px" onclick="_peFillFromBase('${containerId}')">Fill from current</button>
+            <button style="font-size:10px;padding:2px 8px" onclick="_peClearOverride('${containerId}')">Clear</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  // ── Public API ────────────────────────────────────────────────────────────
+  const api = {
+    refresh: _render,
+    getEffectivePayload() {
+      if (_overrideActive && _overrideText.trim() && !_parseError) {
+        try { return JSON.parse(_overrideText); } catch {}
+      }
+      return getBasePayload() || null;
+    },
+    isOverrideActive() { return _overrideActive && !_parseError && !!_overrideText.trim(); },
+    // Called by global handlers below (must be reachable by inline onclick)
+    _toggle(section) {
+      if (section === 'preview') { _open = !_open; _render(); }
+      if (section === 'override') {
+        _overrideOpen = !_overrideOpen;
+        const wrap = document.getElementById(containerId + '-override-wrap');
+        if (wrap) wrap.style.display = _overrideOpen ? '' : 'none';
+        _render();
+      }
+    },
+    _overrideToggle(checked) {
+      _overrideActive = checked;
+      if (checked && _overrideText.trim()) {
+        try { JSON.parse(_overrideText); _parseError = ''; }
+        catch(e) { _parseError = e.message; }
+      }
+      _render();
+    },
+    _overrideInput(val) {
+      _overrideText = val;
+      if (_overrideActive && val.trim()) {
+        try { JSON.parse(val); _parseError = ''; }
+        catch(e) { _parseError = e.message; }
+      } else {
+        _parseError = '';
+      }
+      // Live re-render preview section only (avoid losing cursor in textarea)
+      const jsonEl = document.getElementById(containerId + '-json');
+      if (jsonEl) {
+        try {
+          const eff = _overrideActive && val.trim() ? JSON.parse(val) : getBasePayload();
+          jsonEl.innerHTML = _hlJson(eff || {});
+        } catch {}
+      }
+      // Update error state on textarea
+      const ta = document.getElementById(containerId + '-override-ta');
+      if (ta) ta.className = 'pe-override-ta' + (_parseError ? ' pe-err' : '');
+    },
+    _fillFromBase() {
+      const base = getBasePayload() || {};
+      _overrideText = JSON.stringify(base, null, 2);
+      _parseError = '';
+      _render();
+    },
+    _clearOverride() {
+      _overrideText = '';
+      _overrideActive = false;
+      _parseError = '';
+      _render();
+    },
+    _copyPayload() {
+      const eff = api.getEffectivePayload();
+      if (eff) navigator.clipboard?.writeText(JSON.stringify(eff, null, 2)).catch(() => {});
+    },
+  };
+
+  // Register instance in global registry so inline onclick handlers can reach it
+  _peRegistry[containerId] = api;
+  return api;
+}
+
+// ── PayloadEditor global dispatch (onclick bridges to instance methods) ───────
+const _peRegistry = {};
+function _peToggle(id, section)           { _peRegistry[id]?._toggle(section); }
+function _peOverrideToggle(id, checked)   { _peRegistry[id]?._overrideToggle(checked); }
+function _peOverrideInput(id, val)        { _peRegistry[id]?._overrideInput(val); }
+function _peFillFromBase(id)              { _peRegistry[id]?._fillFromBase(); }
+function _peClearOverride(id)             { _peRegistry[id]?._clearOverride(); }
+function _peCopyPayload(id)               { _peRegistry[id]?._copyPayload(); }
+
 // ── Studio tab state ────────────────────────────────────────────────────────
 let _studioHistory      = [];
 let _studioCtxPollTimer = null;
@@ -2464,6 +2708,7 @@ let _studioStreaming     = false;
 let _studioCurrentRunId = null;   // conv_id of loaded run (null = fresh)
 let _studioRunLabels    = {};     // conv_id → display label cache
 let _studioCtxMessages  = [];     // last context panel messages[] for forking
+let _studioPayloadEditor = null;  // PayloadEditor instance for the context column
 
 // Persist and restore chat history across tab switches
 function saveChatHistory() {
@@ -9368,11 +9613,26 @@ function renderDiscoveryResult(data) {
 
 // ── Studio tab ───────────────────────────────────────────────────────────────
 
+// Returns the payload that studioSend() would build from current history + controls.
+// Pure function — no side effects.  Used by the PayloadEditor preview.
+function buildStudioPayload() {
+  const model = document.getElementById('studio-model-sel')?.value || '';
+  const msgs  = _studioHistory.map(m => ({ role: m.role, content: m.content }));
+  const body  = { messages: msgs, stream: true, _beigebox_direct: true };
+  if (model) body.model = model;
+  return body;
+}
+
 async function loadStudio() {
   await studioLoadModels();
   await studioLoadControls();
   studioStartContextPoll();
   studioFetchContext();
+  // Create (or reuse) the payload editor in the context column
+  if (!_studioPayloadEditor) {
+    _studioPayloadEditor = makePayloadEditor('studio-payload-editor', buildStudioPayload);
+  }
+  _studioPayloadEditor.refresh();
   studioMobileActivate('chat');
 }
 
@@ -9578,6 +9838,8 @@ async function studioSend() {
 
   _studioHistory.push({ role: 'user', content: text });
   studioAppendMsg('user', text, '', _studioHistory.length - 1);
+  // Update preview to include the new user message before sending
+  _studioPayloadEditor?.refresh();
 
   const area = document.getElementById('studio-msgs');
   const typingId = 'studio-typing-' + Date.now();
@@ -9586,10 +9848,10 @@ async function studioSend() {
   area.scrollTop = area.scrollHeight;
 
   try {
-    const model = document.getElementById('studio-model-sel')?.value || '';
-    const msgs = _studioHistory.map(m => ({ role: m.role, content: m.content }));
-    const bodyObj = { messages: msgs, stream: true, _beigebox_direct: true };
-    if (model) bodyObj.model = model;
+    // Use override payload if active and valid, otherwise build from history + controls
+    const bodyObj = _studioPayloadEditor?.isOverrideActive()
+      ? _studioPayloadEditor.getEffectivePayload()
+      : buildStudioPayload();
 
     const resp = await fetch(BASE + '/v1/chat/completions', {
       method: 'POST',
@@ -9674,6 +9936,8 @@ async function studioSend() {
     _studioStreaming = false;
     if (sendBtn) sendBtn.disabled = false;
     document.getElementById('studio-input')?.focus();
+    // Refresh payload preview to reflect the completed exchange
+    _studioPayloadEditor?.refresh();
   }
 }
 
@@ -9700,6 +9964,7 @@ function studioClearChat() {
   if (badge) badge.textContent = '';
   const area = document.getElementById('studio-msgs');
   if (area) area.innerHTML = '';
+  _studioPayloadEditor?.refresh();
 }
 
 function studioKeydown(e) {
@@ -9791,6 +10056,7 @@ async function studioLoadRun(convId) {
         _studioHistory[i].role === 'assistant' ? 'assistant' : '', i);
     }
     area.scrollTop = area.scrollHeight;
+    _studioPayloadEditor?.refresh();
   } catch(e) {
     area.innerHTML = `<div class="empty" style="padding:16px">Error: ${esc(e.message)}</div>`;
   }
@@ -9815,6 +10081,7 @@ function studioForkAt(idx) {
       _studioHistory[i].role === 'assistant' ? 'assistant' : '', i);
   }
   area.scrollTop = area.scrollHeight;
+  _studioPayloadEditor?.refresh();
   document.getElementById('studio-input')?.focus();
 }
 
