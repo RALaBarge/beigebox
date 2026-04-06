@@ -205,7 +205,6 @@ services:
       - /tmp
     networks:
       - tools
-    read_only: true
     environment:
       - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-whisper-base}
       - WHISPER__DEVICE=cpu
@@ -233,7 +232,6 @@ services:
       - /tmp
     networks:
       - tools
-    read_only: true
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8880/health"]
