@@ -250,7 +250,7 @@ services:
   # TODO: pin image digest after first pull: docker inspect --format='{{index .RepoDigests 0}}'
   whisper-apple:
     profiles: [apple]
-    image: fedirz/faster-whisper-server:latest
+    image: fedirz/faster-whisper-server:latest-cpu
     platform: linux/arm64
     container_name: beigebox-whisper-apple
     ports:
@@ -282,7 +282,7 @@ services:
   # TODO: pin image digest after first pull: docker inspect --format='{{index .RepoDigests 0}}'
   kokoro-apple:
     profiles: [apple]
-    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest-arm64
     platform: linux/arm64
     container_name: beigebox-kokoro-apple
     ports:
