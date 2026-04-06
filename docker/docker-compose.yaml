@@ -7,7 +7,8 @@
 #
 # PROFILES:
 #   (default)           Ollama (CPU) + BeigeBox — transparent proxy + integrated UI
-#   voice               adds Whisper (STT) + Kokoro (TTS)
+#   voice               adds Whisper (STT) + Kokoro (TTS)  [x86_64 / Linux CPU]
+#   apple               adds Whisper + Kokoro as native arm64 images  [Apple Silicon]
 #   cdp                 adds Chromium with CDP (Chrome DevTools Protocol) for browser automation
 #   engines-cpp         use llama.cpp instead of Ollama (quantized models, minimal resource)
 #   engines-vllm        use vLLM instead of Ollama (production-grade inference)
@@ -17,13 +18,23 @@
 # EXAMPLES:
 #   docker compose up -d                              # full stack, Ollama (default)
 #   docker compose --profile cdp up -d                # + Chromium for browser automation (CDP)
-#   docker compose --profile voice up -d              # + voice I/O
+#   docker compose --profile voice up -d              # + voice I/O (x86 / Linux)
+#   docker compose --profile apple up -d              # + voice I/O (Apple Silicon, arm64-native)
 #   docker compose --profile cdp --profile voice up -d # + browser automation + voice
+#   docker compose --profile cdp --profile apple up -d # + browser automation + voice (Apple)
 #   docker compose --profile engines-cpp up -d        # use llama.cpp instead
 #   docker compose --profile engines-vllm up -d       # use vLLM instead
 #   docker compose --profile engines-executorch up -d # use ExecutorTorch instead
 #   docker compose --profile sandbox up -d            # Claude Code DinD sandbox
 #   docker compose up -d beigebox                     # proxy only (external Ollama)
+#
+# APPLE SILICON NOTE:
+#   Use './up.sh' instead of 'docker compose' — it auto-detects arm64 and selects
+#   the apple profile when voice I/O is requested. Docker on Mac does NOT expose
+#   Metal to containers, so MLX GPU acceleration is unavailable inside Docker.
+#   The 'apple' profile uses native arm64 images (no Rosetta emulation) which is
+#   already significantly faster. For true MLX: run Whisper + Kokoro natively and
+#   set stt_url / tts_url in runtime_config.yaml to http://localhost:9000 / :8880.
 #
 # NVIDIA GPU:
 #   Uncomment the 'deploy' block on the ollama service below, then:
@@ -35,8 +46,10 @@
 # SERVICES:
 #   ollama          → :11434  LLM inference engine (default)
 #   beigebox        → :1337   transparent proxy + integrated web UI
-#   whisper         → :9000   speech-to-text (voice profile)
-#   kokoro          → :8880   text-to-speech (voice profile)
+#   whisper         → :9000   speech-to-text (voice profile, x86/Linux)
+#   kokoro          → :8880   text-to-speech (voice profile, x86/Linux)
+#   whisper-apple   → :9000   speech-to-text (apple profile, arm64-native)
+#   kokoro-apple    → :8880   text-to-speech (apple profile, arm64-native)
 #   chrome          → :9222   Chrome DevTools Protocol (cdp profile)
 #   llama-cpp       → :8001   C++ inference (engines-cpp profile)
 #   vllm            → :8002   Production inference (engines-vllm profile)
@@ -210,6 +223,68 @@ services:
     profiles: [voice]
     image: ghcr.io/remsky/kokoro-fastapi-cpu@sha256:c8812546d358cbfd6a5c4087a28795b2b001d8e32d7a322eedd246e6bc13cb55
     container_name: beigebox-kokoro
+    ports:
+      - "${KOKORO_PORT:-8880}:8880"
+    volumes:
+      - kokoro_models:/app/models
+    tmpfs:
+      - /tmp
+    networks:
+      - tools
+    read_only: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8880/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # ---------------------------------------------------------------------------
+  # Whisper (Apple Silicon) — STT, arm64-native (apple profile)
+  # ---------------------------------------------------------------------------
+  # Replaces 'whisper' on Apple Silicon. Same OpenAI-compatible API, same port.
+  # Uses native arm64 image — no Rosetta emulation overhead.
+  # Model: faster-distil-whisper-small.en (faster on CPU, override via WHISPER_MODEL).
+  # Do NOT combine with 'voice' profile — both bind :9000.
+  # TODO: pin image digest after first pull: docker inspect --format='{{index .RepoDigests 0}}'
+  whisper-apple:
+    profiles: [apple]
+    image: fedirz/faster-whisper-server:latest
+    platform: linux/arm64
+    container_name: beigebox-whisper-apple
+    ports:
+      - "${WHISPER_PORT:-9000}:8000"
+    volumes:
+      - whisper_cache:/root/.cache/huggingface
+    tmpfs:
+      - /tmp
+    networks:
+      - tools
+    read_only: true
+    environment:
+      - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-distil-whisper-small.en}
+      - WHISPER__DEVICE=cpu
+      - WHISPER__INFERENCE_DEVICE=cpu
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ---------------------------------------------------------------------------
+  # Kokoro (Apple Silicon) — TTS, arm64-native (apple profile)
+  # ---------------------------------------------------------------------------
+  # Replaces 'kokoro' on Apple Silicon. Same OpenAI-compatible API, same port.
+  # Do NOT combine with 'voice' profile — both bind :8880.
+  # TODO: pin image digest after first pull: docker inspect --format='{{index .RepoDigests 0}}'
+  kokoro-apple:
+    profiles: [apple]
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    platform: linux/arm64
+    container_name: beigebox-kokoro-apple
     ports:
       - "${KOKORO_PORT:-8880}:8880"
     volumes:
