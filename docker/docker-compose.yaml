@@ -245,7 +245,7 @@ services:
   # ---------------------------------------------------------------------------
   # Replaces 'whisper' on Apple Silicon. Same OpenAI-compatible API, same port.
   # Uses native arm64 image — no Rosetta emulation overhead.
-  # Model: faster-distil-whisper-small.en (faster on CPU, override via WHISPER_MODEL).
+  # Model: faster-whisper-small (real HF model, faster than base, override via WHISPER_MODEL).
   # Do NOT combine with 'voice' profile — both bind :9000.
   # TODO: pin image digest after first pull: docker inspect --format='{{index .RepoDigests 0}}'
   whisper-apple:
@@ -263,7 +263,7 @@ services:
       - tools
     read_only: true
     environment:
-      - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-distil-whisper-small.en}
+      - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-whisper-small}
       - WHISPER__DEVICE=cpu
       - WHISPER__INFERENCE_DEVICE=cpu
     restart: unless-stopped
