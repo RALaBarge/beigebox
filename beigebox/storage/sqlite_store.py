@@ -203,6 +203,21 @@ CREATE TABLE IF NOT EXISTS users (
     UNIQUE(provider, sub)
 );
 CREATE INDEX IF NOT EXISTS idx_users_provider_sub ON users(provider, sub);
+
+CREATE TABLE IF NOT EXISTS operator_turns (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      TEXT NOT NULL,          -- FK → operator_runs.id
+    turn_n      INTEGER NOT NULL,       -- 0-based turn index within the run
+    input_sha   TEXT,                   -- git short SHA — content-addressable replay key
+    input_chars INTEGER,                -- pre-prune character count
+    store_path  TEXT,                   -- path to context_store repo for git show
+    model       TEXT,
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    misc1       TEXT,
+    misc2       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_operator_turns_run ON operator_turns(run_id);
+CREATE INDEX IF NOT EXISTS idx_operator_turns_sha ON operator_turns(input_sha);
 """
 
 # Migrations: append-only ALTER TABLE statements that add new columns to
@@ -225,6 +240,8 @@ MIGRATIONS = [
     # Index migrations are also safe (CREATE INDEX IF NOT EXISTS in CREATE_TABLES).
     # v1.0 — web auth: user tracking
     "ALTER TABLE conversations ADD COLUMN user_id TEXT DEFAULT NULL",
+    # v1.1 — per-turn context archive index (operator_turns table is in CREATE_TABLES)
+    "SELECT 1",  # no-op placeholder; table created via CREATE TABLE IF NOT EXISTS above
 ]
 
 
@@ -807,6 +824,44 @@ class SQLiteStore:
                 (_json.dumps(score_dict), run_id),
             )
         logger.debug("Stored trajectory score for run %s (score=%.1f)", run_id, score_dict.get("score", 0))
+
+    # ─ Operator turns (context archive index) ────────────────────────────────
+
+    def store_operator_turn(
+        self,
+        run_id: str,
+        turn_n: int,
+        input_sha: str | None,
+        input_chars: int,
+        store_path: str | None,
+        model: str = "",
+    ) -> None:
+        """
+        Record one archived turn in the operator_turns table.
+
+        input_sha + store_path together form the replay key:
+            git -C <store_path> show <input_sha>
+        """
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO operator_turns
+                   (run_id, turn_n, input_sha, input_chars, store_path, model)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (run_id, turn_n, input_sha, input_chars, store_path, model),
+            )
+        logger.debug("Stored operator turn %s/%d sha=%s", run_id, turn_n, input_sha or "none")
+
+    def list_operator_turns(self, run_id: str) -> list[dict]:
+        """Return all archived turns for a run, ordered by turn_n."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT turn_n, input_sha, input_chars, store_path, model, created_at
+                   FROM operator_turns
+                   WHERE run_id = ?
+                   ORDER BY turn_n""",
+                (run_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     # ─ Wire events (structured tap) ───────────────────────────────────────
 

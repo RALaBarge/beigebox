@@ -3241,16 +3241,19 @@ async def api_harness_autonomous(request: Request):
             initial_history = _raw_history[-8:] if len(_raw_history) > 8 else _raw_history
             final_answer = None
 
+            _ws_path_cfg = cfg2.get("workspace", {}).get("path", "./workspace")
+            _workspace_out = (Path(__file__).parent.parent / _ws_path_cfg / "out").resolve()
+
             from beigebox.agents.pruner import ContextPruner as _ContextPruner
-            _pruner = _ContextPruner.from_config()
+            _pruner = _ContextPruner.from_config(
+                workspace_path=str(_workspace_out),
+                sqlite_store=_st.sqlite_store if _st else None,
+            )
             from beigebox.agents.reflector import Reflector as _Reflector
             _reflector = _Reflector.from_config()
             from beigebox.agents.shadow import ShadowAgent as _ShadowAgent
             _shadow = _ShadowAgent.from_config()
             _shadow_task = None
-
-            _ws_path_cfg = cfg2.get("workspace", {}).get("path", "./workspace")
-            _workspace_out = (Path(__file__).parent.parent / _ws_path_cfg / "out").resolve()
 
             # Turn 0: self-contained question — no conversation history passed.
             # Subsequent turns receive structured state from the state reducer instead.
@@ -3340,6 +3343,22 @@ async def api_harness_autonomous(request: Request):
                 if turn_n == 0 and _shadow.enabled:
                     _shadow_task = asyncio.ensure_future(_shadow.run_shadow(question, vs))
 
+                # Prune cur_question BEFORE the model sees it — extractive, git-archived.
+                # Guards: skips first skip_first_turns and contexts < min_chars.
+                if _pruner.enabled and turn_n > 0:
+                    _step_label = f"turn {turn_n + 1}"
+                    try:
+                        _loop = asyncio.get_event_loop()
+                        cur_question = await asyncio.wait_for(
+                            _loop.run_in_executor(
+                                None, _pruner.prune,
+                                cur_question, _step_label, turn_n, _run_id, _op_model,
+                            ),
+                            timeout=_pruner._timeout + 1,
+                        )
+                    except Exception:
+                        pass  # keep original on any failure
+
                 op = Operator(vector_store=vs, model_override=model_override, autonomous=True,
                               sqlite_store=_st.sqlite_store if _st else None)
                 _op_model = op._model
@@ -3384,19 +3403,6 @@ async def api_harness_autonomous(request: Request):
                 # Fire-and-forget reflection on completed turn
                 if _reflector.enabled and turn_answer:
                     await _reflector.reflect_async(turn_answer, cur_question, f"turn {turn_n + 1}")
-
-                # Context pruner: compress turn answer to reduce inter-turn token bloat
-                if _pruner.enabled and turn_answer and turn_n + 1 < max_turns:
-                    _next_step_name = f"turn {turn_n + 2}"
-                    try:
-                        _loop = asyncio.get_event_loop()
-                        _pruned = await asyncio.wait_for(
-                            _loop.run_in_executor(None, _pruner.prune, turn_answer, _next_step_name),
-                            timeout=_pruner._timeout + 1,
-                        )
-                        final_answer = _pruned
-                    except Exception:
-                        pass  # keep original
 
                 if turn_answer and "##DONE##" in turn_answer:
                     break
