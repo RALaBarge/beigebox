@@ -1647,6 +1647,33 @@
     color: var(--cyan); background: transparent; border: 1px solid var(--cyan);
     border-radius: 2px; cursor: pointer; flex-shrink: 0;
   }
+  /* ── Active Models (SAM) panel ──────────────────────────────────────── */
+  #studio-active-models { display: flex; flex-direction: column; gap: 0; margin-bottom: 8px; }
+  .sam-header {
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; user-select: none; padding: 1px 0 3px;
+  }
+  .sam-header:hover { color: var(--fg); }
+  .sam-list { display: flex; flex-direction: column; gap: 5px; padding: 5px 0 2px; }
+  .sam-card {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg-panel,#1a1a1a); border: 1px solid var(--bg-border);
+    border-radius: 4px; padding: 5px 8px; font-size: 11px; min-height: 36px;
+  }
+  .sam-card-name {
+    flex: 1; font-family: monospace; color: var(--fg);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .sam-card-meta { color: var(--fg-muted); font-size: 10px; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  .sam-icon-wrap { position: relative; width: 32px; height: 32px; flex-shrink: 0; }
+  .sam-model-letter {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    font-size: 10px; font-weight: bold; color: var(--lavender); font-family: monospace; z-index: 2;
+  }
+  .sam-empty { color: var(--fg-muted); font-size: 10px; padding: 2px 0; }
+  .sam-divider { border: none; border-top: 1px solid var(--bg-border); margin: 4px 0 10px; }
+  /* Device selector */
+  #studio-device { width: 100%; }
 </style>
 </head>
 <body>
@@ -2429,9 +2456,34 @@
       <div class="scroll-area">
         <div id="studio-controls-body">
 
+          <!-- Active LLMs -->
+          <div id="studio-active-models">
+            <div class="sam-header studio-ctrl-label" onclick="toggleSamPanel()">
+              Active LLMs <span id="sam-toggle-icon" style="font-size:9px;margin-left:4px">▾</span>
+            </div>
+            <div id="sam-list-wrap">
+              <div id="sam-list" class="sam-list">
+                <div class="sam-empty">Loading…</div>
+              </div>
+            </div>
+          </div>
+          <hr class="sam-divider">
+
           <div class="studio-ctrl-group">
             <label class="studio-ctrl-label">Model</label>
-            <select id="studio-model-sel" style="width:100%"><option value="">Loading…</option></select>
+            <select id="studio-model-sel" style="width:100%" onchange="studioOnModelChange()"><option value="">Loading…</option></select>
+          </div>
+
+          <div class="studio-ctrl-group">
+            <label class="studio-ctrl-label">Device</label>
+            <select id="studio-device">
+              <option value="">auto</option>
+              <option value="cpu">CPU</option>
+              <option value="cuda">GPU (CUDA)</option>
+              <option value="cuda:0">GPU 0 (cuda:0)</option>
+              <option value="cuda:1">GPU 1 (cuda:1)</option>
+              <option value="metal">GPU (Metal / Apple)</option>
+            </select>
           </div>
 
           <div class="studio-ctrl-group">
@@ -2781,6 +2833,162 @@ let _studioCurrentRunId = null;   // conv_id of loaded run (null = fresh)
 let _studioRunLabels    = {};     // conv_id → display label cache
 let _studioCtxMessages  = [];     // last context panel messages[] for forking
 let _studioPayloadEditor = null;  // PayloadEditor instance for the context column
+
+// ── Model canonicalization ───────────────────────────────────────────────────
+// Produces a stable short name and ID from any raw model string.
+// e.g. "qwen/qwen3.5:3b-a1b-instruct-q4_k_m" → {id:"qwen3.5:3b", shortName:"qwen3.5:3b"}
+//      "llama3.2:3b"                           → {id:"llama3.2:3b", shortName:"llama3.2:3b"}
+function modelCanonical(rawName) {
+  if (!rawName) return { id: '', shortName: rawName, fullName: rawName };
+  // Strip leading namespace (anything before the first / or \)
+  let name = rawName.replace(/^[^:/\\]+[/\\]/, '');
+  const colonIdx = name.indexOf(':');
+  if (colonIdx !== -1) {
+    const base = name.slice(0, colonIdx);
+    const tag  = name.slice(colonIdx + 1);
+    // Short tag: grab the leading size token (e.g. "3b", "7b", "14b", "0.5b")
+    const sizeMatch = tag.match(/^(\d+\.?\d*[bBmMkKgG])/);
+    const shortTag  = sizeMatch ? sizeMatch[1].toLowerCase() : tag.split('-')[0].toLowerCase();
+    const shortName = base + ':' + shortTag;
+    const id        = shortName.replace(/[^a-zA-Z0-9.:_-]/g, '_').toLowerCase();
+    return { id, shortName, fullName: rawName };
+  }
+  const id = name.replace(/[^a-zA-Z0-9.:_-]/g, '_').toLowerCase();
+  return { id, shortName: name, fullName: rawName };
+}
+
+// ── Per-model settings (persisted in localStorage) ───────────────────────────
+const _MODEL_SETTINGS_KEY = 'bb_model_settings_v1';
+function _loadAllModelSettings() {
+  try { return JSON.parse(localStorage.getItem(_MODEL_SETTINGS_KEY) || '{}'); } catch { return {}; }
+}
+function _saveAllModelSettings(all) {
+  try { localStorage.setItem(_MODEL_SETTINGS_KEY, JSON.stringify(all)); } catch {}
+}
+function getModelProfile(modelId) {
+  return _loadAllModelSettings()[modelId] || {};
+}
+function setModelProfile(modelId, patch) {
+  const all = _loadAllModelSettings();
+  all[modelId] = Object.assign({}, all[modelId] || {}, patch);
+  _saveAllModelSettings(all);
+}
+
+// Called when the model dropdown changes — restore that model's saved params
+function studioOnModelChange() {
+  const sel = document.getElementById('studio-model-sel');
+  const raw = sel?.value || '';
+  if (!raw) return;
+  const { id } = modelCanonical(raw);
+  if (!id) return;
+  const prof = getModelProfile(id);
+  const tempEl   = document.getElementById('studio-temp');
+  const toppEl   = document.getElementById('studio-topp');
+  const ctxEl    = document.getElementById('studio-numctx');
+  const maxtokEl = document.getElementById('studio-maxtok');
+  const devEl    = document.getElementById('studio-device');
+  if (prof.temperature != null && tempEl) {
+    tempEl.value = prof.temperature;
+    document.getElementById('studio-temp-val').textContent = parseFloat(prof.temperature).toFixed(2);
+  }
+  if (prof.top_p != null && toppEl) {
+    toppEl.value = prof.top_p;
+    document.getElementById('studio-topp-val').textContent = parseFloat(prof.top_p).toFixed(2);
+  }
+  if (ctxEl)    ctxEl.value    = prof.num_ctx    != null ? prof.num_ctx    : '';
+  if (maxtokEl) maxtokEl.value = prof.max_tokens != null ? prof.max_tokens : '';
+  if (devEl)    devEl.value    = prof.device || '';
+}
+
+// ── Active Models (SAM) panel ────────────────────────────────────────────────
+let _samPollTimer  = null;
+let _samPanelOpen  = true;
+
+function toggleSamPanel() {
+  _samPanelOpen = !_samPanelOpen;
+  const wrap = document.getElementById('sam-list-wrap');
+  const icon = document.getElementById('sam-toggle-icon');
+  if (wrap) wrap.style.display = _samPanelOpen ? '' : 'none';
+  if (icon) icon.textContent = _samPanelOpen ? '▾' : '▸';
+}
+
+function samStart() {
+  samStop();
+  studioFetchActiveModels();
+  _samPollTimer = setInterval(studioFetchActiveModels, 3000);
+}
+function samStop() {
+  if (_samPollTimer) { clearInterval(_samPollTimer); _samPollTimer = null; }
+}
+
+async function studioFetchActiveModels() {
+  const el = document.getElementById('sam-list');
+  if (!el) return;
+  try {
+    const d = await api('/api/ps');
+    const models = d.models || [];
+    if (!models.length) {
+      el.innerHTML = '<div class="sam-empty">No models loaded in memory</div>';
+      return;
+    }
+    el.innerHTML = models.map(m => renderSamCard(m)).join('');
+  } catch {
+    el.innerHTML = '<div class="sam-empty" style="color:var(--red)">Ollama unreachable</div>';
+  }
+}
+
+function renderSamCard(m) {
+  const raw = m.name || m.model || '?';
+  const { shortName } = modelCanonical(raw);
+  const letter = shortName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase() || '??';
+
+  // Clock-wipe progress: remaining fraction of keep-alive window
+  // Ollama default keep_alive = 5 min after last use
+  const KEEP_ALIVE_MS = 5 * 60 * 1000;
+  const expiry = m.expires_at ? new Date(m.expires_at).getTime() : null;
+  const now    = Date.now();
+  let frac = 1;
+  let timeStr  = '';
+  if (expiry) {
+    const remaining = expiry - now;
+    frac = Math.max(0, Math.min(1, remaining / KEEP_ALIVE_MS));
+    if (remaining > 0) {
+      const s = Math.round(remaining / 1000);
+      timeStr = s >= 60 ? `${Math.floor(s/60)}m${(s%60).toString().padStart(2,'0')}s` : `${s}s`;
+    } else {
+      timeStr = 'expiring';
+    }
+  }
+
+  // SVG clock-wipe: stroke-dashoffset creates a clockwise-filling arc from 12 o'clock.
+  // frac=1 → full ring (fully loaded/fresh). frac→0 → ring empties (about to evict).
+  const R = 12, CX = 16, CY = 16;
+  const CIRC = 2 * Math.PI * R;
+  const dashOffset = CIRC * (1 - frac);
+  const arcColor = frac > 0.5 ? 'var(--green)' : frac > 0.2 ? 'var(--yellow)' : 'var(--red)';
+
+  // VRAM badge
+  const vramStr = m.size_vram ? `${(m.size_vram / 1048576).toFixed(0)}MB` : '';
+
+  return `<div class="sam-card" title="${esc(raw)}">
+    <div class="sam-icon-wrap">
+      <svg width="32" height="32" viewBox="0 0 32 32" style="overflow:visible">
+        <circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="var(--bg-border)" stroke-width="2.5"/>
+        <circle cx="${CX}" cy="${CY}" r="${R}" fill="none"
+          stroke="${arcColor}" stroke-width="2.5"
+          stroke-dasharray="${CIRC.toFixed(2)}" stroke-dashoffset="${dashOffset.toFixed(2)}"
+          stroke-linecap="round"
+          transform="rotate(-90 ${CX} ${CY})"/>
+      </svg>
+      <span class="sam-model-letter">${esc(letter)}</span>
+    </div>
+    <span class="sam-card-name">${esc(shortName)}</span>
+    <div class="sam-card-meta">
+      ${vramStr ? `<span style="color:var(--lavender)">${esc(vramStr)}</span>` : ''}
+      ${timeStr ? `<span style="font-family:monospace;font-size:9px">${esc(timeStr)}</span>` : ''}
+    </div>
+  </div>`;
+}
 
 // Persist and restore chat history across tab switches
 function saveChatHistory() {
@@ -3844,6 +4052,8 @@ const TOOLTIPS = {
   auto_token_budget:           'Trigger summarization when the conversation exceeds this many tokens.',
   auto_summary_model:          'Model used to generate the summary. Leave blank to reuse the active model.',
   auto_keep_last:              'Number of most-recent messages preserved verbatim after summarization.',
+  agg_sum_keep_last:           'Most-recent messages kept verbatim; everything older is bullet-compressed on every request.',
+  agg_sum_model:               'Model for aggressive summarization. Blank = reuse summary model.',
   // Routing (Phase 3)
   tier1_ttl:                   'Tier 1: Keep user sticky to their chosen model for this many seconds.',
   classifier_rebuild_interval: 'Tier 2: Rebuild classifier centroids every N seconds.',
@@ -8548,6 +8758,12 @@ async function loadConfig() {
     html += cfgInput('auto_keep_last',     'Keep last N messages',   c.auto_summarization?.keep_last ?? 4, 'number');
     html += `<div style="font-size:11px;color:var(--fg-dim);margin-top:6px">Model: See <strong>Models Registry</strong> section for summary model.</div>`;
     html += `</div>`;
+    html += cfgToggle('features_aggressive_summarization', 'Aggressive summarization', c.features?.aggressive_summarization ?? false);
+    html += `<div id="sub-features_aggressive_summarization" style="display:${c.features?.aggressive_summarization ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
+    html += cfgInput('agg_sum_keep_last', 'Keep last N messages', c.aggressive_summarization?.keep_last ?? 2, 'number');
+    html += cfgInput('agg_sum_model', 'Model (blank = summary model)', c.aggressive_summarization?.model ?? '', 'text');
+    html += `<div style="font-size:11px;color:var(--fg-dim);margin-top:6px">Runs on <strong>every</strong> request — bullets, not sentences.</div>`;
+    html += `</div>`;
     html += cfgToggle('features_system_context', 'System context injection', c.features?.system_context ?? false);
     html += cfgToggle('features_wiretap', 'Request/response logging', c.features?.wiretap ?? true);
     html += cfgToggle('features_payload_log', 'Full payload logging', c.features?.payload_log ?? false);
@@ -8775,7 +8991,7 @@ async function saveConfig() {
     // Features (normalized naming)
     'features_backends','features_decision_llm','features_classifier','features_semantic_cache',
     'features_operator','features_harness','features_tools','features_cost_tracking',
-    'features_conversation_replay','features_auto_summarization','features_system_context',
+    'features_conversation_replay','features_auto_summarization','features_aggressive_summarization','features_system_context',
     'features_wiretap','features_payload_log','features_wasm','features_guardrails',
     'features_amf_mesh','features_voice','features_hooks',
     // Other toggles
@@ -8785,13 +9001,13 @@ async function saveConfig() {
   ];
   const strings = [
     'default_model','operator_model','force_route','log_level','web_ui_palette',
-    'voice_hotkey','system_prompt_prefix','auto_summary_model',
+    'voice_hotkey','system_prompt_prefix','auto_summary_model','agg_sum_model',
     'stt_url','tts_url','tts_model','tts_voice',
     'wasm_default_module','browserbox_ws_url',
   ];
   const numbers = [
     'orchestrator_max_parallel','orchestrator_task_timeout','orchestrator_total_timeout',
-    'auto_token_budget','auto_keep_last',
+    'auto_token_budget','auto_keep_last','agg_sum_keep_last',
     'gen_temperature','gen_top_p','gen_top_k','gen_num_ctx',
     'gen_repeat_penalty','gen_max_tokens','gen_seed',
     'tts_speed',
@@ -9893,11 +10109,13 @@ async function loadStudio() {
     _studioPayloadEditor = makePayloadEditor('studio-payload-editor', buildStudioPayload);
   }
   _studioPayloadEditor.refresh();
+  samStart();
   studioMobileActivate('chat');
 }
 
 function stopStudio() {
   if (_studioCtxPollTimer) { clearInterval(_studioCtxPollTimer); _studioCtxPollTimer = null; }
+  samStop();
 }
 
 function studioStartContextPoll() {
@@ -9989,8 +10207,13 @@ async function studioLoadModels() {
   try {
     const d = await api('/v1/models');
     const models = (d.data || d.models || []).map(m => m.id || m.name || m).filter(Boolean);
+    // Show short canonical name in the label; store full name as value so routing still works
     sel.innerHTML = '<option value="">— server default —</option>'
-      + models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+      + models.map(m => {
+          const { shortName } = modelCanonical(m);
+          const label = shortName !== m ? `${shortName}  (${m})` : m;
+          return `<option value="${esc(m)}">${esc(label)}</option>`;
+        }).join('');
     try {
       const cfg = await api('/api/v1/config');
       if (cfg.default_model) sel.value = cfg.default_model;
@@ -10030,22 +10253,40 @@ async function studioLoadControls() {
 async function studioApply() {
   studioSetApplyStatus('Applying…', 'dim');
   const body = {};
-  const tempEl = document.getElementById('studio-temp');
-  if (tempEl) body.gen_temperature = parseFloat(tempEl.value);
-  const toppEl = document.getElementById('studio-topp');
-  if (toppEl) body.gen_top_p = parseFloat(toppEl.value);
-  const ctxEl = document.getElementById('studio-numctx');
-  if (ctxEl && ctxEl.value !== '') body.gen_num_ctx = parseInt(ctxEl.value);
+  const tempEl   = document.getElementById('studio-temp');
+  const toppEl   = document.getElementById('studio-topp');
+  const ctxEl    = document.getElementById('studio-numctx');
   const maxtokEl = document.getElementById('studio-maxtok');
+  const frEl     = document.getElementById('studio-force-route');
+  const spEl     = document.getElementById('studio-sysprefix');
+  const scEl     = document.getElementById('studio-sysctx-enabled');
+  const msel     = document.getElementById('studio-model-sel');
+  const devEl    = document.getElementById('studio-device');
+
+  if (tempEl)   body.gen_temperature = parseFloat(tempEl.value);
+  if (toppEl)   body.gen_top_p       = parseFloat(toppEl.value);
+  if (ctxEl && ctxEl.value !== '')   body.gen_num_ctx    = parseInt(ctxEl.value);
   body.gen_max_tokens = (maxtokEl && maxtokEl.value !== '') ? parseInt(maxtokEl.value) : null;
-  const frEl = document.getElementById('studio-force-route');
-  if (frEl) body.force_route = frEl.value.trim() || null;
-  const spEl = document.getElementById('studio-sysprefix');
-  if (spEl) body.system_prompt_prefix = spEl.value;
-  const scEl = document.getElementById('studio-sysctx-enabled');
-  if (scEl) body.system_context_enabled = scEl.checked;
-  const msel = document.getElementById('studio-model-sel');
+  if (frEl)     body.force_route           = frEl.value.trim() || null;
+  if (spEl)     body.system_prompt_prefix  = spEl.value;
+  if (scEl)     body.system_context_enabled = scEl.checked;
   if (msel && msel.value) body.default_model = msel.value;
+
+  // Save per-model profile to localStorage (settings keyed by canonical ID)
+  const rawModel = msel?.value || '';
+  if (rawModel) {
+    const { id } = modelCanonical(rawModel);
+    if (id) {
+      setModelProfile(id, {
+        temperature: tempEl ? parseFloat(tempEl.value) : undefined,
+        top_p:       toppEl ? parseFloat(toppEl.value) : undefined,
+        num_ctx:     (ctxEl && ctxEl.value !== '') ? parseInt(ctxEl.value) : null,
+        max_tokens:  (maxtokEl && maxtokEl.value !== '') ? parseInt(maxtokEl.value) : null,
+        device:      devEl?.value || '',
+      });
+    }
+  }
+
   try {
     await api('/api/v1/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
     studioSetApplyStatus('Applied ✓', 'ok');
