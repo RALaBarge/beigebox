@@ -33,12 +33,26 @@ from __future__ import annotations
 
 import copy
 import logging
+import pathlib
 from dataclasses import dataclass, field
 from typing import Any
 
 from beigebox.config import get_runtime_config, update_runtime_config
 
 logger = logging.getLogger(__name__)
+
+# ── Workspace output directory ─────────────────────────────────────────────
+# DGM writes output artifacts (run summaries, kept file patches) here.
+_WORKSPACE_OUT = pathlib.Path("workspace/out")
+
+
+# ── File patch allowlist ───────────────────────────────────────────────────
+# Maps relative file path → description.
+# Only files listed here can be patched by the DGM proposer.
+
+ALLOWED_FILE_PATHS: dict[str, str] = {
+    "system_context.md": "Global system prompt injected into every request (hot-reloaded)",
+}
 
 
 # ── Allowlist ──────────────────────────────────────────────────────────────
@@ -78,7 +92,7 @@ ALLOWED_KEYS: dict[str, tuple[tuple, str]] = {
 @dataclass
 class Patch:
     """
-    A proposed config change.
+    A proposed config key change.
 
     key:       Dot-notation config key (must be in ALLOWED_KEYS).
     value:     New value to apply.
@@ -89,7 +103,26 @@ class Patch:
     reasoning: str = ""
 
     def to_dict(self) -> dict:
-        return {"key": self.key, "value": self.value, "reasoning": self.reasoning}
+        return {"type": "config", "key": self.key, "value": self.value, "reasoning": self.reasoning}
+
+
+@dataclass
+class FilePatch:
+    """
+    A proposed file content change.
+
+    path:      Relative file path (must be in ALLOWED_FILE_PATHS).
+    content:   Full new file content.
+    reasoning: Why the proposer thinks this change will help.
+    """
+    path: str
+    content: str
+    reasoning: str = ""
+
+    def to_dict(self) -> dict:
+        return {"type": "file", "path": self.path,
+                "content": self.content[:200] + "…" if len(self.content) > 200 else self.content,
+                "reasoning": self.reasoning}
 
 
 @dataclass
@@ -210,6 +243,102 @@ class ConfigPatcher:
             ok,
         )
         return ok
+
+    # ── File patch support ─────────────────────────────────────────────────
+
+    def validate_file(self, patch: FilePatch) -> str | None:
+        """Validate a file patch. Returns None if valid, error string if not."""
+        if patch.path not in ALLOWED_FILE_PATHS:
+            return (
+                f"Path '{patch.path}' not in DGM file allowlist. "
+                f"Allowed: {sorted(ALLOWED_FILE_PATHS)}"
+            )
+        if not patch.content or not patch.content.strip():
+            return "File content cannot be empty"
+        if len(patch.content) > 8000:
+            return f"File content too large ({len(patch.content)} chars, max 8000)"
+        return None
+
+    def apply_file(self, patch: FilePatch) -> PatchResult:
+        """
+        Apply a file content patch.
+
+        Reads the current content as backup, writes new content via the
+        appropriate hot-reload-aware writer, and returns the original content.
+        """
+        error = self.validate_file(patch)
+        if error:
+            logger.warning("dgm.patcher.file_validate_failed path=%s error=%s", patch.path, error)
+            return PatchResult(ok=False, error=error)
+
+        if patch.path == "system_context.md":
+            from beigebox.config import get_config
+            from beigebox.system_context import read_context_file, write_context_file
+            cfg = get_config()
+            original = read_context_file(cfg)
+            ok = write_context_file(cfg, patch.content)
+            if not ok:
+                return PatchResult(ok=False, original=original,
+                                   error="write_context_file returned False")
+            logger.info("dgm.patcher.file_applied path=%s len=%d reason=%r",
+                        patch.path, len(patch.content), patch.reasoning[:80])
+            return PatchResult(ok=True, original=original)
+
+        # Generic file under workspace/out/
+        target = _WORKSPACE_OUT / patch.path
+        original_content = target.read_text(encoding="utf-8") if target.exists() else None
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(patch.content, encoding="utf-8")
+            logger.info("dgm.patcher.file_applied path=%s len=%d", patch.path, len(patch.content))
+            return PatchResult(ok=True, original=original_content)
+        except Exception as exc:
+            return PatchResult(ok=False, original=original_content, error=str(exc))
+
+    def revert_file(self, patch: FilePatch, original: str | None) -> bool:
+        """
+        Revert a file patch to its original content.
+
+        If original is None (file didn't exist before), the file is deleted.
+        """
+        if patch.path == "system_context.md":
+            from beigebox.config import get_config
+            from beigebox.system_context import write_context_file
+            cfg = get_config()
+            if original is None:
+                # File didn't exist — clear it
+                ok = write_context_file(cfg, "")
+            else:
+                ok = write_context_file(cfg, original)
+            logger.info("dgm.patcher.file_reverted path=%s ok=%s", patch.path, ok)
+            return ok
+
+        target = _WORKSPACE_OUT / patch.path
+        try:
+            if original is None:
+                target.unlink(missing_ok=True)
+            else:
+                target.write_text(original, encoding="utf-8")
+            logger.info("dgm.patcher.file_reverted path=%s", patch.path)
+            return True
+        except Exception as exc:
+            logger.warning("dgm.patcher.file_revert_failed path=%s error=%s", patch.path, exc)
+            return False
+
+    def archive_to_out(self, patch: FilePatch, run_id: str, iteration: int) -> None:
+        """
+        Archive a kept file patch to workspace/out/ for review.
+
+        Written as: workspace/out/dgm_{run_id}_{iteration:02d}_{basename}
+        """
+        try:
+            _WORKSPACE_OUT.mkdir(parents=True, exist_ok=True)
+            stem = pathlib.Path(patch.path).name
+            dest = _WORKSPACE_OUT / f"dgm_{run_id}_{iteration:02d}_{stem}"
+            dest.write_text(patch.content, encoding="utf-8")
+            logger.info("dgm.patcher.archived path=%s dest=%s", patch.path, dest)
+        except Exception as exc:
+            logger.warning("dgm.patcher.archive_failed: %s", exc)
 
     def _get_nested(self, d: dict, dotkey: str) -> Any:
         """

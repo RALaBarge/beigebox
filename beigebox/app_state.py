@@ -48,3 +48,8 @@ class AppState:
     # Runtime registry: run_id → asyncio.Queue for harness steering injection.
     # Registered by active harness/ralph runs, consumed by /inject endpoint.
     harness_injection_queues: dict[str, asyncio.Queue] = field(default_factory=dict)
+    # DGM run history (in-memory, last 20 runs). Each entry is a summary dict.
+    dgm_run_history: list[dict] = field(default_factory=list)
+    # DGM baselines: run_id → full runtime_config snapshot taken before the run.
+    # Used by the revert endpoint to restore pre-run state.
+    dgm_baselines: dict[str, dict] = field(default_factory=dict)

@@ -363,3 +363,38 @@ def update_runtime_config(key: str, value) -> bool:
             os.access(_RUNTIME_CONFIG_PATH.parent, os.W_OK),
         )
         return False
+
+
+def write_runtime_config(data: dict) -> bool:
+    """
+    Atomically replace the entire runtime_config.yaml with the given data dict.
+
+    The data should be a dict whose contents will be wrapped in a ``runtime:`` key,
+    matching the expected file structure. Used by the DGM revert endpoint to restore
+    a pre-run snapshot.
+
+    Returns True on success.
+    """
+    import tempfile as _tempfile
+    try:
+        if not _RUNTIME_CONFIG_PATH.parent.exists():
+            return False
+        full = {"runtime": data}
+        tmp_fd, tmp_path = _tempfile.mkstemp(
+            dir=_RUNTIME_CONFIG_PATH.parent, suffix=".tmp"
+        )
+        try:
+            import yaml as _yaml
+            with os.fdopen(tmp_fd, "w") as f:
+                _yaml.dump(full, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+            os.replace(tmp_path, _RUNTIME_CONFIG_PATH)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+        return True
+    except Exception as e:
+        _log.getLogger(__name__).error("write_runtime_config failed: %s", e)
+        return False
