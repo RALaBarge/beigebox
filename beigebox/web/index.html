@@ -708,6 +708,104 @@
     50%       { box-shadow: 0 0 0 5px rgba(191, 97, 106, 0); }
   }
 
+  /* ── Voice/Vision panel ─────────────────────────────────────────────── */
+  #voice-container {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+  #voice-camera-row {
+    display: flex;
+    gap: 10px;
+    padding: 10px 14px;
+    align-items: flex-start;
+    flex-shrink: 0;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--bg-border);
+  }
+  #voice-video {
+    width: 192px;
+    height: 144px;
+    object-fit: cover;
+    border: 1px solid var(--bg-border);
+    border-radius: 2px;
+    background: #0a0a0a;
+    flex-shrink: 0;
+  }
+  #voice-status-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+  #voice-status-badge {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 2px;
+    background: var(--bg-border);
+    color: var(--fg-dim);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    width: fit-content;
+    transition: background 0.2s, color 0.2s;
+  }
+  #voice-status-badge.listening  { background: #162116; color: var(--green); }
+  #voice-status-badge.speaking   { background: #231313; color: var(--red); }
+  #voice-status-badge.thinking   { background: #161621; color: var(--lavender); }
+  #voice-status-badge.responding { background: #141e21; color: var(--cyan); }
+  #voice-status-badge.loading    { background: var(--bg-border); color: var(--fg-muted); }
+  #voice-vad-bar {
+    height: 3px;
+    background: var(--bg-border);
+    border-radius: 2px;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  #voice-vad-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--green);
+    transition: width 0.08s linear;
+  }
+  #voice-controls {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  #voice-transcript {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+  }
+  .voice-turn { display: flex; flex-direction: column; gap: 2px; }
+  .voice-turn-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--fg-muted);
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  .voice-turn-label.user-lbl  { color: var(--cyan); }
+  .voice-turn-label.asst-lbl  { color: var(--lavender); }
+  .voice-turn-text {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--fg);
+    padding: 3px 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .voice-turn-text.user-txt { color: var(--fg-dim); }
+
   /* ── Multi-pane chat ─────────────────────────────────────────────────── */
   #chat-pane-container {
     flex: 1;
@@ -1750,6 +1848,7 @@
     <div class="subnav">
       <button id="chat-sub-direct-btn" class="subnav-active" onclick="switchChatSub('direct')">Direct</button>
       <button id="chat-sub-agent-btn" onclick="switchChatSub('agent')">Agent</button>
+      <button id="chat-sub-voice-btn" onclick="switchChatSub('voice')">Voice</button>
     </div>
 
     <!-- Direct sub-view -->
@@ -1868,6 +1967,40 @@
         </div>
       </div>
     </div><!-- /chat-sub-agent -->
+
+    <!-- Voice/Vision sub-view -->
+    <div id="chat-sub-voice" style="display:none;flex-direction:column;flex:1;min-height:0">
+      <div id="voice-container">
+        <div id="voice-camera-row">
+          <video id="voice-video" autoplay muted playsinline></video>
+          <div id="voice-status-col">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <span id="voice-status-badge">● idle</span>
+              <button id="voice-camera-toggle" onclick="voiceToggleCamera()" style="font-size:11px;padding:2px 10px">📷 off</button>
+            </div>
+            <div id="voice-vad-bar"><div id="voice-vad-fill"></div></div>
+            <div id="voice-controls">
+              <button id="voice-start-btn" class="primary" onclick="voiceStart()" style="padding:4px 18px">▶ Start</button>
+              <button id="voice-stop-btn" onclick="voiceStop()" style="display:none;padding:4px 18px;background:var(--red);color:#fff">■ Stop</button>
+              <select id="voice-model" style="height:26px;font-size:11px;padding:2px 6px;min-width:140px">
+                <option value="">— model (default) —</option>
+              </select>
+              <select id="voice-tts-voice" style="height:26px;font-size:11px;padding:2px 6px">
+                <option value="af_bella">af_bella</option>
+                <option value="af_sarah">af_sarah</option>
+                <option value="alloy">alloy</option>
+                <option value="echo">echo</option>
+                <option value="af">af</option>
+                <option value="am_adam">am_adam</option>
+              </select>
+              <button onclick="voiceClearTranscript()" style="font-size:11px;padding:2px 8px">✕ Clear</button>
+            </div>
+            <div id="voice-error" style="font-size:11px;color:var(--red);display:none"></div>
+          </div>
+        </div>
+        <div id="voice-transcript"></div>
+      </div>
+    </div><!-- /chat-sub-voice -->
   </div>
 
   <!-- 3. Tap (includes Conversations) -->
@@ -3281,11 +3414,16 @@ updateClock();
 // ── Tab switching ───────────────────────────────────────────────────────────
 function switchChatSub(sub) {
   const isAgent = sub === 'agent';
-  document.getElementById('chat-sub-direct').style.display = isAgent ? 'none' : 'flex';
-  document.getElementById('chat-sub-agent').style.display  = isAgent ? 'flex' : 'none';
-  document.getElementById('chat-sub-direct-btn').classList.toggle('subnav-active', !isAgent);
+  const isVoice = sub === 'voice';
+  const isDirect = !isAgent && !isVoice;
+  document.getElementById('chat-sub-direct').style.display = isDirect ? 'flex' : 'none';
+  document.getElementById('chat-sub-agent').style.display  = isAgent  ? 'flex' : 'none';
+  document.getElementById('chat-sub-voice').style.display  = isVoice  ? 'flex' : 'none';
+  document.getElementById('chat-sub-direct-btn').classList.toggle('subnav-active', isDirect);
   document.getElementById('chat-sub-agent-btn').classList.toggle('subnav-active',  isAgent);
+  document.getElementById('chat-sub-voice-btn').classList.toggle('subnav-active',  isVoice);
   if (isAgent) { loadOpTargets(); hideOpBgIndicator(); }
+  if (isVoice) { _voiceTabOpened(); }
 }
 
 function switchTapSub(sub) {
@@ -5613,6 +5751,11 @@ async function sendToPane(pane, text, forceOp) {
           }
         }
         pane.history.push({ role: 'assistant', content: fullText, model: model || 'assistant' });
+        // Render markdown on final text (streaming used plain textContent)
+        if (assistantDiv) {
+          const bub = assistantDiv.querySelector('.bubble');
+          if (bub) bub.innerHTML = _formatOutput(fullText);
+        }
         updateCtxUsage(pane);
         // force_reload is one-shot — clear after use so next send doesn't re-evict
         if (pane.config?.force_reload) {
@@ -5817,6 +5960,324 @@ async function _transcribeAudio() {
   btn.addEventListener('touchend', e => { e.preventDefault(); stopRecording(); }, { passive: false });
 })();
 // ── End Voice ─────────────────────────────────────────────────────────────────
+
+// ── Voice/Vision — Silero VAD + STT + vision LLM + TTS ───────────────────────
+//
+// Pipeline per turn:
+//   Silero VAD detects speech end → Float32 PCM → WAV → Whisper STT
+//   → optional camera JPEG → /v1/chat/completions (stream)
+//   → sentence-level → /v1/audio/speech (Kokoro) → AudioContext playback
+//   Barge-in: new speech start cancels current TTS + LLM stream.
+
+const _VAD_ORT_VER = '1.21.0';
+const _VAD_LIB_VER = '0.0.22';
+
+let _vadMic        = null;
+let _voiceActive   = false;   // session running
+let _cameraStream  = null;
+let _cameraOn      = false;
+let _vadLibReady   = false;
+let _voiceHistory  = [];      // [{role, content}] multi-turn context
+let _voiceAbort    = null;    // AbortController for LLM stream
+let _voiceTtsCtx   = null;
+let _voiceTtsSrc   = null;    // current AudioBufferSourceNode
+
+function _loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = src; s.onload = resolve; s.onerror = () => reject(new Error('Failed: ' + src));
+    document.head.appendChild(s);
+  });
+}
+
+async function _loadVadLib() {
+  if (_vadLibReady) return;
+  await _loadScript(`https://cdn.jsdelivr.net/npm/onnxruntime-web@${_VAD_ORT_VER}/dist/ort.min.js`);
+  await _loadScript(`https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@${_VAD_LIB_VER}/dist/bundle.min.js`);
+  if (window.ort) {
+    ort.env.wasm.wasmPaths = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${_VAD_ORT_VER}/dist/`;
+  }
+  _vadLibReady = true;
+}
+
+async function _voiceTabOpened() {
+  // Populate model selector once
+  const sel = document.getElementById('voice-model');
+  if (sel && sel.options.length <= 1) {
+    try {
+      const data = await fetch(BASE + '/v1/models').then(r => r.json());
+      (data.data || []).forEach(m => {
+        const o = document.createElement('option');
+        o.value = m.id; o.textContent = m.id;
+        sel.appendChild(o);
+      });
+    } catch {}
+  }
+}
+
+async function voiceStart() {
+  const errEl = document.getElementById('voice-error');
+  if (errEl) errEl.style.display = 'none';
+  _voiceSetStatus('loading', '◌ loading…');
+  try {
+    await _loadVadLib();
+  } catch(e) {
+    _voiceError('VAD library failed to load. Check network connection.');
+    _voiceSetStatus('', '● idle');
+    return;
+  }
+
+  _voiceActive = true;
+  document.getElementById('voice-start-btn').style.display = 'none';
+  document.getElementById('voice-stop-btn').style.display  = '';
+
+  try {
+    _vadMic = await window.vad.MicVAD.new({
+      positiveSpeechThreshold: 0.8,
+      negativeSpeechThreshold: 0.35,
+      preSpeechPadFrames: 10,
+      minSpeechFrames: 4,
+      onSpeechStart: () => {
+        if (!_voiceActive) return;
+        _voiceSetStatus('speaking', '◉ speaking');
+        // Barge-in: cancel TTS and any in-flight LLM stream
+        _voiceTtsStop();
+        if (_voiceAbort) { _voiceAbort.abort(); _voiceAbort = null; }
+      },
+      onSpeechEnd: async (audio) => {
+        if (!_voiceActive) return;
+        _voiceSetStatus('thinking', '◎ thinking…');
+        await _voiceTurn(audio);
+        if (_voiceActive) _voiceSetStatus('listening', '● listening');
+      },
+    });
+    _vadMic.start();
+    _voiceSetStatus('listening', '● listening');
+  } catch(e) {
+    _voiceError('Mic access denied or VAD init failed: ' + (e.message || e));
+    voiceStop();
+  }
+}
+
+function voiceStop() {
+  _voiceActive = false;
+  if (_vadMic) { try { _vadMic.destroy(); } catch {} _vadMic = null; }
+  if (_voiceAbort) { _voiceAbort.abort(); _voiceAbort = null; }
+  _voiceTtsStop();
+  document.getElementById('voice-start-btn').style.display = '';
+  document.getElementById('voice-stop-btn').style.display  = 'none';
+  _voiceSetStatus('', '● idle');
+}
+
+async function voiceToggleCamera() {
+  if (_cameraOn) {
+    if (_cameraStream) { _cameraStream.getTracks().forEach(t => t.stop()); _cameraStream = null; }
+    const v = document.getElementById('voice-video');
+    if (v) v.srcObject = null;
+    _cameraOn = false;
+    const btn = document.getElementById('voice-camera-toggle');
+    if (btn) btn.textContent = '📷 off';
+  } else {
+    try {
+      _cameraStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
+      const v = document.getElementById('voice-video');
+      if (v) v.srcObject = _cameraStream;
+      _cameraOn = true;
+      const btn = document.getElementById('voice-camera-toggle');
+      if (btn) btn.textContent = '📷 on';
+    } catch(e) {
+      _voiceError('Camera access denied: ' + (e.message || e));
+    }
+  }
+}
+
+function _captureFrame() {
+  if (!_cameraOn) return null;
+  const v = document.getElementById('voice-video');
+  if (!v || !v.srcObject || v.videoWidth === 0) return null;
+  const c = document.createElement('canvas');
+  c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext('2d').drawImage(v, 0, 0);
+  return c.toDataURL('image/jpeg', 0.7).split(',')[1];
+}
+
+// Float32Array PCM (16 kHz mono) → WAV Blob
+function _pcmToWav(pcm, sr) {
+  const buf  = new ArrayBuffer(44 + pcm.length * 2);
+  const view = new DataView(buf);
+  const w16  = (o, v) => view.setUint16(o, v, true);
+  const w32  = (o, v) => view.setUint32(o, v, true);
+  const wStr = (o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
+  wStr(0, 'RIFF'); w32(4, 36 + pcm.length * 2); wStr(8, 'WAVE');
+  wStr(12, 'fmt '); w32(16, 16); w16(20, 1); w16(22, 1);
+  w32(24, sr); w32(28, sr * 2); w16(32, 2); w16(34, 16);
+  wStr(36, 'data'); w32(40, pcm.length * 2);
+  let off = 44;
+  for (let i = 0; i < pcm.length; i++, off += 2) {
+    const s = Math.max(-1, Math.min(1, pcm[i]));
+    view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+
+async function _voiceTurn(audio) {
+  // 1. STT via Whisper
+  const wav  = _pcmToWav(audio, 16000);
+  const form = new FormData();
+  form.append('file', wav, 'speech.wav');
+  form.append('model', 'whisper-1');
+  let transcript;
+  try {
+    const r = await fetch(BASE + '/v1/audio/transcriptions', { method: 'POST', body: form });
+    if (!r.ok) throw new Error(`STT ${r.status}`);
+    transcript = ((await r.json()).text || '').trim();
+  } catch(e) {
+    _voiceError('STT error: ' + (e.message || e));
+    return;
+  }
+  if (!transcript) return;
+
+  // 2. Show user turn
+  _voiceAppendTurn('user', transcript);
+
+  // 3. Build user content — vision if camera active
+  const frameB64   = _captureFrame();
+  const userContent = frameB64
+    ? [ { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frameB64}` } },
+        { type: 'text', text: transcript } ]
+    : transcript;
+
+  _voiceHistory.push({ role: 'user', content: userContent });
+
+  const msgs = [
+    { role: 'system', content: 'You are a helpful voice assistant. Keep responses concise (1-3 sentences) and conversational.' },
+    ..._voiceHistory,
+  ];
+
+  // 4. Stream LLM response
+  const model = document.getElementById('voice-model')?.value || undefined;
+  _voiceAbort  = new AbortController();
+  let fullText  = '';
+  let sentBuf   = '';
+  const turnEl  = _voiceAppendTurn('assistant', '');
+  const textEl  = turnEl?.querySelector('.voice-turn-text');
+  _voiceSetStatus('responding', '▶ responding…');
+
+  try {
+    const resp = await fetch(BASE + '/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer beigebox' },
+      body: JSON.stringify({ ...(model ? { model } : {}), messages: msgs, stream: true }),
+      signal: _voiceAbort.signal,
+    });
+    if (!resp.ok) throw new Error(`LLM ${resp.status}`);
+
+    const reader = resp.body.getReader();
+    const dec    = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      for (const line of dec.decode(value, { stream: true }).split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6);
+        if (raw === '[DONE]') break;
+        try {
+          const delta = JSON.parse(raw).choices?.[0]?.delta?.content || '';
+          if (!delta) continue;
+          fullText += delta;
+          sentBuf  += delta;
+          if (textEl) textEl.textContent = fullText;
+          // Flush on sentence boundary
+          const m = sentBuf.match(/^([\s\S]*?[.!?])\s+/);
+          if (m) {
+            const sentence = m[1].trim();
+            sentBuf = sentBuf.slice(m[0].length);
+            _voiceTtsPlay(sentence);   // fire-and-forget; sentences queue via await chain
+          }
+        } catch {}
+      }
+    }
+    // Flush remainder
+    if (sentBuf.trim()) await _voiceTtsPlay(sentBuf.trim());
+  } catch(e) {
+    if (e.name !== 'AbortError') _voiceError('LLM error: ' + (e.message || e));
+  }
+
+  if (fullText) _voiceHistory.push({ role: 'assistant', content: fullText });
+  _voiceAbort = null;
+}
+
+// ── TTS playback ─────────────────────────────────────────────────────────────
+function _voiceTtsCtxGet() {
+  if (!_voiceTtsCtx) _voiceTtsCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (_voiceTtsCtx.state === 'suspended') _voiceTtsCtx.resume();
+  return _voiceTtsCtx;
+}
+
+function _voiceTtsStop() {
+  if (_voiceTtsSrc) { try { _voiceTtsSrc.stop(); } catch {} _voiceTtsSrc = null; }
+}
+
+async function _voiceTtsPlay(text) {
+  if (!text?.trim()) return;
+  const voice = document.getElementById('voice-tts-voice')?.value || 'af_bella';
+  try {
+    const resp = await fetch(BASE + '/v1/audio/speech', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer beigebox' },
+      body: JSON.stringify({ model: 'kokoro', input: text, voice, speed: 1.0 }),
+    });
+    if (!resp.ok) return;
+    const ctx   = _voiceTtsCtxGet();
+    const audio = await ctx.decodeAudioData(await resp.arrayBuffer());
+    return new Promise(resolve => {
+      _voiceTtsStop();
+      const src  = ctx.createBufferSource();
+      src.buffer = audio;
+      src.connect(ctx.destination);
+      src.onended = () => { _voiceTtsSrc = null; resolve(); };
+      _voiceTtsSrc = src;
+      src.start(0);
+    });
+  } catch {}
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+function _voiceSetStatus(cls, label) {
+  const el = document.getElementById('voice-status-badge');
+  if (!el) return;
+  el.className = cls || '';
+  el.textContent = label;
+}
+
+function _voiceError(msg) {
+  const el = document.getElementById('voice-error');
+  if (el) { el.textContent = msg; el.style.display = ''; }
+  console.error('[Voice]', msg);
+}
+
+function _voiceAppendTurn(role, text) {
+  const c = document.getElementById('voice-transcript');
+  if (!c) return null;
+  const d  = document.createElement('div');
+  d.className = 'voice-turn';
+  const isUser = role === 'user';
+  d.innerHTML  =
+    `<div class="voice-turn-label ${isUser ? 'user-lbl' : 'asst-lbl'}">${isUser ? 'you' : 'assistant'}</div>` +
+    `<div class="voice-turn-text ${isUser ? 'user-txt' : ''}">${text}</div>`;
+  c.appendChild(d);
+  c.scrollTop = c.scrollHeight;
+  return d;
+}
+
+function voiceClearTranscript() {
+  const c = document.getElementById('voice-transcript');
+  if (c) c.innerHTML = '';
+  _voiceHistory = [];
+}
+
+// ── End Voice/Vision ──────────────────────────────────────────────────────────
 
 // Legacy compatibility for any code that calls appendMsg
 function appendMsg(role, text, model) {
@@ -6601,18 +7062,22 @@ function _formatOutput(text) {
       continue;
     }
 
-    // Markdown: headers, bold, lists
-    let formatted = line
-      .replace(/^### (.*)/g, '<strong style="color:var(--lavender);font-size:13px">### $1</strong>')
-      .replace(/^## (.*)/g, '<strong style="color:var(--lavender);font-size:14px">## $1</strong>')
-      .replace(/^# (.*)/g, '<strong style="color:var(--lavender);font-size:15px"># $1</strong>')
+    // Markdown: headers, bold, italic, inline code, lists
+    // Escape raw text first so user content can't inject HTML,
+    // then apply markdown patterns to the safe escaped string.
+    let safe = esc(line);
+    let formatted = safe
+      .replace(/^### (.*)/g, '<strong style="color:var(--lavender);font-size:13px">$1</strong>')
+      .replace(/^## (.*)/g, '<strong style="color:var(--lavender);font-size:14px">$1</strong>')
+      .replace(/^# (.*)/g, '<strong style="color:var(--lavender);font-size:15px">$1</strong>')
       .replace(/\*\*(.*?)\*\*/g, '<strong style="color:var(--yellow)">$1</strong>')
       .replace(/_(.*?)_/g, '<em style="color:var(--fg-muted)">$1</em>')
+      .replace(/`([^`]+)`/g, '<code style="background:var(--bg-input);padding:1px 4px;border-radius:2px;font-size:0.9em;color:var(--cyan)">$1</code>')
       .replace(/^- (.*)/, '• $1')
       .replace(/^  - (.*)/, '  ◦ $1');
 
     if (formatted || !html) {
-      html += `<div style="color:var(--fg-dim);margin:2px 0;line-height:1.5">${esc(formatted)}</div>`;
+      html += `<div style="color:var(--fg-dim);margin:2px 0;line-height:1.5">${formatted}</div>`;
     }
   }
 
@@ -8325,6 +8790,11 @@ async function harnessEnsembleRun() {
               cards[ev.winner].style.borderColor = 'var(--green)';
               cards[ev.winner].style.borderWidth = '2px';
             }
+            // Render markdown in all card bodies now that responses are complete
+            Object.values(cards).forEach(card => {
+              const body = card.querySelector('.card-body');
+              if (body && body.textContent) body.innerHTML = _formatOutput(body.textContent);
+            });
           } else if (ev.type === 'error') {
             banner.innerHTML = `<div class="error-box">Error: ${esc(ev.message)}</div>`;
           }
