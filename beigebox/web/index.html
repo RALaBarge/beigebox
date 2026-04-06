@@ -5966,21 +5966,32 @@ async function _transcribeAudio() {
 // Pipeline per turn:
 //   Silero VAD detects speech end → Float32 PCM → WAV → Whisper STT
 //   → optional camera JPEG → /v1/chat/completions (stream)
-//   → sentence-level → /v1/audio/speech (Kokoro) → AudioContext playback
-//   Barge-in: new speech start cancels current TTS + LLM stream.
+//   → sentence-level serial TTS queue → /v1/audio/speech (Kokoro) → AudioContext
+//   Barge-in: onSpeechStart cancels current TTS + LLM stream + drains queue.
 
 const _VAD_ORT_VER = '1.21.0';
 const _VAD_LIB_VER = '0.0.22';
+const _VOICE_HISTORY_MAX   = 8;   // max turns kept; older turns have images stripped
 
-let _vadMic        = null;
-let _voiceActive   = false;   // session running
-let _cameraStream  = null;
-let _cameraOn      = false;
-let _vadLibReady   = false;
-let _voiceHistory  = [];      // [{role, content}] multi-turn context
-let _voiceAbort    = null;    // AbortController for LLM stream
-let _voiceTtsCtx   = null;
-let _voiceTtsSrc   = null;    // current AudioBufferSourceNode
+let _vadMic            = null;
+let _voiceActive       = false;   // session running
+let _voiceTurnInFlight = false;   // concurrent-turn guard
+let _cameraStream      = null;
+let _cameraOn          = false;
+let _vadLibReady       = false;
+let _voiceHistory      = [];      // [{role, content}] multi-turn context (capped)
+let _voiceAbort        = null;    // AbortController for LLM stream
+let _voiceTtsCtx       = null;
+let _voiceTtsSrc       = null;    // current AudioBufferSourceNode
+let _voiceTtsQueue     = [];      // serial sentence queue
+let _voiceTtsDraining  = false;   // drain loop running
+
+// Auth header — mirrors window._bbApiKey pattern used throughout the app
+function _voiceAuthHeader() {
+  return window._bbApiKey
+    ? { 'Authorization': `Bearer ${window._bbApiKey}` }
+    : { 'Authorization': 'Bearer beigebox' };
+}
 
 function _loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -5995,8 +6006,11 @@ async function _loadVadLib() {
   if (_vadLibReady) return;
   await _loadScript(`https://cdn.jsdelivr.net/npm/onnxruntime-web@${_VAD_ORT_VER}/dist/ort.min.js`);
   await _loadScript(`https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@${_VAD_LIB_VER}/dist/bundle.min.js`);
+  // Set WASM paths before marking ready — must succeed even if ort isn't exposed
   if (window.ort) {
     ort.env.wasm.wasmPaths = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${_VAD_ORT_VER}/dist/`;
+  } else {
+    throw new Error('onnxruntime-web loaded but window.ort not found');
   }
   _vadLibReady = true;
 }
@@ -6014,9 +6028,26 @@ async function _voiceTabOpened() {
       });
     } catch {}
   }
+  // Show unconfigured warning if voice services not enabled
+  const startBtn = document.getElementById('voice-start-btn');
+  const errEl    = document.getElementById('voice-error');
+  if (startBtn && errEl) {
+    try {
+      const cfg = await fetch(BASE + '/api/v1/config').then(r => r.json());
+      if (!cfg.features?.voice && !cfg.voice?.stt_url) {
+        errEl.textContent = 'Voice services not configured — enable features_voice and set stt_url in Settings.';
+        errEl.style.display = '';
+        startBtn.disabled = true;
+      } else {
+        errEl.style.display = 'none';
+        startBtn.disabled = false;
+      }
+    } catch {}
+  }
 }
 
 async function voiceStart() {
+  if (_voiceActive) return;  // double-start guard
   const errEl = document.getElementById('voice-error');
   if (errEl) errEl.style.display = 'none';
   _voiceSetStatus('loading', '◌ loading…');
@@ -6041,14 +6072,16 @@ async function voiceStart() {
       onSpeechStart: () => {
         if (!_voiceActive) return;
         _voiceSetStatus('speaking', '◉ speaking');
-        // Barge-in: cancel TTS and any in-flight LLM stream
+        // Barge-in: cancel TTS queue + in-flight LLM stream
+        _voiceTtsQueue = [];
         _voiceTtsStop();
         if (_voiceAbort) { _voiceAbort.abort(); _voiceAbort = null; }
       },
       onSpeechEnd: async (audio) => {
-        if (!_voiceActive) return;
+        if (!_voiceActive || _voiceTurnInFlight) return;  // concurrent-turn guard
+        _voiceTurnInFlight = true;
         _voiceSetStatus('thinking', '◎ thinking…');
-        await _voiceTurn(audio);
+        try { await _voiceTurn(audio); } finally { _voiceTurnInFlight = false; }
         if (_voiceActive) _voiceSetStatus('listening', '● listening');
       },
     });
@@ -6061,7 +6094,9 @@ async function voiceStart() {
 }
 
 function voiceStop() {
-  _voiceActive = false;
+  _voiceActive       = false;
+  _voiceTurnInFlight = false;
+  _voiceTtsQueue     = [];
   if (_vadMic) { try { _vadMic.destroy(); } catch {} _vadMic = null; }
   if (_voiceAbort) { _voiceAbort.abort(); _voiceAbort = null; }
   _voiceTtsStop();
@@ -6129,7 +6164,11 @@ async function _voiceTurn(audio) {
   form.append('model', 'whisper-1');
   let transcript;
   try {
-    const r = await fetch(BASE + '/v1/audio/transcriptions', { method: 'POST', body: form });
+    const r = await fetch(BASE + '/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: _voiceAuthHeader(),
+      body: form,
+    });
     if (!r.ok) throw new Error(`STT ${r.status}`);
     transcript = ((await r.json()).text || '').trim();
   } catch(e) {
@@ -6142,20 +6181,31 @@ async function _voiceTurn(audio) {
   _voiceAppendTurn('user', transcript);
 
   // 3. Build user content — vision if camera active
-  const frameB64   = _captureFrame();
+  const frameB64    = _captureFrame();
   const userContent = frameB64
     ? [ { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frameB64}` } },
         { type: 'text', text: transcript } ]
     : transcript;
 
+  // 4. Cap history: keep last N turns, strip images from older entries
   _voiceHistory.push({ role: 'user', content: userContent });
+  if (_voiceHistory.length > _VOICE_HISTORY_MAX) {
+    _voiceHistory = _voiceHistory.slice(-_VOICE_HISTORY_MAX);
+  }
+  // Strip image_url from turns not in the last 2 (saves context window)
+  const historyForRequest = _voiceHistory.map((m, i, arr) => {
+    if (i < arr.length - 2 && Array.isArray(m.content)) {
+      return { ...m, content: m.content.filter(c => c.type !== 'image_url') };
+    }
+    return m;
+  });
 
   const msgs = [
     { role: 'system', content: 'You are a helpful voice assistant. Keep responses concise (1-3 sentences) and conversational.' },
-    ..._voiceHistory,
+    ...historyForRequest,
   ];
 
-  // 4. Stream LLM response
+  // 5. Stream LLM response
   const model = document.getElementById('voice-model')?.value || undefined;
   _voiceAbort  = new AbortController();
   let fullText  = '';
@@ -6167,7 +6217,7 @@ async function _voiceTurn(audio) {
   try {
     const resp = await fetch(BASE + '/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer beigebox' },
+      headers: { 'Content-Type': 'application/json', ..._voiceAuthHeader() },
       body: JSON.stringify({ ...(model ? { model } : {}), messages: msgs, stream: true }),
       signal: _voiceAbort.signal,
     });
@@ -6188,18 +6238,17 @@ async function _voiceTurn(audio) {
           fullText += delta;
           sentBuf  += delta;
           if (textEl) textEl.textContent = fullText;
-          // Flush on sentence boundary
-          const m = sentBuf.match(/^([\s\S]*?[.!?])\s+/);
+          // Enqueue at sentence boundary (serial drain prevents overlapping audio)
+          const m = sentBuf.match(/^(.*?[.!?])\s+/);
           if (m) {
-            const sentence = m[1].trim();
+            _voiceTtsEnqueue(m[1].trim());
             sentBuf = sentBuf.slice(m[0].length);
-            _voiceTtsPlay(sentence);   // fire-and-forget; sentences queue via await chain
           }
         } catch {}
       }
     }
     // Flush remainder
-    if (sentBuf.trim()) await _voiceTtsPlay(sentBuf.trim());
+    if (sentBuf.trim()) _voiceTtsEnqueue(sentBuf.trim());
   } catch(e) {
     if (e.name !== 'AbortError') _voiceError('LLM error: ' + (e.message || e));
   }
@@ -6208,7 +6257,10 @@ async function _voiceTurn(audio) {
   _voiceAbort = null;
 }
 
-// ── TTS playback ─────────────────────────────────────────────────────────────
+// ── TTS playback — serial queue ───────────────────────────────────────────────
+// Sentences are enqueued and drained one-at-a-time so they play in order.
+// Barge-in clears _voiceTtsQueue + stops the current source before enqueueing.
+
 function _voiceTtsCtxGet() {
   if (!_voiceTtsCtx) _voiceTtsCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (_voiceTtsCtx.state === 'suspended') _voiceTtsCtx.resume();
@@ -6219,19 +6271,34 @@ function _voiceTtsStop() {
   if (_voiceTtsSrc) { try { _voiceTtsSrc.stop(); } catch {} _voiceTtsSrc = null; }
 }
 
-async function _voiceTtsPlay(text) {
+function _voiceTtsEnqueue(text) {
+  if (!text?.trim()) return;
+  _voiceTtsQueue.push(text);
+  if (!_voiceTtsDraining) _voiceTtsDrain();
+}
+
+async function _voiceTtsDrain() {
+  _voiceTtsDraining = true;
+  while (_voiceTtsQueue.length > 0) {
+    const text = _voiceTtsQueue.shift();
+    await _voiceTtsPlayOne(text);
+  }
+  _voiceTtsDraining = false;
+}
+
+async function _voiceTtsPlayOne(text) {
   if (!text?.trim()) return;
   const voice = document.getElementById('voice-tts-voice')?.value || 'af_bella';
   try {
     const resp = await fetch(BASE + '/v1/audio/speech', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer beigebox' },
+      headers: { 'Content-Type': 'application/json', ..._voiceAuthHeader() },
       body: JSON.stringify({ model: 'kokoro', input: text, voice, speed: 1.0 }),
     });
     if (!resp.ok) return;
     const ctx   = _voiceTtsCtxGet();
     const audio = await ctx.decodeAudioData(await resp.arrayBuffer());
-    return new Promise(resolve => {
+    await new Promise(resolve => {
       _voiceTtsStop();
       const src  = ctx.createBufferSource();
       src.buffer = audio;
@@ -6260,12 +6327,13 @@ function _voiceError(msg) {
 function _voiceAppendTurn(role, text) {
   const c = document.getElementById('voice-transcript');
   if (!c) return null;
-  const d  = document.createElement('div');
-  d.className = 'voice-turn';
+  const d      = document.createElement('div');
+  d.className  = 'voice-turn';
   const isUser = role === 'user';
+  // Use esc() to prevent XSS from STT transcripts or model output
   d.innerHTML  =
     `<div class="voice-turn-label ${isUser ? 'user-lbl' : 'asst-lbl'}">${isUser ? 'you' : 'assistant'}</div>` +
-    `<div class="voice-turn-text ${isUser ? 'user-txt' : ''}">${text}</div>`;
+    `<div class="voice-turn-text ${isUser ? 'user-txt' : ''}">${esc(text)}</div>`;
   c.appendChild(d);
   c.scrollTop = c.scrollHeight;
   return d;
