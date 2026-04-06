@@ -251,7 +251,6 @@ services:
   whisper-apple:
     profiles: [apple]
     image: fedirz/faster-whisper-server:latest-cpu
-    platform: linux/arm64
     container_name: beigebox-whisper-apple
     ports:
       - "${WHISPER_PORT:-9000}:8000"
@@ -283,7 +282,6 @@ services:
   kokoro-apple:
     profiles: [apple]
     image: ghcr.io/remsky/kokoro-fastapi-cpu:latest-arm64
-    platform: linux/arm64
     container_name: beigebox-kokoro-apple
     ports:
       - "${KOKORO_PORT:-8880}:8880"
