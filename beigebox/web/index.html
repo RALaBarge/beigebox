@@ -5894,6 +5894,10 @@ function enableVoiceUI(hotkey) {
 
 async function startRecording() {
   if (_isRecording) return;
+  if (!window.isSecureContext || !navigator.mediaDevices) {
+    console.warn('Microphone requires HTTPS or localhost');
+    return;
+  }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
@@ -6050,6 +6054,14 @@ async function voiceStart() {
   if (_voiceActive) return;  // double-start guard
   const errEl = document.getElementById('voice-error');
   if (errEl) errEl.style.display = 'none';
+
+  // Microphone requires a secure context (HTTPS or localhost).
+  // Mobile Chrome does not grant the localhost exemption that desktop does.
+  if (!window.isSecureContext || !navigator.mediaDevices) {
+    _voiceError('Microphone requires HTTPS. Open BeigeBox via https:// or use localhost on desktop.');
+    return;
+  }
+
   _voiceSetStatus('loading', '◌ loading…');
   try {
     await _loadVadLib();
@@ -6114,6 +6126,10 @@ async function voiceToggleCamera() {
     const btn = document.getElementById('voice-camera-toggle');
     if (btn) btn.textContent = '📷 off';
   } else {
+    if (!window.isSecureContext || !navigator.mediaDevices) {
+      _voiceError('Camera requires HTTPS. Open BeigeBox via https:// or use localhost on desktop.');
+      return;
+    }
     try {
       _cameraStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
       const v = document.getElementById('voice-video');
