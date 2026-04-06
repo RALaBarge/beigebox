@@ -177,7 +177,7 @@ auto_summarization:
 # --- System Context (global prompt injection) ---
 system_context:
   enabled: false
-  path: ./system_context.md
+  path: ./data/system_context.md
 
 # --- Generation Parameters (global inference overrides) ---
 # Uncomment values to override. Leave unset to let frontend decide.

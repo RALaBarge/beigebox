@@ -130,30 +130,19 @@ class OllamaBackend(BaseBackend):
         """
         result = []
         for entry in self._ps_cache:
+            # /api/ps structure (Ollama v0.x): "model" is a string (model name),
+            # not a nested object. GPU layer counts are not exposed here.
+            # context_length and size_vram are top-level fields.
             name = entry.get("name", "")
-            model_info = entry.get("model", {})
 
-            # GPU layers — Ollama returns None for CPU-only models
-            gpu_layers: int = int(model_info.get("num_gpu") or 0)
-            total_layers: int = int(model_info.get("num_layer") or 0)
-
-            # VRAM: prefer direct measurement from /api/ps
             size_vram_bytes: int = int(entry.get("size_vram") or 0)
-            if size_vram_bytes > 0:
-                vram_used_mb = size_vram_bytes // (1024 * 1024)
-            elif gpu_layers > 0 and total_layers > 0:
-                # back-of-envelope: gpu_layers * (total_size / total_layers)
-                total_size_bytes: int = int(entry.get("size") or 0)
-                vram_used_mb = int(gpu_layers * (total_size_bytes / total_layers) / (1024 * 1024))
-            else:
-                vram_used_mb = 0
-
-            context_window: int = int(model_info.get("context_length") or 0)
+            vram_used_mb = size_vram_bytes // (1024 * 1024) if size_vram_bytes > 0 else 0
+            context_window: int = int(entry.get("context_length") or 0)
 
             result.append({
                 "model": name,
-                "gpu_layers": gpu_layers,
-                "total_layers": total_layers,
+                "gpu_layers": 0,   # not available from /api/ps
+                "total_layers": 0, # not available from /api/ps
                 "vram_used_mb": vram_used_mb,
                 "context_window": context_window,
             })

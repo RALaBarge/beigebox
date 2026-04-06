@@ -35,7 +35,7 @@ _context_path: Path | None = None
 def _get_path(cfg: dict) -> Path:
     """Resolve the system_context.md path from config."""
     sc_cfg = cfg.get("system_context", {})
-    raw = sc_cfg.get("path", "./system_context.md")
+    raw = sc_cfg.get("path", "./data/system_context.md")
     return Path(raw)
 
 
