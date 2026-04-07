@@ -46,7 +46,7 @@ server:
 # ─────────────────────────────────────────────────────────────────────────────
 
 backend:
-  default_model: "llama3.2:3b"  # CPU-friendly default
+  default_model: "qwen3:4b"  # CPU-friendly default
   url: "http://${OLLAMA_HOST:-localhost}:11434"
   timeout: 120
   model_paths:
@@ -92,11 +92,11 @@ wiretap:
 # ─────────────────────────────────────────────────────────────────────────────
 
 models:
-  default: "llama3.2:3b"
+  default: "qwen3:4b"
   profiles:
-    routing: "llama3.2:3b"         # Decision LLM
-    agentic: "llama3.2:3b"         # Operator
-    summary: "llama3.2:3b"         # Auto-summarization
+    routing: "qwen3:4b"         # Decision LLM
+    agentic: "qwen3:4b"         # Operator
+    summary: "qwen3:4b"         # Auto-summarization
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Decision LLM (Intelligent Routing)
@@ -113,7 +113,7 @@ decision_llm:
 
 operator:
   enabled: true
-  model: "llama3.2:3b"
+  model: "qwen3:4b"
   tool_profiles:
     minimal:
       - web_search

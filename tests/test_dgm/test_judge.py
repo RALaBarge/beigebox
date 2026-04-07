@@ -18,7 +18,7 @@ from beigebox.dgm.rubrics import RUBRIC_BANK
 
 @pytest.fixture
 def judge():
-    return DGMJudge(judge_model="llama3.2:3b", backend_url="http://localhost:1337", best_of_n=3)
+    return DGMJudge(judge_model="qwen3:4b", backend_url="http://localhost:1337", best_of_n=3)
 
 
 @pytest.fixture

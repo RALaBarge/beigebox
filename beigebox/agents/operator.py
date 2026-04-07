@@ -3,7 +3,7 @@ Operator agent — the brain behind `beigebox operator` and the web UI Operator 
 
 Uses a custom JSON tool loop instead of LangChain ReAct text parsing.
 The model emits structured JSON at each step which is far more reliable on
-small models (llama3.2:3b, etc.) than free-text Action/Observation parsing.
+small models (qwen3:4b, etc.) than free-text Action/Observation parsing.
 
 Loop protocol:
   Each turn the model must respond with ONE of:

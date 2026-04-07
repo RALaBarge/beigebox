@@ -83,7 +83,7 @@ wiretap:
 
 decision_llm:
   enabled: true
-  model: "llama3.2:3b"
+  model: "qwen3:4b"
   temperature: 0.2
   system_prompt: "You are a helpful routing assistant that decides which tool or backend to use."
 
@@ -109,7 +109,7 @@ conversation_replay:
 
 auto_summarization:
   enabled: false
-  model: "llama3.2:3b"
+  model: "qwen3:4b"
   token_budget: 500
   keep_last_n: 5
 
@@ -176,7 +176,7 @@ harness:
 
 operator:
   enabled: true
-  model: "llama3.2:3b"
+  model: "qwen3:4b"
   max_iterations: 10
   shell:
     enabled: true

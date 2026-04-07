@@ -2837,7 +2837,7 @@ let _studioPayloadEditor = null;  // PayloadEditor instance for the context colu
 // ── Model canonicalization ───────────────────────────────────────────────────
 // Produces a stable short name and ID from any raw model string.
 // e.g. "qwen/qwen3.5:3b-a1b-instruct-q4_k_m" → {id:"qwen3.5:3b", shortName:"qwen3.5:3b"}
-//      "llama3.2:3b"                           → {id:"llama3.2:3b", shortName:"llama3.2:3b"}
+//      "qwen3:4b"                                 → {id:"qwen3:4b", shortName:"qwen3:4b"}
 function modelCanonical(rawName) {
   if (!rawName) return { id: '', shortName: rawName, fullName: rawName };
   // Strip leading namespace (anything before the first / or \)
@@ -4028,9 +4028,9 @@ const TOOLTIPS = {
   features_hooks:              'Enable custom middleware hooks — drop your own .py files into hooks/ directory.',
   // Models Registry (Phase 2 refactoring)
   models_default:              'Global fallback model used when no specific role-based model is selected.',
-  models_routing:              'Judge/routing model (decision LLM) — fast LLM that classifies requests. (default: llama3.2:3b)',
+  models_routing:              'Judge/routing model (decision LLM) — fast LLM that classifies requests. (default: qwen3:4b)',
   models_agentic:              'Operator/tool-use model — used for LLM-driven tool invocation and multi-turn reasoning. (default: qwen3:4b)',
-  models_summary:              'Summarization model — used for auto-summarization of long conversations. (default: llama3.2:3b)',
+  models_summary:              'Summarization model — used for auto-summarization of long conversations. (default: qwen3:4b)',
   // Backend
   default_model:               'Deprecated: use Models Registry → Default model instead.',
   // Storage
@@ -8779,9 +8779,9 @@ async function loadConfig() {
     html += cfgInput('models_default', 'Default model', c.models?.default || 'qwen3:4b');
     html += `<hr style="border:none;border-top:1px solid var(--bg-border);margin:8px 0">`;
     html += `<div style="font-size:11px;color:var(--fg-dim);margin-bottom:8px"><strong>Model allocation by role:</strong></div>`;
-    html += cfgInput('models_routing', 'Judge/Routing model', c.models?.routing || 'llama3.2:3b');
+    html += cfgInput('models_routing', 'Judge/Routing model', c.models?.routing || 'qwen3:4b');
     html += cfgInput('models_agentic', 'Operator/Tool-use model', c.models?.agentic || 'qwen3:4b');
-    html += cfgInput('models_summary', 'Summarization model', c.models?.summary || 'llama3.2:3b');
+    html += cfgInput('models_summary', 'Summarization model', c.models?.summary || 'qwen3:4b');
     html += SC;
 
     // ── Routing Pipeline (Phase 3 refactoring) ────────────────────────────
@@ -9680,8 +9680,8 @@ function renderAARankings() {
       <a href="https://artificialanalysis.ai/models/capabilities/agentic" target="_blank" rel="noopener"
         style="font-size:10px;color:var(--lavender);text-decoration:none;opacity:0.8" title="Agentic & Coding capability rankings from artificialanalysis.ai">artificialanalysis.ai</a>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border-bottom:1px solid var(--border)">
-      <div style="padding:6px 10px;border-right:1px solid var(--border)">
+    <div style="border-bottom:1px solid var(--border)">
+      <div style="padding:6px 10px;border-bottom:1px solid var(--border)">
         <div style="font-size:10px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px">
           <a href="https://artificialanalysis.ai/models/capabilities/agentic" target="_blank" rel="noopener"
             style="color:var(--muted);text-decoration:none" title="Composite of GDPval-AA, Tau2-Bench, CRITPt, LCR, IFBench">Agentic Index</a></div>

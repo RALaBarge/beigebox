@@ -5,7 +5,7 @@ Send the same prompt to N models in parallel. Collect all responses.
 Ask a judge LLM to evaluate which is best. Stream results back.
 
 Usage:
-    voter = EnsembleVoter(models=["llama3.2:3b", "mistral:7b"], judge_model="llama3.2:3b")
+    voter = EnsembleVoter(models=["qwen3:4b", "mistral:7b"], judge_model="qwen3:4b")
     async for event in voter.vote(prompt):
         print(event)   # {type:"dispatch"|"result"|"evaluate"|"finish", ...}
 """

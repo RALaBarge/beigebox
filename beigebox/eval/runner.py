@@ -3,7 +3,7 @@ EvalRunner — loads and runs eval suites against the BeigeBox proxy.
 
 Suite format (YAML or JSON):
   name: "Basic routing smoke test"
-  model: "llama3.2:3b"       # default model for all cases
+  model: "qwen3:4b"       # default model for all cases
   cases:
     - id: "hello"
       input: "Say hello"

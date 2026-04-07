@@ -19,7 +19,7 @@ from beigebox.dgm.patcher import ConfigPatcher, Patch, ALLOWED_KEYS
 class TestAllowlist:
     def test_allowed_key_passes_validation(self):
         patcher = ConfigPatcher()
-        patch_obj = Patch(key="models.default", value="llama3.2:3b")
+        patch_obj = Patch(key="models.default", value="qwen3:4b")
         assert patcher.validate(patch_obj) is None
 
     def test_forbidden_key_fails_validation(self):

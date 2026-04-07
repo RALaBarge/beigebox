@@ -97,13 +97,22 @@ class MultiBackendRouter:
     deferred to the second pass — only used if all healthy backends fail.
     """
 
-    def __init__(self, backends_config: list[dict]):
+    def __init__(self, backends_config: list[dict], model_routes: list[dict] | None = None):
         self.backends: list[BaseBackend] = []
         self._thresholds: dict[str, float] = {}  # backend name → ms threshold (0=off)
         self._weights: dict[str, float] = {}     # backend name → traffic split weight (0=off)
         self._allow_unqualified_models: dict[str, bool] = {}  # backend opt-in for plain model ids
         self._allowed_models: dict[str, list[str]] = {}  # backend name → list of allowed model globs
         self._tracker = LatencyTracker()
+        # Ordered list of (pattern, backend_name) — first match wins and pins the backend.
+        # Takes precedence over allowed_models and supports_model checks.
+        self._model_routes: list[tuple[str, str]] = []
+        for route in (model_routes or []):
+            pattern = route.get("pattern", "")
+            backend_name = route.get("backend", "")
+            if pattern and backend_name:
+                self._model_routes.append((pattern, backend_name))
+                logger.info("model_routes: pattern '%s' → backend '%s'", pattern, backend_name)
 
         for cfg in backends_config:
             backend = self._create_backend(cfg)
@@ -192,6 +201,13 @@ class MultiBackendRouter:
 
         return cls(**kwargs)
 
+    def _resolve_route(self, model: str) -> str | None:
+        """Return the pinned backend name if a model_route matches, else None."""
+        for pattern, backend_name in self._model_routes:
+            if fnmatch.fnmatch(model, pattern):
+                return backend_name
+        return None
+
     def _unwrap(self, backend: BaseBackend) -> BaseBackend:
         return getattr(backend, "backend", backend)
 
@@ -209,6 +225,14 @@ class MultiBackendRouter:
         )
 
     def _can_attempt_model(self, backend: BaseBackend, model: str) -> bool:
+        # model_routes pin — if a pattern matches, ONLY the named backend is allowed.
+        # This is the highest-priority routing rule: it bypasses allowed_models and
+        # supports_model entirely so there's no ambiguity about which backend handles
+        # a given model family (e.g. "google/*" → openrouter, "qwen*" → ollama-local).
+        pinned = self._resolve_route(model)
+        if pinned is not None:
+            return backend.name == pinned
+
         # Check allowed_models list first (if configured, non-empty = restrictive)
         allowed = self._allowed_models.get(backend.name)
         if allowed:  # Non-empty list = restrict to these models

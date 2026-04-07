@@ -16,7 +16,7 @@ def _mock_vs(results=None):
     return vs
 
 
-def _hit(content="some content", distance=0.2, role="user", model="llama3.2:3b"):
+def _hit(content="some content", distance=0.2, role="user", model="qwen3:4b"):
     return {"content": content, "distance": distance, "metadata": {"role": role, "model": model}}
 
 
@@ -108,7 +108,7 @@ class TestPreprocessEnabled:
             tool = MemoryTool(
                 vector_store=vs,
                 query_preprocess=True,
-                query_preprocess_model="llama3.2:3b",
+                query_preprocess_model="qwen3:4b",
                 backend_url="http://localhost:11434",
             )
         return tool, vs, mock_resp
@@ -118,7 +118,7 @@ class TestPreprocessEnabled:
         tool = MemoryTool(
             vector_store=vs,
             query_preprocess=True,
-            query_preprocess_model="llama3.2:3b",
+            query_preprocess_model="qwen3:4b",
         )
         assert tool.query_preprocess is True
 
@@ -132,7 +132,7 @@ class TestPreprocessEnabled:
         tool = MemoryTool(
             vector_store=vs,
             query_preprocess=True,
-            query_preprocess_model="llama3.2:3b",
+            query_preprocess_model="qwen3:4b",
         )
         with patch("beigebox.tools.memory.httpx.post", return_value=mock_resp):
             tool.run("what did we decide about the database last week")
@@ -143,7 +143,7 @@ class TestPreprocessEnabled:
         tool = MemoryTool(
             vector_store=vs,
             query_preprocess=True,
-            query_preprocess_model="llama3.2:3b",
+            query_preprocess_model="qwen3:4b",
         )
         with patch("beigebox.tools.memory.httpx.post", side_effect=Exception("timeout")):
             tool.run("original query")
@@ -159,7 +159,7 @@ class TestPreprocessEnabled:
         tool = MemoryTool(
             vector_store=vs,
             query_preprocess=True,
-            query_preprocess_model="llama3.2:3b",
+            query_preprocess_model="qwen3:4b",
         )
         with patch("beigebox.tools.memory.httpx.post", return_value=mock_resp):
             tool.run("original query")

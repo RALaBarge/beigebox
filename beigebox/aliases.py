@@ -3,15 +3,15 @@ Model alias resolver — maps virtual model names to real model IDs.
 
 Config (config.yaml):
   aliases:
-    fast: "llama3.2:3b"
+    fast: "qwen3:4b"
     smart: "qwen3:30b"
     cheap: "llama3.2:1b"
     code: "qwen2.5-coder:7b"
 
 Usage:
   resolver = AliasResolver(cfg)
-  model = resolver.resolve("fast")          # → "llama3.2:3b"
-  model = resolver.resolve("llama3.2:3b")  # → passthrough
+  model = resolver.resolve("fast")          # → "qwen3:4b"
+  model = resolver.resolve("qwen3:4b")  # → passthrough
 """
 
 import logging

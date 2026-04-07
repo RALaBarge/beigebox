@@ -53,7 +53,7 @@ class TestIsThinker:
         assert _is_thinker("deepseek-r:latest") is True
 
     def test_llama_not_thinker(self):
-        assert _is_thinker("llama3.2:3b") is False
+        assert _is_thinker("qwen3:4b") is False
 
     def test_qwen25_not_thinker(self):
         assert _is_thinker("qwen2.5:7b") is False
@@ -84,7 +84,7 @@ class TestExtractJsonArray:
 
     def test_multiple_members(self):
         arr = [
-            {"name": "Analyst", "model": "llama3.2:3b", "task": "analyse"},
+            {"name": "Analyst", "model": "qwen3:4b", "task": "analyse"},
             {"name": "Coder",   "model": "qwen2.5:7b",  "task": "code review"},
         ]
         result = _extract_json_array(json.dumps(arr))
@@ -112,12 +112,12 @@ class TestPropose:
     @pytest.mark.asyncio
     async def test_returns_list_of_dicts(self):
         proposal = [
-            {"name": "Analyst", "model": "llama3.2:3b", "task": "analyse the query"},
+            {"name": "Analyst", "model": "qwen3:4b", "task": "analyse the query"},
             {"name": "Coder",   "model": "qwen2.5:7b",  "task": "write code"},
         ]
-        with patch("beigebox.agents.council._fetch_models", new=AsyncMock(return_value=["llama3.2:3b", "qwen2.5:7b"])), \
+        with patch("beigebox.agents.council._fetch_models", new=AsyncMock(return_value=["qwen3:4b", "qwen2.5:7b"])), \
              patch("beigebox.agents.council._chat",         new=AsyncMock(return_value=json.dumps(proposal))):
-            result = await propose("write a sorting algorithm", "http://localhost:11434", "llama3.2:3b")
+            result = await propose("write a sorting algorithm", "http://localhost:11434", "qwen3:4b")
 
         assert isinstance(result, list)
         assert len(result) == 2
@@ -125,9 +125,9 @@ class TestPropose:
 
     @pytest.mark.asyncio
     async def test_fallback_on_bad_json(self):
-        with patch("beigebox.agents.council._fetch_models", new=AsyncMock(return_value=["llama3.2:3b"])), \
+        with patch("beigebox.agents.council._fetch_models", new=AsyncMock(return_value=["qwen3:4b"])), \
              patch("beigebox.agents.council._chat",         new=AsyncMock(return_value="not json")):
-            result = await propose("query", "http://localhost:11434", "llama3.2:3b")
+            result = await propose("query", "http://localhost:11434", "qwen3:4b")
 
         assert isinstance(result, list)
         assert len(result) >= 1
@@ -135,20 +135,20 @@ class TestPropose:
     @pytest.mark.asyncio
     async def test_sanitises_name_length(self):
         long_name = "X" * 200
-        proposal = [{"name": long_name, "model": "llama3.2:3b", "task": "do stuff"}]
-        with patch("beigebox.agents.council._fetch_models", new=AsyncMock(return_value=["llama3.2:3b"])), \
+        proposal = [{"name": long_name, "model": "qwen3:4b", "task": "do stuff"}]
+        with patch("beigebox.agents.council._fetch_models", new=AsyncMock(return_value=["qwen3:4b"])), \
              patch("beigebox.agents.council._chat",         new=AsyncMock(return_value=json.dumps(proposal))):
-            result = await propose("q", "http://localhost:11434", "llama3.2:3b")
+            result = await propose("q", "http://localhost:11434", "qwen3:4b")
 
         assert len(result[0]["name"]) <= 60
 
     @pytest.mark.asyncio
     async def test_sanitises_task_length(self):
         long_task = "T" * 500
-        proposal = [{"name": "A", "model": "llama3.2:3b", "task": long_task}]
-        with patch("beigebox.agents.council._fetch_models", new=AsyncMock(return_value=["llama3.2:3b"])), \
+        proposal = [{"name": "A", "model": "qwen3:4b", "task": long_task}]
+        with patch("beigebox.agents.council._fetch_models", new=AsyncMock(return_value=["qwen3:4b"])), \
              patch("beigebox.agents.council._chat",         new=AsyncMock(return_value=json.dumps(proposal))):
-            result = await propose("q", "http://localhost:11434", "llama3.2:3b")
+            result = await propose("q", "http://localhost:11434", "qwen3:4b")
 
         assert len(result[0]["task"]) <= 300
 
@@ -159,7 +159,7 @@ class TestExecute:
     @pytest.mark.asyncio
     async def test_yields_member_done_and_synthesis(self):
         council = [
-            {"name": "A", "model": "llama3.2:3b", "task": "task A"},
+            {"name": "A", "model": "qwen3:4b", "task": "task A"},
             {"name": "B", "model": "qwen2.5:7b",  "task": "task B"},
         ]
 
@@ -168,7 +168,7 @@ class TestExecute:
 
         with patch("beigebox.agents.council._chat", side_effect=fake_chat):
             events = []
-            async for evt in execute("query", council, "http://localhost:11434", "llama3.2:3b"):
+            async for evt in execute("query", council, "http://localhost:11434", "qwen3:4b"):
                 events.append(evt)
 
         types = [e["type"] for e in events]

@@ -100,7 +100,7 @@ class DGMProposer:
 
     def __init__(
         self,
-        proposer_model: str = "llama3.2:3b",
+        proposer_model: str = "qwen3:4b",
         backend_url: str = "http://localhost:1337",
         timeout: float = 30.0,
         temperature: float = 0.4,

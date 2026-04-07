@@ -198,7 +198,7 @@ class DGMLoop:
 
         # Use the routing model (usually 3B) for both judge and proposer
         routing_model = (
-            cfg.get("models", {}).get("profiles", {}).get("routing", "llama3.2:3b")
+            cfg.get("models", {}).get("profiles", {}).get("routing", "qwen3:4b")
         )
         judge_model = overrides.pop("judge_model", routing_model)
         proposer_model = overrides.pop("proposer_model", routing_model)

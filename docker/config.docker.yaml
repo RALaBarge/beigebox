@@ -5,7 +5,7 @@
 # --- Backend (where requests get forwarded) ---
 backend:
   url: "http://ollama:11434"            # Docker service name
-  default_model: "llama3.2:3b"         # Main chat model — pulled by ollama-init
+  default_model: "qwen3:4b"         # Main chat model — pulled by ollama-init
   timeout: 120
 
 # --- Middleware Server ---
@@ -62,32 +62,32 @@ tools:
 # --- Decision LLM ---
 decision_llm:
   enabled: true                          # Enabled by default in Docker — setup pulls the model
-  model: "llama3.2:3b"                   # Fast routing decisions
+  model: "qwen3:4b"                   # Fast routing decisions
   backend_url: "http://ollama:11434"
   timeout: 5
   max_tokens: 256
   routes:
     default:
-      model: "llama3.2:3b"
+      model: "qwen3:4b"
       description: "General purpose conversation and Q&A"
       wasm_module: "opener_strip"
     code:
-      model: "llama3.2:3b"
+      model: "qwen3:4b"
       description: "Code generation, debugging, technical programming tasks"
       # no wasm_module — code responses should not be stripped
     large:
-      model: "llama3.2:3b"
+      model: "qwen3:4b"
       description: "Complex reasoning, analysis, long-form writing"
       wasm_module: "opener_strip"
     fast:
-      model: "llama3.2:3b"
+      model: "qwen3:4b"
       description: "Quick responses, simple questions, brainstorming"
       wasm_module: "opener_strip"
 
 # --- Operator ---
 operator:
   enabled: true                           # CAUTION: enables LLM-driven tool execution. Review allowed_tools before enabling.
-  model: "llama3.2:3b"                   # Defaults to backend.default_model
+  model: "qwen3:4b"                   # Defaults to backend.default_model
   max_iterations: 10
   timeout: 300                            # 5 min — large models (8B+ fp16) need time to load on first inference
   allowed_tools: []                       # Empty = all registered tools. Restrict: ["system_info", "memory", "calculator", "datetime"]
@@ -170,7 +170,7 @@ wiretap:
 auto_summarization:
   enabled: false               # Enable to compress long conversations automatically
   token_budget: 3000           # Trigger when estimated tokens exceed this
-  summary_model: "llama3.2:3b" # Model to use for summarization (defaults to backend.default_model)
+  summary_model: "qwen3:4b" # Model to use for summarization (defaults to backend.default_model)
   keep_last: 4                 # Always keep the N most recent messages intact
   summary_prefix: "Summary of earlier conversation: "
 

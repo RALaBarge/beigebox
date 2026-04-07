@@ -173,15 +173,15 @@ class TestApplyActionRouting:
 
     def test_route_resolved_from_routes(self):
         body = _body()
-        routes = {"complex": {"model": "qwen3:14b"}, "simple": {"model": "llama3.2:3b"}}
+        routes = {"complex": {"model": "qwen3:14b"}, "simple": {"model": "qwen3:4b"}}
         result = _apply_action(body, {"route": "complex"}, routes=routes)
         assert result["model"] == "qwen3:14b"
 
     def test_route_string_value_resolved(self):
         body = _body()
-        routes = {"fast": "llama3.2:3b"}
+        routes = {"fast": "qwen3:4b"}
         result = _apply_action(body, {"route": "fast"}, routes=routes)
-        assert result["model"] == "llama3.2:3b"
+        assert result["model"] == "qwen3:4b"
 
     def test_route_missing_warns_and_skips(self):
         body = _body()

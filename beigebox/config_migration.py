@@ -75,9 +75,9 @@ def migrate_v1_to_v2(config: Dict[str, Any]) -> Dict[str, Any]:
     models = {
         "default": config.get("backend", {}).get("default_model", "qwen3:4b"),
         "profiles": {
-            "routing": config.get("decision_llm", {}).get("model", "llama3.2:3b"),
+            "routing": config.get("decision_llm", {}).get("model", "qwen3:4b"),
             "agentic": config.get("operator", {}).get("model", "qwen3:4b"),
-            "summary": config.get("auto_summarization", {}).get("summary_model", "llama3.2:3b"),
+            "summary": config.get("auto_summarization", {}).get("summary_model", "qwen3:4b"),
             "embedding": config.get("embedding", {}).get("model", "nomic-embed-text"),
         },
         "per_task": {},

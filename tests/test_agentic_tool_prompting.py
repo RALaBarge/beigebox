@@ -198,11 +198,11 @@ class TestResolveToolProfile:
         }
 
     def test_no_profiles_configured_returns_none(self):
-        assert _resolve_tool_profile("llama3.2:3b", {}) is None
+        assert _resolve_tool_profile("qwen3:4b", {}) is None
 
     def test_exact_pattern_match(self):
-        cfg = self._cfg(model_map={"llama3.2:3b": "minimal"})
-        assert _resolve_tool_profile("llama3.2:3b", cfg) == "minimal"
+        cfg = self._cfg(model_map={"qwen3:4b": "minimal"})
+        assert _resolve_tool_profile("qwen3:4b", cfg) == "minimal"
 
     def test_wildcard_pattern_match(self):
         cfg = self._cfg(model_map={"*:3b": "minimal"})

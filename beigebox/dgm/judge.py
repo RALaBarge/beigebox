@@ -106,7 +106,7 @@ class DGMJudge:
 
     def __init__(
         self,
-        judge_model: str = "llama3.2:3b",
+        judge_model: str = "qwen3:4b",
         backend_url: str = "http://localhost:1337",
         timeout: float = 30.0,
         best_of_n: int = 3,

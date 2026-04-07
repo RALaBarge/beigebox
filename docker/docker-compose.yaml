@@ -102,7 +102,7 @@ services:
     command: >
       sh -c "sleep 5 &&
       curl -s http://ollama:11434/api/pull -d '{\"name\":\"nomic-embed-text\"}' &&
-      curl -s http://ollama:11434/api/pull -d '{\"name\":\"llama3.2:3b\"}' &&
+      curl -s http://ollama:11434/api/pull -d '{\"name\":\"qwen3:4b\"}' &&
       curl -s http://ollama:11434/api/pull -d '{\"name\":\"qwen3:4b\"}'"
     restart: "no"
 

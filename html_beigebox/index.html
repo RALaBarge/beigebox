@@ -827,7 +827,7 @@
           <div class="tier-num">Tier 4</div>
           <div class="tier-body">
             <h3>Decision LLM</h3>
-            <p>A small, fast model (e.g. <code>llama3.2:3b</code>) judges ambiguous cases that didn't classify cleanly. Optional — disable to cap at tier 3.</p>
+            <p>A small, fast model (e.g. <code>qwen3:4b</code>) judges ambiguous cases that didn't classify cleanly. Optional — disable to cap at tier 3.</p>
           </div>
           <div class="tier-cost">cost: ~200–800 ms</div>
         </div>
@@ -849,7 +849,7 @@
         <div class="zcmd-row"><span class="zcmd-cmd">z: simple</span><span class="zcmd-desc">Route to the fast / cheap model</span></div>
         <div class="zcmd-row"><span class="zcmd-cmd">z: complex</span><span class="zcmd-desc">Route to the large / capable model</span></div>
         <div class="zcmd-row"><span class="zcmd-cmd">z: code</span><span class="zcmd-desc">Route to the code-specialist model</span></div>
-        <div class="zcmd-row"><span class="zcmd-cmd">z: llama3.2:3b</span><span class="zcmd-desc">Route to an exact model by name</span></div>
+        <div class="zcmd-row"><span class="zcmd-cmd">z: qwen3:4b</span><span class="zcmd-desc">Route to an exact model by name</span></div>
         <div class="zcmd-row"><span class="zcmd-cmd">z: search</span><span class="zcmd-desc">Force web search, inject results before sending</span></div>
         <div class="zcmd-row"><span class="zcmd-cmd">z: memory</span><span class="zcmd-desc">Recall relevant past conversations and inject context</span></div>
         <div class="zcmd-row"><span class="zcmd-cmd">z: calc 2^32</span><span class="zcmd-desc">Evaluate a math expression inline (sandboxed)</span></div>

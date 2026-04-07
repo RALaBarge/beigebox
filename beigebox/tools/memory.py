@@ -51,7 +51,7 @@ class MemoryTool:
             query_preprocess:        If True, run a fast LLM pass to extract keywords
                                      from the raw query before embedding.
             query_preprocess_model:  Model name to use for preprocessing (should be
-                                     small/fast, e.g. "llama3.2:3b").
+                                     small/fast, e.g. "qwen3:4b").
             backend_url:             Ollama base URL for the preprocessing call.
         """
         self.vector_store           = vector_store

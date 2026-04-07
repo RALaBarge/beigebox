@@ -783,7 +783,7 @@ class Proxy:
         runtime_config structure (flat num_gpu per model):
             runtime:
               model_options:
-                llama3.2:3b: 0      # CPU
+                qwen3:4b: 0      # CPU
                 mistral:7b: 99      # all GPU layers
                 llama2:70b: 20      # partial offload
         """

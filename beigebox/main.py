@@ -212,7 +212,8 @@ async def lifespan(app: FastAPI):
     backends_enabled, backends_cfg = get_effective_backends_config()
     if backends_enabled:
         if backends_cfg:
-            backend_router = MultiBackendRouter(backends_cfg)
+            model_routes = cfg.get("routing", {}).get("model_routes", [])
+            backend_router = MultiBackendRouter(backends_cfg, model_routes=model_routes)
             logger.info("Multi-backend router: enabled (%d backends)", len(backend_router.backends))
         else:
             logger.warning("backends_enabled=true but no backends configured")
@@ -1089,9 +1090,9 @@ async def api_config():
         # ── Models Registry (Phase 2 refactoring) ────────────────────
         "models": {
             "default":       rt.get("models_default") or cfg.get("models", {}).get("default", "qwen3:4b"),
-            "routing":       rt.get("models_routing") or cfg.get("models", {}).get("profiles", {}).get("routing", "llama3.2:3b"),
+            "routing":       rt.get("models_routing") or cfg.get("models", {}).get("profiles", {}).get("routing", "qwen3:4b"),
             "agentic":       rt.get("models_agentic") or cfg.get("models", {}).get("profiles", {}).get("agentic", "qwen3:4b"),
-            "summary":       rt.get("models_summary") or cfg.get("models", {}).get("profiles", {}).get("summary", "llama3.2:3b"),
+            "summary":       rt.get("models_summary") or cfg.get("models", {}).get("profiles", {}).get("summary", "qwen3:4b"),
         },
         # ── Server ───────────────────────────────────────────────────
         "server": {
@@ -1716,7 +1717,7 @@ async def api_get_model_options():
 async def api_set_model_option(request: Request):
     """
     Set or clear num_gpu for a specific model.
-    Body: {"model": "llama3.2:3b", "num_gpu": 0}  — 0=CPU, 99=GPU, null=inherit
+    Body: {"model": "qwen3:4b", "num_gpu": 0}  — 0=CPU, 99=GPU, null=inherit
     """
     body = await request.json()
     model_name = body.get("model", "").strip()
@@ -1913,7 +1914,8 @@ async def api_backends_apply(request: Request):
         if enabled and resolved:
             try:
                 _, effective_backends = get_effective_backends_config()
-                new_router = MultiBackendRouter(effective_backends)
+                _model_routes = get_config().get("routing", {}).get("model_routes", [])
+                new_router = MultiBackendRouter(effective_backends, model_routes=_model_routes)
             except Exception as e:
                 logger.error("Router build failed: %s", e, exc_info=True)
                 return JSONResponse({"error": f"Router build failed: {e}"}, status_code=500)
@@ -2224,7 +2226,7 @@ async def api_harness_orchestrate(request: Request):
 
     Body:
         query    str           — the goal/task to accomplish
-        targets  list[str]     — available targets e.g. ["operator","model:llama3.2:3b"]
+        targets  list[str]     — available targets e.g. ["operator","model:qwen3:4b"]
         model    str (opt)     — override the orchestrator's own model
         max_rounds int (opt)   — override max iteration rounds (default 8)
 
@@ -2815,7 +2817,7 @@ async def api_dgm_run(request: Request):
 
         try:
             cfg = get_config()
-            routing_model = cfg.get("models", {}).get("profiles", {}).get("routing", "llama3.2:3b")
+            routing_model = cfg.get("models", {}).get("profiles", {}).get("routing", "qwen3:4b")
             proxy_url = f"http://localhost:{cfg.get('server', {}).get('port', 8001)}"
 
             # Snapshot runtime config before any changes (used by revert endpoint)
@@ -3862,8 +3864,8 @@ async def api_ensemble(request: Request):
     Request body:
     {
       "prompt": "What is X?",
-      "models": ["llama3.2:3b", "mistral:7b"],
-      "judge_model": "llama3.2:3b"  (optional; defaults to operator model)
+      "models": ["qwen3:4b", "mistral:7b"],
+      "judge_model": "qwen3:4b"  (optional; defaults to operator model)
     }
 
     Returns: SSE stream of JSON events
@@ -4789,7 +4791,7 @@ async def eval_run(request: Request):
     POST /api/v1/eval/run
     {
         "suite": "evals/smoke.yaml",   // path to suite file
-        "model": "llama3.2:3b",        // optional model override
+        "model": "qwen3:4b",        // optional model override
         "base_url": "http://..."       // optional proxy URL override
     }
 

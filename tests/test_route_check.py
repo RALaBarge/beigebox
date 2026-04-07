@@ -144,7 +144,7 @@ class TestEvalRunnerRouteCheckPath:
 
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
-        mock_resp.json.return_value = {"route": "simple", "model": "llama3.2:3b"}
+        mock_resp.json.return_value = {"route": "simple", "model": "qwen3:4b"}
 
         with patch("httpx.post", return_value=mock_resp) as mock_post:
             result = runner._run_case(case, suite, "http://localhost:1337", "run1")

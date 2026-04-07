@@ -6,8 +6,8 @@ the best response, and returns a structured summary the operator can reason
 over or pass back to the user.
 
 Input format (JSON string or plain comma-separated model list):
-  {"prompt": "explain X", "models": ["llama3.2:3b", "mistral:7b"], "judge": "llama3.2:3b"}
-  OR just pass a pipe-separated string: "explain X | llama3.2:3b,mistral:7b"
+  {"prompt": "explain X", "models": ["qwen3:4b", "mistral:7b"], "judge": "qwen3:4b"}
+  OR just pass a pipe-separated string: "explain X | qwen3:4b,mistral:7b"
 
 Output: plain-text summary of all responses + winner + reasoning.
 
@@ -32,7 +32,7 @@ class EnsembleTool:
         "Run a prompt against multiple models in parallel and get a judge verdict on which "
         "response is best. Input: JSON with keys 'prompt', 'models' (list), and optional "
         "'judge' (model name). Example: "
-        '{\"prompt\": \"explain recursion\", \"models\": [\"llama3.2:3b\", \"mistral:7b\"]}'
+        '{\"prompt\": \"explain recursion\", \"models\": [\"qwen3:4b\", \"mistral:7b\"]}'
     )
 
     def __init__(self, judge_model: str | None = None, max_models: int = 6):

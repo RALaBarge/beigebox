@@ -102,7 +102,7 @@ class TestLoadSuite:
     def test_load_json(self, tmp_path):
         data = {
             "name": "test",
-            "model": "llama3.2:3b",
+            "model": "qwen3:4b",
             "cases": [
                 {"id": "c1", "input": "hello", "scorer": "contains", "expect": {"contains": ["hi"]}}
             ],
@@ -113,7 +113,7 @@ class TestLoadSuite:
         assert suite.name == "test"
         assert len(suite.cases) == 1
         assert suite.cases[0].id == "c1"
-        assert suite.model == "llama3.2:3b"
+        assert suite.model == "qwen3:4b"
 
     def test_load_yaml(self, tmp_path):
         pytest.importorskip("yaml")
@@ -139,7 +139,7 @@ def test_eval_result_fields():
     r = EvalResult(
         case_id="x", input="hi", output="hello",
         passed=True, score=1.0, scorer="contains",
-        model="llama3.2:3b", latency_ms=42.0, run_id="abc123",
+        model="qwen3:4b", latency_ms=42.0, run_id="abc123",
     )
     assert r.passed
     assert r.score == 1.0

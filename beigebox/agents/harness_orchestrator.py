@@ -16,7 +16,7 @@ Features:
 
 Usage (async generator — yields dicts):
 
-    orch = HarnessOrchestrator(available_targets=["operator", "llama3.2:3b"])
+    orch = HarnessOrchestrator(available_targets=["operator", "qwen3:4b"])
     async for event in orch.run("Write and critique a haiku about latency"):
         print(event)   # {type: "plan"|"dispatch"|"result"|"evaluate"|"finish"|"error", ...}
 """
@@ -182,7 +182,7 @@ class HarnessOrchestrator:
           {type:"start",   goal, model, targets, run_id}
           {type:"plan",    round:1, tasks:[{target, prompt, rationale}]}
           {type:"dispatch",round:1, task_count:3}
-          {type:"result",  round:1, target:"llama3.2:3b", content:"...", latency_ms:1234, status:"done"|"error", attempts:N}
+          {type:"result",  round:1, target:"qwen3:4b", content:"...", latency_ms:1234, status:"done"|"error", attempts:N}
           {type:"evaluate",round:1, assessment:"...", action:"continue"|"finish"}
           {type:"finish",  answer:"...", rounds:2, capped:false}
           {type:"error",   message:"..."}

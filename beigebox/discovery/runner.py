@@ -161,8 +161,8 @@ class DiscoveryRunner:
     ):
         cfg = get_config()
         self.sqlite_store = sqlite_store
-        self.judge_model = judge_model or cfg.get("operator", {}).get("model") or "llama3.2:3b"
-        self.candidate_model = candidate_model or cfg.get("default_model") or "llama3.2:3b"
+        self.judge_model = judge_model or cfg.get("operator", {}).get("model") or "qwen3:4b"
+        self.candidate_model = candidate_model or cfg.get("default_model") or "qwen3:4b"
         # Use config backend URL (resolves OLLAMA_HOST in Docker); caller may override
         _cfg_backend_url = cfg.get("backend", {}).get("url", "http://localhost:11434").rstrip("/")
         self.backend_url = (backend_url or _cfg_backend_url).rstrip("/")
