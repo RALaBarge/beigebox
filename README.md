@@ -35,7 +35,7 @@ docker compose up -d
 
 Open **http://localhost:1337** for the web UI. The OpenAI-compatible API is at `http://localhost:1337/v1`.
 
-See [Deployment](docs/deployment.md#quick-start) for profiles (CDP, voice, alternative engines).
+See [Deployment](d0cs/deployment.md#quick-start) for profiles (CDP, voice, alternative engines).
 
 ### Profiles
 
@@ -46,7 +46,7 @@ See [Deployment](docs/deployment.md#quick-start) for profiles (CDP, voice, alter
 | voice | `--profile voice up -d` | Whisper (STT) + Kokoro (TTS) |
 | engines-* | `--profile engines-cpp up -d` | Alternative inference (llama.cpp, vLLM, ExecutorTorch) |
 
-See [Deployment Quickstart](docs/deployment.md#quick-start) for more.
+See [Deployment Quickstart](d0cs/deployment.md#quick-start) for more.
 
 ---
 
@@ -91,22 +91,22 @@ Integrated security scanners run via a single command:
 | **gitleaks** | Secrets accidentally committed to git history |
 | **trivy** | OS and app-level CVEs in Docker images |
 
-See [Security](docs/security.md) for threat model, defense strategy, hardening details, and known limitations.
+See [Security](d0cs/security.md) for threat model, defense strategy, hardening details, and known limitations.
 
 ---
 
 ## Documentation
 
-- **[Security](docs/security.md)** — Supply chain hardening, read-only root, network segmentation, threat model, defense layers
-- **[Configuration](docs/configuration.md)** — config.yaml, runtime_config.yaml, feature flags, per-model options
-- **[Routing & Backends](docs/routing.md)** — Routing tiers, latency-aware selection, A/B splitting, custom rules
-- **[Authentication](docs/authentication.md)** — API keys, multi-key setup, ACLs, agentauth keychain
-- **[CLI & Z-Commands](docs/cli.md)** — Command-line tools and inline command prefixes
-- **[Observability](docs/observability.md)** — Tap event types, metrics, debugging
-- **[Agents & Tools](docs/agents.md)** — Operator, orchestration, multi-turn, group chat, RAG
-- **[Tools & Integrations](docs/tools.md)** — CDP, plugins, MCP server, document search
-- **[Deployment](docs/deployment.md)** — Docker Compose, Kubernetes, Systemd, production setup
-- **[API Reference](docs/api-reference.md)** — Endpoints, request/response formats, examples
+- **[Security](d0cs/security.md)** — Supply chain hardening, read-only root, network segmentation, threat model, defense layers
+- **[Configuration](d0cs/configuration.md)** — config.yaml, runtime_config.yaml, feature flags, per-model options
+- **[Routing & Backends](d0cs/routing.md)** — Routing tiers, latency-aware selection, A/B splitting, custom rules
+- **[Authentication](d0cs/authentication.md)** — API keys, multi-key setup, ACLs, agentauth keychain
+- **[CLI & Z-Commands](d0cs/cli.md)** — Command-line tools and inline command prefixes
+- **[Observability](d0cs/observability.md)** — Tap event types, metrics, debugging
+- **[Agents & Tools](d0cs/agents.md)** — Operator, orchestration, multi-turn, group chat, RAG
+- **[Tools & Integrations](d0cs/tools.md)** — CDP, plugins, MCP server, document search
+- **[Deployment](d0cs/deployment.md)** — Docker Compose, Kubernetes, Systemd, production setup
+- **[API Reference](d0cs/api-reference.md)** — Endpoints, request/response formats, examples
 
 ---
 
@@ -122,7 +122,7 @@ BeigeBox's architecture is **transparent** — every request flows through a det
 6. **Stream to backend** — buffered if WASM active
 7. **Post-stream transforms** — WASM normalization → cache store
 
-See [Architecture](docs/architecture.md) for the full pipeline and subsystem map.
+See [Architecture](d0cs/architecture.md) for the full pipeline and subsystem map.
 
 ---
 

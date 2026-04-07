@@ -358,8 +358,9 @@ def update_runtime_config(key: str, value) -> bool:
                 pass
             raise
 
-        # Reset both mtime and last-checked so the next get_runtime_config()
-        # call triggers a full reload even within the 1s debounce window.
+        # Reset both mtime and the last-checked timestamp so the next
+        # get_runtime_config() call bypasses the 1s interval guard and
+        # reloads immediately — important for the config POST → GET test.
         global _runtime_mtime, _runtime_mtime_last_checked
         _runtime_mtime = 0.0
         _runtime_mtime_last_checked = 0.0

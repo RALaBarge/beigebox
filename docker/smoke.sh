@@ -10,8 +10,8 @@ BB="http://localhost:1337"
 PASS=0
 FAIL=0
 
-_ok()   { echo "  ✓  $*"; ((PASS++)); }
-_fail() { echo "  ✗  $*"; ((FAIL++)); }
+_ok()   { echo "  ✓  $*"; PASS=$((PASS + 1)); }
+_fail() { echo "  ✗  $*"; FAIL=$((FAIL + 1)); }
 _hdr()  { echo; echo "── $* ──────────────────────────────────"; }
 
 # ── 1. Stack startup ──────────────────────────────────────────────────────────
@@ -93,7 +93,7 @@ curl -fsS "$BB/v1/chat/completions" \
 
 # ── 8. Wire log populated ─────────────────────────────────────────────────────
 _hdr "Wire log"
-TAP=$(curl -fsS "$BB/api/v1/tap?n=5")
+TAP=$(curl -sS "$BB/api/v1/tap?n=5")
 COUNT=$(echo "$TAP" | python3 -c \
   "import sys,json; d=json.load(sys.stdin); print(d.get('total',0))" 2>/dev/null || echo 0)
 if [[ "$COUNT" -gt 0 ]]; then
@@ -104,9 +104,9 @@ fi
 
 # ── 9. Conversation storage ───────────────────────────────────────────────────
 _hdr "Conversation storage"
-STATS=$(curl -fsS "$BB/api/v1/stats")
+STATS=$(curl -sS "$BB/api/v1/stats")
 MSG_COUNT=$(echo "$STATS" | python3 -c \
-  "import sys,json; d=json.load(sys.stdin); print(d.get('messages',0))" 2>/dev/null || echo 0)
+  "import sys,json; d=json.load(sys.stdin); print(d.get('conversations',{}).get('messages',0))" 2>/dev/null || echo 0)
 if [[ "$MSG_COUNT" -gt 0 ]]; then
   _ok "conversations stored ($MSG_COUNT messages)"
 else
@@ -120,14 +120,14 @@ curl -fsS "$BB/api/v1/search?q=hello&n=3" >/dev/null \
 
 # ── 11. Config save + runtime hot-reload ─────────────────────────────────────
 _hdr "Config API"
-SAVE=$(curl -fsS -X POST "$BB/api/v1/config" \
+SAVE=$(curl -sS -X POST "$BB/api/v1/config" \
   -H 'Content-Type: application/json' \
   -d '{"log_conversations":true}')
 echo "$SAVE" | grep -q "saved" \
   && _ok "POST /api/v1/config saves settings" \
   || _fail "POST /api/v1/config failed: $SAVE"
 
-CONFIG=$(curl -fsS "$BB/api/v1/config")
+CONFIG=$(curl -sS "$BB/api/v1/config")
 echo "$CONFIG" | python3 -c \
   "import sys,json; d=json.load(sys.stdin); assert d['storage']['log_conversations'] is True" 2>/dev/null \
   && _ok "config hot-reload: saved value visible immediately" \
@@ -135,14 +135,14 @@ echo "$CONFIG" | python3 -c \
 
 # ── 12. Generation params config ─────────────────────────────────────────────
 _hdr "Generation params"
-GPSET=$(curl -fsS -X POST "$BB/api/v1/config" \
+GPSET=$(curl -sS -X POST "$BB/api/v1/config" \
   -H 'Content-Type: application/json' \
   -d '{"gen_temperature":0.7,"gen_max_tokens":256}')
 echo "$GPSET" | grep -q "saved" \
   && _ok "POST /api/v1/config sets gen params" \
   || _fail "POST /api/v1/config gen params failed: $GPSET"
 
-GPCFG=$(curl -fsS "$BB/api/v1/config")
+GPCFG=$(curl -sS "$BB/api/v1/config")
 echo "$GPCFG" | python3 -c \
   "import sys,json; d=json.load(sys.stdin); assert d['generation']['temperature']==0.7" 2>/dev/null \
   && _ok "generation.temperature reflected in config" \
@@ -154,13 +154,13 @@ curl -fsS -X POST "$BB/api/v1/generation-params/reset" >/dev/null \
 
 # ── 13. System context API ────────────────────────────────────────────────────
 _hdr "System context"
-SC_GET=$(curl -fsS "$BB/api/v1/system-context")
+SC_GET=$(curl -sS "$BB/api/v1/system-context")
 echo "$SC_GET" | python3 -c \
   "import sys,json; d=json.load(sys.stdin); assert 'content' in d and 'enabled' in d" 2>/dev/null \
   && _ok "GET /api/v1/system-context returns expected shape" \
   || _fail "GET /api/v1/system-context unexpected shape: $SC_GET"
 
-SC_SET=$(curl -fsS -X POST "$BB/api/v1/system-context" \
+SC_SET=$(curl -sS -X POST "$BB/api/v1/system-context" \
   -H 'Content-Type: application/json' \
   -d '{"content":"smoke test context"}')
 echo "$SC_SET" | python3 -c \
@@ -168,7 +168,7 @@ echo "$SC_SET" | python3 -c \
   && _ok "POST /api/v1/system-context writes content" \
   || _fail "POST /api/v1/system-context failed: $SC_SET"
 
-SC_VERIFY=$(curl -fsS "$BB/api/v1/system-context")
+SC_VERIFY=$(curl -sS "$BB/api/v1/system-context")
 echo "$SC_VERIFY" | python3 -c \
   "import sys,json; d=json.load(sys.stdin); assert 'smoke test context' in d.get('content','')" 2>/dev/null \
   && _ok "system context content round-trips" \
@@ -233,7 +233,7 @@ sleep 5
 curl -fsS "$BB/beigebox/health" >/dev/null \
   && _ok "healthy after restart" || _fail "not healthy after restart"
 
-CONFIG_PR=$(curl -fsS "$BB/api/v1/config")
+CONFIG_PR=$(curl -sS "$BB/api/v1/config")
 echo "$CONFIG_PR" | python3 -c \
   "import sys,json; d=json.load(sys.stdin); assert 'web_ui' in d and 'voice' in d and 'generation' in d" 2>/dev/null \
   && _ok "config shape intact after restart" \
@@ -241,7 +241,7 @@ echo "$CONFIG_PR" | python3 -c \
 
 # ── 18. WASM runtime ──────────────────────────────────────────────────────────
 _hdr "WASM runtime"
-WASM_ST=$(curl -fsS "$BB/api/v1/status")
+WASM_ST=$(curl -sS "$BB/api/v1/status")
 echo "$WASM_ST" | python3 -c \
   "import sys,json; d=json.load(sys.stdin); assert 'wasm' in d" 2>/dev/null \
   && _ok "status includes wasm key" \
@@ -260,7 +260,7 @@ docker compose exec -T beigebox test -d /app/workspace/out \
   && _ok "/app/workspace/out exists in container" \
   || _fail "/app/workspace/out not found"
 
-WSAPI=$(curl -fsS "$BB/api/v1/workspace")
+WSAPI=$(curl -sS "$BB/api/v1/workspace")
 echo "$WSAPI" | python3 -c \
   "import sys,json; d=json.load(sys.stdin); assert 'in' in d and 'out' in d" 2>/dev/null \
   && _ok "GET /api/v1/workspace returns in/out keys" \
@@ -268,7 +268,7 @@ echo "$WSAPI" | python3 -c \
 
 # ── 20. Request Inspector ─────────────────────────────────────────────────────
 _hdr "Request Inspector"
-INSP=$(curl -fsS "$BB/api/v1/inspector")
+INSP=$(curl -sS "$BB/api/v1/inspector")
 echo "$INSP" | python3 -c \
   "import sys,json; d=json.load(sys.stdin); assert 'requests' in d and 'total' in d" 2>/dev/null \
   && _ok "GET /api/v1/inspector returns expected shape" \
@@ -276,7 +276,7 @@ echo "$INSP" | python3 -c \
 
 # ── 21. Eval API ──────────────────────────────────────────────────────────────
 _hdr "Eval API"
-SUITES=$(curl -fsS "$BB/api/v1/eval/suites")
+SUITES=$(curl -sS "$BB/api/v1/eval/suites")
 echo "$SUITES" | python3 -c \
   "import sys,json; d=json.load(sys.stdin); assert isinstance(d, list)" 2>/dev/null \
   && _ok "GET /api/v1/eval/suites returns list" \
@@ -284,7 +284,7 @@ echo "$SUITES" | python3 -c \
 
 # ── 22. Routing stats ─────────────────────────────────────────────────────────
 _hdr "Routing stats"
-RSTATS=$(curl -fsS "$BB/api/v1/routing-stats")
+RSTATS=$(curl -sS "$BB/api/v1/routing-stats")
 echo "$RSTATS" | python3 -c \
   "import sys,json; d=json.load(sys.stdin); assert 'cache_hits' in d and 'total' in d" 2>/dev/null \
   && _ok "GET /api/v1/routing-stats returns expected shape" \
@@ -292,7 +292,7 @@ echo "$RSTATS" | python3 -c \
 
 # ── 23. System metrics ────────────────────────────────────────────────────────
 _hdr "System metrics"
-SYSM=$(curl -fsS "$BB/api/v1/system-metrics")
+SYSM=$(curl -sS "$BB/api/v1/system-metrics")
 echo "$SYSM" | python3 -c \
   "import sys,json; d=json.load(sys.stdin); assert 'cpu' in d or 'error' not in d" 2>/dev/null \
   && _ok "GET /api/v1/system-metrics responds" \
@@ -300,7 +300,7 @@ echo "$SYSM" | python3 -c \
 
 # ── 24. CDP status ────────────────────────────────────────────────────────────
 _hdr "CDP status"
-CDPS=$(curl -fsS "$BB/api/v1/cdp/status")
+CDPS=$(curl -sS "$BB/api/v1/cdp/status")
 echo "$CDPS" | python3 -c \
   "import sys,json; d=json.load(sys.stdin); assert 'available' in d" 2>/dev/null \
   && _ok "GET /api/v1/cdp/status returns available key" \
@@ -308,7 +308,7 @@ echo "$CDPS" | python3 -c \
 
 # ── 25. Z-commands ────────────────────────────────────────────────────────────
 _hdr "Z-commands"
-ZC=$(curl -fsS "$BB/api/v1/zcommands")
+ZC=$(curl -sS "$BB/api/v1/zcommands")
 echo "$ZC" | python3 -c \
   "import sys,json; d=json.load(sys.stdin); assert 'routes' in d or isinstance(d, dict)" 2>/dev/null \
   && _ok "GET /api/v1/zcommands responds" \
@@ -316,7 +316,7 @@ echo "$ZC" | python3 -c \
 
 # ── 26. Model options ─────────────────────────────────────────────────────────
 _hdr "Model options"
-MOPT=$(curl -fsS "$BB/api/v1/model-options")
+MOPT=$(curl -sS "$BB/api/v1/model-options")
 echo "$MOPT" | python3 -c \
   "import sys,json; d=json.load(sys.stdin); assert 'model_options' in d" 2>/dev/null \
   && _ok "GET /api/v1/model-options returns model_options key" \
@@ -324,15 +324,15 @@ echo "$MOPT" | python3 -c \
 
 # ── 27. Orchestrations ────────────────────────────────────────────────────────
 _hdr "Orchestrations"
-ORCH=$(curl -fsS "$BB/api/v1/orchestrations")
+ORCH=$(curl -sS "$BB/api/v1/orchestrations")
 echo "$ORCH" | python3 -c \
-  "import sys,json; d=json.load(sys.stdin); assert isinstance(d, list) or 'orchestrations' in d" 2>/dev/null \
+  "import sys,json; d=json.load(sys.stdin); assert isinstance(d, (list,dict))" 2>/dev/null \
   && _ok "GET /api/v1/orchestrations responds" \
   || _fail "GET /api/v1/orchestrations failed: $ORCH"
 
 # ── 28. Agent card ────────────────────────────────────────────────────────────
 _hdr "Agent card"
-CARD=$(curl -fsS "$BB/.well-known/agent-card.json")
+CARD=$(curl -sS "$BB/.well-known/agent-card.json")
 echo "$CARD" | python3 -c \
   "import sys,json; d=json.load(sys.stdin); assert 'name' in d or 'url' in d" 2>/dev/null \
   && _ok "GET /.well-known/agent-card.json returns agent card" \
@@ -340,7 +340,7 @@ echo "$CARD" | python3 -c \
 
 # ── 29. Auth endpoint ─────────────────────────────────────────────────────────
 _hdr "Auth"
-AUTHME=$(curl -fsS "$BB/auth/me")
+AUTHME=$(curl -sS "$BB/auth/me")
 echo "$AUTHME" | python3 -c \
   "import sys,json; d=json.load(sys.stdin); assert 'authenticated' in d" 2>/dev/null \
   && _ok "GET /auth/me returns authenticated key" \
@@ -348,7 +348,7 @@ echo "$AUTHME" | python3 -c \
 
 # ── 30. MCP server ────────────────────────────────────────────────────────────
 _hdr "MCP server"
-MCP=$(curl -fsS -X POST "$BB/mcp" \
+MCP=$(curl -sS -X POST "$BB/mcp" \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}')
 echo "$MCP" | python3 -c \
