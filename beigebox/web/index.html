@@ -3039,6 +3039,42 @@ const THEMES = {
     '--yellow':        '#EBCB8B',
     '--red':           '#BF616A',
   },
+  phosphor: {
+    '--lavender':      '#33FF33',
+    '--lavender-dim':  '#1A8C1A',
+    '--green':         '#66FF66',
+    '--green-dim':     '#2E7A2E',
+    '--cyan':          '#AAFF44',
+    '--yellow':        '#FFFF00',
+    '--red':           '#FF4444',
+  },
+  cobalt: {
+    '--lavender':      '#80AAFF',
+    '--lavender-dim':  '#3D5A99',
+    '--green':         '#5FDDB0',
+    '--green-dim':     '#2A7A60',
+    '--cyan':          '#66D9FF',
+    '--yellow':        '#FFCC66',
+    '--red':           '#FF6B6B',
+  },
+  sakura: {
+    '--lavender':      '#F48FB1',
+    '--lavender-dim':  '#8C4060',
+    '--green':         '#A5D6A7',
+    '--green-dim':     '#4A7A4C',
+    '--cyan':          '#F8BBD9',
+    '--yellow':        '#FFF176',
+    '--red':           '#EF9A9A',
+  },
+  slate: {
+    '--lavender':      '#90A4AE',
+    '--lavender-dim':  '#4A6370',
+    '--green':         '#80CBC4',
+    '--green-dim':     '#3A706C',
+    '--cyan':          '#B0BEC5',
+    '--yellow':        '#CFD8DC',
+    '--red':           '#EF9A9A',
+  },
 };
 
 function randomPalette() {
@@ -4069,8 +4105,11 @@ const TOOLTIPS = {
   backends_enabled:            'Enable/disable multi-backend routing. When off, all requests go directly to the primary backend URL.',
   // Decision LLM tuning
   decision_llm_timeout:        'Override the decision LLM HTTP timeout in seconds. Lower = faster fallback on slow models.',
+  // Aggressive summarization
+  features_aggressive_summarization: 'Run summarization on EVERY request, not just when a token budget is exceeded. Compresses all but the last N messages into bullet points before each call — keeps context short but loses detail. Use when running many long sessions on memory-constrained hardware.',
   // WASM
   wasm_enabled:                'Enable/disable the WASM post-processing pipeline. Lazy-initialises the engine on first enable.',
+  wasm_default_module:         'WASM module applied to every response when no per-route override is set. Must match a filename (without .wasm) from the wasm_modules/ directory. Leave blank to disable the always-on transform.',
   wasm_timeout_ms:             'Abort a WASM module call and pass the response through unmodified if it exceeds this (ms).',
   // Logging
   log_level:                   'Verbosity of server-side logs: DEBUG → INFO → WARNING → ERROR.',
@@ -8771,6 +8810,28 @@ async function loadConfig() {
     html += cfgToggle('features_guardrails', 'Content filtering (guardrails)', c.features?.guardrails ?? false);
     html += cfgToggle('features_amf_mesh', 'Service mesh advertisement', c.features?.amf_mesh ?? false);
     html += cfgToggle('features_voice', 'Speech I/O (STT + TTS)', c.features?.voice ?? false);
+    html += `<div id="sub-features_voice" style="display:${c.features?.voice ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
+    html += `<div style="font-size:11px;color:var(--fg-dim);margin-bottom:6px">Service configuration — changes apply immediately without restart</div>`;
+    html += cfgToggle('voice_enabled', 'Push-to-talk button (mic icon in chat)', c.web_ui?.voice_enabled ?? false);
+    html += cfgInput('voice_hotkey', 'PTT hotkey (single key, e.g. v)', c.web_ui?.voice_hotkey || '');
+    html += cfgInput('stt_url', 'STT service URL', c.voice?.stt_url || '');
+    html += cfgToggle('tts_autoplay', 'Auto-play TTS after responses', c.voice?.tts_autoplay ?? false);
+    html += `<div id="sub-tts_autoplay" style="display:${c.voice?.tts_autoplay ? 'block' : 'none'};margin-left:16px;margin-top:4px;border-left:2px solid var(--bg-border);padding-left:10px">`;
+    html += cfgInput('tts_url',   'TTS service URL', c.voice?.tts_url || '');
+    html += cfgInput('tts_model', 'TTS model', c.voice?.tts_model || 'tts-1');
+    const ttsVoiceOptions = ['alloy','echo','fable','onyx','nova','shimmer','af','af_bella','af_sarah','am_adam','af_sky'];
+    html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">` +
+      `<label style="width:140px;font-size:12px;color:var(--fg-dim)" data-tip="tts_voice">TTS voice</label>` +
+      `<input id="cfg-tts_voice" list="tts-voice-list" value="${esc(c.voice?.tts_voice || 'alloy')}" ` +
+      `style="width:160px;background:var(--bg);color:var(--fg);border:1px solid var(--bg-border);border-radius:4px;padding:3px 6px;font-size:12px">` +
+      `<datalist id="tts-voice-list">${ttsVoiceOptions.map(v=>`<option value="${esc(v)}">`).join('')}</datalist></div>`;
+    html += cfgInput('tts_speed', 'Speed (0.25–4.0)', c.voice?.tts_speed ?? 1.0, 'number');
+    html += `<div style="margin-top:6px;display:flex;gap:8px">` +
+      `<button class="action-btn" onclick="testTTS()">▶ Test TTS</button>` +
+      `<button class="action-btn" id="tts-stop-btn" style="display:none" onclick="stopTTS()">■ Stop</button>` +
+      `</div>`;
+    html += `</div>`;
+    html += `</div>`;
     html += cfgToggle('features_hooks', 'Custom middleware hooks', c.features?.hooks ?? false);
     html += SC;
 
@@ -8905,27 +8966,9 @@ async function loadConfig() {
     // ── Interface ─────────────────────────────────────────────────────────
     html += SO('Interface');
     html += cfgSelect('web_ui_palette', 'Palette theme', c.web_ui?.palette || 'default',
-                      ['default','phosphor','cobalt','sakura','slate']);
+                      ['default','dracula','gruvbox','nord','phosphor','cobalt','sakura','slate','random']);
     html += cfgToggle('web_ui_vi_mode', 'Vi mode', c.web_ui?.vi_mode ?? false);
-    html += cfgToggle('voice_enabled', 'Push-to-talk (requires STT service)', c.web_ui?.voice_enabled ?? false);
-    html += cfgInput('voice_hotkey', 'PTT hotkey (single key, e.g. v)', c.web_ui?.voice_hotkey || '');
-    html += cfgInput('stt_url', 'STT service URL', c.voice?.stt_url || '');
-    html += cfgToggle('tts_autoplay', 'Auto-play TTS after responses', c.voice?.tts_autoplay ?? false);
-    html += `<div id="sub-tts_autoplay" style="display:${c.voice?.tts_autoplay ? 'block' : 'none'};margin-left:16px;margin-top:4px;border-left:2px solid var(--bg-border);padding-left:10px">`;
-    html += cfgInput('tts_url',   'TTS service URL', c.voice?.tts_url || '');
-    html += cfgInput('tts_model', 'TTS model', c.voice?.tts_model || 'tts-1');
-    const ttsVoiceOptions = ['alloy','echo','fable','onyx','nova','shimmer','af','af_bella','af_sarah','am_adam','af_sky'];
-    html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">` +
-      `<label style="width:140px;font-size:12px;color:var(--muted)">TTS voice</label>` +
-      `<input id="cfg-tts_voice" list="tts-voice-list" value="${esc(c.voice?.tts_voice || 'alloy')}" ` +
-      `style="width:160px;background:var(--bg2);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px">` +
-      `<datalist id="tts-voice-list">${ttsVoiceOptions.map(v=>`<option value="${esc(v)}">`).join('')}</datalist></div>`;
-    html += cfgInput('tts_speed', 'Speed (0.25–4.0)', c.voice?.tts_speed ?? 1.0, 'number');
-    html += `<div style="margin-top:6px;display:flex;gap:8px">` +
-      `<button class="action-btn" onclick="testTTS()">▶ Test TTS</button>` +
-      `<button class="action-btn" id="tts-stop-btn" style="display:none" onclick="stopTTS()">■ Stop</button>` +
-      `</div>`;
-    html += `</div>`;
+    html += `<div style="font-size:11px;color:var(--fg-dim);margin-top:6px">Voice settings are in <strong>Features → Speech I/O (STT + TTS)</strong> above.</div>`;
     html += SC;
 
     // ── System (read-only info) ───────────────────────────────────────────

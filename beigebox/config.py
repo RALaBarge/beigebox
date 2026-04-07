@@ -358,10 +358,11 @@ def update_runtime_config(key: str, value) -> bool:
                 pass
             raise
 
-        # Reset mtime so the next get_runtime_config() call triggers a reload
-        # even if the OS mtime resolution is coarser than the write interval.
-        global _runtime_mtime
+        # Reset both mtime and last-checked so the next get_runtime_config()
+        # call triggers a full reload even within the 1s debounce window.
+        global _runtime_mtime, _runtime_mtime_last_checked
         _runtime_mtime = 0.0
+        _runtime_mtime_last_checked = 0.0
         return True
     except Exception as e:
         import logging as _log
