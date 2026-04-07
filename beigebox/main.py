@@ -170,6 +170,10 @@ async def lifespan(app: FastAPI):
     _setup_logging(cfg)
     logger = logging.getLogger(__name__)
 
+    # Configure payload log path once at startup
+    from beigebox.payload_log import configure as _pl_configure
+    _pl_configure(cfg.get("payload_log", {}).get("path", "./data/payload.jsonl"))
+
     # Storage
     sqlite_path, vector_store_path = get_storage_paths(cfg)
     sqlite_store = SQLiteStore(sqlite_path)
@@ -453,8 +457,8 @@ async def lifespan(app: FastAPI):
         await stop_egress_hooks(_app_state.egress_hooks)
     if _app_state and _app_state.proxy and _app_state.proxy.wire:
         _app_state.proxy.wire.close()
-    from beigebox.payload_log import get_payload_log as _get_pl
-    _get_pl().close()
+    from beigebox.payload_log import close as _pl_close
+    _pl_close()
     logger.info("Wiretap and payload log flushed and closed")
 
 

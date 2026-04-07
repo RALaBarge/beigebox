@@ -471,6 +471,63 @@ def log_harness_turn(
     )
 
 
+def log_payload_event(
+    source: str,
+    payload: dict | None = None,
+    response: str | None = None,
+    model: str = "",
+    backend: str = "",
+    conversation_id: str = "",
+    latency_ms: float = 0.0,
+) -> None:
+    """Log a full LLM payload — summary onto Tap bus, full body to payload.jsonl.
+
+    Gate-checked here so call sites need no conditional logic.
+    Only active when payload_log_enabled: true in runtime_config.
+    """
+    from beigebox.config import get_runtime_config
+    if not get_runtime_config().get("payload_log_enabled", False):
+        return
+
+    # Lightweight summary event on the Tap bus (no payload data — keep bus lean)
+    wire = _get_tap_logger()
+    if wire:
+        msg_count = len(payload.get("messages", [])) if payload else 0
+        summary = f"Payload {source}: {model}"
+        if msg_count:
+            summary += f" [{msg_count} msgs]"
+        if latency_ms:
+            summary += f" ({latency_ms:.0f}ms)"
+        wire.log(
+            direction="outbound" if payload else "inbound",
+            role="payload",
+            content=summary,
+            model=model,
+            event_type="payload",
+            source=source,
+            meta={
+                "backend": backend,
+                "conversation_id": conversation_id,
+                "latency_ms": latency_ms,
+            },
+        )
+
+    # Full body written to payload.jsonl — off the bus, separate concern
+    try:
+        from beigebox.payload_log import write_payload
+        write_payload(
+            source=source,
+            payload=payload,
+            response=response,
+            model=model,
+            backend=backend,
+            conversation_id=conversation_id,
+            latency_ms=latency_ms,
+        )
+    except Exception:
+        pass
+
+
 def log_error_event(component: str, error: str, severity: str = "error"):
     """Log errors and exceptions."""
     wire = _get_tap_logger()

@@ -31,6 +31,7 @@ from typing import Any
 import httpx
 
 from beigebox.config import get_config, get_runtime_config
+from beigebox.logging import log_payload_event
 from beigebox.agents.skill_loader import load_skills, skills_to_xml, skills_fingerprint
 
 logger = logging.getLogger(__name__)
@@ -650,19 +651,7 @@ class Operator:
                 time.sleep(delay)
             try:
                 with httpx.Client(timeout=self._timeout) as client:
-                    # Payload log — full operator context dump (hot-toggled)
-                    try:
-                        from beigebox.config import get_runtime_config as _grc
-                        from beigebox.payload_log import get_payload_log as _gpl
-                        if _grc().get("payload_log_enabled", False):
-                            _gpl(self.cfg).log(
-                                source="operator",
-                                payload=payload,
-                                backend=_backend_url,
-                                model=self._model,
-                            )
-                    except Exception:
-                        pass  # never block on logging
+                    log_payload_event("operator", payload=payload, model=self._model, backend=_backend_url)
 
                     resp = client.post(
                         f"{_backend_url}/v1/chat/completions",
@@ -671,20 +660,7 @@ class Operator:
                     resp.raise_for_status()
                     result = resp.json()["choices"][0]["message"]["content"]
 
-                    # Payload log — capture operator response
-                    try:
-                        from beigebox.config import get_runtime_config as _grc2
-                        from beigebox.payload_log import get_payload_log as _gpl2
-                        if _grc2().get("payload_log_enabled", False):
-                            _gpl2(self.cfg).log(
-                                source="operator_response",
-                                payload={},
-                                response=result,
-                                backend=_backend_url,
-                                model=self._model,
-                            )
-                    except Exception:
-                        pass
+                    log_payload_event("operator_response", response=result, model=self._model, backend=_backend_url)
 
                     return result
             except Exception as e:
@@ -718,14 +694,7 @@ class Operator:
                 await asyncio.sleep(delay)
             try:
                 async with httpx.AsyncClient(timeout=self._timeout) as client:
-                    try:
-                        from beigebox.config import get_runtime_config as _grc
-                        from beigebox.payload_log import get_payload_log as _gpl
-                        if _grc().get("payload_log_enabled", False):
-                            _gpl(self.cfg).log(source="operator", payload=payload,
-                                               backend=_backend_url, model=self._model)
-                    except Exception:
-                        pass
+                    log_payload_event("operator", payload=payload, model=self._model, backend=_backend_url)
 
                     resp = await client.post(
                         f"{_backend_url}/v1/chat/completions",
@@ -734,15 +703,7 @@ class Operator:
                     resp.raise_for_status()
                     result = resp.json()["choices"][0]["message"]["content"]
 
-                    try:
-                        from beigebox.config import get_runtime_config as _grc2
-                        from beigebox.payload_log import get_payload_log as _gpl2
-                        if _grc2().get("payload_log_enabled", False):
-                            _gpl2(self.cfg).log(source="operator_response", payload={},
-                                                response=result, backend=_backend_url,
-                                                model=self._model)
-                    except Exception:
-                        pass
+                    log_payload_event("operator_response", response=result, model=self._model, backend=_backend_url)
 
                     return result
             except Exception as e:
