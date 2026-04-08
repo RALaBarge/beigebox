@@ -1,6 +1,0 @@
-[submodule "skills/anthropics-skills"]
-	path = skills/anthropics-skills
-	url = https://github.com/anthropics/skills
-[submodule "skills/scientific-skills"]
-	path = skills/scientific-skills
-	url = https://github.com/K-Dense-AI/claude-scientific-skills

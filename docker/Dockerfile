@@ -1,5 +1,7 @@
 FROM python@sha256:3d5ed973e45820f5ba5e46bd065bd88b3a504ff0724d85980dcd05eab361fcf4
 
+ARG REQUIRE_HASHES=true
+
 WORKDIR /app
 
 # ── System deps ────────────────────────────────────────────────────────────
@@ -42,7 +44,11 @@ RUN useradd -m -u 1000 -s /usr/sbin/nologin appuser
 COPY requirements.txt .
 COPY requirements.lock .
 COPY config.yaml .
-RUN pip install --no-cache-dir --require-hashes -r requirements.lock
+RUN if [ "${REQUIRE_HASHES}" = "true" ]; then \
+      pip install --no-cache-dir --require-hashes -r requirements.lock; \
+    else \
+      pip install --no-cache-dir -r requirements.lock; \
+    fi
 
 # ── Application code ───────────────────────────────────────────────────────
 COPY beigebox/ beigebox/

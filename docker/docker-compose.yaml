@@ -126,6 +126,8 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      args:
+        REQUIRE_HASHES: "${REQUIRE_HASHES:-true}"
     container_name: beigebox
     ports:
       - "${BEIGEBOX_PORT:-1337}:8000"
