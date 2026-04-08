@@ -115,9 +115,10 @@ services:
       - /tmp
     command: >
       sh -c "sleep 5 &&
+      curl -s http://ollama:11434/api/pull -d '{\"name\":\"qwen3:4b\"}' &&
+      curl -s http://ollama:11434/api/pull -d '{\"name\":\"llama3.2:3b\"}' &&
       curl -s http://ollama:11434/api/pull -d '{\"name\":\"nomic-embed-text\"}' &&
-      curl -s http://ollama:11434/api/pull -d '{\"name\":\"gemma3:4b\"}' &&
-      curl -s http://ollama:11434/api/generate -d '{\"model\":\"gemma3:4b\",\"keep_alive\":-1}'"
+      curl -s http://ollama:11434/api/generate -d '{\"model\":\"qwen3:4b\",\"keep_alive\":-1}'"
     restart: "no"
 
   # ---------------------------------------------------------------------------
