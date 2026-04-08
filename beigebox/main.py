@@ -340,13 +340,35 @@ async def lifespan(app: FastAPI):
     # Preload models — run concurrently in the background so startup is not blocked.
     # Both use retry-with-backoff; Ollama may still be loading models from disk.
     _preload_tasks = [asyncio.create_task(_preload_embedding_model(cfg))]
-    if decision_agent:
-        # Delay decision LLM preload by 30s — gives Ollama time to finish loading
-        # the primary chat model first so the two don't race for VRAM bandwidth.
-        async def _delayed_decision_preload():
-            await asyncio.sleep(30)
+
+    # Collect all distinct special-purpose models (judge, operator, summary)
+    # and pin them in Ollama at startup so cold-start latency never hits a
+    # live request. Stagger by 15s each to avoid VRAM bandwidth contention.
+    _backend_url = cfg["backend"]["url"]
+    _models_cfg = cfg.get("models", {})
+    _profiles = _models_cfg.get("profiles", {})
+    _default_model = _models_cfg.get("default", "")
+    _special_models: list[tuple[str, str]] = []  # (model, label)
+    _seen: set[str] = set()
+    for label, key in [("routing/judge", "routing"), ("operator/agentic", "agentic"), ("summary", "summary")]:
+        m = _profiles.get(key) or _default_model
+        if m and m not in _seen:
+            _seen.add(m)
+            _special_models.append((m, label))
+
+    async def _staggered_preloads():
+        # Give Ollama 15s head-start before the first special model, then
+        # stagger each additional distinct model by 15s so they don't race.
+        await asyncio.sleep(15)
+        for idx, (model, label) in enumerate(_special_models):
+            if idx > 0:
+                await asyncio.sleep(15)
+            await _preload_model(_backend_url, model, label)
+        # Also trigger DecisionAgent's own preload (updates its internal state)
+        if decision_agent:
             await decision_agent.preload()
-        _preload_tasks.append(asyncio.create_task(_delayed_decision_preload()))
+
+    _preload_tasks.append(asyncio.create_task(_staggered_preloads()))
     # Fire-and-forget: server starts accepting requests immediately while
     # models warm up. Tasks are not awaited here.
 
@@ -1078,7 +1100,7 @@ async def api_config():
             "aggressive_summarization": rt.get("features_aggressive_summarization", cfg.get("features", {}).get("aggressive_summarization", cfg.get("aggressive_summarization", {}).get("enabled", False))),
             "system_context":        rt.get("features_system_context", cfg.get("features", {}).get("system_context", cfg.get("system_context", {}).get("enabled", False))),
             "wiretap":               rt.get("features_wiretap", cfg.get("features", {}).get("wiretap", cfg.get("wiretap", {}).get("enabled", True))),
-            "payload_log":           rt.get("features_payload_log", cfg.get("features", {}).get("payload_log", False)),
+            "payload_log":           rt.get("payload_log_enabled", False),
             "wasm":                  rt.get("features_wasm", cfg.get("features", {}).get("wasm", cfg.get("wasm", {}).get("enabled", False))),
             "guardrails":            rt.get("features_guardrails", cfg.get("features", {}).get("guardrails", cfg.get("guardrails", {}).get("enabled", False))),
             "amf_mesh":              rt.get("features_amf_mesh", cfg.get("features", {}).get("amf_mesh", cfg.get("amf_mesh", {}).get("enabled", False))),
@@ -1337,7 +1359,7 @@ async def api_config_save(request: Request):
         "features_auto_summarization":  "features_auto_summarization",
         "features_system_context":      "features_system_context",
         "features_wiretap":             "features_wiretap",
-        "features_payload_log":         "features_payload_log",
+        # "features_payload_log" removed — was a no-op; use payload_log_enabled instead
         "features_wasm":                "features_wasm",
         "features_guardrails":          "features_guardrails",
         "features_amf_mesh":            "features_amf_mesh",
@@ -3666,10 +3688,11 @@ async def api_operator_notes_set(request: Request):
 @app.get("/api/v1/operator/runs")
 async def api_operator_list_runs():
     """List recent operator runs."""
-    if not sqlite_store:
+    _st = get_state()
+    if not _st.sqlite_store:
         return JSONResponse({"error": "storage not available"}, status_code=503)
 
-    runs = sqlite_store.list_operator_runs(limit=50)
+    runs = _st.sqlite_store.list_operator_runs(limit=50)
     return JSONResponse({"runs": runs})
 
 
@@ -3685,17 +3708,6 @@ async def api_operator_get_run(run_id: str):
         return JSONResponse({"error": f"Run '{run_id}' not found"}, status_code=404)
 
     return JSONResponse(run)
-
-
-@app.get("/api/v1/operator/runs")
-async def api_operator_list_runs():
-    """List recent operator runs."""
-    _st = get_state()
-    if not _st.sqlite_store:
-        return JSONResponse({"error": "storage not available"}, status_code=503)
-
-    runs = _st.sqlite_store.list_operator_runs(limit=50)
-    return JSONResponse({"runs": runs})
 
 
 

@@ -1603,10 +1603,15 @@
   .studio-ctx-card {
     background: var(--bg-panel); border: 1px solid var(--bg-border);
     border-radius: 2px; margin-bottom: 8px; overflow: hidden;
+    resize: vertical; min-height: 60px;
   }
+  .studio-ctx-card.collapsed .studio-ctx-stats,
+  .studio-ctx-card.collapsed .studio-ctx-params,
+  .studio-ctx-card.collapsed .studio-ctx-msgs { display: none; }
   .studio-ctx-meta {
     display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
     padding: 6px 8px; border-bottom: 1px solid var(--bg-border); background: var(--bg);
+    cursor: pointer; user-select: none;
   }
   .studio-ctx-stats {
     padding: 4px 8px; font-size: 10px; color: var(--fg-muted);
@@ -1618,20 +1623,24 @@
   }
   .studio-ctx-msgs { padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
   .studio-ctx-msg-item {
-    position: relative; font-size: 11px;
-    display: flex; align-items: center; gap: 6px; padding: 2px 0;
-    cursor: default;
+    font-size: 11px; display: flex; flex-direction: column; gap: 2px; padding: 2px 0;
   }
+  .studio-ctx-msg-row {
+    display: flex; align-items: center; gap: 6px; cursor: pointer;
+  }
+  .studio-ctx-msg-row:hover { opacity: 0.8; }
   .studio-ctx-msg-body {
-    display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
-    margin-top: 2px; padding: 6px 8px; font-size: 10px;
+    display: none; padding: 6px 8px; font-size: 10px;
     white-space: pre-wrap; word-break: break-word;
-    background: var(--bg-panel); border: 1px solid var(--bg-border);
+    background: var(--bg); border: 1px solid var(--bg-border);
     border-radius: 2px; color: var(--fg-dim);
-    max-height: 240px; overflow-y: auto;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    max-height: 300px; overflow-y: auto; resize: vertical;
+    margin-top: 2px;
   }
-  .studio-ctx-msg-item:hover .studio-ctx-msg-body { display: block; }
+  .studio-ctx-msg-body.open { display: block; }
+  /* Studio image attachment */
+  #studio-attach-pills { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 10px 0; min-height: 0; }
+  #studio-attach-pills:empty { display: none; }
 
   /* ── Payload editor widget ───────────────────────────────────────────── */
   .pe-section {
@@ -2557,9 +2566,17 @@
         <div id="studio-runs-list"><div class="empty" style="padding:16px">Loading…</div></div>
       </div>
       <div id="studio-msgs"></div>
-      <div id="studio-input-area">
+      <div id="studio-attach-pills"></div>
+      <div id="studio-input-area"
+        ondragover="event.preventDefault();event.dataTransfer.dropEffect='copy'"
+        ondrop="event.preventDefault();studioHandleDrop(event.dataTransfer.files)">
+        <input type="file" id="studio-file-input" multiple accept="image/*"
+          style="display:none" onchange="studioHandleDrop(this.files);this.value=''">
+        <button onclick="document.getElementById('studio-file-input').click()"
+          style="font-size:14px;padding:4px 7px;flex-shrink:0" title="Attach image">🖼</button>
         <textarea id="studio-input" placeholder="Send a message… (Enter=send, Shift+Enter=newline)"
-          rows="1" onkeydown="studioKeydown(event)" oninput="autoResize(this)"></textarea>
+          rows="1" onkeydown="studioKeydown(event)"
+          oninput="autoResize(this);_studioPayloadEditor?.refresh()"></textarea>
         <button class="primary" id="studio-send-btn" onclick="studioSend()">Send</button>
       </div>
     </div>
@@ -2966,6 +2983,8 @@ let _studioCurrentRunId = null;   // conv_id of loaded run (null = fresh)
 let _studioRunLabels    = {};     // conv_id → display label cache
 let _studioCtxMessages  = [];     // last context panel messages[] for forking
 let _studioPayloadEditor = null;  // PayloadEditor instance for the context column
+let _studioAttachments  = [];     // pending image attachments [{name, dataUrl}]
+let _studioCtxCollapsed = false;  // via-router card collapsed state
 
 // ── Model canonicalization ───────────────────────────────────────────────────
 // Produces a stable short name and ID from any raw model string.
@@ -6632,7 +6651,14 @@ function _renderTapEntriesWithSeparators(entries) {
 }
 
 function _renderTapEntry(e) {
-  const ts      = e.ts ? new Date(e.ts).toLocaleTimeString() : '?';
+  const _tsDate = e.ts ? new Date(e.ts) : null;
+  const _tsAgo  = _tsDate ? (() => {
+    const s = Math.floor((Date.now() - _tsDate) / 1000);
+    if (s < 60)  return s + 's';
+    if (s < 3600) return Math.floor(s / 60) + 'm';
+    return Math.floor(s / 3600) + 'h';
+  })() : '?';
+  const ts      = _tsDate ? `<span title="${_tsDate.toLocaleTimeString()}">${_tsDate.toLocaleTimeString()} <span style="color:var(--fg-muted);font-size:10px">${_tsAgo} ago</span></span>` : '?';
   const role    = e.role  || '?';
   const dir     = e.dir   || '';
   const model   = e.model || '';
@@ -6748,7 +6774,7 @@ function _renderTapEntry(e) {
   const rowBg = isHighlighted ? 'background:rgba(137,180,250,0.22);border-color:rgba(137,180,250,0.60);' : '';
 
   return `<div data-conv="${esc(conv)}" data-run="${esc(runId)}" style="margin-bottom:6px;border-bottom:1px solid var(--bg-border);padding-bottom:5px;${rowBg}">
-    <span style="color:var(--fg-muted)">${esc(ts)}</span>
+    <span style="color:var(--fg-muted)">${ts}</span>
     ${dir ? `<span style="color:var(--fg-dim)">${esc(arrow)}</span>` : ''}
     <span style="color:${color};font-weight:500">${esc(icon)} ${esc(role.toUpperCase())}</span>
     ${sourcePart}${evPart}${modelPart}${lenPart}${latencyBadge}${convPart}${runPart}
@@ -10691,6 +10717,15 @@ function renderDiscoveryResult(data) {
 function buildStudioPayload() {
   const model = document.getElementById('studio-model-sel')?.value || '';
   const msgs  = _studioHistory.map(m => ({ role: m.role, content: m.content }));
+  // Preview pending attachments in the payload editor (not sent — studioSend does the real build)
+  if (_studioAttachments.length > 0) {
+    const pendingText = document.getElementById('studio-input')?.value || '';
+    const parts = [{ type: 'text', text: pendingText || '(pending…)' }];
+    for (const a of _studioAttachments) {
+      parts.push({ type: 'image_url', image_url: { url: `[${a.name} — ${Math.round(a.dataUrl.length * 0.75 / 1024)}KB]` } });
+    }
+    msgs.push({ role: 'user', content: parts });
+  }
   const body  = { messages: msgs, stream: true, _beigebox_direct: true };
   if (model) body.model = model;
   return body;
@@ -10725,6 +10760,59 @@ function studioStopContextPoll() {
 function studioToggleContextLive() {
   const live = document.getElementById('studio-ctx-live')?.checked;
   if (live) studioStartContextPoll(); else studioStopContextPoll();
+}
+
+function studioToggleCtxCard(e) {
+  if (e && e.target && e.target.closest('.studio-fork-btn')) return;
+  _studioCtxCollapsed = !_studioCtxCollapsed;
+  const el = document.getElementById('studio-ctx-body');
+  if (el) {
+    const card = el.querySelector('.studio-ctx-card');
+    if (card) card.classList.toggle('collapsed', _studioCtxCollapsed);
+    const btn = card?.querySelector('.studio-ctx-meta > span:last-child');
+    if (btn) btn.textContent = _studioCtxCollapsed ? '▸' : '▾';
+  }
+}
+
+function studioToggleMsgBody(bodyId) {
+  const el = document.getElementById(bodyId);
+  if (!el) return;
+  const open = el.classList.toggle('open');
+  const chev = document.getElementById(bodyId + '-chev');
+  if (chev) chev.textContent = open ? '▾' : '▸';
+}
+
+async function studioHandleDrop(files) {
+  if (!files || !files.length) return;
+  for (const file of files) {
+    if (!file.type.startsWith('image/')) continue;
+    const dataUrl = await new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result);
+      fr.onerror = rej;
+      fr.readAsDataURL(file);
+    });
+    _studioAttachments.push({ name: file.name, dataUrl });
+  }
+  studioRenderAttachPills();
+  _studioPayloadEditor?.refresh();
+}
+
+function studioRenderAttachPills() {
+  const el = document.getElementById('studio-attach-pills');
+  if (!el) return;
+  el.innerHTML = _studioAttachments.map((a, i) => `
+    <div class="attach-pill" title="${esc(a.name)}">
+      <span>🖼</span>
+      <span class="pill-name">${esc(a.name)}</span>
+      <span class="pill-rm" onclick="studioRemoveAttach(${i})" title="Remove">✕</span>
+    </div>`).join('');
+}
+
+function studioRemoveAttach(idx) {
+  _studioAttachments.splice(idx, 1);
+  studioRenderAttachPills();
+  _studioPayloadEditor?.refresh();
 }
 
 async function studioFetchContext() {
@@ -10775,22 +10863,38 @@ function renderStudioContext(req) {
 
   _studioCtxMessages = req.messages || [];
   const msgsHtml = (req.messages || []).map((m, idx) => {
-    const c = (m.content || '');
-    const preview = c.length > 1200 ? esc(c.slice(0,1200)) + '\n… +'+(c.length-1200)+' chars' : esc(c);
+    const rawContent = m.content;
+    let c, hasImage = false;
+    if (Array.isArray(rawContent)) {
+      const textParts = rawContent.filter(p => p.type === 'text').map(p => p.text).join('\n');
+      hasImage = rawContent.some(p => p.type === 'image_url');
+      c = textParts + (hasImage ? '\n[image attached]' : '');
+    } else {
+      c = String(rawContent || '');
+    }
+    const preview = c.length > 2000 ? esc(c.slice(0,2000)) + '\n… +'+(c.length-2000)+' chars' : esc(c);
+    const bodyId = `sctx-body-${idx}`;
+    const chevron = `<span id="${bodyId}-chev" style="font-size:9px;color:var(--fg-muted)">▸</span>`;
     return `<div class="studio-ctx-msg-item">
-      <span class="badge" style="background:${roleColor[m.role]||'var(--fg-muted)'}20;color:${roleColor[m.role]||'var(--fg-muted)'}">${m.role}</span>
-      <span style="color:var(--fg-muted);font-size:10px">${c.length} chars</span>
-      <button class="studio-fork-btn" onclick="studioForkAt(${idx})" title="Fork context here">⑂</button>
-      <div class="studio-ctx-msg-body">${preview}</div>
+      <div class="studio-ctx-msg-row" onclick="studioToggleMsgBody('${bodyId}')">
+        ${chevron}
+        <span class="badge" style="background:${roleColor[m.role]||'var(--fg-muted)'}20;color:${roleColor[m.role]||'var(--fg-muted)'}">${m.role}</span>
+        <span style="color:var(--fg-muted);font-size:10px">${c.length} ch${hasImage?' 🖼':''}</span>
+        <button class="studio-fork-btn" onclick="event.stopPropagation();studioForkAt(${idx})" title="Fork context here">⑂</button>
+      </div>
+      <div class="studio-ctx-msg-body" id="${bodyId}">${preview}</div>
     </div>`;
   }).join('');
 
-  return `<div class="studio-ctx-card">
-    <div class="studio-ctx-meta">
+  const collapseBtn = `<span onclick="studioToggleCtxCard(event)" style="margin-left:auto;font-size:10px;color:var(--fg-muted);cursor:pointer;flex-shrink:0" title="Collapse">${_studioCtxCollapsed ? '▸' : '▾'}</span>`;
+
+  return `<div class="studio-ctx-card${_studioCtxCollapsed ? ' collapsed' : ''}">
+    <div class="studio-ctx-meta" onclick="studioToggleCtxCard(event)">
       <span style="width:8px;height:8px;border-radius:50%;background:${statusColor};flex-shrink:0;display:inline-block"></span>
       <span class="badge badge-lav">${esc(req.model || '?')}</span>
       ${latBadge}${ttftBadge}
-      <span style="color:var(--fg-muted);font-size:10px;margin-left:auto">${req.backend_url ? esc(req.backend_url.length>35?req.backend_url.slice(0,35)+'…':req.backend_url) : ''}</span>
+      <span style="color:var(--fg-muted);font-size:10px">${req.backend_url ? esc(req.backend_url.length>35?req.backend_url.slice(0,35)+'…':req.backend_url) : ''}</span>
+      ${collapseBtn}
     </div>
     <div class="studio-ctx-stats">${nMsgs} messages · ${nChars.toLocaleString()} chars · ${tokStr}</div>
     ${paramPills ? `<div class="studio-ctx-params">${paramPills}</div>` : ''}
@@ -10934,8 +11038,23 @@ async function studioSend() {
   if (sendBtn) sendBtn.disabled = true;
   _studioStreaming = true;
 
-  _studioHistory.push({ role: 'user', content: text });
-  studioAppendMsg('user', text, '', _studioHistory.length - 1);
+  // Collect and clear attachments
+  const attachments = _studioAttachments.splice(0);
+  studioRenderAttachPills();
+
+  // Build user content — multimodal if images present
+  let userContent;
+  if (attachments.length > 0) {
+    const parts = [{ type: 'text', text }];
+    for (const a of attachments) parts.push({ type: 'image_url', image_url: { url: a.dataUrl } });
+    userContent = parts;
+  } else {
+    userContent = text;
+  }
+
+  const displayLabel = attachments.length ? `[${attachments.map(a=>a.name).join(', ')}]\n${text}` : text;
+  _studioHistory.push({ role: 'user', content: userContent });
+  studioAppendMsg('user', displayLabel, '', _studioHistory.length - 1);
   // Update preview to include the new user message before sending
   _studioPayloadEditor?.refresh();
 
@@ -10995,6 +11114,13 @@ async function studioSend() {
             continue;
           }
           const delta = j.choices?.[0]?.delta?.content || '';
+          // Backend errors arrive as normal content with [Backend error NNN: ...] prefix
+          if (delta && /^\[Backend error \d+/.test(delta) && !fullText) {
+            const errDiv = document.createElement('div');
+            errDiv.className = 'error-box'; errDiv.textContent = delta;
+            area.appendChild(errDiv); area.scrollTop = area.scrollHeight;
+            continue;
+          }
           if (delta) {
             fullText += delta;
             if (!assistantDiv) {
@@ -11058,10 +11184,12 @@ function studioAppendMsg(role, text, model, histIdx) {
 function studioClearChat() {
   _studioHistory = [];
   _studioCurrentRunId = null;
+  _studioAttachments = [];
   const badge = document.getElementById('studio-run-badge');
   if (badge) badge.textContent = '';
   const area = document.getElementById('studio-msgs');
   if (area) area.innerHTML = '';
+  studioRenderAttachPills();
   _studioPayloadEditor?.refresh();
 }
 

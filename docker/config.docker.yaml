@@ -62,9 +62,9 @@ tools:
 # --- Decision LLM ---
 decision_llm:
   enabled: true                          # Enabled by default in Docker — setup pulls the model
-  model: "qwen3:4b"                   # Fast routing decisions
+  model: "llama3.2:3b"                   # Routing judge — no thinking mode, faster than qwen3
   backend_url: "http://ollama:11434"
-  timeout: 5
+  timeout: 15                            # seconds; bumped from 5 — accounts for GPU cold-start
   max_tokens: 256
   routes:
     default:
