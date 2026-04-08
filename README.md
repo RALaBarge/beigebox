@@ -27,13 +27,17 @@ flowchart LR
 ## Quick Start
 
 ```bash
-git clone --recursive https://github.com/ralabarge/beigebox.git
+git clone https://github.com/ralabarge/beigebox.git
 cd beigebox/docker
 cp env.example .env        # optional — set GPU, ports, API keys
 docker compose up -d
 ```
 
 Open **http://localhost:1337** for the web UI. The OpenAI-compatible API is at `http://localhost:1337/v1`.
+
+**Cross-platform builds (Linux/macOS):** By default, Docker enforces strict pip hash validation (`REQUIRE_HASHES=true`). If building on a different architecture than your lock file was generated on, either:
+- Regenerate the lock file: `uv pip compile requirements.txt --generate-hashes --output-file docker/requirements.lock`
+- Or disable hash validation: `echo "REQUIRE_HASHES=false" >> docker/.env` (less secure, dev-only)
 
 See [Deployment](d0cs/deployment.md#quick-start) for profiles (CDP, voice, alternative engines).
 
@@ -59,7 +63,7 @@ See [Deployment Quickstart](d0cs/deployment.md#quick-start) for more.
 | **Observability** | Tap unified logging (18+ event types); Grafana dashboards; per-request tracing |
 | **Orchestration** | Harness multi-turn harness; ensemble parallel execution; multi-agent coordination |
 | **Storage** | SQLite (conversations, metrics) + ChromaDB (embeddings); hot-reload config |
-| **Tools** | Chrome DevTools Protocol; operator agentic tools; RAG via document search; plugins + MCP |
+| **Tools** | Chrome DevTools Protocol; operator agentic tools; RAG via document search; MCP server + custom plugins |
 | **Post-processing** | WASM module support; output normalization; streaming transforms |
 
 ---
@@ -168,7 +172,7 @@ See [LICENSE.md](LICENSE.md) and [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md).
 
 - **Issues**: [GitHub Issues](https://github.com/ralabarge/beigebox/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/ralabarge/beigebox/discussions)
-- **Skills**: 187 skills via [Anthropic Skills + K-Dense scientific library](https://github.com/anthropics/anthropic-sdk-python/tree/main/examples/skills)
+- **Skills & Tools**: BeigeBox includes a built-in [MCP server](d0cs/tools.md#mcp-server) for tool discovery and extensibility. Write custom skills as MCP tools instead of external skill libraries for better portability and IDE integration.
 
 ---
 
