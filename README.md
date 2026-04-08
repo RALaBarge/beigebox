@@ -30,10 +30,17 @@ flowchart LR
 git clone https://github.com/ralabarge/beigebox.git
 cd beigebox/docker
 cp env.example .env        # optional — set GPU, ports, API keys
+
+# macOS (Apple Silicon or Intel):
+../launch.sh
+
+# Linux / Docker Desktop Windows:
 docker compose up -d
 ```
 
 Open **http://localhost:1337** for the web UI. The OpenAI-compatible API is at `http://localhost:1337/v1`.
+
+> **macOS note:** Always use `./launch.sh` for startup (handles ARM64 image selection, model pinning). On macOS, `docker compose` alone will pull x86_64 images if voice profile is used.
 
 **Cross-platform builds (Linux/macOS):** By default, Docker enforces strict pip hash validation (`REQUIRE_HASHES=true`). If building on a different architecture than your lock file was generated on, either:
 - Regenerate the lock file: `uv pip compile requirements.txt --generate-hashes --output-file docker/requirements.lock`

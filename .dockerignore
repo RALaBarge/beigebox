@@ -1,0 +1,64 @@
+# Build context bloat — exclude from Docker image
+data/
+workspace/
+logs/
+.git/
+.gitmodules
+.gitignore
+.github/
+.claude/
+.vscode/
+.idea/
+2600/
+HN_POSTS_*.txt
+HN_POSTS_*.md
+
+# Python
+__pycache__/
+.pytest_cache/
+.coverage
+.venv/
+venv/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+.Python
+
+# Tests
+tests/
+test_*.py
+*_test.py
+
+# Documentation
+*.md
+README*
+docs/
+CHANGES*
+LICENSE*
+CONTRIBUTING*
+
+# Local files
+.env
+.env.local
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# CI/CD
+.gitlab-ci.yml
+.github/
+azure-pipelines.yml
+.travis.yml
+.circleci/
+
+# Development
+node_modules/
+npm-debug.log
+yarn-error.log
+.eslintcache
