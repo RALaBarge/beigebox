@@ -43,7 +43,6 @@ RUN useradd -m -u 1000 -s /usr/sbin/nologin appuser
 # Regenerate with: uv pip compile requirements.txt --generate-hashes --output-file requirements.lock
 COPY requirements.txt .
 COPY requirements.lock .
-COPY config.yaml .
 RUN if [ "${REQUIRE_HASHES}" = "true" ]; then \
       pip install --no-cache-dir --require-hashes -r requirements.lock; \
     else \
