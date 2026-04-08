@@ -90,13 +90,14 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # For NVIDIA GPU support: uncomment the 'deploy' block below and restart.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
 
   # ---------------------------------------------------------------------------
   # Model pull — runs once to ensure required models exist
