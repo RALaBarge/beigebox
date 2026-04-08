@@ -245,8 +245,10 @@ def get_runtime_config() -> dict:
             data = yaml.safe_load(f) or {}
         _runtime_config = data.get("runtime", {})
         _runtime_mtime = mtime
-    except Exception:
-        pass  # Keep last good config on parse error
+    except yaml.YAMLError as e:
+        _vlog.warning("runtime_config.yaml parse error (keeping last good config): %s", e)
+    except Exception as e:
+        _vlog.warning("runtime_config.yaml load failed: %s", e)
 
     return _runtime_config
 
