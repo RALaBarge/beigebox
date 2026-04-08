@@ -1,6 +1,6 @@
 #!/bin/bash
-# up.sh — Platform-aware docker compose launcher for BeigeBox
-# Run from the docker/ directory: ./up.sh [args]
+# launch.sh — Platform-aware docker compose launcher for BeigeBox
+# Run from the docker/ directory: ./launch.sh [args]
 #
 # Auto-selects the best voice profile for the current host:
 #   arm64 / Apple Silicon  →  --profile apple  (arm64-native images)

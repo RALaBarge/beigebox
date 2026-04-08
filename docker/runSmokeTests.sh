@@ -1,6 +1,6 @@
 #!/usr/bin/bash
-# BeigeBox smoke test — validates the full Docker stack end-to-end.
-# Run from the docker/ directory: ./smoke.sh
+# BeigeBox smoke tests — validates the full Docker stack end-to-end.
+# Run from the docker/ directory: ./runSmokeTests.sh
 # Exits 0 on success, 1 on any failure.
 set -euo pipefail
 

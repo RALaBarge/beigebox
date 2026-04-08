@@ -29,7 +29,7 @@
 #   docker compose up -d beigebox                     # proxy only (external Ollama)
 #
 # APPLE SILICON NOTE:
-#   Use './up.sh' instead of 'docker compose' — it auto-detects arm64 and selects
+#   Use './launch.sh' instead of 'docker compose' — it auto-detects arm64 and selects
 #   the apple profile when voice I/O is requested. Docker on Mac does NOT expose
 #   Metal to containers, so MLX GPU acceleration is unavailable inside Docker.
 #   The 'apple' profile uses native arm64 images (no Rosetta emulation) which is
@@ -246,7 +246,7 @@ services:
   # Uses native arm64 image — no Rosetta emulation overhead.
   # Model: faster-whisper-small (real HF model, faster than base, override via WHISPER_MODEL).
   # Do NOT combine with 'voice' profile — both bind :9000.
-  # Digest is pinned automatically by up.sh on first run (Apple Silicon).
+  # Digest is pinned automatically by launch.sh on first run (Apple Silicon).
   whisper-apple:
     profiles: [apple]
     image: fedirz/faster-whisper-server:latest-cpu
@@ -277,7 +277,7 @@ services:
   # ---------------------------------------------------------------------------
   # Replaces 'kokoro' on Apple Silicon. Same OpenAI-compatible API, same port.
   # Do NOT combine with 'voice' profile — both bind :8880.
-  # Digest is pinned automatically by up.sh on first run (Apple Silicon).
+  # Digest is pinned automatically by launch.sh on first run (Apple Silicon).
   kokoro-apple:
     profiles: [apple]
     image: ghcr.io/remsky/kokoro-fastapi-cpu:latest-arm64
