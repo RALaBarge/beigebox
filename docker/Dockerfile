@@ -55,7 +55,6 @@ COPY beigebox/ beigebox/
 COPY docker/config.docker.yaml config.yaml
 COPY scripts/ scripts/
 COPY hooks/ hooks/
-COPY 2600/skills/ 2600/skills/
 
 # ── Data directory ─────────────────────────────────────────────────────────
 # /app/data is mounted as a named volume — runtime_config.yaml lives here
