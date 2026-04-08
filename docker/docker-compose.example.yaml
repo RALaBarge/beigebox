@@ -1,31 +1,46 @@
-# BeigeBox — Full Stack (Middleware + LLM) — EXAMPLE (CPU-only)
+# BeigeBox — Full Stack (Middleware + LLM) — EXAMPLE
 # Tap the line. Control the carrier.
 #
 # QUICKSTART:
+#   cp env.example .env
 #   cp docker-compose.example.yaml docker-compose.yaml
-#   cp ../config.example.yaml ../config.yaml
 #   docker compose up -d
+#   Open browser to: http://localhost:1337
 #
 # PROFILES:
-#   (default)           Ollama (CPU) + BeigeBox — transparent proxy + integrated UI
-#   voice               adds Whisper (STT) + Kokoro (TTS)
+#   (default)           Ollama + BeigeBox — transparent proxy + integrated UI
+#   voice               adds Whisper (STT) + Kokoro (TTS)  [x86_64 / Linux CPU]
+#   apple               adds Whisper + Kokoro as native arm64 images  [Apple Silicon]
 #   cdp                 adds Chromium with CDP (Chrome DevTools Protocol) for browser automation
 #   engines-cpp         use llama.cpp instead of Ollama (quantized models, minimal resource)
 #   engines-vllm        use vLLM instead of Ollama (production-grade inference)
+#   engines-executorch  use ExecutorTorch instead of Ollama (edge/mobile inference)
+#   sandbox             Claude Code DinD sandbox for AI-assisted development
 #
 # EXAMPLES:
-#   docker compose up -d                              # full stack, Ollama (CPU)
-#   docker compose --profile cdp up -d                # + Chromium for browser automation
-#   docker compose --profile voice up -d              # + voice I/O
+#   docker compose up -d                              # full stack, Ollama (default)
+#   docker compose --profile cdp up -d                # + Chromium for browser automation (CDP)
+#   docker compose --profile voice up -d              # + voice I/O (x86 / Linux)
+#   docker compose --profile apple up -d              # + voice I/O (Apple Silicon, arm64-native)
 #   docker compose --profile cdp --profile voice up -d # + browser automation + voice
+#   docker compose --profile cdp --profile apple up -d # + browser automation + voice (Apple)
 #   docker compose --profile engines-cpp up -d        # use llama.cpp instead
 #   docker compose --profile engines-vllm up -d       # use vLLM instead
+#   docker compose --profile engines-executorch up -d # use ExecutorTorch instead
+#   docker compose --profile sandbox up -d            # Claude Code DinD sandbox
 #   docker compose up -d beigebox                     # proxy only (external Ollama)
 #
-# GPU SUPPORT (NVIDIA only):
-#   1. Uncomment the 'deploy' block on the ollama service below
-#   2. Ensure nvidia-container-toolkit is installed: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
-#   3. Run: docker compose up -d
+# APPLE SILICON NOTE:
+#   Use './launch.sh' instead of 'docker compose' — it auto-detects arm64 and selects
+#   the apple profile when voice I/O is requested. Docker on Mac does NOT expose
+#   Metal to containers, so MLX GPU acceleration is unavailable inside Docker.
+#   The 'apple' profile uses native arm64 images (no Rosetta emulation) which is
+#   already significantly faster. For true MLX: run Whisper + Kokoro natively and
+#   set stt_url / tts_url in runtime_config.yaml to http://localhost:9000 / :8880.
+#
+# NVIDIA GPU:
+#   Uncomment the 'deploy' block on the ollama service below, then:
+#   docker compose up -d
 #
 # CONFIGURATION:
 #   cp env.example .env  → set OLLAMA_DATA, ports, API keys
@@ -33,11 +48,15 @@
 # SERVICES:
 #   ollama          → :11434  LLM inference engine (default)
 #   beigebox        → :1337   transparent proxy + integrated web UI
-#   whisper         → :9000   speech-to-text (voice profile)
-#   kokoro          → :8880   text-to-speech (voice profile)
+#   whisper         → :9000   speech-to-text (voice profile, x86/Linux)
+#   kokoro          → :8880   text-to-speech (voice profile, x86/Linux)
+#   whisper-apple   → :9000   speech-to-text (apple profile, arm64-native)
+#   kokoro-apple    → :8880   text-to-speech (apple profile, arm64-native)
 #   chrome          → :9222   Chrome DevTools Protocol (cdp profile)
 #   llama-cpp       → :8001   C++ inference (engines-cpp profile)
 #   vllm            → :8002   Production inference (engines-vllm profile)
+#   executorch      → :8003   Edge inference (engines-executorch profile)
+#   claude-bot      → n/a     Claude Code sidecar, workspace + BeigeBox access (sandbox profile)
 #
 # ALTERNATIVE FRONTENDS:
 #   BeigeBox exposes OpenAI-compatible /v1 endpoint.
@@ -57,7 +76,7 @@ services:
     ports:
       - "${OLLAMA_PORT:-11434}:11434"
     volumes:
-      - /mnt/storage/ollama:/root/.ollama
+      - ${OLLAMA_DATA:-ollama_data}:/root/.ollama
     tmpfs:
       - /tmp
     restart: unless-stopped
@@ -100,17 +119,20 @@ services:
       - /tmp
     command: >
       sh -c "sleep 5 &&
-      curl -s http://ollama:11434/api/pull -d '{\"name\":\"qwen3:4b\"}' > /dev/null &&
-      curl -s http://ollama:11434/api/pull -d '{\"name\":\"nomic-embed-text\"}' > /dev/null &&
-      echo 'Models ready'"
+      curl -s http://ollama:11434/api/pull -d '{\"name\":\"nomic-embed-text\"}' &&
+      curl -s http://ollama:11434/api/pull -d '{\"name\":\"gemma3:4b\"}' &&
+      curl -s http://ollama:11434/api/generate -d '{\"model\":\"gemma3:4b\",\"keep_alive\":-1}'"
+    restart: "no"
 
   # ---------------------------------------------------------------------------
-  # BeigeBox — OpenAI-compatible proxy + web UI
+  # BeigeBox — transparent LLM proxy + middleware + integrated web UI
   # ---------------------------------------------------------------------------
   beigebox:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      args:
+        REQUIRE_HASHES: "${REQUIRE_HASHES:-true}"
     container_name: beigebox
     depends_on:
       ollama:
@@ -118,96 +140,341 @@ services:
       ollama-model-pull:
         condition: service_completed_successfully
     ports:
-      - "${BEIGEBOX_PORT:-1337}:8001"
+      - "${BEIGEBOX_PORT:-1337}:8000"
     volumes:
-      - ../config.yaml:/app/config.yaml:ro         # Mount your local config
-      - ../runtime_config.yaml:/app/runtime_config.yaml:rw  # Hot-reload
-      - beigebox-data:/app/data                   # Persistent storage
-      - beigebox-workspace:/app/workspace         # Agent workspace
+      - ../data:/app/data
+      - ../hooks:/app/hooks:ro
+      - ../workspace/out:/app/workspace/out:rw
+      - ../workspace/mounts:/app/workspace/mounts:rw
+      - ../beigebox/web:/app/beigebox/web:ro
+      - ../wasm_modules:/app/wasm_modules:ro
+      - ./logs:/app/logs
+      - type: tmpfs
+        target: /app/workspace/in
+        tmpfs:
+          size: 536870912   # 512 MB — files never touch disk, auto-cleared on stop
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 268435456   # 256 MB — temp buffers, cleared on stop
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      OLLAMA_HOST: "http://ollama:11434"
-      PYTHONUNBUFFERED: "1"
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GOOGLE_CSE_ID=${GOOGLE_CSE_ID:-}
+      - OLLAMA_HOST=${OLLAMA_HOST:-ollama}
+      - BROWSERBOX_WS_URL=${BROWSERBOX_WS_URL:-ws://host.docker.internal:9009}
+      - LOG_LEVEL=DEBUG
+      - PYTHONUNBUFFERED=1
     restart: unless-stopped
     networks:
       - llm
-    read_only: true
-    tmpfs:
-      - /tmp
-      - /var/run
+      - tools
+      - inference
+    security_opt:
+      - no-new-privileges:true
     cap_drop:
       - ALL
-    cap_add:
-      - NET_BIND_SERVICE
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+        labels: "service=beigebox"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/beigebox/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/beigebox/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Whisper — STT (voice profile)
+  # ---------------------------------------------------------------------------
+  whisper:
+    profiles: [voice]
+    image: fedirz/faster-whisper-server@sha256:760e5e43d427dc6cfbbc4731934b908b7de9c7e6d5309c6a1f0c8c923a5b6030
+    container_name: beigebox-whisper
+    ports:
+      - "${WHISPER_PORT:-9000}:8000"
+    volumes:
+      - whisper_cache:/root/.cache/huggingface
+    tmpfs:
+      - /tmp
+    networks:
+      - tools
+    environment:
+      - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-whisper-base}
+      - WHISPER__DEVICE=cpu
+      - WHISPER__INFERENCE_DEVICE=cpu
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 60s
 
   # ---------------------------------------------------------------------------
-  # Voice (Optional — profile: voice)
-  # STT: Faster-Whisper, TTS: Kokoro
+  # Kokoro — TTS (voice profile)
   # ---------------------------------------------------------------------------
-  whisper:
-    image: openai/whisper-api:latest
-    container_name: beigebox-whisper
-    ports:
-      - "9000:8000"
-    volumes:
-      - whisper-cache:/root/.cache
-    restart: unless-stopped
-    networks:
-      - llm
-    profiles:
-      - voice
-    read_only: true
-    tmpfs:
-      - /tmp
-
   kokoro:
-    image: hexgrad/kokoro:latest
+    profiles: [voice]
+    image: ghcr.io/remsky/kokoro-fastapi-cpu@sha256:c8812546d358cbfd6a5c4087a28795b2b001d8e32d7a322eedd246e6bc13cb55
     container_name: beigebox-kokoro
     ports:
-      - "8880:8880"
-    restart: unless-stopped
-    networks:
-      - llm
-    profiles:
-      - voice
-    read_only: true
+      - "${KOKORO_PORT:-8880}:8880"
+    volumes:
+      - kokoro_models:/app/models
     tmpfs:
       - /tmp
+    networks:
+      - tools
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8880/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
 
   # ---------------------------------------------------------------------------
-  # CDP — Chromium with Chrome DevTools Protocol (Optional — profile: cdp)
-  # Browser automation for operator tool use
+  # Whisper (Apple Silicon) — STT, arm64-native (apple profile)
+  # ---------------------------------------------------------------------------
+  # Replaces 'whisper' on Apple Silicon. Same OpenAI-compatible API, same port.
+  # Uses native arm64 image — no Rosetta emulation overhead.
+  # Do NOT combine with 'voice' profile — both bind :9000.
+  # Digest is pinned automatically by launch.sh on first run (Apple Silicon).
+  whisper-apple:
+    profiles: [apple]
+    image: fedirz/faster-whisper-server:latest-cpu
+    container_name: beigebox-whisper-apple
+    ports:
+      - "${WHISPER_PORT:-9000}:8000"
+    volumes:
+      - whisper_cache:/root/.cache/huggingface
+    tmpfs:
+      - /tmp
+    networks:
+      - tools
+    read_only: true
+    environment:
+      - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-whisper-small}
+      - WHISPER__DEVICE=cpu
+      - WHISPER__INFERENCE_DEVICE=cpu
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ---------------------------------------------------------------------------
+  # Kokoro (Apple Silicon) — TTS, arm64-native (apple profile)
+  # ---------------------------------------------------------------------------
+  # Replaces 'kokoro' on Apple Silicon. Same OpenAI-compatible API, same port.
+  # Do NOT combine with 'voice' profile — both bind :8880.
+  # Digest is pinned automatically by launch.sh on first run (Apple Silicon).
+  kokoro-apple:
+    profiles: [apple]
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest-arm64
+    container_name: beigebox-kokoro-apple
+    ports:
+      - "${KOKORO_PORT:-8880}:8880"
+    volumes:
+      - kokoro_models:/app/models
+    tmpfs:
+      - /tmp
+    networks:
+      - tools
+    read_only: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8880/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # ---------------------------------------------------------------------------
+  # Chrome — CDP (Chrome DevTools Protocol) for browser automation (cdp profile)
   # ---------------------------------------------------------------------------
   chrome:
-    image: ghcr.io/browserless/chrome:latest
+    profiles: [cdp]
+    image: browserless/chrome@sha256:57d19e414d9fe4ae9d2ab12ba768c97f38d51246c5b31af55a009205c136012f
     container_name: beigebox-chrome
     ports:
-      - "9222:9222"
-    environment:
-      DEBUG: "browserless:*"
-      DEFAULT_LAUNCH_ARGS: '["--no-sandbox"]'
-    restart: unless-stopped
-    networks:
-      - llm
-    profiles:
-      - cdp
-    read_only: true
+      - "9222:3000"
     tmpfs:
       - /tmp
-      - /data
+    networks:
+      - tools
+    environment:
+      DEBUG: "browserless/chrome"
+      MAX_CONCURRENT_SESSIONS: "10"
+      CHROME_DATA_DIR: "/data"
+      PUPPETEER_DISABLE_HEADLESS_WARNING: "true"
+      CHROME_FLAGS: "--no-sandbox --disable-dev-shm-usage"
+    volumes:
+      - chrome_data:/data
+    cap_add:
+      - SYS_ADMIN
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/json/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
+  # ---------------------------------------------------------------------------
+  # llama.cpp — C++ inference engine (engines-cpp profile)
+  # ---------------------------------------------------------------------------
+  llama-cpp:
+    profiles: [engines-cpp]
+    image: ghcr.io/abetlen/llama-cpp-python@sha256:573a6f915ffc6f6420f5b688fd7df19b22b1b97392944dc91f266b65b59109f9
+    container_name: beigebox-llama-cpp
+    ports:
+      - "${LLAMA_CPP_PORT:-8001}:8000"
+    volumes:
+      - llama_cpp_models:/models
+    tmpfs:
+      - /tmp
+    networks:
+      - inference
+    read_only: true
+    environment:
+      - MODEL_PATH=${LLAMA_CPP_MODEL_PATH:-/models}
+      - N_CTX=${LLAMA_CPP_CONTEXT:-4096}
+      - N_GPU_LAYERS=${LLAMA_CPP_GPU_LAYERS:-0}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # vLLM — Production inference engine (engines-vllm profile)
+  # ---------------------------------------------------------------------------
+  vllm:
+    profiles: [engines-vllm]
+    image: vllm/vllm-openai@sha256:96c7e88811a07030f27bc44cd71b9007258a15f130cfec2bb4ab057512238b05
+    container_name: beigebox-vllm
+    ports:
+      - "${VLLM_PORT:-8002}:8000"
+    volumes:
+      - vllm_models:/root/.cache/huggingface
+    tmpfs:
+      - /tmp
+    networks:
+      - inference
+    read_only: true
+    environment:
+      - MODEL=${VLLM_MODEL:-meta-llama/Llama-2-7b-hf}
+      - MAX_MODEL_LEN=${VLLM_MAX_MODEL_LEN:-4096}
+      - GPU_MEMORY_UTILIZATION=${VLLM_GPU_MEM:-0.9}
+      - TRUST_REMOTE_CODE=${VLLM_TRUST_REMOTE_CODE:-false}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # Uncomment for GPU support (requires nvidia-docker):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # ---------------------------------------------------------------------------
+  # ExecutorTorch — Edge inference engine (engines-executorch profile)
+  # ---------------------------------------------------------------------------
+  executorch:
+    profiles: [engines-executorch]
+    image: pytorch/executorch:latest
+    container_name: beigebox-executorch
+    ports:
+      - "${EXECUTORCH_PORT:-8003}:8000"
+    volumes:
+      - executorch_models:/models
+    tmpfs:
+      - /tmp
+    networks:
+      - inference
+    read_only: true
+    environment:
+      - MODEL_PATH=${EXECUTORCH_MODEL_PATH:-/models}
+      - TORCH_DTYPE=${EXECUTORCH_DTYPE:-float32}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # Claude Code sidecar — AI assistant with full workspace + BeigeBox access
+  # ---------------------------------------------------------------------------
+  # Claude Code pre-installed. Workspace mounted read-write. BeigeBox reachable
+  # as an OpenAI-compatible backend at http://beigebox:8000/v1.
+  # ANTHROPIC_API_KEY must be set in .env for Claude to authenticate.
+  claude-bot:
+    profiles: [sandbox]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.claude
+    container_name: beigebox-claude-sandbox
+    volumes:
+      - ..:/workspace
+      - claude_home:/home/jinx/.claude
+    tmpfs:
+      - /tmp
+    networks:
+      - tools
+      - llm
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - BEIGEBOX_URL=http://beigebox:8000
+    depends_on:
+      beigebox:
+        condition: service_started
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  ollama_data:
+  whisper_cache:
+  kokoro_models:
+  llama_cpp_models:
+  vllm_models:
+  executorch_models:
+  chrome_data:
+  claude_home:
+
+# ---------------------------------------------------------------------------
+# Network segmentation — isolate blast radius if any service is compromised
+# ---------------------------------------------------------------------------
+# llm:        beigebox ↔ ollama (inference + embeddings)
+# tools:      beigebox ↔ whisper, kokoro, chrome (voice + CDP)
+# inference:  beigebox ↔ llama-cpp, vllm, executorch (alt engines)
 networks:
   llm:
     driver: bridge
-
-volumes:
-  beigebox-data:
-    driver: local
-  beigebox-workspace:
-    driver: local
-  whisper-cache:
-    driver: local
+    internal: false
+  tools:
+    driver: bridge
+    internal: false
+  inference:
+    driver: bridge
+    internal: false

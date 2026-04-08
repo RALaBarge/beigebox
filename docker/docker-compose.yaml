@@ -70,7 +70,7 @@ services:
   # ---------------------------------------------------------------------------
   # For NVIDIA GPU: uncomment the 'deploy' block below and restart.
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama@sha256:e771d18fe56724f01a6f691a5773df544f36f565fb37c93f0ddc5957007b7766
     container_name: beigebox-ollama
     ports:
       - "${OLLAMA_PORT:-11434}:11434"
@@ -251,7 +251,7 @@ services:
   # Digest is pinned automatically by launch.sh on first run (Apple Silicon).
   whisper-apple:
     profiles: [apple]
-    image: fedirz/faster-whisper-server:latest-cpu
+    image: fedirz/faster-whisper-server@sha256:760e5e43d427dc6cfbbc4731934b908b7de9c7e6d5309c6a1f0c8c923a5b6030
     container_name: beigebox-whisper-apple
     ports:
       - "${WHISPER_PORT:-9000}:8000"
@@ -282,7 +282,7 @@ services:
   # Digest is pinned automatically by launch.sh on first run (Apple Silicon).
   kokoro-apple:
     profiles: [apple]
-    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest-arm64
+    image: ghcr.io/remsky/kokoro-fastapi-cpu@sha256:233081e6e0669d2e083d90b005353d73d42747c01175cf0bea2fe317ca1d833c
     container_name: beigebox-kokoro-apple
     ports:
       - "${KOKORO_PORT:-8880}:8880"

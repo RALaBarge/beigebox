@@ -1,71 +1,182 @@
-# beigebox config — Docker deployment
+# beigebox config — Docker deployment (Phase-2 schema)
 # Uses container service names for networking.
 # For bare-metal, use config.yaml instead.
 
-# --- Backend (where requests get forwarded) ---
+# ─────────────────────────────────────────────────────────────────────────────
+# Features — Centralized Master Control (Phase 1)
+# ─────────────────────────────────────────────────────────────────────────────
+features:
+  backends: true                  # Multi-backend routing
+  decision_llm: true              # Judge/routing LLM
+  classifier: true                # Embedding classifier
+  semantic_cache: true            # Semantic deduplication cache
+  operator: true                  # LLM-driven tool use
+  harness: true                   # Multi-agent orchestrator
+  tools: true                     # Function calling
+  cost_tracking: true             # Estimate token costs
+  conversation_replay: true
+  auto_summarization: false
+  system_context: false
+  wiretap: true
+  wasm: true                      # WASM transform pipeline (opener_strip etc.)
+  guardrails: false
+  amf_mesh: false                 # Disabled in Docker (no mDNS in containers)
+  voice: false                    # Set true only if whisper/kokoro containers running
+  hooks: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Backend (where requests get forwarded)
+# ─────────────────────────────────────────────────────────────────────────────
 backend:
   url: "http://ollama:11434"            # Docker service name
-  default_model: "qwen3:4b"         # Main chat model — pulled by ollama-init
+  default_model: "qwen3:4b"             # Main chat model — pulled by ollama-init
   timeout: 120
 
-# --- Middleware Server ---
+backends_enabled: true
+backends:
+  - provider: ollama
+    name: ollama-local
+    url: "http://ollama:11434"
+    timeout: 120
+    timeout_ms: 120000
+    priority: 1
+    max_retries: 2
+    backoff_base: 1.5
+    backoff_max: 10.0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Middleware Server
+# ─────────────────────────────────────────────────────────────────────────────
 server:
   host: "0.0.0.0"
   port: 8000
 
-# --- Embedding ---
-embedding:
-  model: "nomic-embed-text"
-  backend_url: "http://ollama:11434"
+# ─────────────────────────────────────────────────────────────────────────────
+# Models Registry — Phase 2 unified allocation
+# ─────────────────────────────────────────────────────────────────────────────
+models:
+  default: "qwen3:4b"
+  profiles:
+    routing: "llama3.2:3b"          # Decision LLM / judge — no thinking mode, faster than qwen3
+    agentic: "qwen3:4b"             # Operator / tool use
+    summary: "qwen3:4b"             # Auto-summarization
+  per_task:
+    pre_hook: null
+    post_hook: null
+    reflection: null
+    context_pruning: null
+  whitelist:
+    enabled: false
+    allowed_models: []
 
-# --- Storage ---
+# ─────────────────────────────────────────────────────────────────────────────
+# Storage — Phase 2 keys
+# ─────────────────────────────────────────────────────────────────────────────
 storage:
-  sqlite_path: "./data/conversations.db"
-  chroma_path: "./data/chroma"
+  type: sqlite
+  path: ./data/beigebox.db
+  vector_store_path: ./data/chroma
+  vector_backend: chromadb
   log_conversations: true
 
-# --- Tools ---
+# ─────────────────────────────────────────────────────────────────────────────
+# Embedding — Phase 2 structure
+# ─────────────────────────────────────────────────────────────────────────────
+embedding:
+  model: "nomic-embed-text"
+  backend: "ollama"
+
+classifier:
+  enabled: true
+  centroid_rebuild_interval: 3600
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Semantic Cache
+# ─────────────────────────────────────────────────────────────────────────────
+semantic_cache:
+  enabled: true
+  similarity_threshold: 0.92
+  max_entries: 500
+  ttl_seconds: 3600
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tools (Function Calling) — Phase 2 list-form registry
+# ─────────────────────────────────────────────────────────────────────────────
 tools:
   enabled: true
   webhook_url: ""
-  web_search:
-    enabled: true
-    provider: "duckduckgo"
-    max_results: 5
-  web_scraper:
-    enabled: true
-    max_content_length: 10000
-  google_search:
-    enabled: false
-    api_key: "${GOOGLE_API_KEY}"
-    cse_id: "${GOOGLE_CSE_ID}"
-  calculator:
-    enabled: true
-  datetime:
-    enabled: true
-    local_tz_offset: -5.0
-  system_info:
-    enabled: true
+  registry:
+    - name: web_search
+      description: "Search the web for current information"
+      enabled: true
+      provider: "duckduckgo"
+      max_results: 5
+    - name: web_scraper
+      description: "Scrape a webpage for content"
+      enabled: true
+      max_content_length: 10000
+    - name: calculator
+      description: "Perform mathematical calculations"
+      enabled: true
+    - name: datetime_tool
+      description: "Get current date/time in any timezone"
+      enabled: true
+      local_tz_offset: -5.0
+    - name: system_info
+      description: "Get system information"
+      enabled: true
+    - name: google_search
+      description: "Google Custom Search"
+      enabled: false
+      api_key: "${GOOGLE_API_KEY}"
+      cse_id: "${GOOGLE_CSE_ID}"
+
   memory:
     enabled: true
     max_results: 3
     min_score: 0.3
+
   browserbox:
     enabled: true
     ws_url: ws://host.docker.internal:9009   # relay running on host
     timeout: 10
+
+  cdp:
+    enabled: false
+    ws_url: ws://host.docker.internal:9222
+    timeout: 10
+
   ensemble:
     enabled: false
     judge_model: ""
     max_models: 6
 
-# --- Decision LLM ---
+  plugins:
+    enabled: true
+    path: ./plugins
+    repo:
+      enabled: true
+    zip_inspector:
+      enabled: true
+    doc_parser:
+      enabled: true
+      max_ref_tokens: 4000
+      chunk_size: 800
+      chunk_overlap: 80
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Decision LLM — references models.profiles.routing
+# ─────────────────────────────────────────────────────────────────────────────
 decision_llm:
-  enabled: true                          # Enabled by default in Docker — setup pulls the model
-  model: "llama3.2:3b"                   # Routing judge — no thinking mode, faster than qwen3
+  enabled: true
+  # model is sourced from models.profiles.routing (llama3.2:3b) in Phase-2 loader.
+  # Kept here for back-compat with any code path still reading decision_llm.model.
+  model: "llama3.2:3b"
   backend_url: "http://ollama:11434"
-  timeout: 15                            # seconds; bumped from 5 — accounts for GPU cold-start
+  timeout: 15
+  temperature: 0.2
   max_tokens: 256
+  system_prompt: "You are a helpful routing assistant that decides which tool or backend to use."
   routes:
     default:
       model: "qwen3:4b"
@@ -84,18 +195,95 @@ decision_llm:
       description: "Quick responses, simple questions, brainstorming"
       wasm_module: "opener_strip"
 
-# --- Operator ---
+# ─────────────────────────────────────────────────────────────────────────────
+# Routing — explicit tier pipeline
+# ─────────────────────────────────────────────────────────────────────────────
+routing:
+  session_cache:
+    ttl_seconds: 3600
+  classifier:
+    enabled: true
+    centroid_rebuild_interval: 3600
+  semantic_cache:
+    enabled: true
+    similarity_threshold: 0.92
+    max_entries: 500
+    ttl_seconds: 3600
+  decision_llm:
+    enabled: true
+    temperature: 0.2
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Harness
+# ─────────────────────────────────────────────────────────────────────────────
+harness:
+  enabled: true
+  ralph_enabled: false
+  retry:
+    max_retries: 2
+    backoff_base: 1.5
+    backoff_max: 10
+  stagger:
+    operator_seconds: 1.0
+    model_seconds: 0.4
+  timeouts:
+    task_seconds: 120
+    operator_seconds: 180
+  store_runs: true
+  max_stored_runs: 1000
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Operator
+# ─────────────────────────────────────────────────────────────────────────────
 operator:
-  enabled: true                           # CAUTION: enables LLM-driven tool execution. Review allowed_tools before enabling.
-  model: "qwen3:4b"                   # Defaults to backend.default_model
+  enabled: true
+  model: "qwen3:4b"
   max_iterations: 10
-  timeout: 300                            # 5 min — large models (8B+ fp16) need time to load on first inference
-  allowed_tools: []                       # Empty = all registered tools. Restrict: ["system_info", "memory", "calculator", "datetime"]
+  timeout: 300
+  run_timeout: 600
+  allowed_tools: []
+  browser_meta_tool: false
+  tool_profiles:
+    minimal:
+      - web_search
+      - calculator
+      - datetime_tool
+    standard:
+      - web_search
+      - web_scraper
+      - calculator
+      - datetime_tool
+      - memory
+    full:
+      - web_search
+      - web_scraper
+      - calculator
+      - datetime_tool
+      - memory
+      - system_info
+  model_tool_profiles: {}
+  autonomous:
+    enabled: false
+    max_turns: 5
+  context_pruning:
+    enabled: false
+    model: ""
+    timeout: 8
+  reflection:
+    enabled: false
+    model: ""
+    timeout: 20
+  pre_hook:
+    enabled: false
+    model: "qwen3:4b"
+    max_iterations: 3
+  post_hook:
+    enabled: false
+    model: "qwen3:4b"
+    max_iterations: 3
   shell:
     enabled: true
     # All shell commands are routed through /usr/local/bin/bb (restricted busybox).
-    # This allowlist is the first gate; the bb wrapper enforces a blocklist as the second.
-    # Only add applets that are genuinely useful for system observability.
     shell_binary: "/usr/local/bin/bb"
     allowed_commands:
       - ls
@@ -114,25 +302,23 @@ operator:
       - hostname
       - date
     blocked_patterns:
-      # Belt-and-suspenders: reject at the config layer even if the applet
-      # somehow passes the bb wrapper check.
       - "rm"
       - "chmod"
       - "chown"
       - "chroot"
       - "mv"
       - "cp"
-      - "> "          # output redirection
-      - ">>"          # append redirection
+      - "> "
+      - ">>"
       - "sudo"
       - "su "
-      - "| sh"        # pipe to shell
+      - "| sh"
       - "| bash"
       - "| ash"
-      - "$()"         # command substitution
-      - "`"           # backtick substitution
+      - "$()"
+      - "`"
   data:
-    sqlite_queries:   # named query templates the agent can call by name
+    sqlite_queries:
       recent_conversations: >
         SELECT c.id, c.created_at, COUNT(m.id) as msg_count
         FROM conversations c JOIN messages m ON m.conversation_id = c.id
@@ -149,53 +335,81 @@ operator:
         WHERE date(c.created_at) = date('now')
         GROUP BY c.id ORDER BY c.created_at DESC
 
-# --- Hooks ---
+# ─────────────────────────────────────────────────────────────────────────────
+# Cost Tracking
+# ─────────────────────────────────────────────────────────────────────────────
+cost_tracking:
+  enabled: true
+  track_openrouter: true
+  track_local: false
+
+conversation_replay:
+  enabled: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Hooks
+# ─────────────────────────────────────────────────────────────────────────────
 hooks:
+  enabled: false
   directory: "./hooks"
 
-# --- Advanced ---
+# ─────────────────────────────────────────────────────────────────────────────
+# Advanced
+# ─────────────────────────────────────────────────────────────────────────────
 advanced:
-  stream_stall_timeout_seconds: 120   # Give Ollama time to cold-load models from disk
+  stream_stall_timeout_seconds: 120
+  session_cache_ttl: 3600
+  max_concurrent_requests: 10
+  request_timeout: 300
+  embedding_batch_size: 32
+  wiretap_compress: false
 
-# --- Logging ---
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging
+# ─────────────────────────────────────────────────────────────────────────────
 logging:
   level: "DEBUG"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   file: "/app/logs/beigebox.log"
+  max_bytes: 10485760
+  backup_count: 5
 
-# --- Wiretap ---
+# ─────────────────────────────────────────────────────────────────────────────
+# Wiretap
+# ─────────────────────────────────────────────────────────────────────────────
 wiretap:
+  enabled: true
   path: "./data/wire.jsonl"
+  max_lines: 100000
+  rotation_enabled: true
 
-# --- Auto-summarization ---
+payload_log:
+  path: ./data/payload.jsonl
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Auto-summarization
+# ─────────────────────────────────────────────────────────────────────────────
 auto_summarization:
-  enabled: false               # Enable to compress long conversations automatically
-  token_budget: 3000           # Trigger when estimated tokens exceed this
-  summary_model: "qwen3:4b" # Model to use for summarization (defaults to backend.default_model)
-  keep_last: 4                 # Always keep the N most recent messages intact
+  enabled: false
+  token_budget: 3000
+  summary_model: "qwen3:4b"
+  keep_last: 4
   summary_prefix: "Summary of earlier conversation: "
 
-# --- System Context (global prompt injection) ---
+# ─────────────────────────────────────────────────────────────────────────────
+# System Context
+# ─────────────────────────────────────────────────────────────────────────────
 system_context:
   enabled: false
   path: ./data/system_context.md
 
-# --- Generation Parameters (global inference overrides) ---
-# Uncomment values to override. Leave unset to let frontend decide.
-# generation:
-#   force: false
-#   temperature: ~
-#   top_p: ~
-#   top_k: ~
-#   num_ctx: ~
-#   repeat_penalty: ~
-#   max_tokens: ~
-#   seed: ~
-
-# --- WASM Transform Pipeline ---
+# ─────────────────────────────────────────────────────────────────────────────
+# WASM Transform Pipeline
+# ─────────────────────────────────────────────────────────────────────────────
 wasm:
   enabled: true
-  timeout_ms: 5000          # PDF parsing can be slow — give it 5s
-  default_module: ""        # No global default; modules selected per-request
+  timeout_ms: 5000
+  default_module: ""
   modules:
     pdf_oxide:
       enabled: true
@@ -214,7 +428,7 @@ wasm:
       path: "/app/wasm_modules/markdown_stripper/target/wasm32-wasip1/release/markdown_stripper.wasm"
       description: "Strip markdown formatting to plain text"
     opener_strip:
-      enabled: false
+      enabled: true     # REQUIRED: decision_llm.routes reference this module
       path: "/app/wasm_modules/opener_strip/target/wasm32-wasip1/release/opener_strip.wasm"
       description: "Strip verbose opening phrases from responses"
     pii_redactor:
@@ -222,13 +436,26 @@ wasm:
       path: "/app/wasm_modules/pii_redactor/target/wasm32-wasip1/release/pii_redactor.wasm"
       description: "Redact PII (emails, phone numbers, SSNs) from text"
 
-# --- Voice (Push-to-talk + TTS autoplay) ---
+# ─────────────────────────────────────────────────────────────────────────────
+# Voice
+# ─────────────────────────────────────────────────────────────────────────────
 voice:
-  enabled: false               # Enable voice input/output
-  stt_url: "http://whisper:8000"   # faster-whisper-server container
-  tts_url: "http://kokoro:8880"    # kokoro-fastapi container
-  tts_voice: "af_heart"            # Kokoro default — see /v1/audio/voices for full list
+  enabled: false
+  stt_url: "http://whisper:8000"
+  tts_url: "http://kokoro:8880"
+  tts_voice: "af_heart"
   tts_model: "kokoro"
   tts_speed: 1.0
-  tts_autoplay: false          # Set true to auto-speak assistant responses
-  hotkey: ""                   # Push-to-talk hotkey (e.g. "v")
+  tts_autoplay: false
+  hotkey: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AMF Mesh — disabled in Docker (no mDNS across container boundaries)
+# ─────────────────────────────────────────────────────────────────────────────
+amf_mesh:
+  enabled: false
+  instance_name: "beigebox"
+  host: "localhost"
+  port: null
+  trust_domain: "local"
+  nats_url: ""
