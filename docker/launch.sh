@@ -92,11 +92,11 @@ else
   IS_APPLE=false
 fi
 
-ARGS=("$@")
+ARGS=("${@:+$@}")  # Safe with set -u: expands $@ or empty array if no args
 HAS_VOICE=false
 HAS_APPLE=false
 
-for arg in "${ARGS[@]}"; do
+for arg in "${ARGS[@]:-}"; do
   [[ "$arg" == "voice"              || "$arg" == "--profile=voice" ]] && HAS_VOICE=true
   [[ "$arg" == "apple"              || "$arg" == "--profile=apple" ]] && HAS_APPLE=true
 done
@@ -104,7 +104,7 @@ done
 if [[ "$IS_APPLE" == true && "$HAS_VOICE" == true && "$HAS_APPLE" == false ]]; then
   echo "[launch.sh] Apple Silicon detected — swapping --profile voice → --profile apple"
   NEW_ARGS=()
-  for arg in "${ARGS[@]}"; do
+  for arg in "${ARGS[@]:-}"; do
     if   [[ "$arg" == "voice"            ]]; then NEW_ARGS+=("apple")
     elif [[ "$arg" == "--profile=voice"  ]]; then NEW_ARGS+=("--profile=apple")
     else NEW_ARGS+=("$arg")
@@ -114,7 +114,7 @@ if [[ "$IS_APPLE" == true && "$HAS_VOICE" == true && "$HAS_APPLE" == false ]]; t
 fi
 
 FINAL_HAS_VOICE=false; FINAL_HAS_APPLE=false
-for arg in "${ARGS[@]}"; do
+for arg in "${ARGS[@]:-}"; do
   [[ "$arg" == "voice" || "$arg" == "--profile=voice" ]] && FINAL_HAS_VOICE=true
   [[ "$arg" == "apple" || "$arg" == "--profile=apple" ]] && FINAL_HAS_APPLE=true
 done
