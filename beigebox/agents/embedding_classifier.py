@@ -241,49 +241,49 @@ class EmbeddingClassifier:
     def ready(self) -> bool:
         return bool(self._centroids)
 
-    def _embed(self, text: str) -> Optional[np.ndarray]:
-        """Get embedding vector from Ollama."""
+    async def _embed(self, text: str) -> Optional[np.ndarray]:
+        """Get embedding vector from Ollama (async)."""
         try:
-            resp = httpx.post(
-                f"{self.embed_url}/api/embed",
-                json={"model": self.embed_model, "input": text},
-                timeout=30.0,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            embeddings = data.get("embeddings", [[]])
-            if embeddings and embeddings[0]:
-                vec = np.array(embeddings[0], dtype=np.float32)
-                norm = np.linalg.norm(vec)
-                if norm > 0:
-                    # L2-normalise to a unit vector so np.dot(emb, centroid)
-                    # computes cosine similarity: dot(u, v) == cos(θ) when
-                    # both vectors have unit length.
-                    vec = vec / norm
-                return vec
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.post(
+                    f"{self.embed_url}/api/embed",
+                    json={"model": self.embed_model, "input": text},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                embeddings = data.get("embeddings", [[]])
+                if embeddings and embeddings[0]:
+                    vec = np.array(embeddings[0], dtype=np.float32)
+                    norm = np.linalg.norm(vec)
+                    if norm > 0:
+                        # L2-normalise to a unit vector so np.dot(emb, centroid)
+                        # computes cosine similarity: dot(u, v) == cos(θ) when
+                        # both vectors have unit length.
+                        vec = vec / norm
+                    return vec
         except Exception as e:
-            logger.debug("Embedding failed: %s", e)
+            logger.warning("Embedding failed: %s", e)
         return None
 
-    def _embed_batch(self, texts: list[str]) -> list[np.ndarray]:
-        """Get embeddings for multiple texts."""
+    async def _embed_batch(self, texts: list[str]) -> list[np.ndarray]:
+        """Get embeddings for multiple texts (async)."""
         try:
-            resp = httpx.post(
-                f"{self.embed_url}/api/embed",
-                json={"model": self.embed_model, "input": texts},
-                timeout=30.0,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            embeddings = data.get("embeddings", [])
-            results = []
-            for emb in embeddings:
-                vec = np.array(emb, dtype=np.float32)
-                norm = np.linalg.norm(vec)
-                if norm > 0:
-                    vec = vec / norm
-                results.append(vec)
-            return results
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.post(
+                    f"{self.embed_url}/api/embed",
+                    json={"model": self.embed_model, "input": texts},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                embeddings = data.get("embeddings", [])
+                results = []
+                for emb in embeddings:
+                    vec = np.array(emb, dtype=np.float32)
+                    norm = np.linalg.norm(vec)
+                    if norm > 0:
+                        vec = vec / norm
+                    results.append(vec)
+                return results
         except Exception as e:
             logger.error("Batch embedding failed: %s", e)
             return []
@@ -298,12 +298,12 @@ class EmbeddingClassifier:
             return self.routes.get("large", {}).get("model", self.default_model)
         return self.default_model
 
-    def classify(self, prompt: str) -> EmbeddingDecision:
+    async def classify(self, prompt: str) -> EmbeddingDecision:
         if not self.ready:
             return EmbeddingDecision(tier="default", borderline=True)
 
         start = time.monotonic()
-        emb = self._embed(prompt)
+        emb = await self._embed(prompt)
         if emb is None:
             return EmbeddingDecision(tier="default", borderline=True)
 

@@ -612,11 +612,8 @@ class Proxy:
         if not force_decision and self.embedding_classifier and self.embedding_classifier.ready:
             user_msg = self._get_latest_user_message(body)
             if user_msg:
-                # Run synchronous httpx call in thread pool to avoid blocking the event loop
-                loop = asyncio.get_event_loop()
-                emb_result = await loop.run_in_executor(
-                    None, self.embedding_classifier.classify, user_msg
-                )
+                # Call async classifier directly (no threadpool needed)
+                emb_result = await self.embedding_classifier.classify(user_msg)
                 self.wire.log(
                     direction="internal",
                     role="decision",
