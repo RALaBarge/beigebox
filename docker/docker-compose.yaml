@@ -90,14 +90,13 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    # Uncomment for NVIDIA GPU support:
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   # ---------------------------------------------------------------------------
   # Model pull — runs once to ensure required models exist
@@ -116,8 +115,8 @@ services:
     command: >
       sh -c "sleep 5 &&
       curl -s http://ollama:11434/api/pull -d '{\"name\":\"nomic-embed-text\"}' &&
-      curl -s http://ollama:11434/api/pull -d '{\"name\":\"qwen3:4b\"}' &&
-      curl -s http://ollama:11434/api/pull -d '{\"name\":\"qwen3:4b\"}'"
+      curl -s http://ollama:11434/api/pull -d '{\"name\":\"gemma3:4b\"}' &&
+      curl -s http://ollama:11434/api/generate -d '{\"model\":\"gemma3:4b\",\"keep_alive\":-1}'"
     restart: "no"
 
   # ---------------------------------------------------------------------------
@@ -247,7 +246,7 @@ services:
   # Uses native arm64 image — no Rosetta emulation overhead.
   # Model: faster-whisper-small (real HF model, faster than base, override via WHISPER_MODEL).
   # Do NOT combine with 'voice' profile — both bind :9000.
-  # TODO: pin image digest after first pull: docker inspect --format='{{index .RepoDigests 0}}'
+  # Digest is pinned automatically by up.sh on first run (Apple Silicon).
   whisper-apple:
     profiles: [apple]
     image: fedirz/faster-whisper-server:latest-cpu
@@ -278,7 +277,7 @@ services:
   # ---------------------------------------------------------------------------
   # Replaces 'kokoro' on Apple Silicon. Same OpenAI-compatible API, same port.
   # Do NOT combine with 'voice' profile — both bind :8880.
-  # TODO: pin image digest after first pull: docker inspect --format='{{index .RepoDigests 0}}'
+  # Digest is pinned automatically by up.sh on first run (Apple Silicon).
   kokoro-apple:
     profiles: [apple]
     image: ghcr.io/remsky/kokoro-fastapi-cpu:latest-arm64
@@ -318,15 +317,17 @@ services:
       - /tmp
     networks:
       - tools
-    read_only: true
     environment:
       # Enable remote debugging for CDP
       DEBUG: "browserless/chrome"
       MAX_CONCURRENT_SESSIONS: "10"
       CHROME_DATA_DIR: "/data"
       PUPPETEER_DISABLE_HEADLESS_WARNING: "true"
+      CHROME_FLAGS: "--no-sandbox --disable-dev-shm-usage"
     volumes:
       - chrome_data:/data
+    cap_add:
+      - SYS_ADMIN
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/json/version"]

@@ -22,6 +22,30 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# Pin an unpinned image tag in docker-compose.yaml by digest.
+# Runs only when the image line still contains a mutable tag (no '@sha256:').
+pin_image_digest() {
+  local image="$1"
+  # Skip if already pinned
+  if grep -q "@sha256:" docker-compose.yaml && grep -q "$image" docker-compose.yaml; then
+    return 0
+  fi
+  if ! grep -q "image: ${image}" docker-compose.yaml; then
+    return 0
+  fi
+  echo "[up.sh] Pinning digest for ${image} ..."
+  docker pull "${image}" --quiet
+  local digest
+  digest=$(docker inspect "${image}" --format='{{index .RepoDigests 0}}' 2>/dev/null || true)
+  if [[ -z "$digest" ]]; then
+    echo "[up.sh] WARNING: could not resolve digest for ${image} — running unpinned"
+    return 0
+  fi
+  # Rewrite the image line in docker-compose.yaml (macOS-safe sed)
+  sed -i '' "s|image: ${image}|image: ${digest}|g" docker-compose.yaml
+  echo "[up.sh] Pinned: ${digest}"
+}
+
 ARCH="$(uname -m)"
 
 if [[ "$ARCH" == "arm64" || "$ARCH" == "aarch64" ]]; then
@@ -58,6 +82,11 @@ for arg in "${ARGS[@]}"; do
 done
 if [[ "$FINAL_HAS_VOICE" == true && "$FINAL_HAS_APPLE" == true ]]; then
   echo "[up.sh] WARNING: both 'voice' and 'apple' profiles active — they share ports :9000/:8880"
+fi
+
+if [[ "$FINAL_HAS_APPLE" == true ]]; then
+  pin_image_digest "fedirz/faster-whisper-server:latest-cpu"
+  pin_image_digest "ghcr.io/remsky/kokoro-fastapi-cpu:latest-arm64"
 fi
 
 echo "[up.sh] docker compose ${ARGS[*]}"
