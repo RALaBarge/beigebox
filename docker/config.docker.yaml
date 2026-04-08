@@ -201,6 +201,9 @@ decision_llm:
 routing:
   session_cache:
     ttl_seconds: 3600
+    max_entries: 1000          # Hard cap on session cache size
+    trim_to: 800               # Shrink to this after hitting max
+    evict_every_writes: 100    # Eviction sweep frequency
   classifier:
     enabled: true
     centroid_rebuild_interval: 3600
@@ -362,7 +365,13 @@ advanced:
   max_concurrent_requests: 10
   request_timeout: 300
   embedding_batch_size: 32
+  embedding_timeout_seconds: 5.0         # Timeout for embedding API calls (classifier, semantic cache)
   wiretap_compress: false
+  runtime_config_check_interval: 1.0     # How often to check mtime on runtime_config.yaml
+  mcp:
+    max_request_bytes: 1000000           # Max size of MCP tool call inputs (1 MB)
+  backends:
+    latency_window_size: 100             # Number of samples to track for P95 latency per backend
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Logging
