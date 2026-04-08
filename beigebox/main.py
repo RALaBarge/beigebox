@@ -256,6 +256,7 @@ async def lifespan(app: FastAPI):
                     backend=_mk_b(_sc.get("vector_backend", "chromadb"), path=get_storage_paths(_cfg2)[1]),
                 )
             except Exception:
+                logger.warning("Vector store init failed", exc_info=True)
                 _vs = None
             _op = _Op(vector_store=_vs, blob_store=blob_store)
             _loop = asyncio.get_event_loop()
@@ -817,7 +818,8 @@ async def mcp_endpoint(request: Request):
         )
     try:
         body = await request.json()
-    except Exception:
+    except Exception as e:
+        logger.debug("MCP parse error: %s", str(e)[:200])
         return JSONResponse(
             {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
             status_code=400,
@@ -1330,7 +1332,8 @@ async def api_config_save(request: Request):
     """
     try:
         body = await request.json()
-    except Exception:
+    except Exception as e:
+        logger.debug("Invalid JSON body: %s", str(e)[:200])
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
     updated = []
@@ -1535,7 +1538,8 @@ async def api_set_system_context(request: Request):
     """
     try:
         body = await request.json()
-    except Exception:
+    except Exception as e:
+        logger.debug("Invalid JSON body: %s", str(e)[:200])
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
     content = body.get("content", "")
@@ -1902,7 +1906,8 @@ async def api_backends_apply(request: Request):
     """
     try:
         body = await request.json()
-    except Exception:
+    except Exception as e:
+        logger.debug("Invalid JSON body: %s", str(e)[:200])
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
     try:
@@ -2272,7 +2277,8 @@ async def api_harness_orchestrate(request: Request):
 
     try:
         body = await request.json()
-    except Exception:
+    except Exception as e:
+        logger.debug("Invalid JSON body: %s", str(e)[:200])
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
     goal = body.get("query", "").strip()
@@ -2398,7 +2404,8 @@ async def api_harness_wiggam(request: Request):
 
     try:
         body = await request.json()
-    except Exception:
+    except Exception as e:
+        logger.debug("Invalid JSON body: %s", str(e)[:200])
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
     goal            = (body.get("goal") or "").strip()
@@ -2459,7 +2466,8 @@ async def api_harness_ralph(request: Request):
 
     try:
         body = await request.json()
-    except Exception:
+    except Exception as e:
+        logger.debug("Invalid JSON body: %s", str(e)[:200])
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
     spec_path      = body.get("spec_path") or None
@@ -2511,7 +2519,8 @@ async def api_harness_inject(run_id: str, request: Request):
     """Inject a steering message into an active orchestration run."""
     try:
         body = await request.json()
-    except Exception:
+    except Exception as e:
+        logger.debug("Invalid JSON body: %s", str(e)[:200])
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
     message = (body.get("message") or "").strip()
     if not message:
@@ -2813,7 +2822,8 @@ async def api_dgm_run(request: Request):
 
     try:
         body = await request.json()
-    except Exception:
+    except Exception as e:
+        logger.debug("Invalid JSON body: %s", str(e)[:200])
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
     n_iterations         = min(int(body.get("iterations", 20)), 100)
@@ -3036,7 +3046,7 @@ async def api_dgm_run(request: Request):
                     oldest = next(iter(state.dgm_baselines))
                     del state.dgm_baselines[oldest]
             except Exception:
-                pass
+                logger.error("DGM run metadata persist failed", exc_info=True)
 
             # Write run summary to workspace/out/
             try:
@@ -3048,7 +3058,7 @@ async def api_dgm_run(request: Request):
                     _json.dumps(summary_with_history, indent=2), encoding="utf-8"
                 )
             except Exception:
-                pass
+                logger.error("DGM run summary write failed", exc_info=True)
 
         except Exception as _exc:
             yield emit({"type": "error", "message": str(_exc)})
@@ -3080,7 +3090,8 @@ def _build_workspace_context() -> str:
                         mount_lines.append(f"--- mounts/{f.name} ---\n{content}")
                     else:
                         mount_lines.append(f"--- mounts/{f.name} --- (binary or large file)")
-                except Exception:
+                except Exception as _e:
+                    logger.debug("mounts read failed for %s: %s", f.name, _e)
                     mount_lines.append(f"--- mounts/{f.name} --- (unreadable)")
         if mount_lines:
             sections.extend(mount_lines[:4])
@@ -3097,8 +3108,8 @@ def _build_workspace_context() -> str:
             try:
                 content = f.read_text(errors="replace")[:300].strip()
                 sections.append(f"--- out/{f.name} (DGM output) ---\n{content}")
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("out read failed for %s: %s", f.name, _e)
 
     return "\n\n".join(sections[:6])
 
@@ -3123,7 +3134,8 @@ async def api_dgm_revert(request: Request):
     """
     try:
         body = await request.json()
-    except Exception:
+    except Exception as e:
+        logger.debug("Invalid JSON body: %s", str(e)[:200])
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
     run_id = str(body.get("run_id", "")).strip()
@@ -3669,7 +3681,8 @@ async def api_operator_notes_set(request: Request):
     """Write the operator's persistent notes file."""
     try:
         body = await request.json()
-    except Exception:
+    except Exception as e:
+        logger.debug("Invalid JSON body: %s", str(e)[:200])
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
     content = body.get("content", "")
     p = _notes_path()
@@ -3735,7 +3748,8 @@ async def api_council_propose(request: Request):
     cfg = get_config()
     try:
         body = await request.json()
-    except Exception:
+    except Exception as e:
+        logger.debug("Invalid JSON body: %s", str(e)[:200])
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
     query = body.get("query", "").strip()
@@ -3809,7 +3823,8 @@ async def api_council_engage(run_id: str, request: Request):
 
     try:
         body = await request.json()
-    except Exception:
+    except Exception as e:
+        logger.debug("Invalid JSON body: %s", str(e)[:200])
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
     council = body.get("council", [])
