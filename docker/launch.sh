@@ -9,9 +9,9 @@
 # All other args are forwarded verbatim to 'docker compose'.
 #
 # USAGE:
-#   ./up.sh up -d                              # default stack
-#   ./up.sh --profile voice up -d             # voice I/O (auto-picks apple or cpu)
-#   ./up.sh --profile cdp --profile voice up -d  # CDP + voice
+#   ./launch.sh up -d                              # default stack
+#   ./launch.sh --profile voice up -d             # voice I/O (auto-picks apple or cpu)
+#   ./launch.sh --profile cdp --profile voice up -d  # CDP + voice
 #
 # MLX NOTE: Docker on Mac does NOT expose Metal to containers.
 # The 'apple' profile uses native arm64 images (no Rosetta emulation).
@@ -21,6 +21,40 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
+
+# Auto-populate OLLAMA_DATA if not set or using placeholder
+if [[ ! -f .env ]]; then
+  # No .env yet; create one with auto-detected OLLAMA_DATA
+  echo "[launch.sh] Creating .env with auto-detected OLLAMA_DATA..."
+  cp env.example .env
+fi
+
+# Check if OLLAMA_DATA is unset or is the placeholder /home/youruser/.ollama
+CURRENT_OLLAMA_DATA=$(grep "^OLLAMA_DATA=" .env | cut -d= -f2- || true)
+if [[ -z "$CURRENT_OLLAMA_DATA" || "$CURRENT_OLLAMA_DATA" == "/home/youruser/.ollama" ]]; then
+  # Auto-detect based on platform
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    # macOS
+    AUTO_OLLAMA_DATA="/Users/$(whoami)/.ollama"
+  else
+    # Linux / WSL
+    AUTO_OLLAMA_DATA="/home/$(whoami)/.ollama"
+  fi
+
+  # Update .env
+  if [[ -z "$CURRENT_OLLAMA_DATA" ]]; then
+    echo "OLLAMA_DATA=$AUTO_OLLAMA_DATA" >> .env
+    echo "[launch.sh] Set OLLAMA_DATA=$AUTO_OLLAMA_DATA in .env"
+  else
+    # Replace placeholder (portable sed for both macOS and Linux)
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+      sed -i '' "s|^OLLAMA_DATA=.*|OLLAMA_DATA=$AUTO_OLLAMA_DATA|" .env
+    else
+      sed -i "s|^OLLAMA_DATA=.*|OLLAMA_DATA=$AUTO_OLLAMA_DATA|" .env
+    fi
+    echo "[launch.sh] Updated OLLAMA_DATA=$AUTO_OLLAMA_DATA in .env (was placeholder)"
+  fi
+fi
 
 # Pin an unpinned image tag in docker-compose.yaml by digest.
 # Runs only when the image line still contains a mutable tag (no '@sha256:').
@@ -33,17 +67,21 @@ pin_image_digest() {
   if ! grep -q "image: ${image}" docker-compose.yaml; then
     return 0
   fi
-  echo "[up.sh] Pinning digest for ${image} ..."
+  echo "[launch.sh] Pinning digest for ${image} ..."
   docker pull "${image}" --quiet
   local digest
   digest=$(docker inspect "${image}" --format='{{index .RepoDigests 0}}' 2>/dev/null || true)
   if [[ -z "$digest" ]]; then
-    echo "[up.sh] WARNING: could not resolve digest for ${image} — running unpinned"
+    echo "[launch.sh] WARNING: could not resolve digest for ${image} — running unpinned"
     return 0
   fi
-  # Rewrite the image line in docker-compose.yaml (macOS-safe sed)
-  sed -i '' "s|image: ${image}|image: ${digest}|g" docker-compose.yaml
-  echo "[up.sh] Pinned: ${digest}"
+  # Rewrite the image line in docker-compose.yaml (portable sed)
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    sed -i '' "s|image: ${image}|image: ${digest}|g" docker-compose.yaml
+  else
+    sed -i "s|image: ${image}|image: ${digest}|g" docker-compose.yaml
+  fi
+  echo "[launch.sh] Pinned: ${digest}"
 }
 
 ARCH="$(uname -m)"
@@ -64,7 +102,7 @@ for arg in "${ARGS[@]}"; do
 done
 
 if [[ "$IS_APPLE" == true && "$HAS_VOICE" == true && "$HAS_APPLE" == false ]]; then
-  echo "[up.sh] Apple Silicon detected — swapping --profile voice → --profile apple"
+  echo "[launch.sh] Apple Silicon detected — swapping --profile voice → --profile apple"
   NEW_ARGS=()
   for arg in "${ARGS[@]}"; do
     if   [[ "$arg" == "voice"            ]]; then NEW_ARGS+=("apple")
@@ -81,7 +119,7 @@ for arg in "${ARGS[@]}"; do
   [[ "$arg" == "apple" || "$arg" == "--profile=apple" ]] && FINAL_HAS_APPLE=true
 done
 if [[ "$FINAL_HAS_VOICE" == true && "$FINAL_HAS_APPLE" == true ]]; then
-  echo "[up.sh] WARNING: both 'voice' and 'apple' profiles active — they share ports :9000/:8880"
+  echo "[launch.sh] WARNING: both 'voice' and 'apple' profiles active — they share ports :9000/:8880"
 fi
 
 if [[ "$FINAL_HAS_APPLE" == true ]]; then
@@ -89,5 +127,5 @@ if [[ "$FINAL_HAS_APPLE" == true ]]; then
   pin_image_digest "ghcr.io/remsky/kokoro-fastapi-cpu:latest-arm64"
 fi
 
-echo "[up.sh] docker compose ${ARGS[*]}"
+echo "[launch.sh] docker compose ${ARGS[*]}"
 exec docker compose "${ARGS[@]}"
