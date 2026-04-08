@@ -48,9 +48,9 @@ if [[ -z "$CURRENT_OLLAMA_DATA" || "$CURRENT_OLLAMA_DATA" == "/home/youruser/.ol
   else
     # Replace placeholder (portable sed for both macOS and Linux)
     if [[ "$(uname -s)" == "Darwin" ]]; then
-      sed -i '' "s|^OLLAMA_DATA=.*|OLLAMA_DATA=$AUTO_OLLAMA_DATA|" .env
+      sed -i '' "s|^OLLAMA_DATA=.*|OLLAMA_DATA=$AUTO_OLLAMA_DATA|" .env || true
     else
-      sed -i "s|^OLLAMA_DATA=.*|OLLAMA_DATA=$AUTO_OLLAMA_DATA|" .env
+      sed -i "s|^OLLAMA_DATA=.*|OLLAMA_DATA=$AUTO_OLLAMA_DATA|" .env || true
     fi
     echo "[launch.sh] Updated OLLAMA_DATA=$AUTO_OLLAMA_DATA in .env (was placeholder)"
   fi
@@ -77,9 +77,9 @@ pin_image_digest() {
   fi
   # Rewrite the image line in docker-compose.yaml (portable sed)
   if [[ "$(uname -s)" == "Darwin" ]]; then
-    sed -i '' "s|image: ${image}|image: ${digest}|g" docker-compose.yaml
+    sed -i '' "s|image: ${image}|image: ${digest}|g" docker-compose.yaml || true
   else
-    sed -i "s|image: ${image}|image: ${digest}|g" docker-compose.yaml
+    sed -i "s|image: ${image}|image: ${digest}|g" docker-compose.yaml || true
   fi
   echo "[launch.sh] Pinned: ${digest}"
 }
