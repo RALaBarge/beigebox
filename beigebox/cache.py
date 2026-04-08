@@ -277,7 +277,7 @@ class SemanticCache:
                 cache_type="semantic",
                 key=user_message[:50],
                 similarity=best_sim,
-                ttl_remaining=int(entry.expires_at - time.time()),
+                ttl_remaining=int(max(0, self.ttl - (time.time() - entry.ts))),
             )
             return entry.response, entry.model
 
