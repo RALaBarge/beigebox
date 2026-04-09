@@ -20,12 +20,18 @@ cd "$(dirname "$0")"
 
 # Load saved config from FIRST_RUN.sh
 CONFIG_FILE="$HOME/.beigebox/config"
-if [[ -f "$CONFIG_FILE" ]]; then
-  source "$CONFIG_FILE"
-  echo "[launch.sh] Loaded config from $CONFIG_FILE"
-else
+if [[ ! -f "$CONFIG_FILE" ]]; then
   echo "[launch.sh] ERROR: No config found at $CONFIG_FILE"
   echo "[launch.sh] Run ./FIRST_RUN.sh first to set up"
+  exit 1
+fi
+
+source "$CONFIG_FILE"
+echo "[launch.sh] Loaded config from $CONFIG_FILE"
+
+# Verify .env exists (should be created by FIRST_RUN.sh)
+if [[ ! -f .env ]]; then
+  echo "[launch.sh] ERROR: .env not found — FIRST_RUN.sh may have failed"
   exit 1
 fi
 
@@ -57,14 +63,6 @@ pin_image_digest() {
   echo "[launch.sh] Pinned: ${digest}"
 }
 
-ARCH="$(uname -m)"
-
-if [[ "$ARCH" == "arm64" || "$ARCH" == "aarch64" ]]; then
-  IS_APPLE=true
-else
-  IS_APPLE=false
-fi
-
 ARGS=("${@:+$@}")  # Safe with set -u: expands $@ or empty array if no args
 
 # Apply saved profiles from FIRST_RUN.sh config
@@ -84,7 +82,7 @@ for arg in "${ARGS[@]:-}"; do
   [[ "$arg" == "apple"              || "$arg" == "--profile=apple" ]] && HAS_APPLE=true
 done
 
-if [[ "$IS_APPLE" == true && "$HAS_VOICE" == true && "$HAS_APPLE" == false ]]; then
+if [[ "${IS_ARM64:-false}" == true && "$HAS_VOICE" == true && "$HAS_APPLE" == false ]]; then
   echo "[launch.sh] Apple Silicon detected — swapping --profile voice → --profile apple"
   NEW_ARGS=()
   for arg in "${ARGS[@]:-}"; do
