@@ -1,26 +1,26 @@
 #!/bin/bash
-# FIRST_RUN.sh — Interactive BeigeBox Docker setup wizard
-# Detects platform, asks for profile choices, creates ~/.beigebox/config
-# Run this once. After that, use ./launch.sh
+# FIRST_RUN.sh — BeigeBox setup wizard (like Claude's /init)
+# Auto-detects your system, asks 2 simple questions, sets up everything
+# Run once. After that, ./launch.sh just works.
 
 set -euo pipefail
 
-# Colors for output
-RED='\033[0;31m'
+# Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 CONFIG_DIR="$HOME/.beigebox"
 CONFIG_FILE="$CONFIG_DIR/config"
 
-echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}BeigeBox Docker Setup Wizard${NC}"
-echo -e "${BLUE}========================================${NC}"
+# Banner
+echo ""
+echo -e "${BLUE}  BeigeBox Setup${NC}"
+echo -e "${BLUE}  ══════════════${NC}"
 echo ""
 
-# Step 1: Detect platform
+# Auto-detect platform
 PLATFORM=$(uname -s)
 ARCH=$(uname -m)
 
@@ -40,69 +40,55 @@ else
     IS_ARM64=false
 fi
 
-echo -e "${GREEN}✓ Detected: $DISPLAY_PLATFORM ($DISPLAY_ARCH)${NC}"
+echo -e "${GREEN}✓${NC} Detected: $DISPLAY_PLATFORM ($DISPLAY_ARCH)"
 echo ""
 
-# Step 2: Ask which profiles
-echo -e "${YELLOW}Which profiles do you want? (select all that apply)${NC}"
+# Question 1: What do you want to do?
+echo -e "${YELLOW}What's your main use case?${NC}"
+echo ""
+echo "  1. LLM inference only (default)"
+echo "  2. + Speech I/O (voice/STT/TTS)"
+echo "  3. + Browser automation (CDP)"
+echo "  4. Everything (voice + browser)"
 echo ""
 
-declare -a AVAILABLE_PROFILES
-declare -a PROFILE_DESCS
+read -p "Choose [1-4, default 1]: " -r USE_CASE
+USE_CASE=${USE_CASE:-1}
 
-if $IS_MACOS && $IS_ARM64; then
-    AVAILABLE_PROFILES+=("apple")
-    PROFILE_DESCS+=("STT + TTS (native arm64 voice I/O) — RECOMMENDED")
-else
-    AVAILABLE_PROFILES+=("voice")
-    PROFILE_DESCS+=("STT + TTS (x86_64/Linux speech I/O)")
-fi
-
-AVAILABLE_PROFILES+=("cdp")
-PROFILE_DESCS+=("Chrome browser automation (CDP)")
-
-AVAILABLE_PROFILES+=("engines-vllm")
-PROFILE_DESCS+=("Production inference (faster than Ollama)")
-
-AVAILABLE_PROFILES+=("engines-cpp")
-PROFILE_DESCS+=("Lightweight C++ inference (quantized models)")
-
-AVAILABLE_PROFILES+=("sandbox")
-PROFILE_DESCS+=("Claude Code sidecar (AI assistant with workspace access)")
-
-# Display options
-for i in "${!AVAILABLE_PROFILES[@]}"; do
-    profile="${AVAILABLE_PROFILES[$i]}"
-    desc="${PROFILE_DESCS[$i]}"
-    echo "  [$i] $profile — $desc"
-done
-
-echo ""
-echo "Enter profile numbers (space-separated, e.g. '0 1 2') or press Enter for none:"
-read -p "> " -r PROFILE_INPUT
-
-SELECTED_PROFILES=()
-if [[ -n "$PROFILE_INPUT" ]]; then
-    for idx in $PROFILE_INPUT; do
-        if [[ $idx -lt ${#AVAILABLE_PROFILES[@]} ]]; then
-            SELECTED_PROFILES+=("${AVAILABLE_PROFILES[$idx]}")
+PROFILES=""
+case "$USE_CASE" in
+    2)
+        if $IS_MACOS && $IS_ARM64; then
+            PROFILES="apple"
+            echo -e "${GREEN}✓${NC} Will add: native arm64 voice I/O"
+        else
+            PROFILES="voice"
+            echo -e "${GREEN}✓${NC} Will add: voice I/O"
         fi
-    done
-fi
+        ;;
+    3)
+        PROFILES="cdp"
+        echo -e "${GREEN}✓${NC} Will add: browser automation"
+        ;;
+    4)
+        if $IS_MACOS && $IS_ARM64; then
+            PROFILES="apple,cdp"
+            echo -e "${GREEN}✓${NC} Will add: native voice I/O + browser automation"
+        else
+            PROFILES="voice,cdp"
+            echo -e "${GREEN}✓${NC} Will add: voice I/O + browser automation"
+        fi
+        ;;
+    *)
+        echo -e "${GREEN}✓${NC} Core only: LLM inference + proxy"
+        ;;
+esac
 
 echo ""
-if [[ ${#SELECTED_PROFILES[@]} -gt 0 ]]; then
-    echo -e "${GREEN}✓ Selected profiles:${NC}"
-    for profile in "${SELECTED_PROFILES[@]}"; do
-        echo "    - $profile"
-    done
-else
-    echo -e "${YELLOW}⚠ No optional profiles selected (core only: ollama + beigebox)${NC}"
-fi
 
-# Step 3: Set OLLAMA_DATA path
+# Question 2: Models location
+echo -e "${YELLOW}Where should models be stored?${NC}"
 echo ""
-echo -e "${YELLOW}Where should Ollama store models?${NC}"
 
 if $IS_MACOS; then
     DEFAULT_OLLAMA_DATA="/Users/$(whoami)/.ollama"
@@ -110,8 +96,10 @@ else
     DEFAULT_OLLAMA_DATA="/home/$(whoami)/.ollama"
 fi
 
-echo "Default: $DEFAULT_OLLAMA_DATA"
-echo "Press Enter to use default, or enter custom path:"
+echo "  Default: $DEFAULT_OLLAMA_DATA"
+echo "  Custom path? Press Enter for default, or paste path:"
+echo ""
+
 read -p "> " -r CUSTOM_OLLAMA_DATA
 
 if [[ -n "$CUSTOM_OLLAMA_DATA" ]]; then
@@ -120,88 +108,47 @@ else
     OLLAMA_DATA="$DEFAULT_OLLAMA_DATA"
 fi
 
-echo -e "${GREEN}✓ OLLAMA_DATA: $OLLAMA_DATA${NC}"
+echo -e "${GREEN}✓${NC} Models → $OLLAMA_DATA"
+echo ""
 
-# Step 4: Create config directory and file
+# Create config
 mkdir -p "$CONFIG_DIR"
 
-# Build profile string (comma-separated for launch.sh)
-PROFILE_STRING=$(IFS=,; echo "${SELECTED_PROFILES[*]}")
-
-# Write config
 cat > "$CONFIG_FILE" << EOF
-# BeigeBox Docker Configuration
-# Generated by FIRST_RUN.sh — edit to change settings
-# Run 'rm $CONFIG_FILE && $0' to re-run setup
+# BeigeBox Config — auto-generated by FIRST_RUN.sh
+# To re-run setup: rm $CONFIG_FILE && ./FIRST_RUN.sh
 
 PLATFORM=$PLATFORM
 ARCH=$ARCH
-DISPLAY_PLATFORM=$DISPLAY_PLATFORM
-DISPLAY_ARCH=$DISPLAY_ARCH
-IS_MACOS=$IS_MACOS
-IS_ARM64=$IS_ARM64
-
-# Selected profiles (space-separated for docker compose --profile)
-PROFILES=$PROFILE_STRING
-
-# Ollama model storage path
+PROFILES=$PROFILES
 OLLAMA_DATA=$OLLAMA_DATA
-
-# Docker ports (customizable)
 OLLAMA_PORT=11434
 BEIGEBOX_PORT=1337
 WHISPER_PORT=9000
 KOKORO_PORT=8880
 CHROME_PORT=9222
-
-# Optional: API keys for external services
-# GOOGLE_API_KEY=
-# GOOGLE_CSE_ID=
-# ANTHROPIC_API_KEY=
 EOF
 
 chmod 600 "$CONFIG_FILE"
-echo -e "${GREEN}✓ Config saved to: $CONFIG_FILE${NC}"
 
-# Step 5: Create/update docker/.env
+# Update docker/.env
 cd "$(dirname "$0")"
 if [[ ! -f .env ]]; then
     cp env.example .env
-    echo -e "${GREEN}✓ Created docker/.env from env.example${NC}"
 fi
 
-# Update OLLAMA_DATA in .env
 if [[ "$(uname -s)" == "Darwin" ]]; then
     sed -i '' "s|^OLLAMA_DATA=.*|OLLAMA_DATA=$OLLAMA_DATA|" .env || true
-else
-    sed -i "s|^OLLAMA_DATA=.*|OLLAMA_DATA=$OLLAMA_DATA|" .env || true
-fi
-
-# Update REQUIRE_HASHES (dev default: false, prod: true)
-if [[ "$(uname -s)" == "Darwin" ]]; then
     sed -i '' "s|^REQUIRE_HASHES=.*|REQUIRE_HASHES=false|" .env || true
 else
+    sed -i "s|^OLLAMA_DATA=.*|OLLAMA_DATA=$OLLAMA_DATA|" .env || true
     sed -i "s|^REQUIRE_HASHES=.*|REQUIRE_HASHES=false|" .env || true
 fi
 
-echo -e "${GREEN}✓ Updated docker/.env${NC}"
 echo ""
-
-# Step 6: Summary and next steps
-echo -e "${BLUE}========================================${NC}"
-echo -e "${GREEN}Setup complete!${NC}"
-echo -e "${BLUE}========================================${NC}"
+echo -e "${BLUE}  Ready to launch!${NC}"
+echo -e "${BLUE}  ════════════════${NC}"
 echo ""
-echo "Summary:"
-echo "  Platform: $DISPLAY_PLATFORM ($DISPLAY_ARCH)"
-echo "  Profiles: ${PROFILE_STRING:-none}"
-echo "  OLLAMA_DATA: $OLLAMA_DATA"
-echo "  Config: $CONFIG_FILE"
-echo ""
-echo "Next steps:"
-echo "  1. Make sure Docker Desktop is running"
-echo "  2. Run: cd docker && ./launch.sh up -d"
-echo "  3. Open: http://localhost:1337"
-echo ""
-echo -e "${YELLOW}Note:${NC} To change settings later, edit $CONFIG_FILE or run this script again."
+echo -e "${YELLOW}Next:${NC} docker/launch.sh up -d"
+echo -e "${YELLOW}Then:${NC} open http://localhost:1337"
 echo ""
