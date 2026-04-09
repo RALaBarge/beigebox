@@ -1,28 +1,9 @@
 # beigebox config — Docker deployment (Phase-2 schema)
 # Uses container service names for networking.
 # For bare-metal, use config.yaml instead.
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Features — Centralized Master Control (Phase 1)
-# ─────────────────────────────────────────────────────────────────────────────
-features:
-  backends: true                  # Multi-backend routing
-  decision_llm: true              # Judge/routing LLM
-  classifier: true                # Embedding classifier
-  semantic_cache: true            # Semantic deduplication cache
-  operator: true                  # LLM-driven tool use
-  harness: true                   # Multi-agent orchestrator
-  tools: true                     # Function calling
-  cost_tracking: true             # Estimate token costs
-  conversation_replay: true
-  auto_summarization: false
-  system_context: false
-  wiretap: true
-  wasm: true                      # WASM transform pipeline (opener_strip etc.)
-  guardrails: false
-  amf_mesh: false                 # Disabled in Docker (no mDNS in containers)
-  voice: false                    # Set true only if whisper/kokoro containers running
-  hooks: false
+#
+# FEATURES: Each subsystem has a single config block below. Enable/disable via enabled: true/false.
+# NO DUPLICATES: Each feature appears only once in this file.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Backend (where requests get forwarded)
@@ -196,7 +177,7 @@ decision_llm:
       wasm_module: "opener_strip"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Routing — explicit tier pipeline
+# Routing — session cache behavior (classifier, semantic_cache, decision_llm are separate blocks)
 # ─────────────────────────────────────────────────────────────────────────────
 routing:
   session_cache:
@@ -204,17 +185,6 @@ routing:
     max_entries: 1000          # Hard cap on session cache size
     trim_to: 800               # Shrink to this after hitting max
     evict_every_writes: 100    # Eviction sweep frequency
-  classifier:
-    enabled: true
-    centroid_rebuild_interval: 3600
-  semantic_cache:
-    enabled: true
-    similarity_threshold: 0.92
-    max_entries: 500
-    ttl_seconds: 3600
-  decision_llm:
-    enabled: true
-    temperature: 0.2
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Harness
@@ -468,3 +438,30 @@ amf_mesh:
   port: null
   trust_domain: "local"
   nats_url: ""
+
+# ═════════════════════════════════════════════════════════════════════════════
+# FEATURE REFERENCE
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# FEATURES WITH MINIMAL CONFIG (just enabled: true/false):
+#   - conversation_replay         (line 349)
+#   - guardrails                  (not present, disabled in features)
+#
+# FEATURES WITH SUBSTANTIVE CONFIG (enabled: true/false + settings):
+#   - backends                    (line 36)
+#   - classifier                  (line 89)
+#   - semantic_cache              (line 96)
+#   - tools                       (line 105)
+#   - decision_llm                (line 170)
+#   - harness                     (line 222)
+#   - operator                    (line 241)
+#   - cost_tracking               (line 344)
+#   - hooks                       (line 355)
+#   - auto_summarization          (line 401)
+#   - system_context              (line 411)
+#   - wasm                        (line 418)
+#   - voice                       (line 451)
+#   - amf_mesh                    (line 464)
+#   - wiretap                     (line 389)
+#
+# NO DUPLICATES: Each feature defined exactly once. Use ./CONFIG_SETUP.sh to modify.
