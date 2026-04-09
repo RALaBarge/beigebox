@@ -60,8 +60,12 @@ def cmd_dial(args):
 
     print(BANNER)
     print(f"  Dialing up on {host}:{port}")
-    print(f"  Backend: {cfg['backend']['url']}")
-    print(f"  Model: {cfg['backend']['default_model']}")
+    # Get first backend URL from backends list
+    backends = cfg.get('backends', [])
+    backend_url = backends[0].get('url', 'N/A') if backends else 'N/A'
+    default_model = cfg.get('models', {}).get('default', 'N/A')
+    print(f"  Backend: {backend_url}")
+    print(f"  Model: {default_model}")
     print()
 
     uvicorn.run(

@@ -131,9 +131,10 @@ async def _preload_model(url: str, model: str, label: str,
 
 async def _preload_embedding_model(cfg: dict):
     """Pin the embedding model in Ollama's memory at startup."""
+    from beigebox.config import get_primary_backend_url
     embed_cfg = cfg.get("embedding", {})
     model = embed_cfg.get("model", "")
-    url = embed_cfg.get("backend_url", cfg["backend"]["url"]).rstrip("/")
+    url = embed_cfg.get("backend_url") or get_primary_backend_url(cfg)
     if not model:
         return
     _log = logging.getLogger(__name__)
@@ -183,9 +184,10 @@ async def lifespan(app: FastAPI):
     _backend_path = vector_store_path
     from beigebox.storage.backends import make_backend as _make_backend
     from beigebox.storage.blob_store import BlobStore
+    from beigebox.config import get_primary_backend_url
     vector_store = VectorStore(
         embedding_model=_embed_cfg["model"],
-        embedding_url=_embed_cfg.get("backend_url") or cfg["backend"]["url"],
+        embedding_url=_embed_cfg.get("backend_url") or get_primary_backend_url(cfg),
         backend=_make_backend(_backend_type, path=_backend_path),
     )
     blob_store = BlobStore(Path(vector_store_path) / "blobs")
@@ -318,11 +320,12 @@ async def lifespan(app: FastAPI):
         egress_hooks=egress_hooks,
     )
 
+    from beigebox.config import get_primary_backend_url
     logger.info(
         "BeigeBox started — listening on %s:%s, backend %s",
         cfg["server"]["host"],
         cfg["server"]["port"],
-        cfg["backend"]["url"],
+        get_primary_backend_url(cfg),
     )
     logger.info("Storage: SQLite=%s, Vector=%s", sqlite_path, vector_store_path)
     logger.info("Tools: %s", tool_registry.list_tools())
@@ -345,7 +348,8 @@ async def lifespan(app: FastAPI):
     # Collect all distinct special-purpose models (judge, operator, summary)
     # and pin them in Ollama at startup so cold-start latency never hits a
     # live request. Stagger by 15s each to avoid VRAM bandwidth contention.
-    _backend_url = cfg["backend"]["url"]
+    from beigebox.config import get_primary_backend_url
+    _backend_url = get_primary_backend_url(cfg)
     _models_cfg = cfg.get("models", {})
     _profiles = _models_cfg.get("profiles", {})
     _default_model = _models_cfg.get("default", "")
@@ -1059,8 +1063,8 @@ async def api_info():
             "port": cfg["server"].get("port", 8000),
         },
         "backend": {
-            "url": cfg["backend"].get("url", ""),
-            "default_model": get_runtime_config().get("default_model") or cfg["backend"].get("default_model", ""),
+            "url": get_primary_backend_url(cfg),
+            "default_model": get_runtime_config().get("default_model") or cfg.get("models", {}).get("default", ""),
         },
         "features": {
             "routing": True,
@@ -2662,7 +2666,7 @@ async def api_operator(request: Request):
             _ec = cfg["embedding"]
             vs = VectorStore(
                 embedding_model=_ec["model"],
-                embedding_url=_ec.get("backend_url") or cfg["backend"]["url"],
+                embedding_url=_ec.get("backend_url") or get_primary_backend_url(cfg),
                 backend=_mk(
                     _sc.get("vector_backend", "chromadb"),
                     path=get_storage_paths(cfg)[1],
@@ -4532,7 +4536,7 @@ async def _wire_and_forward(request: Request, route_label: str, override_base_ur
     override_base_url: if provided, forward to this base instead of config backend.url
     """
     cfg = get_config()
-    backend_url = (override_base_url or cfg["backend"]["url"]).rstrip("/")
+    backend_url = (override_base_url or get_primary_backend_url(cfg)).rstrip("/")
     path = request.url.path
     query = request.url.query
     target = f"{backend_url}{path}"

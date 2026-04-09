@@ -1603,7 +1603,7 @@
   .studio-ctx-card {
     background: var(--bg-panel); border: 1px solid var(--bg-border);
     border-radius: 2px; margin-bottom: 8px; overflow: hidden;
-    resize: vertical; min-height: 60px;
+    resize: vertical; min-height: 60px; user-select: none;
   }
   .studio-ctx-card.collapsed .studio-ctx-stats,
   .studio-ctx-card.collapsed .studio-ctx-params,
@@ -1627,6 +1627,7 @@
   }
   .studio-ctx-msg-row {
     display: flex; align-items: center; gap: 6px; cursor: pointer;
+    user-select: none;
   }
   .studio-ctx-msg-row:hover { opacity: 0.8; }
   .studio-ctx-msg-body {
@@ -2589,6 +2590,7 @@
         <label style="font-size:11px;color:var(--fg-muted);display:flex;align-items:center;gap:4px;cursor:pointer">
           <input type="checkbox" id="studio-ctx-live" checked onchange="studioToggleContextLive()"> live
         </label>
+        <button id="studio-ctx-open-btn" onclick="studioOpenInNewWindow()" style="font-size:10px;padding:2px 6px;margin-left:auto;display:none;background:var(--bg-hover);border:1px solid var(--bg-border);color:var(--fg);cursor:pointer;border-radius:2px" title="Open context in new window">⧉ Open</button>
       </div>
       <div class="scroll-area">
         <div id="studio-ctx-body"><div class="empty">Waiting for a request…</div></div>
@@ -10731,6 +10733,91 @@ function buildStudioPayload() {
   return body;
 }
 
+// ── Studio scroll position persistence ───────────────────────────────────
+function saveStudioScrollPositions() {
+  const positions = {
+    'chat': document.getElementById('studio-chat-col')?.querySelector('.scroll-area')?.scrollTop || 0,
+    'context': document.getElementById('studio-ctx-col')?.querySelector('.scroll-area')?.scrollTop || 0,
+    'controls': document.getElementById('studio-controls-col')?.querySelector('.scroll-area')?.scrollTop || 0
+  };
+  localStorage.setItem('studioScrollPositions', JSON.stringify(positions));
+}
+
+function restoreStudioScrollPositions() {
+  try {
+    const positions = JSON.parse(localStorage.getItem('studioScrollPositions') || '{}');
+    const chatScroll = document.getElementById('studio-chat-col')?.querySelector('.scroll-area');
+    const ctxScroll = document.getElementById('studio-ctx-col')?.querySelector('.scroll-area');
+    const ctrlScroll = document.getElementById('studio-controls-col')?.querySelector('.scroll-area');
+
+    if (chatScroll && positions.chat) chatScroll.scrollTop = positions.chat;
+    if (ctxScroll && positions.context) ctxScroll.scrollTop = positions.context;
+    if (ctrlScroll && positions.controls) ctrlScroll.scrollTop = positions.controls;
+  } catch (e) {
+    console.warn('Failed to restore studio scroll positions:', e);
+  }
+}
+
+function attachStudioScrollListeners() {
+  const chatCol = document.getElementById('studio-chat-col')?.querySelector('.scroll-area');
+  const ctxCol = document.getElementById('studio-ctx-col')?.querySelector('.scroll-area');
+  const ctrlCol = document.getElementById('studio-controls-col')?.querySelector('.scroll-area');
+
+  [chatCol, ctxCol, ctrlCol].forEach(el => {
+    if (el && !el.dataset.scrollListenerAttached) {
+      el.addEventListener('scroll', saveStudioScrollPositions);
+      el.dataset.scrollListenerAttached = 'true';
+    }
+  });
+}
+
+// ── Windows "Open in Studio" button ──────────────────────────────────────
+function initStudioPlatformButton() {
+  const isWindows = navigator.platform.toUpperCase().indexOf('WIN') > -1;
+  const btn = document.getElementById('studio-ctx-open-btn');
+  if (btn) btn.style.display = isWindows ? 'block' : 'none';
+}
+
+function studioOpenInNewWindow() {
+  // Create a new window with the context viewer
+  const width = 800;
+  const height = 600;
+  const left = (screen.width - width) / 2;
+  const top = (screen.height - height) / 2;
+  const contextHtml = document.getElementById('studio-ctx-body')?.innerHTML || '';
+
+  const newWin = window.open('', 'studioContext', `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`);
+  if (newWin) {
+    newWin.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>BeigeBox Context</title>
+        <style>
+          body {
+            font-family: 'Fira Code', monospace;
+            background: #1A1A1A;
+            color: #D8DEE9;
+            margin: 0;
+            padding: 12px;
+            overflow-y: auto;
+          }
+          * { box-sizing: border-box; }
+          pre { white-space: pre-wrap; word-break: break-word; }
+          .scroll-lock { position: fixed; bottom: 0; left: 0; right: 0; height: 4px; background: #88C0D0; }
+        </style>
+      </head>
+      <body>
+        <div id="content">${contextHtml}</div>
+        <div class="scroll-lock"></div>
+      </body>
+      </html>
+    `);
+    newWin.document.close();
+  }
+}
+
 async function loadStudio() {
   await studioLoadModels();
   await studioLoadControls();
@@ -10743,6 +10830,12 @@ async function loadStudio() {
   _studioPayloadEditor.refresh();
   samStart();
   studioMobileActivate('chat');
+  // Initialize platform-specific buttons and restore scroll positions
+  initStudioPlatformButton();
+  setTimeout(() => {
+    attachStudioScrollListeners();
+    restoreStudioScrollPositions();
+  }, 100);
 }
 
 function stopStudio() {

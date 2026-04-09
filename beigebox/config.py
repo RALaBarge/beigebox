@@ -205,6 +205,17 @@ def load_config(path: Path | None = None) -> dict:
 
     _config = _walk_and_resolve(raw)
     _validate_config(_config)
+
+    # Backward compatibility: add virtual 'backend' key for old config access patterns
+    # Maps cfg["backend"]["url"] to the new backends[0].url format
+    if "backend" not in _config:
+        backends = _config.get("backends", [])
+        _config["backend"] = {
+            "url": backends[0].get("url", "") if backends else "",
+            "default_model": _config.get("models", {}).get("default", ""),
+            "timeout": backends[0].get("timeout", 120) if backends else 120,
+        }
+
     return _config
 
 
@@ -317,6 +328,22 @@ def get_effective_backends_config() -> tuple[bool, list[dict]]:
             backends = [static_ollama] + backends
 
     return bool(enabled), backends
+
+
+def get_primary_backend_url(cfg: dict | None = None) -> str:
+    """
+    Return the primary backend URL from the new config structure.
+    Falls back to old config format for compatibility.
+    """
+    cfg = cfg or get_config()
+
+    # Try new format first: backends list
+    backends = cfg.get("backends", [])
+    if backends and isinstance(backends, list) and len(backends) > 0:
+        return backends[0].get("url", "").rstrip("/")
+
+    # Fall back to old format for compatibility
+    return cfg.get("backend", {}).get("url", "").rstrip("/")
 
 
 def update_runtime_config(key: str, value) -> bool:
