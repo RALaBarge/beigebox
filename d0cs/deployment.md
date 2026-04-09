@@ -5,42 +5,63 @@ BeigeBox ships with three production-ready deployment options: Docker Compose (s
 ## Quick Start
 
 ```bash
-git clone --recursive https://github.com/ralabarge/beigebox.git
+git clone https://github.com/ralabarge/beigebox.git
 cd beigebox/docker
-cp env.example .env        # optional — set GPU, ports, API keys
-docker compose up -d
+
+# Run interactive setup wizard:
+./FIRST_RUN.sh
+
+# Then start the stack:
+./launch.sh up -d
 ```
 
-**The `--recursive` flag** initializes community skill submodules (187 skills). Skip it if you don't need them. If already cloned without it:
-```bash
-git submodule update --init --recursive
-```
+Open **http://localhost:1337** for the web UI. The OpenAI-compatible API is at `http://localhost:1337/v1`.
 
 ### What comes up
 
 | Service | Port | What it does |
 |---|---|---|
-| Ollama | `11434` | Local model inference |
+| Ollama | `11434` | Local model inference (pulls qwen3:4b + embedding model on startup) |
 | **BeigeBox** | `1337` | Middleware proxy + integrated web UI + API + embedded vector store |
+| Whisper (optional) | `9000` | Speech-to-text (voice profile) |
+| Kokoro (optional) | `8880` | Text-to-speech (voice profile) |
+| Chrome (optional) | `9222` | Browser automation (cdp profile) |
 
-Open **http://localhost:1337** for the web UI. The OpenAI-compatible API is at `http://localhost:1337/v1`.
+### Setup wizard (FIRST_RUN.sh)
 
-## Profiles
+The interactive setup wizard auto-detects your platform and lets you choose:
 
-Add inference engines or tools via Docker Compose profiles:
+**Use case:**
+- LLM inference only (Ollama + BeigeBox)
+- + Speech I/O (Whisper + Kokoro)
+- + Browser automation (Chrome + CDP)
+- Everything (all of the above)
+
+**Model storage:** 
+- Scans for existing Ollama models and reuses them
+- Or choose a custom path (e.g., external SSD for large model libraries)
+
+Your choices are saved to `~/.beigebox/config`. `launch.sh` uses them automatically — no manual args needed.
+
+### Manual profiles (advanced)
+
+Skip the wizard and use Docker Compose directly:
 
 ```bash
-# Base (default)
+# Base (Ollama + BeigeBox only)
 docker compose up -d
 
-# Add browser automation
+# Add browser automation (CDP)
 docker compose --profile cdp up -d
 
-# Add voice I/O
+# Add voice I/O (x86_64 / Linux only)
 docker compose --profile voice up -d
 
-# Add both
-docker compose --profile cdp --profile voice up -d
+# Add voice I/O (macOS ARM64 native)
+docker compose --profile apple up -d
+
+# Add both voice + browser
+docker compose --profile cdp --profile apple up -d
 
 # Use alternative inference engine (llama.cpp, vLLM, or ExecutorTorch)
 docker compose --profile engines-cpp up -d
