@@ -1,17 +1,13 @@
 #!/bin/bash
-# launch.sh — Platform-aware docker compose launcher for BeigeBox
-# Run from the docker/ directory: ./launch.sh [args]
-#
-# Auto-selects the best voice profile for the current host:
-#   arm64 / Apple Silicon  →  --profile apple  (arm64-native images)
-#   x86_64 / Linux/WSL     →  --profile voice  (CPU ONNX images)
-#
-# All other args are forwarded verbatim to 'docker compose'.
+# launch.sh — BeigeBox Docker launcher
+# Loads profile choices from ~/.beigebox/config (set by FIRST_RUN.sh)
+# Auto-swaps voice → apple on ARM64 macOS
 #
 # USAGE:
-#   ./launch.sh up -d                              # default stack
-#   ./launch.sh --profile voice up -d             # voice I/O (auto-picks apple or cpu)
-#   ./launch.sh --profile cdp --profile voice up -d  # CDP + voice
+#   ./launch.sh up -d                              # runs with profiles from config
+#   ./launch.sh --profile cdp up -d               # CLI arg overrides config
+#
+# First time: run FIRST_RUN.sh to set up ~/.beigebox/config
 #
 # MLX NOTE: Docker on Mac does NOT expose Metal to containers.
 # The 'apple' profile uses native arm64 images (no Rosetta emulation).
@@ -22,48 +18,15 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-# Load saved config from FIRST_RUN.sh if it exists
+# Load saved config from FIRST_RUN.sh
 CONFIG_FILE="$HOME/.beigebox/config"
 if [[ -f "$CONFIG_FILE" ]]; then
   source "$CONFIG_FILE"
   echo "[launch.sh] Loaded config from $CONFIG_FILE"
 else
-  echo "[launch.sh] No config found at $CONFIG_FILE"
-  echo "[launch.sh] Run ./FIRST_RUN.sh first, or set OLLAMA_DATA manually"
-fi
-
-# Auto-populate OLLAMA_DATA if not set or using placeholder
-if [[ ! -f .env ]]; then
-  # No .env yet; create one with auto-detected OLLAMA_DATA
-  echo "[launch.sh] Creating .env with auto-detected OLLAMA_DATA..."
-  cp env.example .env
-fi
-
-# Check if OLLAMA_DATA is unset or is the placeholder /home/youruser/.ollama
-CURRENT_OLLAMA_DATA=$(grep "^OLLAMA_DATA=" .env | cut -d= -f2- || true)
-if [[ -z "$CURRENT_OLLAMA_DATA" || "$CURRENT_OLLAMA_DATA" == "/home/youruser/.ollama" ]]; then
-  # Auto-detect based on platform
-  if [[ "$(uname -s)" == "Darwin" ]]; then
-    # macOS
-    AUTO_OLLAMA_DATA="/Users/$(whoami)/.ollama"
-  else
-    # Linux / WSL
-    AUTO_OLLAMA_DATA="/home/$(whoami)/.ollama"
-  fi
-
-  # Update .env
-  if [[ -z "$CURRENT_OLLAMA_DATA" ]]; then
-    echo "OLLAMA_DATA=$AUTO_OLLAMA_DATA" >> .env
-    echo "[launch.sh] Set OLLAMA_DATA=$AUTO_OLLAMA_DATA in .env"
-  else
-    # Replace placeholder (portable sed for both macOS and Linux)
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-      sed -i '' "s|^OLLAMA_DATA=.*|OLLAMA_DATA=$AUTO_OLLAMA_DATA|" .env || true
-    else
-      sed -i "s|^OLLAMA_DATA=.*|OLLAMA_DATA=$AUTO_OLLAMA_DATA|" .env || true
-    fi
-    echo "[launch.sh] Updated OLLAMA_DATA=$AUTO_OLLAMA_DATA in .env (was placeholder)"
-  fi
+  echo "[launch.sh] ERROR: No config found at $CONFIG_FILE"
+  echo "[launch.sh] Run ./FIRST_RUN.sh first to set up"
+  exit 1
 fi
 
 # Pin an unpinned image tag in docker-compose.yaml by digest.
