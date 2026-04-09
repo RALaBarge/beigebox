@@ -416,7 +416,7 @@ class Operator:
             model_override
             or (self.rt and self.rt.get("models_agentic"))  # runtime override, new key
             or (self.rt and self.rt.get("operator_model"))  # runtime override, old key (compat)
-            or self.cfg.get("operator", {}).get("model")  # static config, old location (compat)
+            or self.cfg.get("models", {}).get("profiles", {}).get("agentic")  # static config, old location (compat)
             or models_cfg.get("profiles", {}).get("agentic")  # new unified location
             or models_cfg.get("default")  # fallback to global default
             or self.cfg.get("backend", {}).get("default_model", "")  # ultimate fallback

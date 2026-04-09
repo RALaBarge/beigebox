@@ -44,7 +44,7 @@ class EnsembleVoter:
         self.models = models
         self.judge_model = (
             judge_model
-            or cfg.get("operator", {}).get("model")
+            or cfg.get("models", {}).get("profiles", {}).get("agentic")
             or cfg.get("backend", {}).get("default_model", "")
         )
         self.temperature = temperature

@@ -148,7 +148,7 @@ class ToolRegistry:
         if ens_cfg.get("enabled", False):
             from beigebox.config import get_config as _gc
             op_cfg = _gc().get("operator", {})
-            default_judge = op_cfg.get("model") or _gc().get("backend", {}).get("default_model")
+            default_judge = op_cfg.get("model") or _gc().get("models", {}).get("default")
             self.tools["ensemble"] = EnsembleTool(
                 judge_model=ens_cfg.get("judge_model") or default_judge,
                 max_models=ens_cfg.get("max_models", 6),

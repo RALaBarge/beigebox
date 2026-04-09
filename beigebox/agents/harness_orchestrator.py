@@ -81,7 +81,7 @@ class HarnessOrchestrator:
         self.model = (
             model
             or (rt and rt.get("operator_model"))
-            or cfg.get("operator", {}).get("model")
+            or cfg.get("models", {}).get("profiles", {}).get("agentic")
             or cfg.get("backend", {}).get("default_model", "")
         )
         self.max_rounds = max_rounds

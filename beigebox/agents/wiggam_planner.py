@@ -123,7 +123,7 @@ class WiggamPlanner:
         self.max_rounds = max_rounds
 
         default_model = (
-            cfg.get("operator", {}).get("model")
+            cfg.get("models", {}).get("profiles", {}).get("agentic")
             or cfg.get("backend", {}).get("default_model", "")
         )
         self.wiggam_model = wiggam_model or default_model
