@@ -1231,27 +1231,46 @@ class CDPTool:
         system = platform.system()
         home = Path.home()
 
-        # Try standard Chrome paths
+        # ENV override — useful when running inside Docker with a host-mounted cookie file
+        env_override = os.environ.get("CDP_COOKIES_PATH", "")
+        if env_override:
+            p = Path(env_override)
+            if p.is_file():
+                return str(p)
+
+        # Try standard Chrome paths (classic + Network/ subdir for Chrome 115+)
         paths = []
         if system == "Linux":
             paths = [
+                home / ".config/google-chrome/Default/Network/Cookies",
                 home / ".config/google-chrome/Default/Cookies",
+                home / ".config/chromium/Default/Network/Cookies",
                 home / ".config/chromium/Default/Cookies",
+                home / ".config/google-chrome-stable/Default/Network/Cookies",
                 home / ".config/google-chrome-stable/Default/Cookies",
             ]
         elif system == "Darwin":  # macOS
             paths = [
+                home / "Library/Application Support/Google/Chrome/Default/Cookies",
+                home / "Library/Application Support/Google/Chrome/Default/Network/Cookies",
                 home / "Library/Application Support/Google Chrome/Default/Cookies",
+                home / "Library/Application Support/Google Chrome/Default/Network/Cookies",
                 home / "Library/Application Support/Chromium/Default/Cookies",
             ]
         elif system == "Windows":
             paths = [
+                Path(os.environ.get("APPDATA", "")) / "Google/Chrome/User Data/Default/Network/Cookies",
                 Path(os.environ.get("APPDATA", "")) / "Google/Chrome/User Data/Default/Cookies",
+                Path(os.environ.get("APPDATA", "")) / "Chromium/User Data/Default/Network/Cookies",
                 Path(os.environ.get("APPDATA", "")) / "Chromium/User Data/Default/Cookies",
             ]
 
         for path in paths:
-            if path.exists():
+            try:
+                is_file = path.is_file()
+            except PermissionError:
+                continue
+            if is_file:
                 logger.debug("Found Chrome cookies at %s", path)
                 return str(path)
 
@@ -1387,37 +1406,31 @@ class CDPTool:
             return "Mimic mode already active."
 
         try:
-            # Find source (user's Chrome cookies)
+            # Find source (user's Chrome cookies) — optional; fingerprinting still
+            # activates if cookies are unavailable (e.g. running inside Docker).
             user_cookies = self._get_chrome_cookies_path()
-            if not user_cookies or not Path(user_cookies).exists():
-                return (
-                    "Error: could not find Chrome cookies. "
-                    "Ensure Chrome/Chromium is installed with a profile. "
-                    "Checked: ~/.config/google-chrome/Default/Cookies (Linux), "
-                    "~/Library/Application Support/Google Chrome/Default/Cookies (macOS)"
-                )
+            cookies_linked = False
 
-            # Find destination (CDP Chrome's user-data-dir)
-            cdp_user_data = self._get_cdp_user_data_dir()
-            if not cdp_user_data:
-                return "Error: could not determine CDP Chrome's user-data-dir. Ensure Chrome is running with --user-data-dir=/tmp/beigebox-cdp"
+            if user_cookies:
+                # Find destination (CDP Chrome's user-data-dir)
+                cdp_user_data = self._get_cdp_user_data_dir()
+                cdp_cookies_dir = Path(cdp_user_data) / "Default"
+                cdp_cookies_dir.mkdir(parents=True, exist_ok=True)
+                cdp_cookies_path = cdp_cookies_dir / "Cookies"
 
-            cdp_cookies_dir = Path(cdp_user_data) / "Default"
-            cdp_cookies_dir.mkdir(parents=True, exist_ok=True)
-            cdp_cookies_path = cdp_cookies_dir / "Cookies"
+                # Back up existing cookies if any
+                if cdp_cookies_path.exists() and not cdp_cookies_path.is_symlink():
+                    backup_path = cdp_cookies_path.with_suffix(".bak")
+                    if not backup_path.exists():
+                        os.rename(str(cdp_cookies_path), str(backup_path))
+                        logger.info("Backed up existing CDP cookies to %s", backup_path)
+                        self._mimic_symlinks.append(str(backup_path))
 
-            # Back up existing cookies if any
-            if cdp_cookies_path.exists():
-                backup_path = cdp_cookies_path.with_suffix(".bak")
-                if not backup_path.exists():
-                    os.rename(str(cdp_cookies_path), str(backup_path))
-                    logger.info("Backed up existing CDP cookies to %s", backup_path)
-                    self._mimic_symlinks.append(str(backup_path))
-
-            # Create symlink: CDP cookies → user's cookies
-            os.symlink(user_cookies, str(cdp_cookies_path))
-            self._mimic_symlinks.append(str(cdp_cookies_path))
-            logger.info("Linked CDP cookies: %s → %s", cdp_cookies_path, user_cookies)
+                # Create symlink: CDP cookies → user's cookies
+                os.symlink(user_cookies, str(cdp_cookies_path))
+                self._mimic_symlinks.append(str(cdp_cookies_path))
+                logger.info("Linked CDP cookies: %s → %s", cdp_cookies_path, user_cookies)
+                cookies_linked = True
 
             # Inject browser fingerprinting via CDP
             import platform
@@ -1426,7 +1439,6 @@ class CDPTool:
 
             # Enable required domains
             await client.send("Network.enable", {})
-            await client.send("Emulation.enable", {})
 
             # Determine platform string
             system = platform.system()
@@ -1480,9 +1492,10 @@ class CDPTool:
             await self._inject_host_storage(client, storage)
 
             self._mimic_active = True
+            cookies_status = user_cookies if cookies_linked else "not found (fingerprinting only)"
             summary = (
                 f"✓ Mimic mode activated:\n"
-                f"  Cookies linked: {user_cookies}\n"
+                f"  Cookies linked: {cookies_status}\n"
                 f"  User-Agent: {fp['user_agent'][:50]}...\n"
                 f"  Viewport: {fp['viewport']['width']}x{fp['viewport']['height']}\n"
                 f"  Timezone: {fp['timezone']}\n"

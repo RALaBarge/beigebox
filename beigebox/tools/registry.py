@@ -30,6 +30,8 @@ from beigebox.tools.python_interpreter import PythonInterpreterTool
 from beigebox.tools.workspace_file import WorkspaceFileTool
 from beigebox.tools.apex_analyzer import ApexAnalyzerTool
 from beigebox.tools.confluence_crawler import ConfluenceCrawler
+from beigebox.tools.aura_recon import AuraReconTool
+from beigebox.tools.sf_ingest import SfIngestTool
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +195,29 @@ class ToolRegistry:
             cdp_tool = self.tools.get("cdp")  # May be None if CDP disabled
             self.tools["confluence_crawler"] = ConfluenceCrawler(cdp_tool=cdp_tool, vector_store=vector_store)
             logger.info("Confluence crawler registered")
+
+        # --- Aura Recon (Salesforce Lightning Aura descriptor discovery — disabled by default) ---
+        # Talks to BrowserBox to sniff live /aura XHR traffic and replay working descriptors.
+        aura_cfg = tools_cfg.get("aura_recon", {})
+        if aura_cfg.get("enabled", False):
+            self.tools["aura_recon"] = AuraReconTool(
+                ws_url=aura_cfg.get("ws_url", "ws://localhost:9009"),
+                timeout=float(aura_cfg.get("timeout", 15.0)),
+                default_sniff_seconds=float(aura_cfg.get("default_sniff_seconds", 10.0)),
+                state_dir=aura_cfg.get("state_dir"),
+            )
+            logger.info("Aura recon tool registered (ws_url=%s)", aura_cfg.get("ws_url", "ws://localhost:9009"))
+
+        # --- SF Ingest (Salesforce list-view paging + case fetch + markdown writer — disabled by default) ---
+        # Uses BrowserBox + Aura framework. Shares BBClient with aura_recon.
+        sfi_cfg = tools_cfg.get("sf_ingest", {})
+        if sfi_cfg.get("enabled", False):
+            self.tools["sf_ingest"] = SfIngestTool(
+                ws_url  = sfi_cfg.get("ws_url", "ws://localhost:9009"),
+                timeout = float(sfi_cfg.get("timeout", 120.0)),
+                out_dir = sfi_cfg.get("out_dir"),
+            )
+            logger.info("SF ingest tool registered (ws_url=%s)", sfi_cfg.get("ws_url", "ws://localhost:9009"))
 
         # --- Python Interpreter (TIR — disabled by default, requires bwrap) ---
         # Registered under the key "python" (not "python_interpreter") so the

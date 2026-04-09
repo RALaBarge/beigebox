@@ -142,13 +142,29 @@ tools:
     max_results: 3
     min_score: 0.3
 
+  document_search:
+    enabled: true
+    max_results: 15
+    min_score: 0.0
+
+  aura_recon:
+    enabled: true
+    ws_url: ws://host.docker.internal:9009
+    timeout: 30
+
+  sf_ingest:
+    enabled: true
+    ws_url: ws://host.docker.internal:9009
+    timeout: 60
+    out_dir: /app/workspace/out/rag/SF
+
   browserbox:
     enabled: true
     ws_url: ws://host.docker.internal:9009
     timeout: 10
 
   cdp:
-    enabled: false
+    enabled: true
     ws_url: ws://host.docker.internal:9222
     timeout: 10
 
@@ -180,21 +196,25 @@ operator:
   browser_meta_tool: false
   tool_profiles:
     minimal:
-      - web_search
+      - document_search
       - calculator
       - datetime_tool
     standard:
+      - document_search
+      - memory
       - web_search
       - web_scraper
       - calculator
       - datetime_tool
-      - memory
     full:
+      - document_search
+      - memory
+      - aura_recon
+      - sf_ingest
       - web_search
       - web_scraper
       - calculator
       - datetime_tool
-      - memory
       - system_info
   autonomous:
     enabled: false

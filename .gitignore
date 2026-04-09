@@ -34,6 +34,10 @@ workspace/
 !workspace/mounts/.gitkeep
 !workspace/README.md
 
+# Ingested RAG corpora — never commit (customer data + large)
+workspace/out/rag/
+workspace/in/*
+
 # Logs
 logs/
 *.log
