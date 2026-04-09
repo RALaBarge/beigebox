@@ -29,35 +29,52 @@ flowchart LR
 ```bash
 git clone https://github.com/ralabarge/beigebox.git
 cd beigebox/docker
-cp env.example .env        # optional — set GPU, ports, API keys
 
-# macOS (Apple Silicon or Intel):
-../launch.sh
+# Run interactive setup (auto-detects platform, asks 2 questions):
+./FIRST_RUN.sh
 
-# Linux / Docker Desktop Windows:
-docker compose up -d
+# Then start the stack:
+./launch.sh up -d
 ```
 
 Open **http://localhost:1337** for the web UI. The OpenAI-compatible API is at `http://localhost:1337/v1`.
 
-> **macOS note:** Always use `./launch.sh` for startup (handles ARM64 image selection, model pinning). On macOS, `docker compose` alone will pull x86_64 images if voice profile is used.
+### What FIRST_RUN.sh does
 
-**Cross-platform builds (Linux/macOS):** By default, Docker enforces strict pip hash validation (`REQUIRE_HASHES=true`). If building on a different architecture than your lock file was generated on, either:
-- Regenerate the lock file: `uv pip compile requirements.txt --generate-hashes --output-file docker/requirements.lock`
-- Or disable hash validation: `echo "REQUIRE_HASHES=false" >> docker/.env` (less secure, dev-only)
+The setup wizard auto-detects your platform (macOS/Linux, ARM64/x86) and asks:
 
-See [Deployment](d0cs/deployment.md#quick-start) for profiles (CDP, voice, alternative engines).
+1. **What's your main use case?**
+   - LLM inference only (default)
+   - + Speech I/O (voice/STT/TTS)
+   - + Browser automation (CDP)
+   - Everything (voice + browser)
 
-### Profiles
+2. **Where should Ollama store models?**
+   - Default: `/Users/$(whoami)/.ollama` (macOS) or `/home/$(whoami)/.ollama` (Linux)
+   - Scans for existing models and reuses them if found
+   - Or specify a custom path
 
-| Profile | Command | What it adds |
-|---|---|---|
-| default | `docker compose up -d` | Ollama + BeigeBox (full stack) |
-| cdp | `--profile cdp up -d` | Chrome automation (operator tools) |
-| voice | `--profile voice up -d` | Whisper (STT) + Kokoro (TTS) |
-| engines-* | `--profile engines-cpp up -d` | Alternative inference (llama.cpp, vLLM, ExecutorTorch) |
+Your choices are saved to `~/.beigebox/config`. `launch.sh` auto-applies them on every run — no CLI args needed after setup.
 
-See [Deployment Quickstart](d0cs/deployment.md#quick-start) for more.
+**Changing setup later?** Edit `~/.beigebox/config` or re-run `./FIRST_RUN.sh`.
+
+### Manual setup (advanced)
+
+To set up without the wizard:
+
+```bash
+# Copy env template and edit manually:
+cp env.example .env
+# Set OLLAMA_DATA, GPU flags, ports, API keys as needed
+
+# Then run docker compose directly:
+docker compose up -d                    # core only
+docker compose --profile cdp up -d      # + browser automation
+docker compose --profile voice up -d    # + voice I/O (x86/Linux)
+docker compose --profile apple up -d    # + voice I/O (macOS ARM64)
+```
+
+See [Deployment](d0cs/deployment.md#quick-start) for all profiles and production setup.
 
 ---
 
