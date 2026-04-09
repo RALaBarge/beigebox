@@ -63,9 +63,9 @@ pin_image_digest() {
   echo "[launch.sh] Pinned: ${digest}"
 }
 
-ARGS=("${@:+$@}")  # Safe with set -u: expands $@ or empty array if no args
+ARGS=()
 
-# Apply saved profiles from FIRST_RUN.sh config
+# Apply saved profiles from FIRST_RUN.sh config FIRST (before command)
 if [[ -n "${PROFILES:-}" ]]; then
   echo "[launch.sh] Applying saved profiles: $PROFILES"
   # Convert comma-separated to --profile flags
@@ -73,6 +73,9 @@ if [[ -n "${PROFILES:-}" ]]; then
     ARGS+=("--profile" "$profile")
   done
 fi
+
+# Then append CLI args (e.g., up, -d, etc.)
+ARGS+=("${@:+$@}")
 
 HAS_VOICE=false
 HAS_APPLE=false
