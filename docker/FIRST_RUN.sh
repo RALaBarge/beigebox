@@ -90,26 +90,72 @@ echo ""
 echo -e "${YELLOW}Where should models be stored?${NC}"
 echo ""
 
+# Scan for existing Ollama installations
+FOUND_EXISTING=""
 if $IS_MACOS; then
-    DEFAULT_OLLAMA_DATA="/Users/$(whoami)/.ollama"
+    RECOMMENDED_PATH="/Users/$(whoami)/.ollama"
+    # Check if user already has Ollama models
+    if [[ -d "$HOME/.ollama/models" ]] && [[ -n "$(ls -A "$HOME/.ollama/models" 2>/dev/null)" ]]; then
+        FOUND_EXISTING="$HOME/.ollama"
+    fi
 else
-    DEFAULT_OLLAMA_DATA="/home/$(whoami)/.ollama"
+    RECOMMENDED_PATH="/home/$(whoami)/.ollama"
+    if [[ -d "$HOME/.ollama/models" ]] && [[ -n "$(ls -A "$HOME/.ollama/models" 2>/dev/null)" ]]; then
+        FOUND_EXISTING="$HOME/.ollama"
+    fi
 fi
 
-echo "  Default: $DEFAULT_OLLAMA_DATA"
-echo "  Custom path? Press Enter for default, or paste path:"
-echo ""
+# If we found existing models, ask user
+if [[ -n "$FOUND_EXISTING" ]]; then
+    echo "Found existing Ollama models at:"
+    echo "  $FOUND_EXISTING"
+    echo ""
+    echo "Use these models? [Y/n]"
+    read -p "> " -r USE_EXISTING
+    USE_EXISTING=${USE_EXISTING:-y}
 
-read -p "> " -r CUSTOM_OLLAMA_DATA
-
-if [[ -n "$CUSTOM_OLLAMA_DATA" ]]; then
-    OLLAMA_DATA="$CUSTOM_OLLAMA_DATA"
+    if [[ "$USE_EXISTING" == "y" || "$USE_EXISTING" == "Y" ]]; then
+        OLLAMA_DATA="$FOUND_EXISTING"
+        echo -e "${GREEN}✓${NC} Using existing models at $OLLAMA_DATA"
+        echo ""
+    else
+        # User wants custom path
+        echo ""
+        echo "Custom path? (recommended: $RECOMMENDED_PATH)"
+        read -p "> " -r CUSTOM_OLLAMA_DATA
+        if [[ -n "$CUSTOM_OLLAMA_DATA" ]]; then
+            OLLAMA_DATA="$CUSTOM_OLLAMA_DATA"
+        else
+            OLLAMA_DATA="$RECOMMENDED_PATH"
+        fi
+        echo -e "${GREEN}✓${NC} Models → $OLLAMA_DATA"
+        echo ""
+    fi
 else
-    OLLAMA_DATA="$DEFAULT_OLLAMA_DATA"
-fi
+    # No existing models found, just ask for path with recommended default
+    echo "Use recommended path? [Y/n]"
+    echo "  $RECOMMENDED_PATH"
+    echo ""
+    read -p "> " -r USE_RECOMMENDED
+    USE_RECOMMENDED=${USE_RECOMMENDED:-y}
 
-echo -e "${GREEN}✓${NC} Models → $OLLAMA_DATA"
-echo ""
+    if [[ "$USE_RECOMMENDED" == "y" || "$USE_RECOMMENDED" == "Y" ]]; then
+        OLLAMA_DATA="$RECOMMENDED_PATH"
+        echo -e "${GREEN}✓${NC} Models → $OLLAMA_DATA"
+        echo ""
+    else
+        echo ""
+        echo "Custom path:"
+        read -p "> " -r CUSTOM_OLLAMA_DATA
+        if [[ -n "$CUSTOM_OLLAMA_DATA" ]]; then
+            OLLAMA_DATA="$CUSTOM_OLLAMA_DATA"
+        else
+            OLLAMA_DATA="$RECOMMENDED_PATH"
+        fi
+        echo -e "${GREEN}✓${NC} Models → $OLLAMA_DATA"
+        echo ""
+    fi
+fi
 
 # Create config
 mkdir -p "$CONFIG_DIR"
