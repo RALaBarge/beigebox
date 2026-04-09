@@ -5,10 +5,11 @@ Run BeigeBox locally via Docker Compose with zero manual configuration.
 ## First Run: Interactive Setup
 
 ```bash
-./FIRST_RUN.sh
+./FIRST_RUN.sh       # Docker setup (models, profiles, ports)
+./launch.sh up -d    # Start the stack
 ```
 
-**The setup wizard:**
+**FIRST_RUN.sh:**
 1. **Auto-detects** your platform (macOS/Linux, ARM64/x86_64)
 2. **Asks 2 questions:**
    - Main use case (inference only, + voice, + browser, or both)
@@ -16,7 +17,22 @@ Run BeigeBox locally via Docker Compose with zero manual configuration.
 3. **Saves config** to `~/.beigebox/config` (persistent across runs)
 4. **Updates .env** with OLLAMA_DATA path and development defaults
 
-That's it. No manual env editing.
+Then use:
+
+```bash
+./CONFIG_SETUP.sh    # BeigeBox app settings (features, models, tools, operator)
+```
+
+**CONFIG_SETUP.sh:**
+Customize BeigeBox features, backends, and tools anytime (hot-reloads without restart):
+- Features (semantic cache, cost tracking, decision LLM, operator, harness, WASM)
+- Models (default, routing, agentic, summary)
+- Backends (Ollama, OpenRouter, multi-backend routing)
+- Tools (web search, browser automation, document search)
+- Operator (max iterations, shell access, tool profiles)
+- Harness (multi-turn, retries, stagger)
+
+Each option includes a description of what it does.
 
 ## Launching the Stack
 
@@ -128,6 +144,27 @@ docker compose ps
 # beigebox               Up (healthy)
 # beigebox-model-pull    Exited (0)      ← ran once, pulled models
 ```
+
+## Customizing BeigeBox Features
+
+After initial setup, use CONFIG_SETUP.sh to enable/disable features:
+
+```bash
+./CONFIG_SETUP.sh
+```
+
+**Interactive menu:**
+1. **Features** — semantic cache, cost tracking, decision LLM, operator, harness, WASM
+2. **Models** — default model, routing model, agentic model
+3. **Backends** — Ollama, OpenRouter, multi-backend failover
+4. **Tools** — web search, browser automation (CDP), document search, RAG
+5. **Operator** — max iterations, shell access, tool profiles
+6. **Harness** — multi-turn orchestration, retry logic, stagger
+7. **Show current config** — dump all settings
+
+Each option includes an explanation of what it does and what to expect.
+
+**Changes are hot-reloaded** — no container restart needed. The running BeigeBox instance reads the updated config on next request.
 
 ## Common Tasks
 
