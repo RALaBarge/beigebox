@@ -237,6 +237,10 @@ class CDPTool:
         '  cdp.cache        — List cache names: {"tool": "cdp.cache", "input": {"action": "list"}}\n'
         '  cdp.throttle     — Network throttle: {"tool": "cdp.throttle", "input": {"action": "set", "latency": 100, "download": 1000, "upload": 500}}\n'
         "\n"
+        "MIMIC MODE (Browser fingerprinting):\n"
+        '  cdp.mimic_activate   — Link host cookies + inject headers: {"tool": "cdp.mimic_activate", "input": ""}\n'
+        '  cdp.mimic_deactivate — Remove links, reset headers:      {"tool": "cdp.mimic_deactivate", "input": ""}\n'
+        "\n"
         "Requires Chrome/Chromium running with --remote-debugging-port=9222.\n"
         "Errors are returned as strings (never crash — check result for 'Error:' prefix)."
     )
@@ -256,6 +260,9 @@ class CDPTool:
         self._http_base = f"{parsed.scheme}://{parsed.netloc}"
         # CDP client (lives in _loop; never touched from other threads directly)
         self._client: CDPClient | None = None
+        # Mimic mode state — tracks symlinks and headers set
+        self._mimic_active: bool = False
+        self._mimic_symlinks: list[str] = []  # Paths created during activate
         # Persistent background event loop so the WebSocket session survives across calls.
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(
@@ -334,6 +341,11 @@ class CDPTool:
             return await self._cache(inp)
         elif method == "throttle":
             return await self._throttle(inp)
+        # Mimic mode
+        elif method == "mimic_activate":
+            return await self._mimic_activate()
+        elif method == "mimic_deactivate":
+            return await self._mimic_deactivate()
         else:
             return f"Error: unknown CDP method '{method}'"
 
@@ -1204,4 +1216,363 @@ class CDPTool:
         except Exception as exc:
             self._client = None
             logger.warning("cdp._throttle failed: %s", exc)
+            return f"Error: {exc}"
+
+    # ------------------------------------------------------------------
+    # MIMIC MODE: Link host cookies & inject browser fingerprint headers
+    # ------------------------------------------------------------------
+
+    def _get_chrome_cookies_path(self) -> str | None:
+        """Find the user's Chrome cookies database (platform-aware)."""
+        import os
+        import platform
+        from pathlib import Path
+
+        system = platform.system()
+        home = Path.home()
+
+        # Try standard Chrome paths
+        paths = []
+        if system == "Linux":
+            paths = [
+                home / ".config/google-chrome/Default/Cookies",
+                home / ".config/chromium/Default/Cookies",
+                home / ".config/google-chrome-stable/Default/Cookies",
+            ]
+        elif system == "Darwin":  # macOS
+            paths = [
+                home / "Library/Application Support/Google Chrome/Default/Cookies",
+                home / "Library/Application Support/Chromium/Default/Cookies",
+            ]
+        elif system == "Windows":
+            paths = [
+                Path(os.environ.get("APPDATA", "")) / "Google/Chrome/User Data/Default/Cookies",
+                Path(os.environ.get("APPDATA", "")) / "Chromium/User Data/Default/Cookies",
+            ]
+
+        for path in paths:
+            if path.exists():
+                logger.debug("Found Chrome cookies at %s", path)
+                return str(path)
+
+        return None
+
+    def _get_cdp_user_data_dir(self) -> str | None:
+        """Find the CDP Chrome's user-data-dir. Try common paths."""
+        import os
+        from pathlib import Path
+
+        paths = [
+            "/tmp/beigebox-cdp",  # Default from docstring
+            Path.home() / ".beigebox-cdp",
+            "/tmp/beigebox_cdp_profile",
+            os.environ.get("CDP_USER_DATA_DIR", ""),
+        ]
+
+        for path_str in paths:
+            if not path_str:
+                continue
+            path = Path(path_str)
+            # Check if Default/Cookies exists or if Default dir exists
+            if (path / "Default").exists():
+                logger.debug("Found CDP user-data-dir at %s", path)
+                return str(path)
+
+        # Return best guess if nothing found
+        return "/tmp/beigebox-cdp"
+
+    def _get_browser_fingerprint(self) -> dict:
+        """Extract browser fingerprinting params: UA, headers, viewport, timezone, locale."""
+        import platform
+        system = platform.system()
+
+        # Standard Chrome User-Agent variants
+        ua_map = {
+            "Linux": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Darwin": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Windows": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        }
+
+        return {
+            "user_agent": ua_map.get(system, ua_map["Linux"]),
+            "headers": {
+                "User-Agent": ua_map.get(system, ua_map["Linux"]),
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+            },
+            # Viewport: 1920x1080 (common desktop)
+            "viewport": {
+                "width": 1920,
+                "height": 1080,
+                "deviceScaleFactor": 1,
+                "mobile": False,
+                "hasTouch": False,
+            },
+            # Timezone: UTC (neutral default)
+            "timezone": "UTC",
+            # Locale: en-US
+            "locale": "en-US",
+        }
+
+    async def _sync_host_storage(self, client: CDPClient) -> dict:
+        """Read localStorage and sessionStorage from host browser via direct JS access."""
+        result = {"localStorage": {}, "sessionStorage": {}}
+
+        try:
+            # Read localStorage
+            expr_local = """
+            Object.fromEntries(
+              Object.entries(localStorage).map(([k, v]) => [k, v]).slice(0, 100)
+            )
+            """
+            res_local = await client.send("Runtime.evaluate", {
+                "expression": expr_local,
+                "returnByValue": True,
+            })
+            if res_local.get("result", {}).get("value"):
+                result["localStorage"] = res_local["result"]["value"]
+                logger.debug("Read %d localStorage items", len(result["localStorage"]))
+        except Exception as e:
+            logger.warning("Failed to read localStorage: %s", e)
+
+        try:
+            # Read sessionStorage
+            expr_session = """
+            Object.fromEntries(
+              Object.entries(sessionStorage).map(([k, v]) => [k, v]).slice(0, 100)
+            )
+            """
+            res_session = await client.send("Runtime.evaluate", {
+                "expression": expr_session,
+                "returnByValue": True,
+            })
+            if res_session.get("result", {}).get("value"):
+                result["sessionStorage"] = res_session["result"]["value"]
+                logger.debug("Read %d sessionStorage items", len(result["sessionStorage"]))
+        except Exception as e:
+            logger.warning("Failed to read sessionStorage: %s", e)
+
+        return result
+
+    async def _inject_host_storage(self, client: CDPClient, storage: dict) -> None:
+        """Inject localStorage and sessionStorage into CDP Chrome."""
+        # Inject localStorage
+        if storage.get("localStorage"):
+            for key, value in storage["localStorage"].items():
+                try:
+                    expr = f"localStorage.setItem({json.dumps(key)}, {json.dumps(value)})"
+                    await client.send("Runtime.evaluate", {"expression": expr})
+                except Exception as e:
+                    logger.warning("Failed to set localStorage[%s]: %s", key, e)
+
+        # Inject sessionStorage
+        if storage.get("sessionStorage"):
+            for key, value in storage["sessionStorage"].items():
+                try:
+                    expr = f"sessionStorage.setItem({json.dumps(key)}, {json.dumps(value)})"
+                    await client.send("Runtime.evaluate", {"expression": expr})
+                except Exception as e:
+                    logger.warning("Failed to set sessionStorage[%s]: %s", key, e)
+
+        logger.info("Injected %d localStorage + %d sessionStorage items",
+                   len(storage.get("localStorage", {})),
+                   len(storage.get("sessionStorage", {})))
+
+    async def _mimic_activate(self) -> str:
+        """Link user's Chrome cookies into CDP Chrome and inject headers."""
+        import os
+        from pathlib import Path
+
+        if self._mimic_active:
+            return "Mimic mode already active."
+
+        try:
+            # Find source (user's Chrome cookies)
+            user_cookies = self._get_chrome_cookies_path()
+            if not user_cookies or not Path(user_cookies).exists():
+                return (
+                    "Error: could not find Chrome cookies. "
+                    "Ensure Chrome/Chromium is installed with a profile. "
+                    "Checked: ~/.config/google-chrome/Default/Cookies (Linux), "
+                    "~/Library/Application Support/Google Chrome/Default/Cookies (macOS)"
+                )
+
+            # Find destination (CDP Chrome's user-data-dir)
+            cdp_user_data = self._get_cdp_user_data_dir()
+            if not cdp_user_data:
+                return "Error: could not determine CDP Chrome's user-data-dir. Ensure Chrome is running with --user-data-dir=/tmp/beigebox-cdp"
+
+            cdp_cookies_dir = Path(cdp_user_data) / "Default"
+            cdp_cookies_dir.mkdir(parents=True, exist_ok=True)
+            cdp_cookies_path = cdp_cookies_dir / "Cookies"
+
+            # Back up existing cookies if any
+            if cdp_cookies_path.exists():
+                backup_path = cdp_cookies_path.with_suffix(".bak")
+                if not backup_path.exists():
+                    os.rename(str(cdp_cookies_path), str(backup_path))
+                    logger.info("Backed up existing CDP cookies to %s", backup_path)
+                    self._mimic_symlinks.append(str(backup_path))
+
+            # Create symlink: CDP cookies → user's cookies
+            os.symlink(user_cookies, str(cdp_cookies_path))
+            self._mimic_symlinks.append(str(cdp_cookies_path))
+            logger.info("Linked CDP cookies: %s → %s", cdp_cookies_path, user_cookies)
+
+            # Inject browser fingerprinting via CDP
+            import platform
+            client = await self._get_client()
+            fp = self._get_browser_fingerprint()
+
+            # Enable required domains
+            await client.send("Network.enable", {})
+            await client.send("Emulation.enable", {})
+
+            # Determine platform string
+            system = platform.system()
+            platform_str = "Linux" if system == "Linux" else ("macOS" if system == "Darwin" else "Windows")
+
+            # Set User-Agent override
+            await client.send("Network.setUserAgentOverride", {
+                "userAgent": fp["user_agent"],
+                "platform": "",
+                "userAgentMetadata": {
+                    "platform": platform_str,
+                    "platformVersion": "",
+                    "architecture": "x86",
+                    "model": "",
+                    "mobile": False,
+                }
+            })
+            logger.info("Set User-Agent via CDP")
+
+            # Set extra HTTP headers
+            await client.send("Network.setExtraHTTPHeaders", {
+                "headers": fp["headers"]
+            })
+            logger.info("Set HTTP headers via CDP")
+
+            # Set device metrics (viewport, DPR)
+            await client.send("Emulation.setDeviceMetricsOverride", {
+                "width": fp["viewport"]["width"],
+                "height": fp["viewport"]["height"],
+                "deviceScaleFactor": fp["viewport"]["deviceScaleFactor"],
+                "mobile": fp["viewport"]["mobile"],
+                "hasTouch": fp["viewport"]["hasTouch"],
+            })
+            logger.info("Set device metrics (viewport=%dx%d) via CDP",
+                       fp["viewport"]["width"], fp["viewport"]["height"])
+
+            # Set timezone override
+            await client.send("Emulation.setTimezoneOverride", {
+                "timezoneId": fp["timezone"]
+            })
+            logger.info("Set timezone to %s via CDP", fp["timezone"])
+
+            # Set locale override
+            await client.send("Emulation.setLocaleOverride", {
+                "locale": fp["locale"]
+            })
+            logger.info("Set locale to %s via CDP", fp["locale"])
+
+            # Sync host storage (localStorage, sessionStorage)
+            storage = await self._sync_host_storage(client)
+            await self._inject_host_storage(client, storage)
+
+            self._mimic_active = True
+            summary = (
+                f"✓ Mimic mode activated:\n"
+                f"  Cookies linked: {user_cookies}\n"
+                f"  User-Agent: {fp['user_agent'][:50]}...\n"
+                f"  Viewport: {fp['viewport']['width']}x{fp['viewport']['height']}\n"
+                f"  Timezone: {fp['timezone']}\n"
+                f"  Locale: {fp['locale']}\n"
+                f"  Headers: {', '.join(fp['headers'].keys())}\n"
+                f"  Storage: {len(storage.get('localStorage', {}))} localStorage + {len(storage.get('sessionStorage', {}))} sessionStorage items"
+            )
+            return summary
+
+        except Exception as exc:
+            logger.error("mimic_activate failed: %s", exc)
+            # Attempt cleanup on error
+            for path in self._mimic_symlinks:
+                try:
+                    p = Path(path)
+                    if p.is_symlink():
+                        p.unlink()
+                except Exception as e:
+                    logger.warning("Failed to clean up %s: %s", path, e)
+            self._mimic_symlinks = []
+            self._mimic_active = False
+            return f"Error: {exc}"
+
+    async def _mimic_deactivate(self) -> str:
+        """Tear down mimic mode: remove symlinks and reset headers."""
+        import os
+        from pathlib import Path
+
+        if not self._mimic_active:
+            return "Mimic mode not active."
+
+        try:
+            results = []
+
+            # Remove symlinks
+            for path_str in self._mimic_symlinks:
+                try:
+                    path = Path(path_str)
+                    if path.is_symlink():
+                        path.unlink()
+                        logger.info("Removed symlink: %s", path)
+                        results.append(f"Removed: {path}")
+                    elif path.suffix == ".bak":
+                        # Restore backed-up cookies
+                        original = path.with_suffix("")
+                        if original.exists():
+                            os.remove(str(original))
+                        os.rename(str(path), str(original))
+                        logger.info("Restored backed-up cookies: %s", original)
+                        results.append(f"Restored: {original}")
+                except Exception as e:
+                    logger.warning("Failed to clean up %s: %s", path_str, e)
+                    results.append(f"Failed to remove {path_str}: {e}")
+
+            # Reset fingerprint via CDP
+            try:
+                client = await self._get_client()
+                # Clear User-Agent override
+                await client.send("Network.setUserAgentOverride", {"userAgent": ""})
+                # Clear extra headers
+                await client.send("Network.setExtraHTTPHeaders", {"headers": {}})
+                # Reset device metrics
+                await client.send("Emulation.clearDeviceMetricsOverride", {})
+                # Reset timezone
+                await client.send("Emulation.clearTimezoneOverride", {})
+                # Reset locale
+                await client.send("Emulation.clearLocaleOverride", {})
+                logger.info("Reset CDP fingerprinting to defaults")
+                results.append("Reset fingerprinting to defaults")
+
+                # Clear storage
+                try:
+                    await client.send("Runtime.evaluate", {"expression": "localStorage.clear()"})
+                    await client.send("Runtime.evaluate", {"expression": "sessionStorage.clear()"})
+                    logger.info("Cleared CDP storage")
+                    results.append("Cleared storage")
+                except Exception as se:
+                    logger.warning("Failed to clear storage: %s", se)
+                    results.append(f"Warning: could not clear storage: {se}")
+
+            except Exception as e:
+                logger.warning("Failed to reset fingerprinting: %s", e)
+                results.append(f"Warning: could not reset fingerprinting: {e}")
+
+            self._mimic_active = False
+            self._mimic_symlinks = []
+
+            summary = "✓ Mimic mode deactivated:\n" + "\n".join(f"  {r}" for r in results)
+            return summary
+
+        except Exception as exc:
+            logger.error("mimic_deactivate failed: %s", exc)
             return f"Error: {exc}"

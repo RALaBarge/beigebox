@@ -28,6 +28,8 @@ from beigebox.tools.cdp import CDPTool
 from beigebox.tools.connection_tool import ConnectionTool
 from beigebox.tools.python_interpreter import PythonInterpreterTool
 from beigebox.tools.workspace_file import WorkspaceFileTool
+from beigebox.tools.apex_analyzer import ApexAnalyzerTool
+from beigebox.tools.confluence_crawler import ConfluenceCrawler
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +177,22 @@ class ToolRegistry:
                 timeout=float(cdp_cfg.get("timeout", 10)),
             )
             logger.info("CDP tool registered (ws_url=%s)", cdp_cfg.get("ws_url"))
+
+        # --- Apex Analyzer (Salesforce Apex code search/analysis — disabled by default) ---
+        # Searches local IDE project for Apex classes, triggers, SOQL, anti-patterns
+        apex_cfg = tools_cfg.get("apex_analyzer", {})
+        if apex_cfg.get("enabled", False):
+            project_root = apex_cfg.get("project_root")  # Optional: override default macOS paths
+            self.tools["apex_analyzer"] = ApexAnalyzerTool(project_root=project_root)
+            logger.info("Apex analyzer registered (project_root=%s)", project_root or "auto-detect macOS defaults")
+
+        # --- Confluence Crawler (crawl Confluence via CDP + embed into vector store) ---
+        conf_cfg = tools_cfg.get("confluence_crawler", {})
+        if conf_cfg.get("enabled", False):
+            # Pass CDP tool + vector store to crawler
+            cdp_tool = self.tools.get("cdp")  # May be None if CDP disabled
+            self.tools["confluence_crawler"] = ConfluenceCrawler(cdp_tool=cdp_tool, vector_store=vector_store)
+            logger.info("Confluence crawler registered")
 
         # --- Python Interpreter (TIR — disabled by default, requires bwrap) ---
         # Registered under the key "python" (not "python_interpreter") so the
