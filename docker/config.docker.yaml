@@ -2,17 +2,19 @@
 # Uses container service names for networking.
 # For bare-metal, use config.yaml instead.
 #
-# FEATURES: Each subsystem has a single config block below. Enable/disable via enabled: true/false.
-# NO DUPLICATES: Each feature appears only once in this file.
+# SINGLE SOURCE OF TRUTH: Each feature defined exactly once. No duplicates.
+# Enable/disable via enabled: true/false in each block.
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Backend (where requests get forwarded)
+# Middleware Server
 # ─────────────────────────────────────────────────────────────────────────────
-backend:
-  url: "http://ollama:11434"            # Docker service name
-  default_model: "qwen3:4b"             # Main chat model — pulled by ollama-init
-  timeout: 120
+server:
+  host: "0.0.0.0"
+  port: 8000
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Multi-Backend Routing
+# ─────────────────────────────────────────────────────────────────────────────
 backends_enabled: true
 backends:
   - provider: ollama
@@ -26,21 +28,14 @@ backends:
     backoff_max: 10.0
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Middleware Server
-# ─────────────────────────────────────────────────────────────────────────────
-server:
-  host: "0.0.0.0"
-  port: 8000
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Models Registry — Phase 2 unified allocation
+# Models — Unified allocation (Phase 2)
 # ─────────────────────────────────────────────────────────────────────────────
 models:
-  default: "qwen3:4b"
+  default: "qwen3:4b"              # Used by all subsystems unless overridden
   profiles:
-    routing: "llama3.2:3b"          # Decision LLM / judge — no thinking mode, faster than qwen3
-    agentic: "qwen3:4b"             # Operator / tool use
-    summary: "qwen3:4b"             # Auto-summarization
+    routing: "llama3.2:3b"         # Decision LLM / routing judge
+    agentic: "qwen3:4b"            # Operator / tool use
+    summary: "qwen3:4b"            # Context compression (future)
   per_task:
     pre_hook: null
     post_hook: null
@@ -51,7 +46,7 @@ models:
     allowed_models: []
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Storage — Phase 2 keys
+# Storage
 # ─────────────────────────────────────────────────────────────────────────────
 storage:
   type: sqlite
@@ -61,27 +56,57 @@ storage:
   log_conversations: true
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Embedding — Phase 2 structure
+# Embedding (for classifier, semantic cache, vector store)
 # ─────────────────────────────────────────────────────────────────────────────
 embedding:
   model: "nomic-embed-text"
   backend: "ollama"
 
-classifier:
-  enabled: true
-  centroid_rebuild_interval: 3600
+# ─────────────────────────────────────────────────────────────────────────────
+# Routing Pipeline — Hybrid routing: session cache → classifier → decision LLM → backend
+# ─────────────────────────────────────────────────────────────────────────────
+routing:
+  session_cache:
+    ttl_seconds: 3600
+    max_entries: 1000
+    trim_to: 800
+    evict_every_writes: 100
+
+  classifier:
+    enabled: true
+    centroid_rebuild_interval: 3600
+
+  semantic_cache:
+    enabled: true
+    similarity_threshold: 0.92
+    max_entries: 500
+    ttl_seconds: 3600
+
+  decision_llm:
+    enabled: true
+    backend_url: "http://ollama:11434"
+    temperature: 0.2
+    max_tokens: 256
+    system_prompt: "You are a helpful routing assistant that decides which tool or backend to use."
+    routes:
+      default:
+        model: "qwen3:4b"
+        description: "General purpose conversation and Q&A"
+        wasm_module: "opener_strip"
+      code:
+        model: "qwen3:4b"
+        description: "Code generation, debugging, technical programming tasks"
+      large:
+        model: "qwen3:4b"
+        description: "Complex reasoning, analysis, long-form writing"
+        wasm_module: "opener_strip"
+      fast:
+        model: "qwen3:4b"
+        description: "Quick responses, simple questions, brainstorming"
+        wasm_module: "opener_strip"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Semantic Cache
-# ─────────────────────────────────────────────────────────────────────────────
-semantic_cache:
-  enabled: true
-  similarity_threshold: 0.92
-  max_entries: 500
-  ttl_seconds: 3600
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Tools (Function Calling) — Phase 2 list-form registry
+# Tools (Function Calling)
 # ─────────────────────────────────────────────────────────────────────────────
 tools:
   enabled: true
@@ -119,7 +144,7 @@ tools:
 
   browserbox:
     enabled: true
-    ws_url: ws://host.docker.internal:9009   # relay running on host
+    ws_url: ws://host.docker.internal:9009
     timeout: 10
 
   cdp:
@@ -146,74 +171,11 @@ tools:
       chunk_overlap: 80
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Decision LLM — references models.profiles.routing
-# ─────────────────────────────────────────────────────────────────────────────
-decision_llm:
-  enabled: true
-  # model is sourced from models.profiles.routing (llama3.2:3b) in Phase-2 loader.
-  # Kept here for back-compat with any code path still reading decision_llm.model.
-  model: "llama3.2:3b"
-  backend_url: "http://ollama:11434"
-  timeout: 15
-  temperature: 0.2
-  max_tokens: 256
-  system_prompt: "You are a helpful routing assistant that decides which tool or backend to use."
-  routes:
-    default:
-      model: "qwen3:4b"
-      description: "General purpose conversation and Q&A"
-      wasm_module: "opener_strip"
-    code:
-      model: "qwen3:4b"
-      description: "Code generation, debugging, technical programming tasks"
-      # no wasm_module — code responses should not be stripped
-    large:
-      model: "qwen3:4b"
-      description: "Complex reasoning, analysis, long-form writing"
-      wasm_module: "opener_strip"
-    fast:
-      model: "qwen3:4b"
-      description: "Quick responses, simple questions, brainstorming"
-      wasm_module: "opener_strip"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Routing — session cache behavior (classifier, semantic_cache, decision_llm are separate blocks)
-# ─────────────────────────────────────────────────────────────────────────────
-routing:
-  session_cache:
-    ttl_seconds: 3600
-    max_entries: 1000          # Hard cap on session cache size
-    trim_to: 800               # Shrink to this after hitting max
-    evict_every_writes: 100    # Eviction sweep frequency
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Harness
-# ─────────────────────────────────────────────────────────────────────────────
-harness:
-  enabled: true
-  ralph_enabled: false
-  retry:
-    max_retries: 2
-    backoff_base: 1.5
-    backoff_max: 10
-  stagger:
-    operator_seconds: 1.0
-    model_seconds: 0.4
-  timeouts:
-    task_seconds: 120
-    operator_seconds: 180
-  store_runs: true
-  max_stored_runs: 1000
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Operator
+# Operator Agent (agentic tool use)
 # ─────────────────────────────────────────────────────────────────────────────
 operator:
   enabled: true
-  model: "qwen3:4b"
   max_iterations: 10
-  timeout: 300
-  run_timeout: 600
   allowed_tools: []
   browser_meta_tool: false
   tool_profiles:
@@ -234,7 +196,6 @@ operator:
       - datetime_tool
       - memory
       - system_info
-  model_tool_profiles: {}
   autonomous:
     enabled: false
     max_turns: 5
@@ -256,7 +217,6 @@ operator:
     max_iterations: 3
   shell:
     enabled: true
-    # All shell commands are routed through /usr/local/bin/bb (restricted busybox).
     shell_binary: "/usr/local/bin/bb"
     allowed_commands:
       - ls
@@ -290,23 +250,22 @@ operator:
       - "| ash"
       - "$()"
       - "`"
-  data:
-    sqlite_queries:
-      recent_conversations: >
-        SELECT c.id, c.created_at, COUNT(m.id) as msg_count
-        FROM conversations c JOIN messages m ON m.conversation_id = c.id
-        GROUP BY c.id ORDER BY c.created_at DESC LIMIT 10
-      token_usage_by_model: >
-        SELECT model, SUM(token_count) as tokens, COUNT(*) as messages
-        FROM messages GROUP BY model ORDER BY tokens DESC
-      search_messages: >
-        SELECT role, content, model, timestamp FROM messages
-        WHERE content LIKE ? ORDER BY timestamp DESC LIMIT 20
-      todays_conversations: >
-        SELECT c.id, c.created_at, COUNT(m.id) as msg_count
-        FROM conversations c JOIN messages m ON m.conversation_id = c.id
-        WHERE date(c.created_at) = date('now')
-        GROUP BY c.id ORDER BY c.created_at DESC
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Harness (multi-turn orchestration)
+# ─────────────────────────────────────────────────────────────────────────────
+harness:
+  enabled: true
+  ralph_enabled: false
+  retry:
+    max_retries: 2
+    backoff_base: 1.5
+    backoff_max: 10
+  stagger:
+    operator_seconds: 1.0
+    model_seconds: 0.4
+  store_runs: true
+  max_stored_runs: 1000
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Cost Tracking
@@ -316,71 +275,12 @@ cost_tracking:
   track_openrouter: true
   track_local: false
 
-conversation_replay:
-  enabled: true
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Hooks
 # ─────────────────────────────────────────────────────────────────────────────
 hooks:
   enabled: false
   directory: "./hooks"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Advanced
-# ─────────────────────────────────────────────────────────────────────────────
-advanced:
-  stream_stall_timeout_seconds: 120
-  session_cache_ttl: 3600
-  max_concurrent_requests: 10
-  request_timeout: 300
-  embedding_batch_size: 32
-  embedding_timeout_seconds: 5.0         # Timeout for embedding API calls (classifier, semantic cache)
-  wiretap_compress: false
-  runtime_config_check_interval: 1.0     # How often to check mtime on runtime_config.yaml
-  mcp:
-    max_request_bytes: 1000000           # Max size of MCP tool call inputs (1 MB)
-  backends:
-    latency_window_size: 100             # Number of samples to track for P95 latency per backend
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Logging
-# ─────────────────────────────────────────────────────────────────────────────
-logging:
-  level: "DEBUG"
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  file: "/app/logs/beigebox.log"
-  max_bytes: 10485760
-  backup_count: 5
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Wiretap
-# ─────────────────────────────────────────────────────────────────────────────
-wiretap:
-  enabled: true
-  path: "./data/wire.jsonl"
-  max_lines: 100000
-  rotation_enabled: true
-
-payload_log:
-  path: ./data/payload.jsonl
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Auto-summarization
-# ─────────────────────────────────────────────────────────────────────────────
-auto_summarization:
-  enabled: false
-  token_budget: 3000
-  summary_model: "qwen3:4b"
-  keep_last: 4
-  summary_prefix: "Summary of earlier conversation: "
-
-# ─────────────────────────────────────────────────────────────────────────────
-# System Context
-# ─────────────────────────────────────────────────────────────────────────────
-system_context:
-  enabled: false
-  path: ./data/system_context.md
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WASM Transform Pipeline
@@ -407,7 +307,7 @@ wasm:
       path: "/app/wasm_modules/markdown_stripper/target/wasm32-wasip1/release/markdown_stripper.wasm"
       description: "Strip markdown formatting to plain text"
     opener_strip:
-      enabled: true     # REQUIRED: decision_llm.routes reference this module
+      enabled: true
       path: "/app/wasm_modules/opener_strip/target/wasm32-wasip1/release/opener_strip.wasm"
       description: "Strip verbose opening phrases from responses"
     pii_redactor:
@@ -416,20 +316,7 @@ wasm:
       description: "Redact PII (emails, phone numbers, SSNs) from text"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Voice
-# ─────────────────────────────────────────────────────────────────────────────
-voice:
-  enabled: false
-  stt_url: "http://whisper:8000"
-  tts_url: "http://kokoro:8880"
-  tts_voice: "af_heart"
-  tts_model: "kokoro"
-  tts_speed: 1.0
-  tts_autoplay: false
-  hotkey: ""
-
-# ─────────────────────────────────────────────────────────────────────────────
-# AMF Mesh — disabled in Docker (no mDNS across container boundaries)
+# AMF Mesh (disabled in Docker — no mDNS across container boundaries)
 # ─────────────────────────────────────────────────────────────────────────────
 amf_mesh:
   enabled: false
@@ -439,29 +326,51 @@ amf_mesh:
   trust_domain: "local"
   nats_url: ""
 
-# ═════════════════════════════════════════════════════════════════════════════
-# FEATURE REFERENCE
-# ═════════════════════════════════════════════════════════════════════════════
-#
-# FEATURES WITH MINIMAL CONFIG (just enabled: true/false):
-#   - conversation_replay         (line 349)
-#   - guardrails                  (not present, disabled in features)
-#
-# FEATURES WITH SUBSTANTIVE CONFIG (enabled: true/false + settings):
-#   - backends                    (line 36)
-#   - classifier                  (line 89)
-#   - semantic_cache              (line 96)
-#   - tools                       (line 105)
-#   - decision_llm                (line 170)
-#   - harness                     (line 222)
-#   - operator                    (line 241)
-#   - cost_tracking               (line 344)
-#   - hooks                       (line 355)
-#   - auto_summarization          (line 401)
-#   - system_context              (line 411)
-#   - wasm                        (line 418)
-#   - voice                       (line 451)
-#   - amf_mesh                    (line 464)
-#   - wiretap                     (line 389)
-#
-# NO DUPLICATES: Each feature defined exactly once. Use ./CONFIG_SETUP.sh to modify.
+# ─────────────────────────────────────────────────────────────────────────────
+# Timeouts — Centralized (all in one place)
+# ─────────────────────────────────────────────────────────────────────────────
+timeouts:
+  backend_seconds: 120             # LLM inference timeout
+  decision_llm_seconds: 15         # Routing judge timeout
+  operator_seconds: 300            # Single operator iteration timeout
+  operator_run_seconds: 600        # Full operator run timeout
+  harness_task_seconds: 120        # Harness task timeout
+  harness_operator_seconds: 180    # Harness operator step timeout
+  embedding_seconds: 5.0           # Embedding API call timeout
+  request_seconds: 300             # Global request timeout
+  stream_stall_seconds: 120        # Stream stall detection timeout
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging & Observability
+# ─────────────────────────────────────────────────────────────────────────────
+logging:
+  level: "DEBUG"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "/app/logs/beigebox.log"
+  max_bytes: 10485760
+  backup_count: 5
+
+wiretap:
+  enabled: true
+  path: "./data/wire.jsonl"
+  max_lines: 100000
+  rotation_enabled: true
+  description: "Structured log of all messages through the proxy (for conversation tracing)"
+
+payload:
+  enabled: false
+  path: "./data/payload.jsonl"
+  description: "Full LLM request/response payloads (for debugging backend issues)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Advanced
+# ─────────────────────────────────────────────────────────────────────────────
+advanced:
+  max_concurrent_requests: 10
+  embedding_batch_size: 32
+  wiretap_compress: false
+  runtime_config_check_interval: 1.0
+  mcp:
+    max_request_bytes: 1000000
+  backends:
+    latency_window_size: 100
