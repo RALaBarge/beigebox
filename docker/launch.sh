@@ -22,6 +22,16 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# Load saved config from FIRST_RUN.sh if it exists
+CONFIG_FILE="$HOME/.beigebox/config"
+if [[ -f "$CONFIG_FILE" ]]; then
+  source "$CONFIG_FILE"
+  echo "[launch.sh] Loaded config from $CONFIG_FILE"
+else
+  echo "[launch.sh] No config found at $CONFIG_FILE"
+  echo "[launch.sh] Run ./FIRST_RUN.sh first, or set OLLAMA_DATA manually"
+fi
+
 # Auto-populate OLLAMA_DATA if not set or using placeholder
 if [[ ! -f .env ]]; then
   # No .env yet; create one with auto-detected OLLAMA_DATA
@@ -93,6 +103,16 @@ else
 fi
 
 ARGS=("${@:+$@}")  # Safe with set -u: expands $@ or empty array if no args
+
+# Apply saved profiles from FIRST_RUN.sh config
+if [[ -n "${PROFILES:-}" ]]; then
+  echo "[launch.sh] Applying saved profiles: $PROFILES"
+  # Convert comma-separated to --profile flags
+  for profile in ${PROFILES//,/ }; do
+    ARGS+=("--profile" "$profile")
+  done
+fi
+
 HAS_VOICE=false
 HAS_APPLE=false
 
