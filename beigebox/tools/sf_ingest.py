@@ -103,7 +103,7 @@ NATIVE_CUTOFF = "2024-01-01"
 
 # Internal org names — actors from these companies are treated as agents, not customers.
 # Override via config or subclass for different orgs.
-_INTERNAL_ORG_NAMES = {"kantata", "mavenlink"}
+_INTERNAL_ORG_NAMES = set()  # populated at init from config
 
 CUSTOMER_USER_TYPES = {
     "CsnOnly", "PowerCustomerSuccess", "CustomerSuccess",
@@ -179,7 +179,11 @@ class SfIngestTool:
         ws_url: str = "ws://localhost:9009",
         timeout: float = 120.0,
         out_dir: str | Path | None = None,
+        internal_org_names: list[str] | None = None,
     ):
+        global _INTERNAL_ORG_NAMES
+        if internal_org_names:
+            _INTERNAL_ORG_NAMES = {n.lower() for n in internal_org_names}
         self._ws_url  = ws_url
         self._timeout = timeout
         # Default output: <app_root>/workspace/out/rag/SF

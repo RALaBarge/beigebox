@@ -229,6 +229,7 @@ class ToolRegistry:
                 ws_url  = sfi_cfg.get("ws_url", "ws://localhost:9009"),
                 timeout = float(sfi_cfg.get("timeout", 120.0)),
                 out_dir = sfi_cfg.get("out_dir"),
+                internal_org_names = sfi_cfg.get("internal_org_names", []),
             )
             logger.info("SF ingest tool registered (ws_url=%s)", sfi_cfg.get("ws_url", "ws://localhost:9009"))
 
