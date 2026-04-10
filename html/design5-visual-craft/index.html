@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BeigeBox</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Helvetica Neue', -apple-system, sans-serif;
+            background: #ffffff;
+            color: #1a1a1a;
+            overflow-x: hidden;
+        }
+
+        /* Aesthetic movement: refined minimalism with subtle geometry */
+        svg {
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.05));
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.5rem 2.5rem;
+            border-bottom: 1px solid #f0f0f0;
+            height: 70px;
+        }
+
+        .mark {
+            font-size: 0.875rem;
+            font-weight: 700;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            color: #1a1a1a;
+        }
+
+        nav {
+            display: flex;
+            gap: 1.5rem;
+            font-size: 0.75rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            font-weight: 500;
+        }
+
+        nav a {
+            color: #1a1a1a;
+            text-decoration: none;
+            opacity: 0.6;
+            transition: opacity 200ms ease;
+        }
+
+        nav a:hover { opacity: 1; }
+
+        /* Hero: composition-driven visual manifesto */
+        .hero {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            min-height: 100vh;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero-left {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 4rem;
+            background: #ffffff;
+            position: relative;
+        }
+
+        .hero-left::after {
+            content: '';
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: 1px;
+            background: #f0f0f0;
+        }
+
+        .hero-left h1 {
+            font-size: 2.75rem;
+            line-height: 1.1;
+            margin-bottom: 1.5rem;
+            letter-spacing: -0.01em;
+            font-weight: 300;
+            color: #1a1a1a;
+        }
+
+        .hero-left p {
+            font-size: 0.95rem;
+            line-height: 1.8;
+            color: #666666;
+            margin-bottom: 2rem;
+            max-width: 380px;
+            font-weight: 300;
+        }
+
+        .cta-subtle {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            background: #1a1a1a;
+            color: #ffffff;
+            text-decoration: none;
+            font-size: 0.75rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            font-weight: 600;
+            border: 1px solid #1a1a1a;
+            transition: all 200ms ease;
+        }
+
+        .cta-subtle:hover {
+            background: #ffffff;
+            color: #1a1a1a;
+        }
+
+        .hero-right {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #f8f8f8 0%, #ffffff 100%);
+            position: relative;
+        }
+
+        /* Geometric accent: perfect circles and lines */
+        .geometric {
+            position: absolute;
+            opacity: 0.4;
+        }
+
+        .circle-1 {
+            width: 300px;
+            height: 300px;
+            border: 1px solid #1a1a1a;
+            border-radius: 50%;
+            top: 10%;
+            right: 5%;
+        }
+
+        .circle-2 {
+            width: 150px;
+            height: 150px;
+            border: 1px solid #1a1a1a;
+            border-radius: 50%;
+            bottom: 15%;
+            left: 10%;
+        }
+
+        .line-accent {
+            position: absolute;
+            background: #1a1a1a;
+        }
+
+        .line-h {
+            width: 200px;
+            height: 1px;
+            bottom: 35%;
+            right: 15%;
+        }
+
+        .line-v {
+            width: 1px;
+            height: 200px;
+            top: 20%;
+            right: 20%;
+        }
+
+        .label {
+            position: absolute;
+            font-size: 0.65rem;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            font-weight: 600;
+            color: #1a1a1a;
+            opacity: 0.5;
+        }
+
+        .label-1 { top: 5%; left: 10%; }
+        .label-2 { bottom: 10%; right: 8%; }
+        .label-3 { top: 50%; left: 5%; }
+
+        /* Features section: visual rhythm */
+        .features-section {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            min-height: 100vh;
+            background: #ffffff;
+        }
+
+        .feature-cell {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 4rem;
+            border-right: 1px solid #f0f0f0;
+            border-bottom: 1px solid #f0f0f0;
+            position: relative;
+        }
+
+        .feature-cell:nth-child(3n) { border-right: none; }
+        .feature-cell:nth-child(n+7) { border-bottom: none; }
+
+        .feature-cell h3 {
+            font-size: 0.875rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: #1a1a1a;
+        }
+
+        .feature-cell p {
+            font-size: 0.9rem;
+            line-height: 1.7;
+            color: #666666;
+            font-weight: 300;
+            max-width: 220px;
+        }
+
+        /* Subtle accent dots */
+        .feature-cell::before {
+            content: '';
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            background: #1a1a1a;
+            top: 2rem;
+            right: 2rem;
+            border-radius: 50%;
+            opacity: 0.3;
+        }
+
+        /* Architecture showcase */
+        .architecture {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 4rem 2rem;
+            background: #f8f8f8;
+            text-align: center;
+            position: relative;
+        }
+
+        .arch-visual {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            aspect-ratio: 1;
+            margin-bottom: 3rem;
+        }
+
+        .arch-block {
+            position: absolute;
+            background: #ffffff;
+            border: 1px solid #cccccc;
+        }
+
+        .block-1 { width: 200px; height: 100px; top: 10%; left: 10%; }
+        .block-2 { width: 180px; height: 120px; bottom: 15%; right: 5%; }
+        .block-3 { width: 150px; height: 150px; top: 35%; right: 15%; }
+
+        .connecting-line {
+            position: absolute;
+            background: #cccccc;
+        }
+
+        .arch-title {
+            font-size: 2rem;
+            letter-spacing: -0.01em;
+            margin-bottom: 1rem;
+            font-weight: 300;
+        }
+
+        .arch-desc {
+            font-size: 0.95rem;
+            color: #666666;
+            line-height: 1.8;
+            max-width: 500px;
+            font-weight: 300;
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            background: #ffffff;
+            border-top: 1px solid #f0f0f0;
+            font-size: 0.8rem;
+            letter-spacing: 0.1em;
+            color: #999999;
+            text-transform: uppercase;
+        }
+
+        @media (max-width: 1024px) {
+            .hero { grid-template-columns: 1fr; }
+            .features-section { grid-template-columns: repeat(2, 1fr); }
+            .circle-1, .circle-2 { opacity: 0.2; }
+        }
+
+        @media (max-width: 640px) {
+            header { padding: 1rem 1.5rem; }
+            .hero-left { padding: 2rem; }
+            .hero-left h1 { font-size: 1.75rem; }
+            .features-section { grid-template-columns: 1fr; }
+            .feature-cell { padding: 2rem; }
+            nav { gap: 0.75rem; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="mark">BeigeBox</div>
+        <nav>
+            <a href="#flow">Flow</a>
+            <a href="#capabilities">Capabilities</a>
+            <a href="#build">Build</a>
+        </nav>
+    </header>
+
+    <section class="hero">
+        <div class="hero-left">
+            <h1>Intelligent LLM Routing</h1>
+            <p>A transparent proxy for multi-backend LLM systems. Route with intention. Cache semantically. Observe completely.</p>
+            <a href="#" class="cta-subtle">Explore</a>
+        </div>
+        <div class="hero-right">
+            <div class="geometric circle-1"></div>
+            <div class="geometric circle-2"></div>
+            <div class="geometric line-accent line-h"></div>
+            <div class="geometric line-accent line-v"></div>
+            <div class="label label-1">Router</div>
+            <div class="label label-2">Pipeline</div>
+            <div class="label label-3">Observe</div>
+        </div>
+    </section>
+
+    <section id="capabilities" class="features-section">
+        <div class="feature-cell">
+            <h3>Multi-Backend</h3>
+            <p>Route to Ollama, OpenRouter, or any OpenAI-compatible endpoint. Automatic selection and failover.</p>
+        </div>
+        <div class="feature-cell">
+            <h3>Semantic Cache</h3>
+            <p>Embed and deduplicate requests. Catch rephrased queries. Reduce costs and latency.</p>
+        </div>
+        <div class="feature-cell">
+            <h3>Operator Agent</h3>
+            <p>Multi-turn tool execution. ReAct loops. Complex workflows with full orchestration.</p>
+        </div>
+        <div class="feature-cell">
+            <h3>Z-Commands</h3>
+            <p>Inline overrides: control routing, model selection, and behavior per-request.</p>
+        </div>
+        <div class="feature-cell">
+            <h3>Tap Logging</h3>
+            <p>Real-time event stream. Understand every decision, every token, every cost.</p>
+        </div>
+        <div class="feature-cell">
+            <h3>Guardrails</h3>
+            <p>Input/output filtering. Custom policies. Compliance and cost control built-in.</p>
+        </div>
+        <div class="feature-cell">
+            <h3>Web Studio</h3>
+            <p>Configure routing, models, and tools. Live dashboard. View metrics instantly.</p>
+        </div>
+        <div class="feature-cell">
+            <h3>Latency Aware</h3>
+            <p>P95-aware selection. Deprioritize slow backends. Smart load balancing.</p>
+        </div>
+        <div class="feature-cell">
+            <h3>Policy Hooks</h3>
+            <p>Pre and post-processing hooks. Custom logic at every stage of the pipeline.</p>
+        </div>
+    </section>
+
+    <section id="flow" class="architecture">
+        <div class="arch-visual">
+            <div class="arch-block block-1"></div>
+            <div class="arch-block block-2"></div>
+            <div class="arch-block block-3"></div>
+        </div>
+        <h2 class="arch-title">4-Tier Pipeline</h2>
+        <p class="arch-desc">Z-commands override. Static rules match models to backends. Embedding classifier handles simple queries. Decision LLM makes complex calls.</p>
+    </section>
+
+    <footer>
+        <p>BeigeBox — Transparent middleware for the LLM era</p>
+    </footer>
+</body>
+</html>

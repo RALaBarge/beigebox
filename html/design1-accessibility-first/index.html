@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BeigeBox – OpenAI-Compatible LLM Proxy</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #ffffff;
+            color: #1a1a1a;
+            line-height: 1.6;
+        }
+
+        /* Accessibility-first color scheme: WCAG AAA contrast */
+        :root {
+            --text-primary: #000000;
+            --text-secondary: #404040;
+            --bg-primary: #ffffff;
+            --bg-secondary: #f5f5f5;
+            --accent-primary: #0051ba;
+            --accent-secondary: #0066ff;
+            --border-color: #cccccc;
+            --success: #003300;
+            --error: #cc0000;
+        }
+
+        /* Focus visible for keyboard navigation (priority 1: accessibility) */
+        *:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
+
+        header {
+            padding: 2rem;
+            background: var(--bg-primary);
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        nav {
+            display: flex;
+            gap: 2rem;
+            align-items: center;
+            font-weight: 500;
+        }
+
+        nav a {
+            color: var(--text-primary);
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+        }
+
+        nav a:hover { background: var(--bg-secondary); }
+
+        .hero {
+            padding: 4rem 2rem;
+            background: var(--bg-secondary);
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            color: var(--text-primary);
+            font-weight: 700;
+        }
+
+        .tagline {
+            font-size: 1.25rem;
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        /* Touch target minimum (priority 2: interaction) 44×44px */
+        .cta-button {
+            display: inline-block;
+            padding: 1rem 2rem;
+            background: var(--accent-primary);
+            color: #ffffff;
+            text-decoration: none;
+            border: 2px solid var(--accent-primary);
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            min-height: 44px;
+            min-width: 44px;
+            border-radius: 4px;
+            transition: background 150ms ease;
+        }
+
+        .cta-button:hover {
+            background: var(--accent-secondary);
+            border-color: var(--accent-secondary);
+        }
+
+        .cta-button:focus-visible {
+            outline: 3px solid var(--accent-primary);
+            outline-offset: 2px;
+        }
+
+        /* Priority 5: Layout & Responsive */
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+            padding: 4rem 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .feature-card {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            padding: 2rem;
+            border-radius: 8px;
+        }
+
+        .feature-card h3 {
+            font-size: 1.25rem;
+            margin-bottom: 0.5rem;
+            color: var(--accent-primary);
+        }
+
+        .feature-card p {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        /* Priority 6: Typography semantic tokens */
+        .heading-priority {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            font-weight: 600;
+            margin-bottom: 1rem;
+            letter-spacing: 0.05em;
+        }
+
+        .priority-badge {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.75rem;
+        }
+
+        /* Performance (priority 3): image optimization placeholders */
+        .mockup {
+            background: var(--bg-secondary);
+            aspect-ratio: 16 / 9;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            margin: 2rem 0;
+        }
+
+        footer {
+            background: var(--bg-secondary);
+            padding: 2rem;
+            text-align: center;
+            color: var(--text-secondary);
+            border-top: 1px solid var(--border-color);
+        }
+
+        /* Motion (priority 7): 150–300ms timing */
+        @media (prefers-reduced-motion: no-preference) {
+            .feature-card {
+                transition: transform 200ms ease, box-shadow 200ms ease;
+            }
+            .feature-card:hover {
+                transform: translateY(-4px);
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <nav>
+            <strong>BeigeBox</strong>
+            <a href="#features">Features</a>
+            <a href="#routing">Routing</a>
+            <a href="#docs">Docs</a>
+        </nav>
+    </header>
+
+    <section class="hero">
+        <h1>BeigeBox</h1>
+        <p class="tagline">OpenAI-compatible LLM proxy. Route, cache, and orchestrate.</p>
+        <button class="cta-button">Get Started</button>
+    </section>
+
+    <section id="features" class="features">
+        <div class="feature-card">
+            <div class="heading-priority">
+                <span class="priority-badge">P1</span> Accessibility
+            </div>
+            <h3>WCAG AAA Ready</h3>
+            <p>Color contrast meets maximum accessibility standards. Keyboard navigation throughout. Screen reader compatible.</p>
+        </div>
+
+        <div class="feature-card">
+            <div class="heading-priority">
+                <span class="priority-badge">P2</span> Touch & Interaction
+            </div>
+            <h3>44×44px Targets</h3>
+            <p>Generous touch targets, clear visual feedback, predictable interaction patterns across all devices.</p>
+        </div>
+
+        <div class="feature-card">
+            <div class="heading-priority">
+                <span class="priority-badge">P3</span> Performance
+            </div>
+            <h3>Optimized Loading</h3>
+            <p>Image optimization, lazy loading, layout stability. Fast first paint and smooth interactions.</p>
+        </div>
+
+        <div class="feature-card">
+            <div class="heading-priority">
+                <span class="priority-badge">P5</span> Responsive Layout
+            </div>
+            <h3>Mobile-First Design</h3>
+            <p>Works perfectly from 375px to 1440px. Safe area support. Flexible grid system.</p>
+        </div>
+
+        <div class="feature-card">
+            <div class="heading-priority">
+                <span class="priority-badge">P6</span> Typography
+            </div>
+            <h3>Semantic Tokens</h3>
+            <p>System fonts, accessible line-height, semantic color meanings. Readable at any size.</p>
+        </div>
+
+        <div class="feature-card">
+            <div class="heading-priority">
+                <span class="priority-badge">P7</span> Motion
+            </div>
+            <h3>Respectful Animation</h3>
+            <p>150–300ms timing, respects prefers-reduced-motion, motion conveys meaning.</p>
+        </div>
+    </section>
+
+    <section id="routing">
+        <div style="padding: 4rem 2rem; max-width: 1200px; margin: 0 auto;">
+            <h2 style="margin-bottom: 2rem; color: var(--accent-primary);">4-Tier Routing Pipeline</h2>
+            <div class="mockup">BeigeBox multi-backend router with latency awareness</div>
+            <p style="color: var(--text-secondary);">Route requests through multiple LLM backends. Automatic failover, load balancing, and decision LLM for complex choices.</p>
+        </div>
+    </section>
+
+    <footer>
+        <p>BeigeBox — transparent middleware for LLM routing, caching, and observability.</p>
+    </footer>
+</body>
+</html>

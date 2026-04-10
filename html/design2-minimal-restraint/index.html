@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BeigeBox – LLM Proxy</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --grid: 8px;
+            --neutral-0: #ffffff;
+            --neutral-50: #fafafa;
+            --neutral-100: #f0f0f0;
+            --neutral-400: #999999;
+            --neutral-700: #333333;
+            --neutral-900: #111111;
+            --accent: #1f7fff;
+        }
+
+        html, body { height: 100%; }
+        body {
+            font-family: 'Segoe UI', -apple-system, sans-serif;
+            background: var(--neutral-0);
+            color: var(--neutral-900);
+            line-height: 1.75;
+            font-size: 16px;
+        }
+
+        /* 8px grid spacing */
+        h1, h2, h3 { margin-top: calc(var(--grid) * 4); margin-bottom: calc(var(--grid) * 2); }
+        p { margin-bottom: calc(var(--grid) * 2); }
+
+        header {
+            padding: calc(var(--grid) * 3) calc(var(--grid) * 4);
+            border-bottom: 1px solid var(--neutral-100);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 1.125rem;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+            color: var(--neutral-900);
+        }
+
+        nav {
+            display: flex;
+            gap: calc(var(--grid) * 3);
+            font-size: 0.875rem;
+        }
+
+        nav a {
+            color: var(--neutral-700);
+            text-decoration: none;
+            transition: color 200ms ease;
+        }
+
+        nav a:hover { color: var(--accent); }
+
+        /* Main content */
+        main {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: calc(var(--grid) * 6) calc(var(--grid) * 4);
+        }
+
+        .hero {
+            margin-bottom: calc(var(--grid) * 8);
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            line-height: 1.2;
+            color: var(--neutral-900);
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .subtitle {
+            font-size: 1.125rem;
+            color: var(--neutral-400);
+            font-weight: 400;
+            margin-bottom: calc(var(--grid) * 4);
+            max-width: 500px;
+        }
+
+        /* Buttons: minimal, focus on typography */
+        button {
+            padding: calc(var(--grid) * 2.5) calc(var(--grid) * 4);
+            background: var(--accent);
+            color: var(--neutral-0);
+            border: none;
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 3px;
+            transition: background 150ms ease;
+        }
+
+        button:hover {
+            background: #0d5ccc;
+        }
+
+        button:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        /* Grid of features */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: calc(var(--grid) * 4);
+            margin: calc(var(--grid) * 8) 0;
+        }
+
+        .card {
+            padding: calc(var(--grid) * 3);
+            background: var(--neutral-50);
+            border: 1px solid var(--neutral-100);
+        }
+
+        .card h3 {
+            font-size: 1rem;
+            color: var(--neutral-900);
+            margin-bottom: calc(var(--grid) * 1.5);
+            font-weight: 600;
+        }
+
+        .card p {
+            font-size: 0.875rem;
+            color: var(--neutral-700);
+            margin-bottom: 0;
+            line-height: 1.6;
+        }
+
+        .accent-text {
+            color: var(--accent);
+            font-weight: 500;
+        }
+
+        /* Mockup area */
+        .mockup-container {
+            margin: calc(var(--grid) * 6) 0;
+            background: var(--neutral-50);
+            border: 1px solid var(--neutral-100);
+            padding: calc(var(--grid) * 6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            aspect-ratio: 16/9;
+            color: var(--neutral-400);
+            font-size: 0.875rem;
+            border-radius: 3px;
+        }
+
+        footer {
+            text-align: center;
+            padding: calc(var(--grid) * 4);
+            color: var(--neutral-400);
+            font-size: 0.875rem;
+            border-top: 1px solid var(--neutral-100);
+            margin-top: calc(var(--grid) * 6);
+        }
+
+        /* Responsive */
+        @media (max-width: 640px) {
+            h1 { font-size: 1.75rem; }
+            header { flex-direction: column; gap: calc(var(--grid) * 2); text-align: center; }
+            main { padding: calc(var(--grid) * 4) calc(var(--grid) * 2); }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">BeigeBox</div>
+        <nav>
+            <a href="#features">Features</a>
+            <a href="#technical">Technical</a>
+            <a href="#docs">Documentation</a>
+        </nav>
+    </header>
+
+    <main>
+        <section class="hero">
+            <h1>OpenAI-compatible<br>LLM proxy</h1>
+            <p class="subtitle">Route, cache, and observe. Deployed in minutes. Compatible with any OpenAI client library.</p>
+            <button>Start Now</button>
+        </section>
+
+        <section id="features">
+            <div class="grid">
+                <div class="card">
+                    <h3>Multi-Backend<br><span class="accent-text">Routing</span></h3>
+                    <p>Send requests to Ollama, OpenRouter, or any OpenAI-compatible API. Automatic selection based on model, latency, and load.</p>
+                </div>
+
+                <div class="card">
+                    <h3>Session &<br><span class="accent-text">Semantic</span> Cache</h3>
+                    <p>Deduplicate requests. Cache responses at the semantic level. Reduce costs and latency for similar queries.</p>
+                </div>
+
+                <div class="card">
+                    <h3>Operator<br><span class="accent-text">Agent</span></h3>
+                    <p>Multi-turn tool execution. ReAct loop. Orchestration harness for complex workflows and reasoning tasks.</p>
+                </div>
+
+                <div class="card">
+                    <h3>Observability<br>&amp; <span class="accent-text">Metrics</span></h3>
+                    <p>Tap event logging. Real-time metrics dashboard. Understand your LLM traffic and costs in detail.</p>
+                </div>
+
+                <div class="card">
+                    <h3>Policy &<br><span class="accent-text">Guardrails</span></h3>
+                    <p>Input/output filtering. Content policies. Custom hooks for compliance, cost control, and security.</p>
+                </div>
+
+                <div class="card">
+                    <h3>Web Studio<br>&amp; <span class="accent-text">Tools</span> Registry</h3>
+                    <p>Configure routing, models, and tools from a single web UI. Live Tap log viewer and metrics dashboard.</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="technical">
+            <h2 style="margin-top: calc(var(--grid) * 8);">How It Works</h2>
+            <div class="mockup-container">Multi-backend routing with decision LLM and semantic cache</div>
+            <p>
+                BeigeBox sits between your frontend and any LLM backend. Requests flow through a <span class="accent-text">4-tier routing pipeline</span>:
+                Z-commands, static rules, embedding classifier, and decision LLM. Responses are cached at the semantic level
+                using embeddings. Policy hooks run before and after processing.
+            </p>
+        </section>
+    </main>
+
+    <footer>
+        <p>BeigeBox — transparent middleware for the LLM era.</p>
+    </footer>
+</body>
+</html>
