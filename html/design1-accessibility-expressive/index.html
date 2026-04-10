@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BeigeBox – Accessible, Expressive LLM Proxy</title>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Newsreader:ital@0;1&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Newsreader', serif;
+            background: #fafaf8;
+            color: #1a1a1a;
+            line-height: 1.65;
+        }
+
+        :root {
+            --text: #1a1a1a;
+            --text-light: #555555;
+            --accent-1: #0066ff;
+            --accent-2: #ff006e;
+            --accent-3: #00d9ff;
+            --bg-1: #ffffff;
+            --bg-2: #f0f0ed;
+        }
+
+        h1, h2, h3 { font-style: italic; font-weight: 700; }
+
+        header {
+            padding: 2rem 3rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--bg-1);
+            border-bottom: 3px solid var(--accent-1);
+        }
+
+        .logo { font-size: 1.5rem; font-weight: 700; letter-spacing: 0.02em; }
+
+        nav {
+            display: flex;
+            gap: 2.5rem;
+        }
+
+        nav a {
+            color: var(--text);
+            text-decoration: underline;
+            text-decoration-color: var(--accent-2);
+            text-decoration-thickness: 2px;
+            text-underline-offset: 4px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: all 200ms ease;
+        }
+
+        nav a:hover { color: var(--accent-2); }
+
+        .hero {
+            display: grid;
+            grid-template-columns: 1fr 1.2fr;
+            gap: 4rem;
+            align-items: center;
+            padding: 5rem 3rem;
+            background: var(--bg-2);
+        }
+
+        h1 {
+            font-size: 3rem;
+            line-height: 1.2;
+            margin-bottom: 1.5rem;
+            color: var(--text);
+        }
+
+        .hero p {
+            font-size: 1.1rem;
+            color: var(--text-light);
+            margin-bottom: 2rem;
+        }
+
+        .highlight {
+            background: linear-gradient(120deg, var(--accent-1), var(--accent-3));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-weight: 700;
+        }
+
+        .cta {
+            display: inline-block;
+            padding: 1rem 2rem;
+            background: var(--accent-1);
+            color: #ffffff;
+            text-decoration: none;
+            font-weight: 700;
+            border-radius: 8px;
+            transition: all 300ms ease;
+            border: 3px solid var(--accent-1);
+        }
+
+        .cta:hover {
+            background: transparent;
+            color: var(--accent-1);
+        }
+
+        .visual-block {
+            background: var(--bg-1);
+            border: 4px dashed var(--accent-2);
+            padding: 4rem;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--accent-2);
+            aspect-ratio: 1;
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            padding: 5rem 3rem;
+            background: var(--bg-1);
+        }
+
+        .feature {
+            background: var(--bg-2);
+            padding: 2.5rem;
+            border-left: 5px solid var(--accent-3);
+            border-radius: 4px;
+            transition: transform 250ms ease;
+        }
+
+        .feature:hover { transform: translateX(8px); }
+
+        .feature h3 {
+            color: var(--accent-1);
+            margin-bottom: 1rem;
+            font-size: 1.3rem;
+        }
+
+        .feature p {
+            color: var(--text-light);
+            font-size: 0.95rem;
+        }
+
+        .code-snippet {
+            font-family: 'IBM Plex Mono', monospace;
+            background: var(--text);
+            color: var(--accent-3);
+            padding: 1.5rem;
+            border-radius: 6px;
+            margin: 2rem 0;
+            font-size: 0.85rem;
+            overflow-x: auto;
+        }
+
+        footer {
+            text-align: center;
+            padding: 3rem;
+            background: var(--text);
+            color: #ffffff;
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 1024px) {
+            .hero { grid-template-columns: 1fr; }
+            h1 { font-size: 2rem; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">BeigeBox</div>
+        <nav>
+            <a href="#features">Features</a>
+            <a href="#code">Example</a>
+            <a href="#about">About</a>
+        </nav>
+    </header>
+
+    <section class="hero">
+        <div>
+            <h1>Route <span class="highlight">with Intention</span></h1>
+            <p>BeigeBox is the transparent LLM proxy for builders. Multi-backend routing. Semantic caching. Full observability. No compromises.</p>
+            <a href="#" class="cta">Get Started Now</a>
+        </div>
+        <div class="visual-block">4-Tier Router</div>
+    </section>
+
+    <section id="features" class="features">
+        <div class="feature">
+            <h3>✦ Router</h3>
+            <p>Send requests to any backend. Ollama locally, OpenRouter remotely, your own API. Automatic selection based on latency, availability, and model.</p>
+        </div>
+
+        <div class="feature">
+            <h3>✧ Cache</h3>
+            <p>Semantic deduplication. Understand that "What is AI?" and "Define artificial intelligence" are the same. Cache at the semantic level.</p>
+        </div>
+
+        <div class="feature">
+            <h3>✦ Operator</h3>
+            <p>Multi-turn tool execution. ReAct loops. Complex workflows. Full orchestration for reasoning-intensive tasks with artifact storage.</p>
+        </div>
+
+        <div class="feature">
+            <h3>✧ Observe</h3>
+            <p>Tap event logging. Real-time metrics. Understand every request, every token, every decision. Live dashboard. Cost tracking.</p>
+        </div>
+
+        <div class="feature">
+            <h3>✦ Protect</h3>
+            <p>Input/output filtering. Policy enforcement. Custom hooks. Compliance and guardrails built into every request.</p>
+        </div>
+
+        <div class="feature">
+            <h3>✧ Configure</h3>
+            <p>Web Studio for routing rules, model selection, and tool management. Live dashboard. No restarts needed for most changes.</p>
+        </div>
+    </section>
+
+    <div style="padding: 5rem 3rem; background: var(--bg-2); text-align: center;">
+        <h2 style="margin-bottom: 2rem; color: var(--text);">How It Works</h2>
+        <div class="code-snippet">z: router=ollama, model=qwen3:32b
+User request → Z-command override → Static rules → Embedding classifier → Decision LLM → Selected backend → Cached response</div>
+        <p style="color: var(--text-light); max-width: 600px; margin: 0 auto;">Every request flows through our intelligent 4-tier pipeline. Z-commands override routing instantly. Static rules handle common cases. Embeddings classify simple queries. The decision LLM makes tough calls. All while caching and logging.</p>
+    </div>
+
+    <footer>
+        <p>BeigeBox — transparent middleware for the LLM era. Built by developers, for developers.</p>
+    </footer>
+</body>
+</html>

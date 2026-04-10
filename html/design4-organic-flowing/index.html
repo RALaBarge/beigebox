@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BeigeBox – Intelligent Routing</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700&family=Merriweather:ital@0;1&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: linear-gradient(135deg, #fef9f3 0%, #f5ede5 100%);
+            color: #3a3a3a;
+            line-height: 1.7;
+        }
+
+        header {
+            padding: 2.5rem 3rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #d97706, #f59e0b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        nav {
+            display: flex;
+            gap: 2.5rem;
+        }
+
+        nav a {
+            color: #3a3a3a;
+            text-decoration: none;
+            font-weight: 500;
+            position: relative;
+            transition: all 200ms ease;
+        }
+
+        nav a::after {
+            content: '';
+            position: absolute;
+            bottom: -8px;
+            left: 50%;
+            width: 0;
+            height: 2px;
+            background: #d97706;
+            transform: translateX(-50%);
+            transition: width 300ms ease;
+        }
+
+        nav a:hover::after { width: 100%; }
+
+        .hero {
+            display: grid;
+            grid-template-columns: 1fr 1.1fr;
+            gap: 4rem;
+            align-items: center;
+            padding: 6rem 3rem;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-family: 'Merriweather', serif;
+            font-size: 3.2rem;
+            line-height: 1.15;
+            margin-bottom: 1.5rem;
+            color: #1a1a1a;
+            font-style: italic;
+            font-weight: 700;
+        }
+
+        .hero p {
+            font-size: 1.1rem;
+            color: #5a5a5a;
+            margin-bottom: 2rem;
+        }
+
+        .accent-orange {
+            color: #d97706;
+            font-weight: 600;
+        }
+
+        .cta {
+            display: inline-block;
+            padding: 1.2rem 2.5rem;
+            background: linear-gradient(135deg, #d97706, #f59e0b);
+            color: #ffffff;
+            text-decoration: none;
+            font-weight: 600;
+            border-radius: 50px;
+            transition: all 300ms ease;
+            box-shadow: 0 8px 30px rgba(217, 119, 6, 0.2);
+        }
+
+        .cta:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 40px rgba(217, 119, 6, 0.3);
+        }
+
+        .hero-visual {
+            position: relative;
+            height: 500px;
+            background: linear-gradient(135deg, rgba(217, 119, 6, 0.1), rgba(245, 158, 11, 0.1));
+            border-radius: 20px;
+            border: 2px solid rgba(217, 119, 6, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .blob {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(40px);
+            opacity: 0.3;
+        }
+
+        .blob-1 {
+            width: 200px;
+            height: 200px;
+            background: #d97706;
+            top: 10%;
+            right: 10%;
+            animation: float 6s ease-in-out infinite;
+        }
+
+        .blob-2 {
+            width: 150px;
+            height: 150px;
+            background: #f59e0b;
+            bottom: 15%;
+            left: 10%;
+            animation: float 8s ease-in-out infinite reverse;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(20px); }
+        }
+
+        .visual-text {
+            position: relative;
+            z-index: 1;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #d97706;
+            text-align: center;
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 2.5rem;
+            padding: 6rem 3rem;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .feature {
+            background: rgba(255, 255, 255, 0.6);
+            backdrop-filter: blur(10px);
+            padding: 2.5rem;
+            border-radius: 12px;
+            border: 1px solid rgba(217, 119, 6, 0.2);
+            transition: all 300ms ease;
+        }
+
+        .feature:hover {
+            transform: translateY(-4px);
+            border-color: #d97706;
+            box-shadow: 0 10px 40px rgba(217, 119, 6, 0.1);
+        }
+
+        .feature-icon {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        .feature h3 {
+            font-size: 1.2rem;
+            margin-bottom: 0.8rem;
+            color: #d97706;
+            font-weight: 600;
+        }
+
+        .feature p {
+            color: #5a5a5a;
+            font-size: 0.95rem;
+        }
+
+        footer {
+            text-align: center;
+            padding: 3rem;
+            color: #7a7a7a;
+            font-size: 0.9rem;
+            border-top: 1px solid rgba(217, 119, 6, 0.1);
+        }
+
+        @media (max-width: 1024px) {
+            .hero { grid-template-columns: 1fr; }
+            h1 { font-size: 2.2rem; }
+        }
+
+        @media (max-width: 640px) {
+            header { flex-direction: column; gap: 1.5rem; }
+            .hero { padding: 3rem 1.5rem; }
+            h1 { font-size: 1.8rem; }
+            nav { gap: 1.5rem; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">BeigeBox</div>
+        <nav>
+            <a href="#features">Features</a>
+            <a href="#pipeline">Pipeline</a>
+            <a href="#start">Start</a>
+        </nav>
+    </header>
+
+    <section class="hero">
+        <div>
+            <h1>Route with <span class="accent-orange">intention</span></h1>
+            <p>BeigeBox brings order to multi-backend LLM systems. Intelligent routing. Semantic caching. Complete observability. All through a transparent proxy.</p>
+            <a href="#" class="cta">Begin Routing</a>
+        </div>
+        <div class="hero-visual">
+            <div class="blob blob-1"></div>
+            <div class="blob blob-2"></div>
+            <div class="visual-text">4-Tier Router</div>
+        </div>
+    </section>
+
+    <section id="features" class="features">
+        <div class="feature">
+            <div class="feature-icon">🔀</div>
+            <h3>Multi-Backend Routing</h3>
+            <p>Send requests to Ollama, OpenRouter, or your own LLM. Intelligent selection based on model, latency, and availability.</p>
+        </div>
+
+        <div class="feature">
+            <div class="feature-icon">✦</div>
+            <h3>Semantic Cache</h3>
+            <p>Understand that "What is AI?" and "Define artificial intelligence" are semantically identical. Cache at the meaning level.</p>
+        </div>
+
+        <div class="feature">
+            <div class="feature-icon">⟳</div>
+            <h3>Operator Agent</h3>
+            <p>Multi-turn orchestration. ReAct loops. Tool execution with artifact storage. Complex reasoning workflows made simple.</p>
+        </div>
+
+        <div class="feature">
+            <div class="feature-icon">👁️</div>
+            <h3>Tap Observability</h3>
+            <p>Real-time event logging. Every request, token, and decision tracked. Live metrics dashboard. Cost visibility.</p>
+        </div>
+
+        <div class="feature">
+            <div class="feature-icon">🛡️</div>
+            <h3>Guardrails & Policies</h3>
+            <p>Input/output filtering. Custom compliance hooks. Cost control. Every request passes through your policy layer.</p>
+        </div>
+
+        <div class="feature">
+            <div class="feature-icon">⚙️</div>
+            <h3>Web Studio</h3>
+            <p>Configure everything from one place. Routing rules, model selection, tool registry. Live updates, no restarts.</p>
+        </div>
+    </section>
+
+    <footer>
+        <p>BeigeBox — transparent middleware for the LLM era</p>
+    </footer>
+</body>
+</html>
