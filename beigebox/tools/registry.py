@@ -32,6 +32,7 @@ from beigebox.tools.apex_analyzer import ApexAnalyzerTool
 from beigebox.tools.confluence_crawler import ConfluenceCrawler
 from beigebox.tools.aura_recon import AuraReconTool
 from beigebox.tools.sf_ingest import SfIngestTool
+from beigebox.tools.atlassian import AtlassianTool
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +208,18 @@ class ToolRegistry:
                 state_dir=aura_cfg.get("state_dir"),
             )
             logger.info("Aura recon tool registered (ws_url=%s)", aura_cfg.get("ws_url", "ws://localhost:9009"))
+
+        # --- Atlassian (live Jira + Confluence REST — disabled by default) ---
+        # Reads creds from env (ATLASSIAN_BASE_URL/EMAIL/API_TOKEN), set via
+        # ~/.beigebox/.env which docker-compose passes through with env_file.
+        atl_cfg = tools_cfg.get("atlassian", {})
+        if atl_cfg.get("enabled", False):
+            self.tools["atlassian"] = AtlassianTool(
+                base_url=atl_cfg.get("base_url"),  # optional override; env var wins by default
+                email=atl_cfg.get("email"),
+                api_token=atl_cfg.get("api_token"),
+            )
+            logger.info("Atlassian tool registered")
 
         # --- SF Ingest (Salesforce list-view paging + case fetch + markdown writer — disabled by default) ---
         # Uses BrowserBox + Aura framework. Shares BBClient with aura_recon.

@@ -12,7 +12,7 @@ Plus **`_window_config`** in request body (per-pane overrides, highest priority)
 ```yaml
 backends:
   ollama:
-    url: http://ollama:11434
+    url: http://host.docker.internal:11434  # macOS host-native Ollama (Metal); Linux can use http://ollama:11434 with in-container service
   openrouter:
     url: https://openrouter.ai/api/v1
     api_key: ${OPENROUTER_API_KEY}
@@ -114,7 +114,7 @@ BEIGEBOX_API_KEY=sk-...
 OPENROUTER_API_KEY=sk-...
 GOOGLE_API_KEY=...
 GOOGLE_CSE_ID=...
-OLLAMA_HOST=http://ollama:11434
+OLLAMA_HOST=http://host.docker.internal:11434
 ```
 
 ## System context injection

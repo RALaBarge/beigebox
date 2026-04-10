@@ -4454,7 +4454,7 @@ async function loadDashboard() {
           <span class="subsystem-name">${name}</span>
           <span class="subsystem-detail">${detail}</span>
         </div>`;
-      html += ghost('Proxy',                'backend: http://ollama:11434');
+      html += ghost('Proxy',                'backend: http://host.docker.internal:11434');
       html += ghost('Storage · SQLite',     '0 messages');
       html += ghost('Storage · ChromaDB',   '');
       html += ghost('Decision LLM',         'disabled');
@@ -5459,15 +5459,24 @@ function _scrollNearBottom(el) {
   if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) el.scrollTop = el.scrollHeight;
 }
 
-function appendMsgToPane(paneId, role, text, model, container) {
+function appendMsgToPane(paneId, role, text, model, container, ts) {
   const area = container || document.getElementById(`pane-msgs-${paneId}`);
   if (!area) return null;
   const div = document.createElement('div');
   div.className = `msg ${role}`;
   // Format assistant messages (JSON, markdown, code blocks); keep user messages plain
   const content = role === 'assistant' ? _formatOutput(text) : esc(text);
+  // Use the explicit ts (captured at message-creation time) when supplied; falling
+  // back to "now" only when callers don't pass one. Showing seconds AND milliseconds
+  // (HH:MM:SS.mmm) so adjacent messages within the same second don't look identical.
+  const _d = ts ? new Date(ts) : new Date();
+  const _hh = String(_d.getHours()).padStart(2, '0');
+  const _mm = String(_d.getMinutes()).padStart(2, '0');
+  const _ss = String(_d.getSeconds()).padStart(2, '0');
+  const _ms = String(_d.getMilliseconds()).padStart(3, '0');
+  const _stamp = `${_hh}:${_mm}:${_ss}.${_ms}`;
   div.innerHTML = `
-    <div class="meta">${esc(role === 'user' ? 'you' : (model || role))} · ${new Date().toLocaleTimeString()}</div>
+    <div class="meta">${esc(role === 'user' ? 'you' : (model || role))} · ${_stamp}</div>
     <div class="bubble">${content}</div>`;
   area.appendChild(div);
   _scrollNearBottom(area);
@@ -5575,10 +5584,18 @@ function chatKeydown(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
 }
 
+// Re-entrancy guard — prevents sendChat from running twice within the same
+// gesture (e.g. button click + Enter keypress, double-click, focus race, etc).
+// Without this, pane.history can end up with the user message pushed twice,
+// which both duplicates the chat bubble and persists into every following turn.
+let _sendChatInFlight = false;
+
 async function sendChat() {
+  if (_sendChatInFlight) return;
+  _sendChatInFlight = true;
   const input = document.getElementById('chat-input');
   const text = input.value.trim();
-  if (!text) return;
+  if (!text) { _sendChatInFlight = false; return; }
   input.value = '';
   input.style.height = 'auto';
 
@@ -5600,11 +5617,19 @@ async function sendChat() {
         : visible)
     : visible;
 
-  // Fan out to all target panes in parallel
-  await Promise.all(targetPanes.map(pane => sendToPane(pane, cleanText, isOpCommand)));
+  // Dedupe targetPanes by reference — defensive guard against the same pane
+  // object appearing twice (which would push the user message twice into one
+  // history array). Belt-and-suspenders for the re-entrancy guard above.
+  const uniqueTargets = Array.from(new Set(targetPanes));
 
-  sendBtn.disabled = false;
-  input.focus();
+  // Fan out to all target panes in parallel
+  try {
+    await Promise.all(uniqueTargets.map(pane => sendToPane(pane, cleanText, isOpCommand)));
+  } finally {
+    sendBtn.disabled = false;
+    input.focus();
+    _sendChatInFlight = false;
+  }
 }
 
 async function sendToPane(pane, text, forceOp) {
@@ -5642,10 +5667,22 @@ async function sendToPane(pane, text, forceOp) {
     ? `[${attachments.map(a => a.name).join(', ')}]\n${text}`
     : text;
 
-  // Add user message to history (store text content for replay; multimodal stored separately)
-  pane.history.push({ role: 'user', content: userContent, _display: displayLabel });
+  // Idempotent push: if the previous history entry is already an identical
+  // user message (same role + same content), skip — don't push or render. This
+  // catches any double-fire of sendToPane that bypasses the sendChat re-entrancy
+  // guard, and prevents the dup from poisoning every subsequent turn.
+  const _last = pane.history[pane.history.length - 1];
+  const _sameContent = _last && _last.role === 'user' &&
+    JSON.stringify(_last.content) === JSON.stringify(userContent);
+  if (_sameContent) {
+    // Already in history; nothing to do for this gesture.
+    return;
+  }
+  // Add user message to history (store text content for replay; multimodal stored separately).
+  // _ts is captured here (not at render time) so duplicate-second renders show distinct timestamps.
+  pane.history.push({ role: 'user', content: userContent, _display: displayLabel, _ts: Date.now() });
   updateCtxUsage(pane);
-  appendMsgToPane(pane.id, 'user', displayLabel, '', area);
+  appendMsgToPane(pane.id, 'user', displayLabel, '', area, Date.now());
   renderAttachmentPills(pane.id);
 
   // Typing indicator
@@ -5667,8 +5704,9 @@ async function sendToPane(pane, text, forceOp) {
       document.getElementById(typingId)?.remove();
       if (_loadHintId) { document.getElementById(_loadHintId)?.remove(); _seenModels.add(_modelKey); _loadHintId = null; }
       const answer = d.success ? d.answer : `Error: ${d.error}`;
-      pane.history.push({ role: 'assistant', content: answer, model: 'operator' });
-      appendMsgToPane(pane.id, 'assistant', answer, 'operator', area);
+      const _opTs = Date.now();
+      pane.history.push({ role: 'assistant', content: answer, model: 'operator', _ts: _opTs });
+      appendMsgToPane(pane.id, 'assistant', answer, 'operator', area, _opTs);
     } else {
       // Stream to model
       const model = pane.target || '';
@@ -5779,9 +5817,10 @@ async function sendToPane(pane, text, forceOp) {
               if (!assistantDiv) {
                 const usedModel = j.model || model || 'assistant';
                 pane._streaming.model = usedModel;
+                pane._streaming.startTs = Date.now();
                 const liveArea = document.getElementById(`pane-msgs-${pane.id}`);
                 if (liveArea) {
-                  assistantDiv = appendMsgToPane(pane.id, 'assistant', '', usedModel, liveArea);
+                  assistantDiv = appendMsgToPane(pane.id, 'assistant', '', usedModel, liveArea, pane._streaming.startTs);
                   if (assistantDiv) assistantDiv.dataset.streaming = 'true';
                   bubble = assistantDiv?.querySelector('.bubble');
                 }
@@ -5811,7 +5850,7 @@ async function sendToPane(pane, text, forceOp) {
             meta.textContent += ` · ${tokLabel}`;
           }
         }
-        pane.history.push({ role: 'assistant', content: fullText, model: model || 'assistant' });
+        pane.history.push({ role: 'assistant', content: fullText, model: model || 'assistant', _ts: pane._streaming?.startTs || Date.now() });
         // Render markdown on final text (streaming used plain textContent)
         if (assistantDiv) {
           const bub = assistantDiv.querySelector('.bubble');
@@ -9951,7 +9990,7 @@ function _bb_enabledChange(checked) {
     if (!_backendsState.backends.some(b => b.provider === 'ollama')) {
       _backendsState.backends.unshift({
         name: 'ollama-local', provider: 'ollama',
-        url: 'http://ollama:11434', priority: 1, api_key: '', allowed_models: [],
+        url: 'http://host.docker.internal:11434', priority: 1, api_key: '', allowed_models: [],
         local_model: '', device_preference: 'cpu',
       });
     }

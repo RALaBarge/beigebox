@@ -106,7 +106,7 @@ Changes to source files are reflected immediately (no reinstall).
 ## Environment Variables
 
 ```bash
-OLLAMA_HOST=http://ollama:11434       # Ollama endpoint
+OLLAMA_HOST=http://host.docker.internal:11434  # Ollama endpoint (macOS host-native)
 GOOGLE_API_KEY=...                    # For Google search tool
 GOOGLE_CSE_ID=...                     # Custom search engine ID
 OPENROUTER_API_KEY=...                # OpenRouter API key

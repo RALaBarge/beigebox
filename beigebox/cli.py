@@ -1106,7 +1106,7 @@ def main():
         p.add_argument("--model", "-m", action="append", default=None,
                        help="Model to benchmark (can specify multiple times)")
         p.add_argument("--ollama-url", "-u", default=None,
-                       help="Ollama URL (default: from config, e.g. http://ollama:11434)")
+                       help="Ollama URL (default: from config, e.g. http://host.docker.internal:11434)")
         p.add_argument("--num-runs", "-n", type=int, default=None,
                        help=f"Measured runs per model (default: 5)")
         p.add_argument("--num-predict", type=int, default=None,

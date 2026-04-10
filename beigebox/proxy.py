@@ -231,11 +231,49 @@ class Proxy:
         """Check if this request was tagged as synthetic by a hook."""
         return body.get("_beigebox_synthetic", False)
 
+    def _dedupe_consecutive_messages(self, body: dict) -> dict:
+        """
+        Drop consecutive (role, content) duplicates from body.messages.
+
+        A buggy or replaying client (e.g. UI double-fire) can send the same
+        user message twice in one request body, which then propagates into
+        every following turn (the dup sticks in the conversation history).
+        This collapses adjacent duplicates so the backend, the wire tap, the
+        SQLite store, and the vector index all see a clean sequence.
+
+        Mutates body['messages'] in place and returns body.
+        """
+        messages = body.get("messages", [])
+        if len(messages) < 2:
+            return body
+        cleaned: list[dict] = []
+        prev_key: tuple[str, str] | None = None
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            content_str = content if isinstance(content, str) else json.dumps(content)
+            key = (role, content_str)
+            if key == prev_key:
+                logger.info("dedupe: dropped consecutive duplicate role=%s len=%d",
+                            role, len(content_str))
+                continue
+            cleaned.append(msg)
+            prev_key = key
+        if len(cleaned) != len(messages):
+            body["messages"] = cleaned
+        return body
+
     async def _log_messages(self, conversation_id: str, messages: list[dict], model: str):
         """Store the user messages from the request."""
         if not self.log_enabled:
             return
         loop = asyncio.get_event_loop()
+        # Defense in depth: collapse consecutive identical (role, content) pairs
+        # before logging. A buggy or replaying client can send the same user
+        # message twice in one body — without this, every following turn would
+        # carry the dup forward and pollute the conversation store, the wire
+        # tap, the vector index, and the token accounting.
+        _prev_key: tuple[str, str] | None = None
         for msg in messages:
             role = msg.get("role", "")
             content = msg.get("content", "")
@@ -245,6 +283,12 @@ class Proxy:
             if not content or role == "system":
                 continue
             content_str = content if isinstance(content, str) else json.dumps(content)
+            _key = (role, content_str)
+            if _key == _prev_key:
+                logger.debug("_log_messages: dropping consecutive duplicate role=%s len=%d",
+                             role, len(content_str))
+                continue
+            _prev_key = _key
             tokens = _estimate_tokens(content_str)
             message = Message(
                 conversation_id=conversation_id,
@@ -1096,6 +1140,9 @@ class Proxy:
         model = self._get_model(body)
         conversation_id = self._extract_conversation_id(body)
 
+        # Drop consecutive duplicate messages from a buggy/replaying client
+        body = self._dedupe_consecutive_messages(body)
+
         # Z-command parsing
         zcmd, body = self._process_z_command(body)
         _stages["z_command"] = (_time.monotonic() - _t0) * 1000
@@ -1322,6 +1369,9 @@ class Proxy:
 
         model = self._get_model(body)
         conversation_id = self._extract_conversation_id(body)
+
+        # Drop consecutive duplicate messages from a buggy/replaying client
+        body = self._dedupe_consecutive_messages(body)
 
         # Log request start
         prompt_tokens = _estimate_tokens(str(body.get("messages", [])))

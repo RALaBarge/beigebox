@@ -66,60 +66,65 @@
 
 services:
   # ---------------------------------------------------------------------------
-  # Ollama — LLM inference (CPU by default)
+  # Ollama — runs NATIVELY on the host (not in Docker)
   # ---------------------------------------------------------------------------
-  # For NVIDIA GPU: uncomment the 'deploy' block below and restart.
-  ollama:
-    image: ollama/ollama@sha256:e771d18fe56724f01a6f691a5773df544f36f565fb37c93f0ddc5957007b7766
-    container_name: beigebox-ollama
-    ports:
-      - "${OLLAMA_PORT:-11434}:11434"
-    volumes:
-      - ${OLLAMA_DATA:-ollama_data}:/root/.ollama
-    tmpfs:
-      - /tmp
-    restart: unless-stopped
-    networks:
-      - llm
-    read_only: true
-    environment:
-      OLLAMA_NUM_PARALLEL: "3"
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    # For NVIDIA GPU support: uncomment the 'deploy' block below and restart.
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
-
-  # ---------------------------------------------------------------------------
-  # Model pull — runs once to ensure required models exist
-  # ---------------------------------------------------------------------------
-  ollama-model-pull:
-    image: curlimages/curl:latest
-    container_name: beigebox-model-pull
-    depends_on:
-      ollama:
-        condition: service_started
-    networks:
-      - llm
-    read_only: true
-    tmpfs:
-      - /tmp
-    command: >
-      sh -c "sleep 5 &&
-      curl -s http://ollama:11434/api/pull -d '{\"name\":\"qwen3:4b\"}' &&
-      curl -s http://ollama:11434/api/pull -d '{\"name\":\"llama3.2:3b\"}' &&
-      curl -s http://ollama:11434/api/pull -d '{\"name\":\"nomic-embed-text\"}' &&
-      curl -s http://ollama:11434/api/generate -d '{\"model\":\"qwen3:4b\",\"keep_alive\":-1}'"
-    restart: "no"
+  # On macOS, Docker cannot pass through Metal GPU and the VM caps RAM at ~7 GiB,
+  # which made it impossible to load larger models (e.g. qwen3:30b-a3b needs ~18 GiB).
+  # We now run Ollama natively on the host so it can use Metal + full unified memory.
+  #
+  # Host setup:
+  #   brew install ollama
+  #   brew services start ollama
+  #   ollama pull qwen3:30b-a3b nomic-embed-text qwen3:4b
+  #
+  # The beigebox container reaches it via host.docker.internal:11434
+  # (see docker/config.docker.yaml → backends[0].url, and the extra_hosts mapping
+  # on the beigebox service below).
+  #
+  # To roll back to in-container Ollama: un-comment the service blocks below,
+  # restore backends[0].url to "http://ollama:11434", and `docker compose up -d ollama`.
+  # The original `ollama_data` volume is preserved as a safety net.
+  #
+  # ollama:
+  #   image: ollama/ollama@sha256:e771d18fe56724f01a6f691a5773df544f36f565fb37c93f0ddc5957007b7766
+  #   container_name: beigebox-ollama
+  #   ports:
+  #     - "${OLLAMA_PORT:-11434}:11434"
+  #   volumes:
+  #     - ${OLLAMA_DATA:-ollama_data}:/root/.ollama
+  #   tmpfs:
+  #     - /tmp
+  #   restart: unless-stopped
+  #   networks:
+  #     - llm
+  #   read_only: true
+  #   environment:
+  #     OLLAMA_NUM_PARALLEL: "3"
+  #   healthcheck:
+  #     test: ["CMD", "ollama", "list"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 40s
+  #
+  # ollama-model-pull:
+  #   image: curlimages/curl:latest
+  #   container_name: beigebox-model-pull
+  #   depends_on:
+  #     ollama:
+  #       condition: service_started
+  #   networks:
+  #     - llm
+  #   read_only: true
+  #   tmpfs:
+  #     - /tmp
+  #   command: >
+  #     sh -c "sleep 5 &&
+  #     curl -s http://ollama:11434/api/pull -d '{\"name\":\"qwen3:4b\"}' &&
+  #     curl -s http://ollama:11434/api/pull -d '{\"name\":\"llama3.2:3b\"}' &&
+  #     curl -s http://ollama:11434/api/pull -d '{\"name\":\"nomic-embed-text\"}' &&
+  #     curl -s http://ollama:11434/api/generate -d '{\"model\":\"qwen3:4b\",\"keep_alive\":-1}'"
+  #   restart: "no"
 
   # ---------------------------------------------------------------------------
   # BeigeBox — transparent LLM proxy + middleware
@@ -142,6 +147,7 @@ services:
       - ../beigebox/web:/app/beigebox/web:ro
       - ../wasm_modules:/app/wasm_modules:ro
       - ./logs:/app/logs
+      - ~/.beigebox/chrome-cookies:/app/chrome-cookies:ro
       - type: tmpfs
         target: /app/workspace/in
         tmpfs:
@@ -156,16 +162,26 @@ services:
       - llm
       - tools
       - inference
+    # Host-side secrets (mode 600) — Atlassian creds, etc. Optional file:
+    # if it doesn't exist, compose will warn but the container still starts
+    # and the atlassian tool returns a "credentials not configured" error.
+    env_file:
+      - path: ${HOME}/.beigebox/.env
+        required: false
     environment:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GOOGLE_CSE_ID=${GOOGLE_CSE_ID:-}
       - OLLAMA_HOST=${OLLAMA_HOST:-ollama}
       - BROWSERBOX_WS_URL=${BROWSERBOX_WS_URL:-ws://host.docker.internal:9009}
+      - CDP_COOKIES_PATH=/app/chrome-cookies
+      # macOS host metrics bridge — point at the host-side helper running as a
+      # LaunchAgent (see ~/.beigebox/host_metrics.py). Without this, the
+      # in-container psutil reports the Linux VM's stats instead of the Mac's.
+      - BEIGEBOX_HOST_METRICS_URL=${BEIGEBOX_HOST_METRICS_URL:-http://host.docker.internal:9119/metrics}
       - LOG_LEVEL=DEBUG
       - PYTHONUNBUFFERED=1
-    depends_on:
-      ollama:
-        condition: service_started
+    # ollama runs natively on the host now (see commented block above);
+    # beigebox reaches it via host.docker.internal:11434, so no depends_on.
     restart: unless-stopped
     # read_only: true removed to allow log file writing
     # Security maintained via: running as non-root, cap_drop: ALL, no-new-privileges

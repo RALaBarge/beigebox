@@ -4,6 +4,13 @@
 **Agent**: Spawned through beigebox proxy (Tap-logged)  
 **Scope**: End-to-end macOS Apple Silicon startup validation
 
+> **⚠ SUPERSEDED 2026-04-09:** Ollama no longer runs in the compose stack on macOS.
+> It runs natively on the host (`brew install ollama && brew services start ollama`)
+> for Metal acceleration and full unified memory access — required to load models
+> larger than ~7B at Q4. The `ollama:11434` references below are from the previous
+> in-container topology. Current backend URL: `http://host.docker.internal:11434`.
+> See `docker/docker-compose.yaml` and `docker/config.docker.yaml` for live config.
+
 ---
 
 ## Validation Checklist

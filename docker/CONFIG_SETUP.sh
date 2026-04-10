@@ -188,7 +188,7 @@ case "$CHOICE" in
         echo ""
 
         echo -e "${YELLOW}Primary backend?${NC}"
-        echo "  1. Ollama (local, http://ollama:11434)"
+        echo "  1. Ollama (local, http://host.docker.internal:11434 — runs natively on macOS host for Metal + full RAM)"
         echo "  2. OpenRouter (API key required, supports GPT-4, Claude, etc.)"
         echo "  3. Both (multi-backend routing with failover)"
         echo ""

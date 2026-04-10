@@ -124,7 +124,7 @@ class BenchmarkRunner:
     Runs speed benchmarks against Ollama directly (bypasses BeigeBox proxy).
 
     Usage:
-        runner = BenchmarkRunner(ollama_url="http://ollama:11434")
+        runner = BenchmarkRunner(ollama_url="http://host.docker.internal:11434")
         async for event in runner.run_stream(models=["llama3.1:8b"], ...):
             print(event)
     """

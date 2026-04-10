@@ -23,7 +23,7 @@ Example config:
 ```yaml
 backends:
   ollama:
-    url: http://ollama:11434
+    url: http://host.docker.internal:11434
     priority: 1
     latency_p95_threshold_ms: 2000
 
@@ -71,7 +71,7 @@ Send 70% of requests to Ollama, 30% to OpenRouter:
 ```yaml
 backends:
   ollama:
-    url: http://ollama:11434
+    url: http://host.docker.internal:11434
     priority: 1
 
   openrouter:

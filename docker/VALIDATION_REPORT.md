@@ -3,6 +3,12 @@
 **Method**: 8 parallel agents spawned through beigebox proxy  
 **Model**: Claude Opus (extended reasoning)
 
+> **⚠ SUPERSEDED 2026-04-09:** Ollama was moved out of the compose stack to
+> run natively on the macOS host (Metal + full unified memory). Any `ollama:11434`
+> references below describe the *previous* in-container topology and are historical.
+> Current backend URL: `http://host.docker.internal:11434`. See
+> `docker/docker-compose.yaml` for the live config.
+
 ---
 
 ## Agent 1: Dockerfile Validation

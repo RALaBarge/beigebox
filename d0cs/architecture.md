@@ -155,7 +155,7 @@ Example:
 ```yaml
 backends:
   ollama:
-    url: http://ollama:11434
+    url: http://host.docker.internal:11434
   openrouter:
     url: https://openrouter.ai/api/v1
     api_key: ${OPENROUTER_API_KEY}
@@ -205,7 +205,7 @@ Example:
 ```yaml
 backends:
   ollama:
-    url: http://ollama:11434
+    url: http://host.docker.internal:11434
     priority: 1
     latency_p95_threshold_ms: 2000
 

@@ -19,7 +19,7 @@ backends_enabled: true
 backends:
   - provider: ollama
     name: ollama-local
-    url: "http://ollama:11434"
+    url: "http://host.docker.internal:11434"
     timeout: 120
     timeout_ms: 120000
     priority: 1
@@ -84,7 +84,6 @@ routing:
 
   decision_llm:
     enabled: true
-    backend_url: "http://ollama:11434"
     temperature: 0.2
     max_tokens: 256
     system_prompt: "You are a helpful routing assistant that decides which tool or backend to use."
@@ -157,6 +156,12 @@ tools:
     ws_url: ws://host.docker.internal:9009
     timeout: 60
     out_dir: /app/workspace/out/rag/SF
+
+  # Live Jira + Confluence REST. Credentials read from env vars
+  # (ATLASSIAN_BASE_URL / ATLASSIAN_EMAIL / ATLASSIAN_API_TOKEN), set via
+  # ~/.beigebox/.env which docker-compose passes through with env_file.
+  atlassian:
+    enabled: true
 
   browserbox:
     enabled: true

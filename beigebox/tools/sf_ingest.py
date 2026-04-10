@@ -50,15 +50,33 @@ logger = logging.getLogger(__name__)
 # ── Constants (duplicated from salesforce_ingest.py — do NOT import it) ──────
 
 CASE_FIELDS = [
+    # identity / system
     "Case.Id",
     "Case.CaseNumber",
-    "Case.Subject",
+    "Case.OwnerId",
+    "Case.IsClosed",
+    "Case.IsEscalated",
+    # status / workflow
     "Case.Status",
     "Case.Priority",
+    "Case.Origin",
+    "Case.Type",                          # dropdown half of "Case Details" section
+    # description / content
+    "Case.Subject",
+    "Case.Description",                   # text half of "Case Details" section
+    "Case.Case_Summary__c",               # the "Case Summary" Ryan asked for
+    # account / contact
+    "Case.Account.Name",
+    "Case.AccountId",
+    "Case.Account_Name__c",               # custom Kantata account name field
+    # dates
     "Case.CreatedDate",
     "Case.ClosedDate",
-    "Case.Description",
-    "Case.Account.Name",
+    "Case.LastModifiedDate",
+    # jira links (live SF custom fields, distinct from the Jira_Issues_CASE__r related list)
+    "Case.Internal_Jira_Key__c",
+    "Case.Tagged_Existing_Jira_Bug_Issue__c",
+    # known issue + external ref
     "Case.Known_Issue__r.Name",
     "Case.External_ID__c",
 ]
@@ -390,18 +408,38 @@ class SfIngestTool:
             return v
 
         case: dict[str, Any] = {
-            "id":          case_id,
-            "caseNumber":  fv("CaseNumber") or "",
-            "subject":     fv("Subject") or "",
-            "status":      fv("Status") or "",
-            "priority":    fv("Priority") or "",
-            "createdDate": fv("CreatedDate") or "",
-            "closedDate":  fv("ClosedDate") or "",
-            "description": fv("Description") or "",
-            "accountName": fv("Account", "Name") or "",
-            "knownIssue":  fv("Known_Issue__r", "Name") or "",
-            "jira":        [],
-            "feed":        [],
+            # identity / system
+            "id":               case_id,
+            "caseNumber":       fv("CaseNumber") or "",
+            "ownerId":          fv("OwnerId") or "",
+            "isClosed":         fv("IsClosed"),
+            "isEscalated":      fv("IsEscalated"),
+            # status / workflow
+            "status":           fv("Status") or "",
+            "priority":         fv("Priority") or "",
+            "origin":           fv("Origin") or "",
+            "type":             fv("Type") or "",            # dropdown half of "Case Details"
+            # description / content
+            "subject":          fv("Subject") or "",
+            "description":      fv("Description") or "",    # text half of "Case Details"
+            "caseSummary":      fv("Case_Summary__c") or "",  # the "Case Summary" Ryan asked for
+            # account / contact
+            "accountName":      fv("Account", "Name") or "",
+            "accountId":        fv("AccountId") or "",
+            "accountNameField": fv("Account_Name__c") or "",  # custom Kantata account field
+            # dates
+            "createdDate":      fv("CreatedDate") or "",
+            "closedDate":       fv("ClosedDate") or "",
+            "lastModifiedDate": fv("LastModifiedDate") or "",
+            # jira links (live SF custom — separate from the Jira_Issues_CASE__r related list)
+            "internalJiraKey":  fv("Internal_Jira_Key__c") or "",
+            "taggedJiraBugId":  fv("Tagged_Existing_Jira_Bug_Issue__c") or "",
+            # known issue + external ref
+            "knownIssue":       fv("Known_Issue__r", "Name") or "",
+            "externalId":       fv("External_ID__c") or "",
+            # populated below
+            "jira":             [],
+            "feed":             [],
         }
 
         # JIRA related list — best-effort
@@ -465,17 +503,40 @@ class SfIngestTool:
         fname    = f"{case_num} - {_sanitize_filename(subject)}.md"
         out_path = target / fname
 
+        # Build the metadata header. Account_Name__c (custom field) wins when populated;
+        # fall back to Account.Name (standard relationship) so we always show *something*.
+        account_display = case.get("accountNameField") or case.get("accountName") or "—"
+        type_str = case.get("type") or ""
+        origin_str = case.get("origin") or ""
+        escalated_marker = " 🚨" if case.get("isEscalated") else ""
+
         lines: list[str] = [
-            f"# {case_num}: {subject}",
+            f"# {case_num}: {subject}{escalated_marker}",
             "",
-            f"**Status:** {case.get('status','')}  •  **Priority:** {case.get('priority','')}",
+            f"**Status:** {case.get('status','')}  •  **Priority:** {case.get('priority','')}"
+            + (f"  •  **Type:** {type_str}" if type_str else "")
+            + (f"  •  **Origin:** {origin_str}" if origin_str else ""),
             f"**Created:** {case.get('createdDate','')}  •  "
             f"**Closed:** {case.get('closedDate') or 'open'}",
-            f"**Account:** {case.get('accountName') or '—'}",
+            f"**Last Modified:** {case.get('lastModifiedDate','')}",
+            f"**Account:** {account_display}",
         ]
         if case.get("knownIssue"):
             lines.append(f"**Known Issue:** {case['knownIssue']}")
+        if case.get("internalJiraKey") or case.get("taggedJiraBugId"):
+            jira_bits = []
+            if case.get("internalJiraKey"):
+                jira_bits.append(f"Internal: {case['internalJiraKey']}")
+            if case.get("taggedJiraBugId"):
+                jira_bits.append(f"Tagged Bug: {case['taggedJiraBugId']}")
+            lines.append(f"**Jira Refs:** {' • '.join(jira_bits)}")
+        if case.get("externalId"):
+            lines.append(f"**External ID:** {case['externalId']}")
         lines.append("")
+
+        # Case Summary (Kantata custom field — surfaces what the team writes for triage)
+        if case.get("caseSummary"):
+            lines += ["## Case Summary", "", scrub_emails(case["caseSummary"]), ""]
 
         if case.get("description"):
             lines += ["## Description", "", scrub_emails(case["description"]), ""]
