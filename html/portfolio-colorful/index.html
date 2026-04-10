@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BeigeBox — Vibrant Design</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #f7f3ee 0%, #fef9f3 100%);
+      color: #2c2c2c;
+      line-height: 1.6;
+    }
+
+    header {
+      background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 50%, #c44569 100%);
+      padding: 1.5rem 2rem;
+      text-align: center;
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(255, 107, 107, 0.2);
+    }
+
+    .logo {
+      font-size: 2rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    nav {
+      margin-top: 1rem;
+      display: flex;
+      justify-content: center;
+      gap: 2rem;
+      flex-wrap: wrap;
+    }
+
+    nav a {
+      color: rgba(255,255,255,0.9);
+      text-decoration: none;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    nav a:hover { color: #fff; }
+
+    .hero {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 5rem 2rem;
+      text-align: center;
+    }
+
+    h1 {
+      font-size: 3.2rem;
+      font-weight: 900;
+      margin-bottom: 1rem;
+      background: linear-gradient(135deg, #ff6b6b 0%, #4ecdc4 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .tagline {
+      font-size: 1.3rem;
+      color: #666;
+      margin-bottom: 2rem;
+      font-weight: 500;
+    }
+
+    .cta-button {
+      display: inline-block;
+      background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+      color: #fff;
+      padding: 1rem 2.5rem;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 700;
+      transition: transform 0.2s, box-shadow 0.2s;
+      box-shadow: 0 4px 12px rgba(255, 107, 107, 0.3);
+    }
+    .cta-button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(255, 107, 107, 0.4);
+    }
+
+    .features {
+      max-width: 1200px;
+      margin: 4rem auto;
+      padding: 0 2rem;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 4rem;
+    }
+
+    .feature-card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 2rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+      transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+      border: 2px solid transparent;
+    }
+
+    .feature-card:nth-child(1) { border-top: 4px solid #ff6b6b; }
+    .feature-card:nth-child(2) { border-top: 4px solid #4ecdc4; }
+    .feature-card:nth-child(3) { border-top: 4px solid #ffe66d; }
+    .feature-card:nth-child(4) { border-top: 4px solid #95e1d3; }
+    .feature-card:nth-child(5) { border-top: 4px solid #f38181; }
+    .feature-card:nth-child(6) { border-top: 4px solid #aa96da; }
+
+    .feature-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+    }
+
+    .feature-card h3 {
+      font-size: 1.3rem;
+      margin-bottom: 0.8rem;
+      color: #2c2c2c;
+      font-weight: 700;
+    }
+
+    .feature-card p {
+      color: #666;
+      font-size: 0.95rem;
+      line-height: 1.7;
+    }
+
+    .mockup-section {
+      margin: 5rem 0;
+      padding: 3rem 2rem;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+
+    .mockup-section h2 {
+      font-size: 2.2rem;
+      margin-bottom: 0.5rem;
+      color: #2c2c2c;
+      font-weight: 800;
+    }
+
+    .mockup-subtitle {
+      color: #999;
+      margin-bottom: 2rem;
+      font-size: 0.95rem;
+    }
+
+    .mockup-container {
+      background: linear-gradient(135deg, #f9f9f9 0%, #f0f0f0 100%);
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 2rem;
+      border: 1px solid #e0e0e0;
+    }
+
+    .mockup-header {
+      background: linear-gradient(135deg, #e8e8e8 0%, #d8d8d8 100%);
+      padding: 0.8rem 1.5rem;
+      display: flex;
+      gap: 0.6rem;
+      align-items: center;
+      border-bottom: 1px solid #d0d0d0;
+    }
+
+    .mockup-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ccc;
+    }
+
+    .mockup-content {
+      padding: 1.5rem;
+      font-family: 'Courier New', monospace;
+      font-size: 0.85rem;
+    }
+
+    .mockup-ui {
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 1.5rem;
+    }
+
+    .mockup-sidebar {
+      border-right: 2px solid #e0e0e0;
+      padding-right: 1rem;
+    }
+
+    .mockup-sidebar-item {
+      padding: 0.6rem 0.8rem;
+      margin-bottom: 0.4rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      color: #999;
+      transition: all 0.2s;
+    }
+
+    .mockup-sidebar-item.active {
+      background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .mockup-input {
+      background: #fff;
+      border: 2px solid #e0e0e0;
+      padding: 0.8rem;
+      margin-bottom: 1rem;
+      border-radius: 4px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.85rem;
+    }
+
+    .mockup-input:focus {
+      outline: none;
+      border-color: #ff6b6b;
+    }
+
+    .mockup-message {
+      margin-bottom: 1rem;
+      padding: 0.8rem;
+      border-radius: 4px;
+      background: #fff;
+      border-left: 3px solid #e0e0e0;
+    }
+
+    .mockup-message.user {
+      border-left-color: #ff6b6b;
+      background: #fff5f5;
+    }
+
+    .mockup-message.system {
+      border-left-color: #4ecdc4;
+      background: #f0fffe;
+    }
+
+    .tap-log {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 1.5rem;
+      font-family: 'Courier New', monospace;
+      font-size: 0.8rem;
+      max-height: 350px;
+      overflow-y: auto;
+      line-height: 1.6;
+    }
+
+    .tap-event {
+      margin-bottom: 0.8rem;
+      display: grid;
+      grid-template-columns: 120px 180px 1fr;
+      gap: 1rem;
+    }
+
+    .tap-timestamp { color: #999; font-size: 0.75rem; }
+    .tap-event-type { color: #ff6b6b; font-weight: 700; }
+    .tap-message { color: #666; }
+    .tap-success { color: #4ecdc4; font-weight: 600; }
+
+    footer {
+      background: linear-gradient(135deg, #2c3e50 0%, #3d566e 100%);
+      padding: 4rem 2rem;
+      text-align: center;
+      color: #aaa;
+      margin-top: 5rem;
+    }
+
+    .footer-content {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .footer-content a {
+      color: #fff;
+      text-decoration: none;
+      transition: opacity 0.2s;
+    }
+    .footer-content a:hover { opacity: 0.8; }
+
+    @media (max-width: 768px) {
+      h1 { font-size: 2.2rem; }
+      .feature-grid { grid-template-columns: 1fr; }
+      .mockup-ui { grid-template-columns: 1fr; }
+      .mockup-sidebar { border-right: none; border-bottom: 2px solid #e0e0e0; padding-right: 0; padding-bottom: 1rem; margin-bottom: 1rem; }
+      .tap-event { grid-template-columns: 1fr; gap: 0; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">🎯 BeigeBox</div>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#studio">Studio</a>
+      <a href="#operator">Operator</a>
+      <a href="#logs">Logs</a>
+    </nav>
+  </header>
+
+  <div class="hero">
+    <h1>LLM Middleware That Works For You</h1>
+    <p class="tagline">Smart routing, semantic caching, unified observability — all built-in</p>
+    <a href="http://localhost:1337" class="cta-button">Launch BeigeBox Now</a>
+  </div>
+
+  <div class="features" id="features">
+    <div class="feature-grid">
+      <div class="feature-card">
+        <h3>🎯 Smart Routing</h3>
+        <p>4-tier pipeline: Z-commands → embedding classifier → decision LLM → multi-backend router. Latency-aware with A/B splitting.</p>
+      </div>
+      <div class="feature-card">
+        <h3>💾 Semantic Cache</h3>
+        <p>Embedding-based deduplication finds similar queries, returns cached responses in milliseconds. Save 60-80% tokens.</p>
+      </div>
+      <div class="feature-card">
+        <h3>📊 Unified Logging</h3>
+        <p>Tap event stream captures routing, caching, tool execution, costs. 18+ event types with real-time dashboard.</p>
+      </div>
+      <div class="feature-card">
+        <h3>🤖 Operator Agent</h3>
+        <p>ReAct-based orchestration for multi-turn workflows, tool execution, RAG, and state management.</p>
+      </div>
+      <div class="feature-card">
+        <h3>🌍 Multi-Backend</h3>
+        <p>Route between Ollama, OpenRouter, OpenAI, Anthropic seamlessly. Automatic fallback and cost optimization.</p>
+      </div>
+      <div class="feature-card">
+        <h3>🔐 Security Default</h3>
+        <p>3,280 pinned dependencies, hash-locked, CVE scanning, read-only root, network isolation, zero trust.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup-section" id="studio">
+    <h2>Web Interface — Chat & Studio</h2>
+    <p class="mockup-subtitle">Send messages or z: commands to control routing, see real-time stats</p>
+
+    <div class="mockup-container">
+      <div class="mockup-header">
+        <div class="mockup-dot"></div>
+        <div class="mockup-dot"></div>
+        <div class="mockup-dot"></div>
+      </div>
+      <div class="mockup-content">
+        <div class="mockup-ui">
+          <div class="mockup-sidebar">
+            <div class="mockup-sidebar-item active">💬 Chat</div>
+            <div class="mockup-sidebar-item">⚙️ Config</div>
+            <div class="mockup-sidebar-item">🎛️ Studio</div>
+            <div class="mockup-sidebar-item">📈 Metrics</div>
+            <div class="mockup-sidebar-item">📜 Tap</div>
+          </div>
+          <div>
+            <div class="mockup-message system">
+              <strong>System:</strong> BeigeBox ready. Backend: Ollama (qwen3:30b), Caching: ON, Rate-limit: 100/min
+            </div>
+            <div class="mockup-message user">
+              <strong>You:</strong> Explain the new routing system
+            </div>
+            <div class="mockup-message">
+              <strong>Assistant:</strong> The 4-tier routing pipeline ensures optimal backend selection...
+            </div>
+            <input type="text" class="mockup-input" placeholder="Try: z: router=openrouter to override...">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mockup-container">
+      <div class="mockup-header">
+        <div class="mockup-dot"></div>
+        <div class="mockup-dot"></div>
+        <div class="mockup-dot"></div>
+      </div>
+      <div class="mockup-content">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+          <div>
+            <strong style="color: #ff6b6b; display: block; margin-bottom: 0.5rem;">Routing Config</strong>
+            <pre style="background: #f5f5f5; padding: 1rem; border-radius: 4px; color: #333; font-size: 0.8rem;">model_pattern: "gpt-*"
+backend: "openrouter"
+priority: 2</pre>
+          </div>
+          <div>
+            <strong style="color: #4ecdc4; display: block; margin-bottom: 0.5rem;">Model Settings</strong>
+            <pre style="background: #f5f5f5; padding: 1rem; border-radius: 4px; color: #333; font-size: 0.8rem;">temperature: 0.7
+max_tokens: 2048
+top_p: 0.95</pre>
+          </div>
+        </div>
+        <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 2px solid #ffe66d;">
+          <span style="color: #4ecdc4; font-weight: 700;">✓</span> Config applied to 2 backends. Routing updated.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup-section" id="operator">
+    <h2>Operator Agent — Multi-Turn Orchestration</h2>
+    <p class="mockup-subtitle">Execute tools, search RAG, coordinate multi-step workflows automatically</p>
+
+    <div class="mockup-container">
+      <div class="mockup-header">
+        <div class="mockup-dot"></div>
+        <div class="mockup-dot"></div>
+        <div class="mockup-dot"></div>
+      </div>
+      <div class="mockup-content">
+        <div style="line-height: 1.8; color: #333;">
+          <div style="margin-bottom: 1rem;">
+            <span style="color: #ff6b6b; font-weight: 700;">operator_turn=2</span>
+            <span style="color: #999;">| state=executing</span>
+          </div>
+
+          <div style="margin-bottom: 1rem; padding: 0.8rem; background: #f0fffe; border-left: 3px solid #4ecdc4; border-radius: 3px;">
+            <span style="color: #4ecdc4; font-weight: 700;">✓ document_search</span><br>
+            <span style="color: #666; font-size: 0.9rem;">query: "routing pipeline architecture"</span><br>
+            <span style="color: #4ecdc4; font-weight: 600;">→ found 4 docs (avg similarity: 0.96)</span>
+          </div>
+
+          <div style="margin-bottom: 1rem; padding: 0.8rem; background: #fff5f5; border-left: 3px solid #ff6b6b; border-radius: 3px;">
+            <span style="color: #ff6b6b; font-weight: 700;">✓ apex_analyzer</span><br>
+            <span style="color: #666; font-size: 0.9rem;">project: "beigebox", scope: "routing.py"</span><br>
+            <span style="color: #ff6b6b; font-weight: 600;">→ parsed 12 classes, 45 methods</span>
+          </div>
+
+          <div style="color: #ffe66d; font-weight: 700; font-size: 0.95rem;">
+            → Next turn: synthesize_findings
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup-section" id="logs">
+    <h2>Tap Log Stream — Real-Time Observability</h2>
+    <p class="mockup-subtitle">Every request flow captured: routing, caching, tool execution, costs</p>
+
+    <div class="tap-log">
+      <div class="tap-event">
+        <div class="tap-timestamp">[12:34:56.120]</div>
+        <div class="tap-event-type">REQUEST</div>
+        <div class="tap-message">user=alice, model=qwen3:30b</div>
+      </div>
+      <div class="tap-event">
+        <div class="tap-timestamp">[12:34:56.145]</div>
+        <div class="tap-event-type">ROUTING_DECISION</div>
+        <div class="tap-success">→ ollama-local (P95: 42ms)</div>
+      </div>
+      <div class="tap-event">
+        <div class="tap-timestamp">[12:34:56.200]</div>
+        <div class="tap-event-type">CACHE_CHECK</div>
+        <div class="tap-success">HIT (similarity: 0.97, tokens_saved: 1024)</div>
+      </div>
+      <div class="tap-event">
+        <div class="tap-timestamp">[12:34:56.202]</div>
+        <div class="tap-event-type">RESPONSE</div>
+        <div class="tap-message">latency: 2ms (cached), cost: $0</div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <div class="footer-content">
+      <p style="margin-bottom: 1.5rem; font-size: 1.1rem; color: #fff; font-weight: 600;">Build smarter LLM applications with BeigeBox</p>
+      <p style="margin-bottom: 2rem;">
+        <a href="https://github.com/ralabarge/beigebox">GitHub</a> •
+        <a href="http://localhost:1337">Local Instance</a> •
+        <a href="d0cs/architecture.md">Architecture Docs</a> •
+        <a href="d0cs/api-reference.md">API Reference</a>
+      </p>
+      <p style="font-size: 0.9rem;">Dual-licensed: <strong>AGPL-3.0</strong> (source-available) • <strong>Commercial</strong> (proprietary)</p>
+    </div>
+  </footer>
+</body>
+</html>

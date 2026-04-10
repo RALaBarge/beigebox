@@ -59,6 +59,9 @@ scripts/browserbox_*.py
 logs/
 *.log
 
+# Internal security analysis / red team reports (not for distribution)
+oss/
+
 # Secrets
 *.key
 *.pem

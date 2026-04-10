@@ -76,6 +76,31 @@ docker compose --profile apple up -d    # + voice I/O (macOS ARM64)
 
 See [Deployment](d0cs/deployment.md#quick-start) for all profiles and production setup.
 
+### macOS Setup (Apple Silicon / Intel)
+
+BeigeBox runs natively on macOS with **host-native Ollama** for Metal GPU acceleration and full system memory. See the `macos` branch for pre-configured infrastructure:
+
+```bash
+# Checkout the macOS branch
+git checkout macos
+
+# Install Ollama natively (not in Docker)
+brew install ollama
+brew services start ollama
+
+# Pre-pull models (one-time, ~22GB)
+ollama pull qwen3:30b-a3b qwen3:4b nomic-embed-text
+
+# Then run Docker
+cd docker
+./FIRST_RUN.sh
+./launch.sh up -d
+```
+
+**Why the macOS branch?** Docker Desktop on macOS can't pass Metal GPU to containers (7GB memory cap). The macos branch runs Ollama natively on the host, keeping Docker lightweight. Linux deployments continue to use in-container Ollama on the main branch.
+
+See [MACOS_QUICK_REFERENCE.md](MACOS_QUICK_REFERENCE.md) for troubleshooting and validation checklist.
+
 ---
 
 ## What's in the box
