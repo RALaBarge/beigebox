@@ -38,6 +38,14 @@ workspace/
 workspace/out/rag/
 workspace/in/*
 
+# Kantata-specific output files — customer data, case analysis, sentiment reports
+workspace/out/ryans_*.json
+workspace/out/ryans_*.md
+workspace/out/ral_notes*
+workspace/out/ryan_jason_sentiment.md
+workspace/out/tap_macos_debug.md
+workspace/out/commit_audit.md
+
 # Logs
 logs/
 *.log
