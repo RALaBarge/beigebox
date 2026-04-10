@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BEIGEBOX — AKIRA STYLE</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap');
+
+        body {
+            font-family: 'Bebas Neue', sans-serif;
+            background: #000000 url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect fill="%23000" width="100" height="100"/><line x1="0" y1="0" x2="100" y2="100" stroke="%23ff00ff" stroke-width="0.5" opacity="0.1"/><line x1="100" y1="0" x2="0" y2="100" stroke="%2300ffff" stroke-width="0.5" opacity="0.1"/></svg>');
+            color: #ffffff;
+            line-height: 1.4;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at 30% 60%, rgba(255, 0, 150, 0.15), transparent 40%),
+                        radial-gradient(circle at 70% 30%, rgba(0, 255, 200, 0.1), transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        header {
+            padding: 1.5rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: relative;
+            z-index: 10;
+            border-bottom: 4px solid #ff00ff;
+            border-top: 4px solid #00ffff;
+            background: rgba(0, 0, 0, 0.8);
+            box-shadow: 0 0 20px rgba(255, 0, 150, 0.3);
+        }
+
+        .logo {
+            font-size: 2rem;
+            letter-spacing: 0.15em;
+            color: #ff00ff;
+            text-shadow: 0 0 10px #ff00ff, 0 0 20px #ff00ff;
+            font-weight: 900;
+        }
+
+        nav {
+            display: flex;
+            gap: 2rem;
+            font-weight: 700;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        nav a {
+            color: #00ffff;
+            text-decoration: none;
+            text-shadow: 0 0 5px #00ffff;
+            transition: all 150ms ease;
+        }
+
+        nav a:hover {
+            color: #ff00ff;
+            text-shadow: 0 0 15px #ff00ff;
+        }
+
+        .hero {
+            padding: 5rem 2rem;
+            text-align: center;
+            position: relative;
+            z-index: 5;
+            background: linear-gradient(180deg, rgba(255,0,150,0.05), rgba(0,255,200,0.05));
+        }
+
+        h1 {
+            font-size: 5rem;
+            line-height: 0.9;
+            margin-bottom: 1rem;
+            letter-spacing: -0.03em;
+            text-transform: uppercase;
+            color: #ffffff;
+            text-shadow:
+                0 0 10px #ff00ff,
+                0 0 20px #ff00ff,
+                3px 3px 0px #00ffff,
+                6px 6px 0px #ffff00;
+            font-weight: 900;
+        }
+
+        .accent {
+            color: #00ffff;
+            text-shadow: 0 0 15px #00ffff;
+        }
+
+        .tagline {
+            font-size: 1.25rem;
+            letter-spacing: 0.05em;
+            color: #ffff00;
+            text-shadow: 0 0 10px #ffff00;
+            margin-bottom: 2rem;
+        }
+
+        .cta {
+            display: inline-block;
+            padding: 1rem 3rem;
+            border: 3px solid #ff00ff;
+            background: rgba(255, 0, 150, 0.1);
+            color: #ff00ff;
+            text-decoration: none;
+            font-weight: 900;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            cursor: pointer;
+            box-shadow: 0 0 15px #ff00ff;
+            transition: all 200ms ease;
+        }
+
+        .cta:hover {
+            background: #ff00ff;
+            color: #000000;
+            box-shadow: 0 0 30px #ff00ff, inset 0 0 10px rgba(0,0,0,0.5);
+            transform: translate(-2px, -2px);
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1.5rem;
+            padding: 4rem 2rem;
+            position: relative;
+            z-index: 5;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .feature {
+            padding: 2rem;
+            background: rgba(255, 0, 150, 0.08);
+            border: 2px solid #00ffff;
+            position: relative;
+            box-shadow: 0 0 10px rgba(0, 255, 200, 0.2);
+            transition: all 200ms ease;
+        }
+
+        .feature::before {
+            content: '';
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            width: 16px;
+            height: 16px;
+            background: #ff00ff;
+            box-shadow: 0 0 10px #ff00ff;
+        }
+
+        .feature:hover {
+            border-color: #ff00ff;
+            box-shadow: 0 0 20px #ff00ff;
+        }
+
+        .feature h3 {
+            font-size: 1.5rem;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.8rem;
+            color: #ffff00;
+            text-shadow: 0 0 5px #ffff00;
+        }
+
+        .feature p {
+            font-size: 0.85rem;
+            color: #cccccc;
+            font-weight: 400;
+            line-height: 1.6;
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            border-top: 4px solid #ff00ff;
+            border-bottom: 4px solid #00ffff;
+            background: rgba(0, 0, 0, 0.8);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: #00ffff;
+            text-shadow: 0 0 5px #00ffff;
+        }
+
+        @media (max-width: 1024px) {
+            .features { grid-template-columns: repeat(2, 1fr); }
+            h1 { font-size: 2.5rem; }
+        }
+
+        @media (max-width: 640px) {
+            .features { grid-template-columns: 1fr; }
+            h1 { font-size: 1.5rem; }
+            header { flex-direction: column; gap: 1rem; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">⬢ BEIGEBOX ⬢</div>
+        <nav>
+            <a href="#features">ROUTE</a>
+            <a href="#tech">CACHE</a>
+            <a href="#deploy">AGENT</a>
+        </nav>
+    </header>
+
+    <section class="hero">
+        <h1>ROUTE <span class="accent">SYSTEMS</span></h1>
+        <p class="tagline">// NEO-TOKYO LLM PROXY //</p>
+        <a href="#" class="cta">⚡ INITIATE ⚡</a>
+    </section>
+
+    <section id="features" class="features">
+        <div class="feature">
+            <h3>ROUTER</h3>
+            <p>Multi-backend routing across OLLAMA, OPENROUTER, CUSTOM APIS. P95-aware latency selection. Instant failover. Tokyo net grid.</p>
+        </div>
+
+        <div class="feature">
+            <h3>CACHE</h3>
+            <p>Semantic deduplication at the quantum level. Same meaning, same cache. Rephrased queries collapse to single response vector.</p>
+        </div>
+
+        <div class="feature">
+            <h3>AGENT</h3>
+            <p>REACT loop orchestration. Multi-turn tool execution. Consciousness mode enabled. Artifact storage in neural vaults.</p>
+        </div>
+
+        <div class="feature">
+            <h3>OBSERVE</h3>
+            <p>TAP event logging in real-time stream. Every decision tracked. Live metrics dashboard. Understand the flow.</p>
+        </div>
+
+        <div class="feature">
+            <h3>GUARD</h3>
+            <p>Policy enforcement at input/output gates. Cost control algorithms. Custom compliance hooks. Protection matrix active.</p>
+        </div>
+
+        <div class="feature">
+            <h3>STUDIO</h3>
+            <p>WEB UI for system configuration. Routing rules, models, tools. Live updates. No restarts required. Zero downtime.</p>
+        </div>
+    </section>
+
+    <footer>
+        // TRANSPARENT MIDDLEWARE FOR THE LLM ERA // AKIRA-INSPIRED //
+    </footer>
+</body>
+</html>

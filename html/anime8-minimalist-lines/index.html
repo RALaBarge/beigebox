@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BeigeBox — Minimalist Line Art</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #fefefe;
+            color: #1a1a1a;
+            line-height: 1.7;
+        }
+
+        header {
+            padding: 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #1a1a1a;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+        }
+
+        nav {
+            display: flex;
+            gap: 2rem;
+            font-weight: 500;
+        }
+
+        nav a {
+            color: #1a1a1a;
+            text-decoration: none;
+            position: relative;
+            font-size: 0.9rem;
+        }
+
+        nav a::before {
+            content: '';
+            position: absolute;
+            bottom: -4px;
+            left: 0;
+            width: 0;
+            height: 1px;
+            background: #1a1a1a;
+            transition: width 300ms ease;
+        }
+
+        nav a:hover::before { width: 100%; }
+
+        .hero {
+            padding: 6rem 2rem;
+            text-align: center;
+            border-bottom: 2px solid #1a1a1a;
+        }
+
+        h1 {
+            font-size: 3.5rem;
+            line-height: 1.1;
+            margin-bottom: 1rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+        }
+
+        .subtitle {
+            font-size: 1.1rem;
+            color: #666;
+            margin-bottom: 2rem;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .cta {
+            display: inline-block;
+            padding: 0.8rem 2rem;
+            border: 2px solid #1a1a1a;
+            background: transparent;
+            color: #1a1a1a;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 200ms ease;
+        }
+
+        .cta:hover {
+            background: #1a1a1a;
+            color: #fefefe;
+        }
+
+        .artwork {
+            max-width: 800px;
+            margin: 3rem auto;
+            padding: 0 2rem;
+            text-align: center;
+        }
+
+        .line-art {
+            width: 100%;
+            height: 250px;
+            border: 2px solid #1a1a1a;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .line-art::before {
+            content: '';
+            position: absolute;
+            width: 200px;
+            height: 200px;
+            border: 1px solid #1a1a1a;
+            border-radius: 50%;
+            top: 25px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .line-art::after {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 1px;
+            background: #1a1a1a;
+            top: 125px;
+            left: 0;
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 2rem;
+            padding: 4rem 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .feature {
+            text-align: center;
+            padding: 2rem;
+            border-bottom: 1px solid #1a1a1a;
+        }
+
+        .feature h3 {
+            font-size: 1.2rem;
+            margin-bottom: 0.8rem;
+            font-weight: 600;
+        }
+
+        .feature p {
+            color: #666;
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            border-top: 2px solid #1a1a1a;
+            color: #999;
+            font-size: 0.85rem;
+        }
+
+        @media (max-width: 1024px) {
+            .features { grid-template-columns: repeat(2, 1fr); }
+            h1 { font-size: 2rem; }
+        }
+
+        @media (max-width: 640px) {
+            .features { grid-template-columns: 1fr; }
+            h1 { font-size: 1.5rem; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">BeigeBox</div>
+        <nav>
+            <a href="#">Essentials</a>
+            <a href="#">Architecture</a>
+            <a href="#">Deploy</a>
+        </nav>
+    </header>
+
+    <section class="hero">
+        <h1>Clean Routing</h1>
+        <p class="subtitle">Minimalist design. Maximum clarity. LLM proxy for the refined.</p>
+        <button class="cta">Explore</button>
+    </section>
+
+    <section class="artwork">
+        <div class="line-art"></div>
+    </section>
+
+    <section class="features">
+        <div class="feature">
+            <h3>Router</h3>
+            <p>Multi-backend routing with elegant simplicity. Latency-aware selection.</p>
+        </div>
+
+        <div class="feature">
+            <h3>Cache</h3>
+            <p>Semantic deduplication. Same meaning recognized. Efficiency perfected.</p>
+        </div>
+
+        <div class="feature">
+            <h3>Agent</h3>
+            <p>Multi-turn orchestration. ReAct loops. Tool execution with clarity.</p>
+        </div>
+
+        <div class="feature">
+            <h3>Observe</h3>
+            <p>Tap event logging. Real-time metrics. Complete visibility maintained.</p>
+        </div>
+
+        <div class="feature">
+            <h3>Guard</h3>
+            <p>Policy enforcement. Cost control. Protection mechanisms refined.</p>
+        </div>
+
+        <div class="feature">
+            <h3>Studio</h3>
+            <p>Web configuration interface. Live updates. Zero-downtime deployment.</p>
+        </div>
+    </section>
+
+    <footer>
+        BeigeBox — Transparent LLM Middleware | Minimalist Edition
+    </footer>
+</body>
+</html>
