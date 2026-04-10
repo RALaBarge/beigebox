@@ -40,6 +40,23 @@ ROLE_COLORS = {
     "system": C_SYSTEM,
     "tool": C_TOOL,
     "decision": C_MODEL,
+    "cache": "\033[36m",
+    "router": "\033[95m",
+    "request": "\033[94m",
+    "backend": "\033[33m",
+    "classifier": "\033[35m",
+    "judge": "\033[33m",
+    "harness": "\033[92m",
+    "profiler": "\033[90m",
+    "error": "\033[91m",
+    "proxy": "\033[90m",
+    "cost_tracker": "\033[33m",
+    "token_counter": "\033[90m",
+    "model_selector": "\033[95m",
+    "payload": "\033[90m",
+    "validation": "\033[91m",
+    "guardrails": "\033[91m",
+    "wasm": "\033[36m",
 }
 
 ROLE_ICONS = {
@@ -48,6 +65,23 @@ ROLE_ICONS = {
     "system": "●",
     "tool": "⚡",
     "decision": "⚖",
+    "cache": "💾",
+    "router": "🔀",
+    "request": "📡",
+    "backend": "🖥",
+    "classifier": "🏷",
+    "judge": "⚖",
+    "harness": "🔄",
+    "profiler": "📊",
+    "error": "❌",
+    "proxy": "🔌",
+    "cost_tracker": "💰",
+    "token_counter": "🔢",
+    "model_selector": "🎯",
+    "payload": "📦",
+    "validation": "🛡",
+    "guardrails": "🚧",
+    "wasm": "🧩",
 }
 
 
@@ -64,18 +98,43 @@ class WireLog:
     to the wire_events table so the web UI can cross-link by conv_id / run_id.
     """
 
-    def __init__(self, log_path: str, sqlite_store=None, egress_hooks=None):
+    def __init__(self, log_path: str, sqlite_store=None, egress_hooks=None,
+                 max_lines: int = 100_000, rotation_enabled: bool = True):
         self.log_path = Path(log_path)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self._file = None
         self._db = sqlite_store        # optional SQLiteStore for dual-write
         self._egress = egress_hooks or []  # list[EgressHook] — fire-and-forget
+        self._max_lines = max_lines
+        self._rotation_enabled = rotation_enabled
+        self._line_count = 0
+        self._line_count_loaded = False
 
     def _ensure_open(self):
         if self._file is None:
             # buffering=1 = line-buffered: each log() call flushes immediately
             # so the tap viewer sees entries in real time without extra flushing.
             self._file = open(self.log_path, "a", buffering=1)
+            if not self._line_count_loaded:
+                try:
+                    self._line_count = sum(1 for _ in open(self.log_path))
+                except (FileNotFoundError, OSError):
+                    self._line_count = 0
+                self._line_count_loaded = True
+
+    def _rotate_if_needed(self):
+        """Rotate JSONL when max_lines exceeded: rename current to .1, start fresh."""
+        if not self._rotation_enabled or self._line_count < self._max_lines:
+            return
+        if self._file:
+            self._file.close()
+            self._file = None
+        rotated = self.log_path.with_suffix(".jsonl.1")
+        if rotated.exists():
+            rotated.unlink()
+        self.log_path.rename(rotated)
+        self._line_count = 0
+        self._ensure_open()
 
     def log(
         self,
@@ -118,6 +177,19 @@ class WireLog:
             entry["latency_ms"] = round(latency_ms, 1)
         if timing:
             entry["timing"] = {k: round(v, 1) for k, v in timing.items()}
+        # Structured fields — parity with SQLite so CLI tap is equally rich
+        if event_type != "message":
+            entry["event_type"] = event_type
+        if source != "proxy":
+            entry["source"] = source
+        if meta:
+            entry["meta"] = meta
+        if run_id:
+            entry["run_id"] = run_id
+        if turn_id:
+            entry["turn_id"] = turn_id
+        if tool_id:
+            entry["tool_id"] = tool_id
 
         # Preserve head + tail for long messages so the log never blows up
         # while still capturing both the opening context and the conclusion.
@@ -127,6 +199,8 @@ class WireLog:
             entry["content"] = content[:1000] + f"\n\n[... {len(content) - 2000} chars truncated ...]\n\n" + content[-1000:]
 
         self._file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        self._line_count += 1
+        self._rotate_if_needed()
 
         # Fire-and-forget to observability egress hooks (non-blocking)
         if self._egress:

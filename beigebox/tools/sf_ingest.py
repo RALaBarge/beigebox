@@ -73,6 +73,14 @@ CASE_FIELDS = [
     "Case.CreatedDate",
     "Case.ClosedDate",
     "Case.LastModifiedDate",
+    # internal status (emoji picklist — "With Development", "Awaiting Customer", etc.)
+    "Case.Internal_Case_Status__c",
+    # SLA fields
+    "Case.SLA_Status__c",
+    "Case.SLA_Due__c",
+    "Case.SLA_Target_Date__c",
+    "Case.LastCustomerUpdate__c",
+    "Case.LastStatusChange__c",
     # jira links (live SF custom fields, distinct from the Jira_Issues_CASE__r related list)
     "Case.Internal_Jira_Key__c",
     "Case.Tagged_Existing_Jira_Bug_Issue__c",

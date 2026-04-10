@@ -1018,7 +1018,9 @@ def main():
     def setup_tap(p):
         p.add_argument("--log", default=None, help="Path to wire.jsonl (default: from config)")
         p.add_argument("--last", "-n", type=int, default=20, help="Show last N entries before following")
-        p.add_argument("--role", "-r", choices=["user", "assistant"], default=None, help="Filter by role")
+        p.add_argument("--role", "-r", default=None,
+                       help="Filter by role (user, assistant, system, tool, decision, "
+                            "cache, router, request, backend, classifier, harness, error, etc.)")
         p.add_argument("--no-follow", action="store_true", help="Don't follow, just show last entries")
         p.add_argument("--raw", action="store_true", help="Raw JSONL output, no formatting")
 
@@ -1036,7 +1038,7 @@ def main():
     def setup_sweep(p):
         p.add_argument("query", nargs="+", help="Search query")
         p.add_argument("--results", "-n", type=int, default=5, help="Number of results")
-        p.add_argument("--role", "-r", choices=["user", "assistant"], default=None, help="Filter by role")
+        p.add_argument("--role", "-r", default=None, help="Filter by role")
 
     _add_command(sub, ["sweep", "search", "find", "query"],
                  "Semantic search over conversations", cmd_sweep, setup_sweep)

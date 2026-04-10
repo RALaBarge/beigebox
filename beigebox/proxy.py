@@ -102,8 +102,15 @@ class Proxy:
         d_cfg = self.cfg.get("decision_llm", {})
         self.routes = d_cfg.get("routes", {})
         # Wire log — structured tap of everything on the line
-        wire_path = self.cfg.get("wiretap", {}).get("path", "./data/wire.jsonl")
-        self.wire = WireLog(wire_path, sqlite_store=sqlite, egress_hooks=egress_hooks or [])
+        wire_cfg = self.cfg.get("wiretap", {})
+        wire_path = wire_cfg.get("path", "./data/wire.jsonl")
+        self.wire = WireLog(
+            wire_path,
+            sqlite_store=sqlite,
+            egress_hooks=egress_hooks or [],
+            max_lines=int(wire_cfg.get("max_lines", 100_000)),
+            rotation_enabled=bool(wire_cfg.get("rotation_enabled", True)),
+        )
         # WASM transform runtime
         self.wasm_runtime = WasmRuntime(self.cfg)
         if self.wasm_runtime.enabled:
