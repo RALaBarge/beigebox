@@ -40,6 +40,7 @@ from beigebox.config import (
     update_runtime_config,
     get_effective_backends_config,
     get_storage_paths,
+    get_primary_backend_url,
 )
 from beigebox.proxy import Proxy
 from beigebox.storage.sqlite_store import SQLiteStore
