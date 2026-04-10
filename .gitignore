@@ -46,6 +46,14 @@ workspace/out/ryan_jason_sentiment.md
 workspace/out/tap_macos_debug.md
 workspace/out/commit_audit.md
 
+# Kantata-specific scripts — internal tooling, not for distribution
+scripts/ryans_*.py
+scripts/slack_ingest.py
+scripts/sf_ingest_run.py
+scripts/jira_ingest_run.py
+scripts/confluence_ingest_run.py
+scripts/ingest_to_chroma.py
+
 # Logs
 logs/
 *.log
