@@ -37,7 +37,7 @@ Ryan's case responses follow a specific pattern:
 ### Patterns
 - Always uses "Hey" or "Hey again [Name]!" — never "Dear" or "Hello"
 - Signs off casually or not at all — no "Best regards" or "Kind regards"
-- Uses "our" when referring to Kantata teams — "our Development team", "our devs"
+- Uses "our" when referring to internal teams — "our Development team", "our devs"
 - Asks permission before taking action on customer data — "With your permission I am happy to correct these"
 - Drops in personality — "listen", "sit tight", "let me know your thoughts"
 - When waiting on dev: transparent about it, gives the customer confidence things are moving

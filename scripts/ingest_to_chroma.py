@@ -119,7 +119,7 @@ def main():
             content = fp.read_text(encoding="utf-8")
             md5 = hashlib.md5(content.encode()).hexdigest()
             # source_file is what shows up in document_search results — tag prefix
-            # makes it easy to filter by data source ("SF/00308207..." vs "JIRA/SX-9841...")
+            # makes it easy to filter by data source ("SF/00300001..." vs "JIRA/SX-1234...")
             source_label = f"{args.tag}/{fp.name}" if args.tag else fp.name
             chunks = chunk_text(
                 content,

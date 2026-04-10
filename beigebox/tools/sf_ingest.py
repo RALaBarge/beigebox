@@ -31,7 +31,7 @@ Privacy semantics (matches salesforce_ingest.py):
     - Account.Name: KEPT
     - Email addresses in text bodies: scrubbed → [email]
     - Feed actors classified as external customers → "[customer]"
-    - Internal kantata users keep their displayName
+    - Internal users keep their displayName
 """
 from __future__ import annotations
 
@@ -64,11 +64,11 @@ CASE_FIELDS = [
     # description / content
     "Case.Subject",
     "Case.Description",                   # text half of "Case Details" section
-    "Case.Case_Summary__c",               # the "Case Summary" Ryan asked for
+    "Case.Case_Summary__c",               # custom case summary field
     # account / contact
     "Case.Account.Name",
     "Case.AccountId",
-    "Case.Account_Name__c",               # custom Kantata account name field
+    "Case.Account_Name__c",               # custom account name field
     # dates
     "Case.CreatedDate",
     "Case.ClosedDate",
@@ -101,6 +101,10 @@ LIST_VIEWS = ["All_Open_Cases_SXPortal", "All_Closed_Cases_SXPortal"]
 
 NATIVE_CUTOFF = "2024-01-01"
 
+# Internal org names — actors from these companies are treated as agents, not customers.
+# Override via config or subclass for different orgs.
+_INTERNAL_ORG_NAMES = {"kantata", "mavenlink"}
+
 CUSTOMER_USER_TYPES = {
     "CsnOnly", "PowerCustomerSuccess", "CustomerSuccess",
     "CspLitePortal", "GuestUser", "PowerPartner",
@@ -124,7 +128,7 @@ def is_customer_actor(actor: dict) -> bool:
     if utype in CUSTOMER_USER_TYPES:
         return True
     company = (actor.get("companyName") or "").lower()
-    if company and "kantata" not in company and "mavenlink" not in company:
+    if company and not any(org in company for org in _INTERNAL_ORG_NAMES):
         return True
     return False
 
@@ -434,7 +438,7 @@ class SfIngestTool:
             # account / contact
             "accountName":      fv("Account", "Name") or "",
             "accountId":        fv("AccountId") or "",
-            "accountNameField": fv("Account_Name__c") or "",  # custom Kantata account field
+            "accountNameField": fv("Account_Name__c") or "",  # custom account name field
             # dates
             "createdDate":      fv("CreatedDate") or "",
             "closedDate":       fv("ClosedDate") or "",
@@ -542,7 +546,7 @@ class SfIngestTool:
             lines.append(f"**External ID:** {case['externalId']}")
         lines.append("")
 
-        # Case Summary (Kantata custom field — surfaces what the team writes for triage)
+        # Case Summary (custom field — surfaces what the team writes for triage)
         if case.get("caseSummary"):
             lines += ["## Case Summary", "", scrub_emails(case["caseSummary"]), ""]
 
