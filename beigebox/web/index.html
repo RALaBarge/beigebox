@@ -1819,6 +1819,7 @@
   <div class="tab" data-tab="harness"   onclick="switchTab('harness')">  <span class="tab-key">4</span>Harness</div>
   <div class="tab" data-tab="discovery" onclick="switchTab('discovery')"><span class="tab-key">5</span>Lab</div>
   <div class="tab" data-tab="studio"    onclick="switchTab('studio')">   <span class="tab-key">6</span>Studio</div>
+  <div class="tab" data-tab="security"  onclick="switchTab('security')"> <span class="tab-key">7</span>Security</div>
 </div>
 
 <!-- ── Content ─────────────────────────────────────────────────────────── -->
@@ -2688,6 +2689,25 @@
     </div>
 
   </div><!-- /panel-studio -->
+
+  <!-- 7. Security Control Plane (P1 Audit, Detection, Forensics) -->
+  <div class="panel" id="panel-security">
+    <div class="subnav">
+      <button class="subnav-active" onclick="switchSecuritySub('overview')">Overview</button>
+      <button onclick="switchSecuritySub('audit')">Audit Log</button>
+      <button onclick="switchSecuritySub('extraction')">Extraction</button>
+      <button onclick="switchSecuritySub('rag')">RAG</button>
+      <button onclick="switchSecuritySub('honeypots')">Honeypots</button>
+    </div>
+    <div class="toolbar">
+      <button onclick="loadSecurityPanel()">↺ Refresh</button>
+      <span class="toolbar-spacer"></span>
+      <span class="last-updated" id="sec-updated"></span>
+    </div>
+    <div class="scroll-area" id="sec-body">
+      <div class="empty"><span class="spinner"></span> Loading…</div>
+    </div>
+  </div>
 
 </div>
 
@@ -3989,6 +4009,7 @@ function switchTab(name) {
   if (name === 'harness')   { loadModelsForPanes(); setHarnessMode(harnessMode); }
   if (name === 'discovery') loadDiscoveryOpportunities();
   if (name === 'studio')    loadStudio();
+  if (name === 'security')  loadSecurityPanel();
 
   // Stop Studio context polling when leaving Studio tab
   if (name !== 'studio') stopStudio();
@@ -4001,12 +4022,186 @@ function switchTab(name) {
 
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
-  const map = {'1':'dashboard','2':'tap','3':'chat','4':'harness','5':'discovery','6':'studio'};
+  const map = {'1':'dashboard','2':'tap','3':'chat','4':'harness','5':'discovery','6':'studio','7':'security'};
   if (map[e.key]) switchTab(map[e.key]);
   // [ ] to page chat panes
   if (e.key === '[') chatPagePrev();
   if (e.key === ']') chatPageNext();
 });
+
+// ── Security Control Plane (Tab 7) ──────────────────────────────────────────
+
+let _securityCurrentSub = 'overview';
+
+function switchSecuritySub(sub) {
+  _securityCurrentSub = sub;
+  document.querySelectorAll('#panel-security .subnav button').forEach(b =>
+    b.classList.toggle('subnav-active', b.textContent.toLowerCase().includes(sub.replace('honeypots', 'honeypot'))));
+  loadSecurityPanel();
+}
+
+async function loadSecurityPanel() {
+  const el = document.getElementById('sec-body');
+  el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
+  try {
+    const [status, audit, patterns, extraction, injection, rag, honeypots] = await Promise.allSettled([
+      api('/api/v1/security/status'),
+      api('/api/v1/security/audit?hours=24&limit=100'),
+      api('/api/v1/security/audit/patterns?hours=24'),
+      api('/api/v1/security/extraction/sessions'),
+      api('/api/v1/security/injection/stats'),
+      api('/api/v1/security/rag/quarantine'),
+      api('/api/v1/security/honeypots'),
+    ]);
+
+    let html = '';
+    const st = status.status === 'fulfilled' ? status.value : {};
+    const au = audit.status === 'fulfilled' ? audit.value : {};
+    const ext = extraction.status === 'fulfilled' ? extraction.value : {};
+    const inj = injection.status === 'fulfilled' ? injection.value : {};
+    const rag_data = rag.status === 'fulfilled' ? rag.value : {};
+    const hpt = honeypots.status === 'fulfilled' ? honeypots.value : {};
+
+    if (_securityCurrentSub === 'overview') {
+      html += '<div class="section-header">Security Status</div>';
+
+      // Stat cards
+      html += '<div class="card-grid">';
+      const denied_24h = au.stats?.denied || 0;
+      const bypass = au.stats?.bypass_attempts || 0;
+      const rag_quarantined = rag_data.stats?.total || 0;
+      const ext_sessions = ext.sessions?.length || 0;
+      html += card('Denied (24h)', denied_24h, 'tool call validations');
+      html += card('Bypass Attempts', bypass, 'honeypot + injection');
+      html += card('RAG Quarantined', rag_quarantined, 'all time');
+      html += card('Active Sessions', ext_sessions, 'extraction monitored');
+      html += '</div>';
+
+      // Subsystem rows
+      html += '<div class="section-header">Subsystems</div>';
+      html += subsystem('Audit Logger', st.audit_logger?.enabled, st.audit_logger?.enabled ? 'logging enabled' : 'disabled');
+      html += subsystem('Honeypot Manager', st.honeypots?.enabled, st.honeypots?.enabled ? st.honeypots?.trap_count + ' traps active' : 'disabled');
+      html += subsystem('Injection Guard', st.injection_guard?.enabled, st.injection_guard?.enabled ? st.injection_guard?.quarantined + ' quarantined' : 'disabled');
+      html += subsystem('RAG Scanner', st.rag_scanner?.enabled, st.rag_scanner?.enabled ? st.rag_scanner?.quarantined + ' quarantined' : 'disabled');
+      html += subsystem('Extraction Detector', st.extraction_detector?.enabled, st.extraction_detector?.enabled ? st.extraction_detector?.active_sessions + ' sessions' : 'disabled');
+      html += subsystem('Anomaly Detector', st.anomaly_detector?.enabled, st.anomaly_detector?.enabled ? 'active' : 'disabled');
+
+    } else if (_securityCurrentSub === 'audit') {
+      html += '<div class="section-header">Audit Log</div>';
+      const entries = au.entries || [];
+      if (entries.length === 0) {
+        html += '<div style="color:var(--fg-muted);padding:16px;text-align:center;font-style:italic">No denials in 24 hours — all clear</div>';
+      } else {
+        html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px">';
+        html += '<tr style="color:var(--fg-muted);border-bottom:1px solid var(--bg-border)">';
+        html += '<th style="text-align:left;padding:4px;border-right:1px solid var(--bg-border)">Timestamp</th>';
+        html += '<th style="text-align:left;padding:4px;border-right:1px solid var(--bg-border)">Tool</th>';
+        html += '<th style="text-align:left;padding:4px;border-right:1px solid var(--bg-border)">Decision</th>';
+        html += '<th style="text-align:left;padding:4px;border-right:1px solid var(--bg-border)">Severity</th>';
+        html += '<th style="text-align:left;padding:4px">Reason</th>';
+        html += '</tr>';
+        entries.forEach(e => {
+          const severity_badge = e.severity === 'critical' ? 'badge-err' : e.severity === 'high' ? 'badge-warn' : 'badge-dim';
+          html += '<tr style="border-bottom:1px solid var(--bg-border)">';
+          html += `<td style="padding:4px;border-right:1px solid var(--bg-border);font-size:10px;color:var(--fg-muted)">${new Date(e.timestamp).toLocaleTimeString()}</td>`;
+          html += `<td style="padding:4px;border-right:1px solid var(--bg-border)">${esc(e.tool)}</td>`;
+          html += `<td style="padding:4px;border-right:1px solid var(--bg-border)"><span class="badge ${e.decision === 'deny' ? 'badge-err' : 'badge-ok'}">${esc(e.decision)}</span></td>`;
+          html += `<td style="padding:4px;border-right:1px solid var(--bg-border)"><span class="badge ${severity_badge}">${esc(e.severity)}</span></td>`;
+          html += `<td style="padding:4px;color:var(--fg-dim)">${esc(e.reason || '—')}</td>`;
+          html += '</tr>';
+        });
+        html += '</table></div>';
+      }
+
+    } else if (_securityCurrentSub === 'extraction') {
+      html += '<div class="section-header">Extraction Detection</div>';
+      const sessions = ext.sessions || [];
+      if (sessions.length === 0) {
+        html += '<div style="color:var(--fg-muted);padding:16px;text-align:center;font-style:italic">No active extraction detection sessions</div>';
+      } else {
+        html += `<div style="color:var(--fg-muted);font-size:10px;margin-bottom:8px">${sessions.length} session${sessions.length !== 1 ? 's' : ''} monitored</div>`;
+        sessions.forEach(s => {
+          const risk_color = s.risk_level === 'critical' ? 'var(--red)' : s.risk_level === 'high_risk' ? 'var(--yellow)' : 'var(--green)';
+          html += `<div style="border:1px solid var(--bg-border);border-radius:2px;padding:8px;margin-bottom:8px">`;
+          html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">`;
+          html += `<span style="color:${risk_color};font-weight:bold">${esc(s.session_id.slice(0, 8))}</span>`;
+          html += `<span class="badge" style="background:${risk_color};color:var(--bg);font-size:9px">${esc(s.risk_level)}</span>`;
+          html += `</div>`;
+          html += `<div class="kv-row"><span class="kv-key">Inversion Attempts</span><span class="kv-val">${s.pattern_breakdown?.inversion_attempts || 0}</span></div>`;
+          html += `<div class="kv-row"><span class="kv-key">Total Queries</span><span class="kv-val">${s.pattern_breakdown?.total_queries || 0}</span></div>`;
+          html += `<div class="kv-row"><span class="kv-key">Baseline</span><span class="kv-val ${s.pattern_breakdown?.baseline_established ? 'kv-ok' : 'kv-err'}">${s.pattern_breakdown?.baseline_established ? '✓ Established' : '✗ Pending'}</span></div>`;
+          html += `</div>`;
+        });
+      }
+
+    } else if (_securityCurrentSub === 'rag') {
+      html += '<div class="section-header">RAG Quarantine</div>';
+      const stats = rag_data.stats || {};
+      const entries = rag_data.entries || [];
+
+      if (stats.total > 0) {
+        html += `<div class="card-grid" style="margin-bottom:12px">`;
+        html += card('Total Quarantined', stats.total, 'documents');
+        html += card('High Risk', stats.by_risk?.high_risk || 0, 'requiring review');
+        html += card('Avg Confidence', (stats.confidence_avg || 0).toFixed(2), 'detection certainty');
+        html += `</div>`;
+      }
+
+      if (entries.length === 0) {
+        html += '<div style="color:var(--fg-muted);padding:16px;text-align:center;font-style:italic">No quarantined documents</div>';
+      } else {
+        html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:10px">';
+        html += '<tr style="color:var(--fg-muted);border-bottom:1px solid var(--bg-border)">';
+        html += '<th style="text-align:left;padding:4px;border-right:1px solid var(--bg-border)">Doc ID</th>';
+        html += '<th style="text-align:left;padding:4px;border-right:1px solid var(--bg-border)">Risk Level</th>';
+        html += '<th style="text-align:right;padding:4px;border-right:1px solid var(--bg-border)">Confidence</th>';
+        html += '<th style="text-align:left;padding:4px">Reason</th>';
+        html += '</tr>';
+        entries.slice(0, 20).forEach(e => {
+          const risk_class = e.risk_level === 'critical' ? 'badge-err' : e.risk_level === 'high_risk' ? 'badge-warn' : 'badge-dim';
+          html += '<tr style="border-bottom:1px solid var(--bg-border)">';
+          html += `<td style="padding:4px;border-right:1px solid var(--bg-border);font-size:9px;color:var(--fg-muted)">${esc(e.doc_id.slice(0, 8))}</td>`;
+          html += `<td style="padding:4px;border-right:1px solid var(--bg-border)"><span class="badge ${risk_class}">${esc(e.risk_level)}</span></td>`;
+          html += `<td style="padding:4px;border-right:1px solid var(--bg-border);text-align:right">${(e.score || 0).toFixed(3)}</td>`;
+          html += `<td style="padding:4px;color:var(--fg-dim)">${esc(e.reasons?.[0] || '—')}</td>`;
+          html += '</tr>';
+        });
+        html += '</table></div>';
+      }
+
+    } else if (_securityCurrentSub === 'honeypots') {
+      html += '<div class="section-header">Honeypot Traps</div>';
+      const traps = hpt.traps || {};
+      const trap_list = Object.entries(traps);
+      if (trap_list.length === 0) {
+        html += '<div style="color:var(--fg-muted);padding:16px;text-align:center;font-style:italic">No honeypot traps configured</div>';
+      } else {
+        html += `<div style="color:var(--fg-muted);font-size:10px;margin-bottom:8px">${trap_list.length} traps active</div>`;
+        trap_list.forEach(([name, info]) => {
+          html += `<div class="subsystem-row"><span class="status-dot ok" style="display:inline-block;vertical-align:middle;margin-right:6px"></span><span class="subsystem-name">${esc(name)}</span><span class="subsystem-detail" style="color:var(--fg-dim);font-size:10px">${esc(info.trigger || '')}</span></div>`;
+        });
+      }
+
+      const triggers = hpt.recent_triggers || [];
+      if (triggers.length > 0) {
+        html += '<div class="section-header" style="margin-top:16px">Recent Triggers</div>';
+        triggers.slice(0, 10).forEach(t => {
+          html += `<div style="padding:4px 0;border-bottom:1px solid var(--bg-border);font-size:10px">`;
+          html += `<span style="color:var(--red);font-weight:bold">⚠ Critical</span> — ${esc(t.tool || '?')} (${esc(t.reason || 'bypass attempt')})`;
+          html += `</div>`;
+        });
+      } else {
+        html += '<div style="color:var(--fg-muted);padding:16px 0;text-align:center;font-style:italic;border-top:1px solid var(--bg-border);margin-top:16px">No bypass attempts detected</div>';
+      }
+    }
+
+    el.innerHTML = html;
+    const now = new Date().toLocaleTimeString();
+    document.getElementById('sec-updated').textContent = `updated ${now}`;
+  } catch(e) {
+    el.innerHTML = featureDisabledMsg('Security', e.message);
+  }
+}
 
 // ── Eval ─────────────────────────────────────────────────────────────────────
 let _evalAbort = null;

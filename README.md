@@ -24,6 +24,38 @@ flowchart LR
 
 ---
 
+## Installation
+
+Choose the distribution channel that best fits your workflow:
+
+### Option 1: Homebrew (macOS/Linux CLI)
+```bash
+brew tap RALaBarge/homebrew-beigebox
+brew install beigebox
+beigebox dial  # start the server
+```
+
+### Option 2: PyPI (Python environments)
+```bash
+pip install beigebox
+beigebox dial
+```
+
+### Option 3: Docker (Containerized deployment)
+```bash
+docker run -d -p 1337:1337 ralabarge/beigebox:1.3.5
+# Open http://localhost:1337
+```
+
+### Option 4: From source (development)
+```bash
+git clone https://github.com/RALaBarge/beigebox.git
+cd beigebox
+pip install -e .
+```
+
+---
+
 ## Quick Start
 
 ```bash
@@ -221,6 +253,28 @@ For technical details, see [RAG_POISONING_THREAT_ANALYSIS.md](workspace/out/RAG_
 - **[Tools & Integrations](d0cs/tools.md)** — CDP, plugins, MCP server, document search
 - **[Deployment](d0cs/deployment.md)** — Docker Compose, Kubernetes, Systemd, production setup
 - **[API Reference](d0cs/api-reference.md)** — Endpoints, request/response formats, examples
+
+---
+
+## Distribution
+
+BeigeBox is distributed across **three channels** for flexibility:
+
+| Channel | Best for | Install |
+|---|---|---|
+| **Homebrew** | macOS/Linux CLI tools | `brew tap RALaBarge/homebrew-beigebox && brew install beigebox` |
+| **PyPI** | Python environments, pip-based deployments | `pip install beigebox` |
+| **Docker Hub** | Containerized deployments, Kubernetes, production | `docker pull ralabarge/beigebox:1.3.5` |
+
+**Verify your installation** across all channels:
+```bash
+./scripts/verify_distributions.sh        # full verification
+./scripts/verify_distributions.sh --pip  # test PyPI only
+./scripts/verify_distributions.sh --docker  # test Docker only
+./scripts/verify_distributions.sh --brew # test Homebrew only
+```
+
+See [homebrew-beigebox/README.md](homebrew-beigebox/README.md) for Homebrew tap details.
 
 ---
 

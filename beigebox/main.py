@@ -301,6 +301,52 @@ async def lifespan(app: FastAPI):
     amf_advertiser = AmfMeshAdvertiser(cfg, tool_names=tool_registry.list_tools())
     await amf_advertiser.start()
 
+    # Model Extraction Attack Detection (OWASP LLM10:2025)
+    from beigebox.security.extraction_detector import ExtractionDetector
+    extraction_cfg = cfg.get("security", {}).get("extraction_detection", {})
+    extraction_detector = None
+    if extraction_cfg.get("enabled", True):
+        extraction_detector = ExtractionDetector(
+            diversity_threshold=extraction_cfg.get("diversity_threshold", 2.5),
+            instruction_frequency_threshold=extraction_cfg.get("instruction_frequency_threshold", 10),
+            token_variance_threshold=extraction_cfg.get("token_variance_threshold", 0.01),
+            inversion_attempt_threshold=extraction_cfg.get("inversion_attempt_threshold", 3),
+            baseline_window=extraction_cfg.get("baseline_window", 20),
+            analysis_window=extraction_cfg.get("analysis_window", 100),
+        )
+        logger.info("Model extraction detection: ENABLED")
+    else:
+        logger.info("Model extraction detection: disabled")
+
+    # Security Audit & Detection Modules (P1 Security Hardening)
+    from beigebox.security.audit_logger import AuditLogger
+    from beigebox.security.honeypots import HoneypotManager
+    from beigebox.security.enhanced_injection_guard import EnhancedInjectionGuard
+    from beigebox.security.rag_content_scanner import RAGContentScanner
+
+    sec_cfg = cfg.get("security", {})
+
+    # Audit Logger (SQLite-backed, queryable)
+    audit_logger_path = sec_cfg.get("audit_db_path", "~/.beigebox/audit.db")
+    audit_logger = AuditLogger(db_path=audit_logger_path) if sec_cfg.get("audit_logging", {}).get("enabled", True) else None
+    if audit_logger:
+        logger.info("Audit Logger: initialized at %s", audit_logger_path)
+
+    # Honeypot Manager (8 bypass canaries)
+    honeypot_manager = HoneypotManager(audit_logger=audit_logger) if sec_cfg.get("honeypots", {}).get("enabled", True) else None
+    if honeypot_manager:
+        logger.info("Honeypot Manager: 8 traps active, logging to audit_logger")
+
+    # Enhanced Injection Guard (semantic + pattern detection)
+    injection_guard = EnhancedInjectionGuard() if sec_cfg.get("injection_guard", {}).get("enabled", True) else None
+    if injection_guard:
+        logger.info("Enhanced Injection Guard: initialized with semantic + pattern detection")
+
+    # RAG Content Scanner (pre-embed poisoning detection)
+    rag_scanner = RAGContentScanner() if sec_cfg.get("rag_scanner", {}).get("enabled", True) else None
+    if rag_scanner:
+        logger.info("RAG Content Scanner: initialized for pre-embed detection")
+
     # Observability egress hooks (webhook batching, fire-and-forget)
     egress_hooks = build_egress_hooks(cfg)
     await start_egress_hooks(egress_hooks)
@@ -309,7 +355,7 @@ async def lifespan(app: FastAPI):
     else:
         logger.debug("Observability egress: no webhooks configured")
 
-    # Proxy (with decision agent, hooks, embedding classifier, tools, and router)
+    # Proxy (with decision agent, hooks, embedding classifier, tools, router, and extraction detector)
     proxy = Proxy(
         sqlite=sqlite_store,
         vector=vector_store,
@@ -320,6 +366,7 @@ async def lifespan(app: FastAPI):
         backend_router=backend_router,
         blob_store=blob_store,
         egress_hooks=egress_hooks,
+        extraction_detector=extraction_detector,
     )
 
     # Late-bind the anomaly detector to the tool (proxy must exist first)
@@ -344,6 +391,11 @@ async def lifespan(app: FastAPI):
         mcp_server=mcp_server,
         amf_advertiser=amf_advertiser,
         poisoning_detector=poisoning_detector,
+        extraction_detector=extraction_detector,
+        audit_logger=audit_logger,
+        honeypot_manager=honeypot_manager,
+        injection_guard=injection_guard,
+        rag_scanner=rag_scanner,
         egress_hooks=egress_hooks,
     )
 
@@ -844,6 +896,123 @@ async def metrics_quarantine(format: str = "json"):
         )
     else:  # json
         return JSONResponse(metrics.get_json_metrics())
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Security Control Plane Endpoints (P1 Audit, Detection, Forensics)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/v1/security/status")
+async def security_status():
+    """Aggregate status of all security subsystems (6 modules)."""
+    _st = get_state()
+    return JSONResponse({
+        "audit_logger": {
+            "enabled": _st.audit_logger is not None,
+            "stats": _st.audit_logger.get_stats() if _st.audit_logger else {}
+        },
+        "honeypots": {
+            "enabled": _st.honeypot_manager is not None,
+            "trap_count": len(_st.honeypot_manager.traps) if _st.honeypot_manager else 0
+        },
+        "injection_guard": {
+            "enabled": _st.injection_guard is not None,
+            "quarantined": len(_st.injection_guard._quarantine) if _st.injection_guard else 0
+        },
+        "rag_scanner": {
+            "enabled": _st.rag_scanner is not None,
+            "quarantined": len(_st.rag_scanner._quarantine) if _st.rag_scanner else 0
+        },
+        "extraction_detector": {
+            "enabled": _st.extraction_detector is not None,
+            "active_sessions": len(_st.extraction_detector._sessions) if _st.extraction_detector else 0
+        },
+        "anomaly_detector": {
+            "enabled": _st.proxy.anomaly_detector is not None if _st.proxy else False
+        }
+    })
+
+
+@app.get("/api/v1/security/audit")
+async def security_audit(hours: int = 24, severity: str = "", tool: str = "", limit: int = 100):
+    """Queryable audit log with filters: severity, tool, hours."""
+    _st = get_state()
+    if not _st.audit_logger:
+        return JSONResponse({"error": "Audit logger not initialized"}, status_code=503)
+
+    stats = _st.audit_logger.get_stats(hours=hours)
+    entries = _st.audit_logger.search_denials(
+        severity=severity or None,
+        tool=tool or None,
+        limit=limit,
+        hours=hours
+    )
+    return JSONResponse({"stats": stats, "entries": entries})
+
+
+@app.get("/api/v1/security/audit/patterns")
+async def security_patterns(hours: int = 24):
+    """Detect suspicious patterns (many denials, rapid calls, etc.)."""
+    _st = get_state()
+    if not _st.audit_logger:
+        return JSONResponse({"error": "Audit logger not initialized"}, status_code=503)
+
+    patterns = _st.audit_logger.search_suspicious_patterns(hours=hours, threshold=1)
+    return JSONResponse({"patterns": patterns})
+
+
+@app.get("/api/v1/security/injection/stats")
+async def injection_stats():
+    """Injection guard quarantine statistics."""
+    _st = get_state()
+    if not _st.injection_guard:
+        return JSONResponse({"enabled": False, "message": "Injection guard not initialized"}, status_code=503)
+
+    stats = _st.injection_guard.get_quarantine_stats()
+    return JSONResponse(stats)
+
+
+@app.get("/api/v1/security/rag/quarantine")
+async def rag_quarantine():
+    """RAG scanner quarantine queue with confidence breakdown."""
+    _st = get_state()
+    if not _st.rag_scanner:
+        return JSONResponse({"enabled": False, "message": "RAG scanner not initialized"}, status_code=503)
+
+    stats = _st.rag_scanner.get_quarantine_stats()
+    contents = _st.rag_scanner.get_quarantine_contents()
+    return JSONResponse({"stats": stats, "entries": contents})
+
+
+@app.get("/api/v1/security/extraction/sessions")
+async def extraction_sessions():
+    """All active extraction detector sessions with risk levels."""
+    _st = get_state()
+    if not _st.extraction_detector:
+        return JSONResponse({"enabled": False, "message": "Extraction detector not initialized"}, status_code=503)
+
+    sessions = []
+    for session_id, metrics in _st.extraction_detector._sessions.items():
+        analysis = _st.extraction_detector.analyze_pattern(session_id)
+        sessions.append(analysis)
+    return JSONResponse({"sessions": sessions})
+
+
+@app.get("/api/v1/security/honeypots")
+async def honeypots_list():
+    """Honeypot trap definitions and status."""
+    _st = get_state()
+    if not _st.honeypot_manager:
+        return JSONResponse({"enabled": False, "message": "Honeypot manager not initialized"}, status_code=503)
+
+    traps = _st.honeypot_manager.get_honeypot_definitions()
+    # Get recent honeypot triggers from audit log
+    recent_triggers = []
+    if _st.audit_logger:
+        triggers = _st.audit_logger.search_bypass_attempts(limit=20)
+        recent_triggers = triggers
+
+    return JSONResponse({"traps": traps, "recent_triggers": recent_triggers})
 
 
 @app.get("/beigebox/search")

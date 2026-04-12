@@ -28,6 +28,7 @@ dependencies = [
     "pynvml>=11.5.0",
     "itsdangerous>=2.0",
     "python-multipart>=0.0.9",
+    "beigebox-security>=0.1.0-beta",
 ]
 
 [tool.setuptools.packages.find]
@@ -42,3 +43,13 @@ dev = [
 
 [project.scripts]
 beigebox = "beigebox.cli:main"
+
+[tool.pytest.ini_options]
+markers = [
+    "unit: fast unit tests",
+    "integration: component integration tests",
+    "e2e: end-to-end flow tests",
+    "error: error scenario tests",
+    "slow: slow tests (>1s)",
+    "acceptance: acceptance criteria tests",
+]

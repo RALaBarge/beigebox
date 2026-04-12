@@ -25,6 +25,11 @@ if TYPE_CHECKING:
     from beigebox.observability.egress import EgressHook
     from beigebox.web_auth import WebAuthManager
     from beigebox_security.integrations.poisoning import RAGPoisoningDetector
+    from beigebox.security.extraction_detector import ExtractionDetector
+    from beigebox.security.audit_logger import AuditLogger
+    from beigebox.security.honeypots import HoneypotManager
+    from beigebox.security.enhanced_injection_guard import EnhancedInjectionGuard
+    from beigebox.security.rag_content_scanner import RAGContentScanner
 
 
 @dataclass
@@ -46,6 +51,12 @@ class AppState:
     mcp_server: McpServer | None = None
     amf_advertiser: AmfMeshAdvertiser | None = None
     poisoning_detector: RAGPoisoningDetector | None = None
+    extraction_detector: ExtractionDetector | None = None
+    # Security audit & detection modules
+    audit_logger: AuditLogger | None = None
+    honeypot_manager: HoneypotManager | None = None
+    injection_guard: EnhancedInjectionGuard | None = None
+    rag_scanner: RAGContentScanner | None = None
     egress_hooks: list[Any] = field(default_factory=list)  # list[EgressHook]
     # Runtime registry: run_id → asyncio.Queue for harness steering injection.
     # Registered by active harness/ralph runs, consumed by /inject endpoint.

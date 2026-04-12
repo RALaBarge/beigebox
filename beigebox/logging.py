@@ -533,20 +533,53 @@ def log_error_event(component: str, error: str, severity: str = "error"):
     wire = _get_tap_logger()
     if not wire:
         return
-    
+
     meta = {
         "component": component,
         "severity": severity,
         "error": error[:200],
     }
-    
+
     content = f"ERROR {component}: {error[:100]}"
-    
+
     wire.log(
         direction="inbound",
         role="error",
         content=content,
         event_type="error",
         source=component,
+        meta=meta,
+    )
+
+
+def log_extraction_attempt(
+    session_id: str,
+    risk_level: str,  # "low" | "medium" | "high" | "critical"
+    confidence: float,
+    triggers: list[str],
+    reason: str,
+):
+    """Log model extraction attack detection event."""
+    wire = _get_tap_logger()
+    if not wire:
+        return
+
+    meta = {
+        "session_id": session_id,
+        "risk_level": risk_level,
+        "confidence": confidence,
+        "triggers": triggers,
+        "reason": reason,
+    }
+
+    trigger_str = ", ".join(triggers) if triggers else "none"
+    content = f"Extraction risk [{risk_level}]: {reason} (triggers={trigger_str}, conf={confidence:.2f})"
+
+    wire.log(
+        direction="inbound",
+        role="security",
+        content=content,
+        event_type="extraction_attempt_detected",
+        source="extraction_detector",
         meta=meta,
     )

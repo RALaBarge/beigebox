@@ -217,6 +217,19 @@ embedding:
   model: "nomic-embed-text"
   backend: "ollama"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Embedding Poisoning Detection (RAG security)
+# ─────────────────────────────────────────────────────────────────────────────
+
+embedding_poisoning_detection:
+  enabled: true
+  sensitivity: 0.95         # 0.90-0.99: higher = more sensitive
+  block_threshold: 0.8      # Block if confidence > this (high confidence poisoning)
+  warn_threshold: 0.5       # Warn if confidence > this (suspicious embeddings)
+  baseline_window: 1000     # Number of embeddings to maintain baseline
+  min_norm: 0.1             # Minimum embedding vector magnitude (lower = suspicious)
+  max_norm: 100.0           # Maximum embedding vector magnitude (higher = suspicious)
+
 classifier:
   enabled: true
   centroid_rebuild_interval: 3600

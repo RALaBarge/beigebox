@@ -83,6 +83,7 @@ class Proxy:
         backend_router=None,
         blob_store=None,
         egress_hooks=None,
+        extraction_detector=None,
     ):
         self.sqlite = sqlite
         self.vector = vector
@@ -92,6 +93,7 @@ class Proxy:
         self.embedding_classifier = embedding_classifier
         self.tool_registry = tool_registry
         self.backend_router = backend_router  # MultiBackendRouter or None
+        self.extraction_detector = extraction_detector  # ExtractionDetector or None
         self.cfg = get_config()
         self.backend_url = self.cfg["backend"]["url"].rstrip("/")
         self.timeout = self.cfg["backend"].get("timeout", 120)
