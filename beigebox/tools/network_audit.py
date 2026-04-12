@@ -3,6 +3,7 @@ NetworkAuditTool — Local network discovery, port scanning, service fingerprint
 
 Phase 1: Self-identification, host discovery (ARP cache + ICMP/TCP sweep), top-1000 TCP port scan
 Phase 2: Service fingerprinting (banner grabbing, HTTP metadata, TLS cert info) + CVE DB lookup
+Phase 3: IoT device reconnaissance (brand detection, firmware version extraction, CVE mapping)
 
 Privilege handling:
   - Without root: TCP connect scan, ARP cache parse from /proc/net/arp
