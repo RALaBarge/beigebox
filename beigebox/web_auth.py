@@ -70,6 +70,101 @@ class OAuthProvider(Protocol):
 
 
 # ---------------------------------------------------------------------------
+# GitHub (OAuth2)
+# ---------------------------------------------------------------------------
+
+class GitHubProvider:
+    name = "github"
+
+    _AUTH_URL     = "https://github.com/login/oauth/authorize"
+    _TOKEN_URL    = "https://github.com/login/oauth/access_token"
+    _USERINFO_URL = "https://api.github.com/user"
+    _EMAIL_URL    = "https://api.github.com/user/emails"
+
+    def __init__(self, client_id: str, client_secret: str, allowed_orgs: list[str] = None):
+        self.client_id       = client_id
+        self._client_secret  = client_secret
+        self._allowed_orgs   = set(allowed_orgs or [])  # empty = any org
+
+    def get_authorization_url(self, redirect_uri: str, state: str) -> tuple[str, str]:
+        # PKCE S256 — generate verifier, derive challenge
+        code_verifier  = secrets.token_urlsafe(64)
+        code_challenge = (
+            urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest())
+            .rstrip(b"=")
+            .decode()
+        )
+        params = {
+            "client_id":             self.client_id,
+            "redirect_uri":          redirect_uri,
+            "response_type":         "code",
+            "scope":                 "user:email read:org",
+            "state":                 state,
+            "code_challenge":        code_challenge,
+            "code_challenge_method": "S256",
+        }
+        return f"{self._AUTH_URL}?{urlencode(params)}", code_verifier
+
+    async def exchange_code(self, code: str, redirect_uri: str, code_verifier: str = "") -> OAuthUserInfo:
+        token_data = {
+            "code":          code,
+            "client_id":     self.client_id,
+            "client_secret": self._client_secret,
+            "redirect_uri":  redirect_uri,
+            "grant_type":    "authorization_code",
+        }
+        if code_verifier:
+            token_data["code_verifier"] = code_verifier
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            # Exchange code for access token
+            tok = await client.post(
+                self._TOKEN_URL,
+                data=token_data,
+                headers={"Accept": "application/json"},
+            )
+            tok.raise_for_status()
+            access_token = tok.json()["access_token"]
+
+            # Get user info
+            ui = await client.get(
+                self._USERINFO_URL,
+                headers={"Authorization": f"token {access_token}"},
+            )
+            ui.raise_for_status()
+            info = ui.json()
+
+            # Get primary email (user might not have a public email)
+            email = info.get("email") or ""
+            if not email:
+                emails = await client.get(
+                    self._EMAIL_URL,
+                    headers={"Authorization": f"token {access_token}"},
+                )
+                emails.raise_for_status()
+                # Find primary verified email
+                for e in emails.json():
+                    if e.get("primary") and e.get("verified"):
+                        email = e.get("email", "")
+                        break
+
+        user = OAuthUserInfo(
+            sub      = str(info["id"]),  # GitHub user ID
+            email    = email,
+            name     = info.get("name") or info.get("login", ""),
+            picture  = info.get("avatar_url", ""),
+            provider = "github",
+        )
+
+        # Check org membership if allowed_orgs specified
+        if self._allowed_orgs:
+            # TODO: implement org membership check if needed
+            pass
+
+        return user
+
+
+# ---------------------------------------------------------------------------
 # Google (OpenID Connect)
 # ---------------------------------------------------------------------------
 
@@ -173,7 +268,25 @@ class WebAuthManager:
 
         for prov_cfg in web_ui_cfg.get("providers", []):
             pname = prov_cfg.get("name", "").lower()
-            if pname == "google":
+            if pname == "github":
+                client_id = prov_cfg.get("client_id", "").strip()
+                client_secret = (
+                    _resolve_secret("github")
+                    or os.environ.get("BB_GITHUB_CLIENT_SECRET", "")
+                )
+                if not client_id or not client_secret:
+                    logger.error(
+                        "WebAuth: GitHub provider missing client_id or client_secret — skipping. "
+                        "Set BB_GITHUB_CLIENT_SECRET or run: agentauth add github"
+                    )
+                    continue
+                self._providers["github"] = GitHubProvider(
+                    client_id=client_id,
+                    client_secret=client_secret,
+                    allowed_orgs=prov_cfg.get("allowed_orgs", []),
+                )
+                logger.info("WebAuth: GitHub provider registered (client_id=%s…)", client_id[:8])
+            elif pname == "google":
                 client_id = prov_cfg.get("client_id", "").strip()
                 client_secret = (
                     _resolve_secret("google")

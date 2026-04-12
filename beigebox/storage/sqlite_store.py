@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from contextlib import contextmanager
 from typing import Any, Dict, Optional
+from datetime import datetime, timezone
 
 from beigebox.storage.models import Message
 from beigebox.security.memory_integrity import ConversationIntegrityValidator, IntegrityAuditLog
@@ -236,6 +237,21 @@ CREATE INDEX IF NOT EXISTS idx_quarantined_embeddings_document
     ON quarantined_embeddings(document_id);
 CREATE INDEX IF NOT EXISTS idx_quarantined_embeddings_confidence
     ON quarantined_embeddings(confidence);
+
+CREATE TABLE IF NOT EXISTS api_keys (
+    id          TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    key_hash    TEXT NOT NULL UNIQUE,   -- SHA256 of actual key (never store plaintext)
+    name        TEXT,                   -- user-given name for the key
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    last_used   TEXT,
+    last_rotated TEXT,
+    expires_at  TEXT,                   -- optional expiration
+    active      INTEGER DEFAULT 1,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_key_hash ON api_keys(key_hash);
 """
 
 # Migrations: append-only ALTER TABLE statements that add new columns to
@@ -420,6 +436,60 @@ class SQLiteStore:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
             return dict(row) if row else None
+
+    def create_api_key(self, user_id: str, name: str = "default") -> tuple[str, str]:
+        """Create a new API key for a user. Returns (key_id, plain_key)."""
+        import uuid
+        import hashlib
+        import secrets
+        from datetime import datetime, timezone
+
+        key_id = str(uuid.uuid4())
+        plain_key = secrets.token_urlsafe(32)
+        key_hash = hashlib.sha256(plain_key.encode()).hexdigest()
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO api_keys (id, user_id, key_hash, name, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (key_id, user_id, key_hash, name, now),
+            )
+        return key_id, plain_key
+
+    def verify_api_key(self, key_hash: str) -> str | None:
+        """Verify an API key hash. Return user_id if valid, None otherwise."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT user_id FROM api_keys WHERE key_hash=? AND active=1 "
+                "AND (expires_at IS NULL OR expires_at > datetime('now'))",
+                (key_hash,),
+            ).fetchone()
+            if row:
+                # Update last_used timestamp
+                now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                conn.execute("UPDATE api_keys SET last_used=? WHERE key_hash=?", (now, key_hash))
+                return row[0]
+            return None
+
+    def get_api_keys(self, user_id: str) -> list[dict]:
+        """List all API keys for a user (excluding plaintext key)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, name, created_at, last_used, active FROM api_keys "
+                "WHERE user_id=? ORDER BY created_at DESC",
+                (user_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def revoke_api_key(self, key_id: str, user_id: str) -> bool:
+        """Revoke an API key. Returns True if successful."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE api_keys SET active=0 WHERE id=? AND user_id=?",
+                (key_id, user_id),
+            )
+            return cursor.rowcount > 0
 
     # ------------------------------------------------------------------
     # RAG Poisoning Quarantine Management

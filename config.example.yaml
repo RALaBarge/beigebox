@@ -268,6 +268,43 @@ zcommands:
       route_to: "harness"
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Authentication Configuration (OAuth2 SSO + API Keys)
+# ─────────────────────────────────────────────────────────────────────────────
+
+auth:
+  # Static API key (for backwards compatibility — legacy mode)
+  api_key: ""
+
+  # OAuth2 web UI authentication (GitHub / Google)
+  # Enable "mode: oauth" to gate the web UI behind OAuth login
+  web_ui:
+    mode: "none"  # "none" = open, "oauth" = require login
+    providers:
+      - name: github
+        client_id: ""  # Get from https://github.com/settings/developers
+        # client_secret from BB_GITHUB_CLIENT_SECRET env var or agentauth add github
+        # allowed_orgs: ["your-org"]  # empty = any GitHub account can login
+
+      # Alternative: Google OAuth (OIDC)
+      # - name: google
+      #   client_id: ""  # Get from Google Cloud Console
+      #   # client_secret from BB_GOOGLE_CLIENT_SECRET env var or agentauth add google
+      #   allowed_emails: ["user@example.com"]  # empty = any Google account
+
+  # Named API keys (for programmatic access)
+  # Each key can have model/endpoint ACLs and rate limits
+  keys:
+    # - name: "dev-client"
+    #   allowed_models: ["qwen*", "llama*"]
+    #   allowed_endpoints: ["/v1/chat/completions", "/v1/models"]
+    #   rate_limit_rpm: 1000
+    #
+    # - name: "readonly-client"
+    #   allowed_models: ["*"]
+    #   allowed_endpoints: ["/v1/models", "/beigebox/stats"]
+    #   rate_limit_rpm: 100
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Web UI Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 

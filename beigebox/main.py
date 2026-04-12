@@ -615,6 +615,17 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             )
 
         meta = _app_state.auth_registry.validate(token)
+
+        # If static key validation fails, try dynamic API keys from database
+        if meta is None and _app_state.sqlite_store and token:
+            import hashlib
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
+            user_id = _app_state.sqlite_store.verify_api_key(token_hash)
+            if user_id:
+                # Create a pseudo-KeyMeta for dynamic keys (no rate limit, all endpoints/models allowed)
+                from beigebox.auth import KeyMeta
+                meta = KeyMeta(name=f"user:{user_id[:8]}", allowed_models=["*"], allowed_endpoints=["*"], rate_limit_rpm=0)
+
         if meta is None:
             return JSONResponse(
                 {
@@ -1264,6 +1275,82 @@ async def auth_me(request: Request):
     if user is None:
         return JSONResponse({"authenticated": False})
     return JSONResponse({"authenticated": True, **user})
+
+
+@app.post("/api/v1/auth/keys")
+async def create_api_key(request: Request):
+    """Create a new API key for the authenticated user."""
+    st = get_state()
+    if not st.sqlite_store:
+        return JSONResponse({"error": "API key storage not configured"}, status_code=501)
+
+    # Get user_id from session
+    token = request.cookies.get(COOKIE_SESSION, "")
+    if st.web_auth and st.web_auth.is_enabled():
+        user_info = st.web_auth.verify_session(token)
+        if not user_info:
+            return JSONResponse({"error": "Not authenticated"}, status_code=401)
+        user_id = user_info.get("user_id")
+    else:
+        return JSONResponse({"error": "OAuth not configured"}, status_code=501)
+
+    try:
+        body = await request.json()
+        name = body.get("name", "default")
+    except:
+        name = "default"
+
+    key_id, plain_key = st.sqlite_store.create_api_key(user_id, name)
+    return JSONResponse({
+        "key_id": key_id,
+        "key": plain_key,  # Only shown once at creation
+        "name": name,
+        "message": "Save this key somewhere safe — you won't see it again",
+    })
+
+
+@app.get("/api/v1/auth/keys")
+async def list_api_keys(request: Request):
+    """List all API keys for the authenticated user (without plaintext)."""
+    st = get_state()
+    if not st.sqlite_store:
+        return JSONResponse({"error": "API key storage not configured"}, status_code=501)
+
+    # Get user_id from session
+    token = request.cookies.get(COOKIE_SESSION, "")
+    if st.web_auth and st.web_auth.is_enabled():
+        user_info = st.web_auth.verify_session(token)
+        if not user_info:
+            return JSONResponse({"error": "Not authenticated"}, status_code=401)
+        user_id = user_info.get("user_id")
+    else:
+        return JSONResponse({"error": "OAuth not configured"}, status_code=501)
+
+    keys = st.sqlite_store.get_api_keys(user_id)
+    return JSONResponse({"keys": keys})
+
+
+@app.delete("/api/v1/auth/keys/{key_id}")
+async def revoke_api_key(key_id: str, request: Request):
+    """Revoke an API key."""
+    st = get_state()
+    if not st.sqlite_store:
+        return JSONResponse({"error": "API key storage not configured"}, status_code=501)
+
+    # Get user_id from session
+    token = request.cookies.get(COOKIE_SESSION, "")
+    if st.web_auth and st.web_auth.is_enabled():
+        user_info = st.web_auth.verify_session(token)
+        if not user_info:
+            return JSONResponse({"error": "Not authenticated"}, status_code=401)
+        user_id = user_info.get("user_id")
+    else:
+        return JSONResponse({"error": "OAuth not configured"}, status_code=501)
+
+    success = st.sqlite_store.revoke_api_key(key_id, user_id)
+    if not success:
+        return JSONResponse({"error": "Key not found or already revoked"}, status_code=404)
+    return JSONResponse({"revoked": True})
 
 
 # ---------------------------------------------------------------------------
