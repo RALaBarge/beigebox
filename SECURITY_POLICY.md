@@ -260,7 +260,7 @@ See [DEPLOYMENT_SECURITY_CHECKLIST.md](DEPLOYMENT_SECURITY_CHECKLIST.md) for det
 
 **Do NOT open a public GitHub issue for security vulnerabilities.**
 
-Instead, email your report to **security@ralabarge.dev** with:
+Instead, email your report to **security@ryanlabarge.com** with:
 
 1. **Title:** Brief description (e.g., "Authentication Bypass in Z-command Parsing")
 2. **Affected Version(s):** Which BeigeBox versions are affected (e.g., 1.9, 1.8)
@@ -326,7 +326,7 @@ If you detect suspicious activity:
    - Capture full request/response pair
    - Check if API key has been compromised (review usage timeline)
    - Consider rotating the key
-   - Report to security@ralabarge.dev if you believe it's a novel attack
+   - Report to security@ryanlabarge.com if you believe it's a novel attack
 
 ### Monitoring Setup
 
@@ -386,7 +386,7 @@ See [DEPLOYMENT_SECURITY_CHECKLIST.md](DEPLOYMENT_SECURITY_CHECKLIST.md) for mon
 ## 8. Contact & Support
 
 ### Security Issues
-- **Email:** security@ralabarge.dev
+- **Email:** security@ryanlabarge.com
 - **Response time:** 24-48 hours for critical issues
 
 ### Operational Questions
@@ -395,7 +395,7 @@ See [DEPLOYMENT_SECURITY_CHECKLIST.md](DEPLOYMENT_SECURITY_CHECKLIST.md) for mon
 
 ### Emergency Contacts
 - **On-call escalation:** See [DEPLOYMENT_SECURITY_CHECKLIST.md](DEPLOYMENT_SECURITY_CHECKLIST.md)
-- **Feature requests:** security@ralabarge.dev (include use case + timeline)
+- **Feature requests:** security@ryanlabarge.com (include use case + timeline)
 
 ---
 
