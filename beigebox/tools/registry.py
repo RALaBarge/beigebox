@@ -6,12 +6,14 @@ New tools are added here + in config.yaml. Nothing else changes.
 Now with:
   - Calculator, DateTime, SystemInfo, Memory tools
   - Webhook notifier for monitoring tool invocations
+  - Parameter validation (Phase 1) to prevent injection attacks
 """
 
 import logging
 import time
 from beigebox.config import get_config
 from beigebox.logging import log_tool_call
+from beigebox.tools.validation import ParameterValidator
 from beigebox.tools.web_search import WebSearchTool
 from beigebox.tools.web_scraper import WebScraperTool
 from beigebox.tools.google_search import GoogleSearchTool
@@ -35,6 +37,14 @@ from beigebox.tools.sf_ingest import SfIngestTool
 from beigebox.tools.atlassian import AtlassianTool
 from beigebox.tools.bluetruth import BlueTruthTool
 from beigebox.tools.network_audit import NetworkAuditTool
+from beigebox.tools.mcp_validator_tool import MCPValidatorTool
+from beigebox.tools.api_anomaly_detector_tool import APIAnomalyDetectorTool
+from beigebox.tools.memory_validator_tool import MemoryValidatorTool
+from beigebox.tools.plan_manager import PlanManagerTool
+from beigebox.tools.research_agent import ResearchAgentTool
+from beigebox.tools.parallel_research import ParallelResearchTool
+from beigebox.tools.evidence_synthesis import EvidenceSynthesisTool
+from beigebox.tools.research_agent_flexible import ResearchAgentFlexibleTool
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +56,9 @@ class ToolRegistry:
         self.tools: dict[str, object] = {}
         cfg = get_config()
         tools_cfg = cfg.get("tools", {})
+
+        # Parameter validation (Phase 1) — prevents injection attacks
+        self.validator = ParameterValidator()
 
         # Webhook notifier (optional)
         webhook_url = tools_cfg.get("webhook_url", "")
@@ -264,6 +277,72 @@ class ToolRegistry:
             logger.info("NetworkAudit tool registered (timeout=%.1fs, concurrency=%d)",
                         na_cfg.get("timeout", 1.0), na_cfg.get("concurrency", 200))
 
+        # --- API Anomaly Detector (security monitoring — disabled by default) ---
+        # Wraps the APIAnomalyDetector from beigebox.security.anomaly_detector.
+        # The actual detector is late-bound from Proxy after init.
+        aad_cfg = tools_cfg.get("api_anomaly_detector", {})
+        sec_cfg = cfg.get("security", {}).get("api_anomaly", {})
+        if aad_cfg.get("enabled", False) or sec_cfg.get("enabled", False):
+            self.tools["api_anomaly_detector"] = APIAnomalyDetectorTool(detector=None)
+            logger.info("APIAnomalyDetectorTool registered (detector late-bound from proxy)")
+
+        # --- Memory Validator (conversation integrity via HMAC-SHA256 — disabled by default) ---
+        # Requires security.memory_integrity to be configured with a valid key.
+        mv_cfg = tools_cfg.get("memory_validator", {})
+        sec_mi_cfg = cfg.get("security", {}).get("memory_integrity", {})
+        if mv_cfg.get("enabled", False) or sec_mi_cfg.get("enabled", False):
+            from beigebox.security.memory_validator import MemoryValidator
+            _mv = MemoryValidator(sec_mi_cfg)
+            self.tools["memory_validator"] = MemoryValidatorTool(validator=_mv, store=None)
+            logger.info("MemoryValidator tool registered (mode=%s, active=%s)", _mv.mode, _mv.is_active)
+
+        # --- MCP Parameter Validator (P1-B security hardening — disabled by default) ---
+        # Multi-tier parameter validation for tool calls: schema, constraint, semantic, isolation.
+        # Can be called directly or used as a pre-execution hook in the Operator.
+        mcp_val_cfg = cfg.get("security", {}).get("mcp_validator", {})
+        if mcp_val_cfg.get("enabled", False):
+            self.tools["mcp_parameter_validator"] = MCPValidatorTool(
+                allow_unsafe=mcp_val_cfg.get("allow_unsafe", False),
+                log_violations=mcp_val_cfg.get("log_violations", True),
+            )
+            logger.info("MCPValidatorTool registered (allow_unsafe=%s)", mcp_val_cfg.get("allow_unsafe", False))
+
+        # --- Plan Manager (orchestration plan.md management — enabled by default when tools enabled) ---
+        pm_cfg = tools_cfg.get("plan_manager", {})
+        if pm_cfg.get("enabled", True):
+            self.tools["plan_manager"] = PlanManagerTool(workspace_out=_ws_out)
+            logger.info("PlanManager tool registered")
+
+        # --- Research Agent (focused research on a subtopic — disabled by default) ---
+        ra_cfg = tools_cfg.get("research_agent", {})
+        if ra_cfg.get("enabled", False):
+            self.tools["research_agent"] = ResearchAgentTool(workspace_out=_ws_out)
+            logger.info("ResearchAgent tool registered")
+
+        # --- Research Agent Flexible (backend-agnostic research — disabled by default) ---
+        # Accepts "provider:model" at runtime (e.g. "openrouter:arcee/trinity").
+        # Falls back to configured default when backend not specified or unavailable.
+        raf_cfg = tools_cfg.get("research_agent_flexible", {})
+        if raf_cfg.get("enabled", False):
+            # Try to pass the existing MultiBackendRouter for the beigebox adapter
+            _router = getattr(self, "_router", None)
+            self.tools["research_agent_flexible"] = ResearchAgentFlexibleTool(
+                workspace_out=_ws_out, router=_router,
+            )
+            logger.info("ResearchAgentFlexible tool registered")
+
+        # --- Parallel Research (multi-agent concurrent research — disabled by default) ---
+        pr_cfg = tools_cfg.get("parallel_research", {})
+        if pr_cfg.get("enabled", False):
+            self.tools["parallel_research"] = ParallelResearchTool(workspace_out=_ws_out)
+            logger.info("ParallelResearch tool registered")
+
+        # --- Evidence Synthesis (cross-finding pattern extraction — disabled by default) ---
+        es_cfg = tools_cfg.get("evidence_synthesis", {})
+        if es_cfg.get("enabled", False):
+            self.tools["evidence_synthesis"] = EvidenceSynthesisTool(workspace_out=_ws_out)
+            logger.info("EvidenceSynthesis tool registered")
+
         # Connection tool auto-enables whenever the top-level connections: section
         # is present in config.yaml — no separate enabled flag needed.
         # --- Connections (agentauth — auto-enabled if connections: configured) ---
@@ -303,16 +382,39 @@ class ToolRegistry:
     def run_tool(self, name: str, input_text: str) -> str | None:
         """
         Run a tool by name. Returns result string or None.
-        Sends notification to webhook if configured.
+
+        Steps:
+        1. Validate input (parameter validation, injection detection)
+        2. Run the tool
+        3. Log result and notify webhook
+
+        Returns None if validation fails (mode=strict) or execution fails.
         """
         tool = self.tools.get(name)
         if tool is None:
             logger.warning("Tool '%s' not found in registry", name)
             return None
 
+        # Step 1: Validate input parameters (Phase 1)
+        validation_result = self.validator.validate_tool_input(name, input_text)
+        if not validation_result.is_valid:
+            logger.error(
+                "Tool '%s' input validation failed: %s",
+                name,
+                validation_result.errors,
+            )
+            return (
+                f"Error: input validation failed for '{name}': "
+                + "; ".join(validation_result.errors)
+            )
+
+        # Use cleaned input if validator provided it
+        cleaned_input = validation_result.cleaned_input or input_text
+
+        # Step 2: Execute tool
         start = time.monotonic()
         try:
-            result = tool.run(input_text)
+            result = tool.run(cleaned_input)
         except Exception as e:
             elapsed_ms = (time.monotonic() - start) * 1000
             logger.warning("Tool '%s' raised during run: %s", name, e)
@@ -324,7 +426,7 @@ class ToolRegistry:
             return f"Error: tool '{name}' failed: {e}"
         elapsed_ms = (time.monotonic() - start) * 1000
 
-        # Notify webhook
+        # Step 3: Notify and log
         if result is not None:
             self.notifier.notify(name, input_text, result, elapsed_ms)
 

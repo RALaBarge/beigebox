@@ -204,6 +204,10 @@ def _build_tool_rubric(tool_names: list[str]) -> str:
         "shell":           "run shell commands — use sparingly",
         "system_info":     "system stats: CPU, memory, disk",
         "read_skill":      "read a skill document for detailed guidance on a task",
+        "plan_manager":    "create/read/update/append to workspace/out/plan.md — track multi-step progress",
+        "research_agent":  "launch a focused research agent on a subtopic — returns structured findings",
+        "parallel_research": "run multiple research agents in parallel — coordinate and aggregate results",
+        "evidence_synthesis": "synthesize multiple research findings — extract patterns, recommendations, contradictions",
     }
     lines = []
     for name in tool_names:
@@ -486,6 +490,17 @@ class Operator:
             self._tools["read_skill"] = SkillReaderTool(self._skills)
             logger.info("Skills available: %s", [s["name"] for s in self._skills])
 
+        # ── P1-B: MCP Parameter Validator (pre-execution security hook) ──
+        self._mcp_validator = None
+        sec_cfg = self.cfg.get("security", {}).get("mcp_validator", {})
+        if sec_cfg.get("enabled", False):
+            try:
+                from beigebox.tools.mcp_validator_tool import MCPValidatorTool
+                self._mcp_validator = MCPValidatorTool()
+                logger.info("MCP parameter validator enabled (pre-execution hook active)")
+            except Exception as e:
+                logger.warning("Failed to initialize MCP parameter validator: %s", e)
+
         tools = self._tools
         skills_block = ""
         if self._skills:
@@ -766,6 +781,18 @@ class Operator:
         if tool is None:
             available = ", ".join(self._tools.keys()) or "none"
             return f"Error: unknown tool '{name}'. Available: {available}"
+
+        # ── P1-B: MCP Parameter Validation (pre-execution hook) ──────────
+        if self._mcp_validator is not None:
+            try:
+                vr = self._mcp_validator.validate_before_execution(name, input_str)
+                if not vr.valid:
+                    issues_text = "; ".join(i.message for i in vr.issues)
+                    logger.warning("MCP validator blocked '%s': %s", name, issues_text)
+                    return f"Error: parameter validation failed for '{name}': {issues_text}"
+            except Exception as e:
+                logger.debug("MCP validator raised (non-fatal): %s", e)
+
         try:
             result = tool.run(input_str)
         except Exception as e:

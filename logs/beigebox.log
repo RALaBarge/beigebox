@@ -2128,3 +2128,29 @@ AttributeError: 'ParetoOptimizer' object has no attribute 'weighted_score'
 2026-04-12 10:50:13,060 [INFO] httpx: HTTP Request: POST http://localhost:11434/api/embed "HTTP/1.1 200 OK"
 2026-04-12 10:50:13,060 [INFO] beigebox.main: Embedding model 'nomic-embed-text' preloaded and pinned
 2026-04-12 10:50:14,780 [INFO] httpx: HTTP Request: GET http://localhost:11434/health "HTTP/1.1 404 Not Found"
+2026-04-12 10:50:37,121 [INFO] httpx: HTTP Request: POST http://localhost:11434/api/generate "HTTP/1.1 200 OK"
+2026-04-12 10:50:37,121 [INFO] beigebox.main: routing/judge model 'gemma3:4b' preloaded and pinned
+2026-04-12 10:50:37,393 [INFO] httpx: HTTP Request: POST http://localhost:11434/api/generate "HTTP/1.1 200 OK"
+2026-04-12 10:50:37,393 [INFO] beigebox.agents.decision: Decision model 'gemma3:4b' preloaded and pinned
+2026-04-12 10:50:43,446 [INFO] httpx: HTTP Request: POST http://localhost:11434/api/embed "HTTP/1.1 200 OK"
+2026-04-12 10:50:43,797 [INFO] httpx: HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 400 Bad Request"
+2026-04-12 10:50:43,798 [WARNING] beigebox.backends.router: Backend 'openrouter' failed for model 'openrouter/google/gemini-2.0-flash-lite-preview-02-05': HTTP 400: {"error":{"message":"openrouter/google/gemini-2.0-flash-lite-preview-02-05 is not a valid model ID","code":400},"user_id":"user_38zeTuC1u9YOEH4Uta5o7pLnkG6"}
+2026-04-12 10:50:43,804 [ERROR] beigebox.backends.router: All backends exhausted for model 'openrouter/google/gemini-2.0-flash-lite-preview-02-05': openrouter: HTTP 400: {"error":{"message":"openrouter/google/gemini-2.0-flash-lite-preview-02-05 is not a valid model ID","code":400},"user_id":"user_38zeTuC1u9YOEH4Uta5o7pLnkG6"}
+2026-04-12 10:50:47,428 [WARNING] beigebox.backends.ollama: Ollama backend 'ollama-local' failed: [Errno -2] Name or service not known
+2026-04-12 10:50:47,428 [WARNING] beigebox.backends.router: Backend 'ollama-local' failed for model 'mistral-7b': [Errno -2] Name or service not known
+2026-04-12 10:50:47,433 [ERROR] beigebox.backends.router: All backends exhausted for model 'mistral-7b': ollama-local: [Errno -2] Name or service not known
+2026-04-12 10:50:47,640 [INFO] httpx: HTTP Request: POST http://localhost:11434/api/embed "HTTP/1.1 200 OK"
+2026-04-12 10:50:51,054 [INFO] httpx: HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 400 Bad Request"
+2026-04-12 10:50:51,054 [WARNING] beigebox.backends.router: Backend 'openrouter' failed for model 'openrouter/mistral/mistral-7b': HTTP 400: {"error":{"message":"openrouter/mistral/mistral-7b is not a valid model ID","code":400},"user_id":"user_38zeTuC1u9YOEH4Uta5o7pLnkG6"}
+2026-04-12 10:50:51,060 [ERROR] beigebox.backends.router: All backends exhausted for model 'openrouter/mistral/mistral-7b': openrouter: HTTP 400: {"error":{"message":"openrouter/mistral/mistral-7b is not a valid model ID","code":400},"user_id":"user_38zeTuC1u9YOEH4Uta5o7pLnkG6"}
+2026-04-12 10:50:51,153 [INFO] httpx: HTTP Request: POST http://localhost:11434/api/embed "HTTP/1.1 200 OK"
+2026-04-12 10:50:55,348 [INFO] httpx: HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 400 Bad Request"
+2026-04-12 10:50:55,349 [WARNING] beigebox.backends.router: Backend 'openrouter' failed for model 'openrouter/mistral/mistral-7b-instruct': HTTP 400: {"error":{"message":"openrouter/mistral/mistral-7b-instruct is not a valid model ID","code":400},"user_id":"user_38zeTuC1u9YOEH4Uta5o7pLnkG6"}
+2026-04-12 10:50:55,355 [ERROR] beigebox.backends.router: All backends exhausted for model 'openrouter/mistral/mistral-7b-instruct': openrouter: HTTP 400: {"error":{"message":"openrouter/mistral/mistral-7b-instruct is not a valid model ID","code":400},"user_id":"user_38zeTuC1u9YOEH4Uta5o7pLnkG6"}
+2026-04-12 10:50:55,387 [INFO] httpx: HTTP Request: POST http://localhost:11434/api/embed "HTTP/1.1 200 OK"
+2026-04-12 10:50:57,714 [WARNING] beigebox.backends.ollama: Ollama backend 'ollama-local' failed: [Errno -2] Name or service not known
+2026-04-12 10:50:57,714 [WARNING] beigebox.backends.router: Backend 'ollama-local' failed for model 'mistral-7b-instruct': [Errno -2] Name or service not known
+2026-04-12 10:50:57,719 [ERROR] beigebox.backends.router: All backends exhausted for model 'mistral-7b-instruct': ollama-local: [Errno -2] Name or service not known
+2026-04-12 10:50:57,856 [INFO] httpx: HTTP Request: POST http://localhost:11434/api/embed "HTTP/1.1 200 OK"
+2026-04-12 10:52:28,588 [INFO] beigebox.main: BeigeBox shutting down
+2026-04-12 10:52:28,588 [INFO] beigebox.main: Wiretap and payload log flushed and closed

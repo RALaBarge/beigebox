@@ -1,0 +1,104 @@
+================================================================================
+RAG POISONING DEFENSE: EXECUTIVE BRIEF
+================================================================================
+
+THREAT:
+  BeigeBox ChromaDB stores embeddings and cached responses with zero validation.
+  Attackers can inject malicious embeddings that corrupt retrieval, causing:
+  - Hallucinations (return attacker-controlled answers)
+  - Instruction injection (execute attacker commands)
+  - Data exfiltration (leak sensitive information)
+  - Model extraction (systematic probing)
+
+IMPACT:
+  - PoisonedRAG (USENIX 2025): 97% success rate with just 5 poisoned documents
+  - CacheAttack (2025): 86% cache hijacking success
+  - Affects ALL users whose queries match poisoned semantic neighborhood
+  - Blast radius: hours (semantic cache TTL) to days (persistent storage)
+
+DETECTION SOLUTION:
+  Multi-layer anomaly detection on embeddings before ChromaDB storage
+
+  Layer 1 (Magnitude):       <1ms, 95% detection, <1% FP       [HIGH ROI]
+  Layer 2 (Centroid):        ~5ms, 80% detection, 5% FP         [GOOD]
+  Layer 3 (Neighborhood):    ~10ms, 85% detection, 5% FP        [OPTIONAL]
+  Layer 4 (Fingerprinting):  ~1s, 99% detection, <1% FP         [DEEP SCAN]
+
+  Result: 95% poison detection → 20% residual success (Nature Sci Rep 2026)
+
+IMPLEMENTATION:
+  Phase 1 (3 weeks, 20-24 hours):
+    - Deploy Layers 1+2 (magnitude + centroid anomaly detection)
+    - Baseline calibration from production embeddings
+    - Quarantine workflow + manual review CLI
+    - <1% false positive rate
+    - Cost: O(1-5ms) per embedding
+
+  Phase 2 (Week 4, 12-16 hours):
+    - Layer 3: async neighborhood density checking
+    - Adaptive baseline (weekly recalibration)
+    - Tap integration + observability
+    - Production hardening & tuning
+
+  Phase 3+ (future):
+    - Layer 4: semantic fingerprinting (expensive)
+    - Input validation: document content scanning
+    - Output monitoring: exfiltration detection
+    - Access control: restrict ChromaDB writes
+
+RISK MITIGATION:
+  Residual attacks after detection:
+    - Adaptive poisoning (attacker learns baseline): 15-20% residual
+    - Attacks matching baseline statistics: 5-10% residual
+    - Attacks with gradient optimization: 10-15% residual
+
+  Mitigated by:
+    - Adaptive baseline updates (weekly)
+    - Multi-layer defense (can't pass all layers)
+    - Access control (restrict embedding injection)
+    - Output monitoring (catch exfiltration in responses)
+
+DEPLOYMENT SEQUENCE:
+  Week 1: Implement Phase 1 (detection + quarantine)
+  Week 2: Baseline calibration + threshold tuning
+  Week 3: Production validation (monitor FP rate)
+  Week 4: Enable blocking mode + Phase 2 features
+
+COST-BENEFIT:
+  Development:    20-24 hours (Phase 1)
+  Runtime cost:   1-5ms per embedding (0.1-0.5% latency overhead)
+  Operational:    5 min/day quarantine review
+  Risk reduction: 95% of PoisonedRAG attacks detected
+
+ADJACENT THREATS (NOT ADDRESSED BY THIS):
+  - Input validation (malicious document content)
+  - Output monitoring (exfiltration in responses)
+  - Access control (who can write to ChromaDB)
+  - Model integrity (backdoored models)
+
+  Recommendation: Add P1-B (RAG content scanner) + P2-B (output exfiltration)
+  in subsequent releases (per AI_SECURITY_GAPS.md roadmap)
+
+KEY RESEARCH:
+  PoisonedRAG (USENIX 2025)          — Attack method + 97% success
+  RevPRAG (EMNLP 2025)               — Neighborhood anomaly detection
+  EmbedGuard (IJCESEN 2025)          — Cross-layer detection + lineage
+  CacheAttack (2025)                 — Semantic cache collisions
+  LLMPrint (ArXiv 2509)              — Semantic fingerprinting (99% TP)
+  Nature Sci Rep (2026)              — Magnitude anomaly (95%→20% success)
+
+RECOMMENDATION:
+  PROCEED with Phase 1 implementation immediately. Embedding magnitude anomaly
+  detection is the highest-ROI single control:
+    - <1ms latency per embedding (negligible overhead)
+    - 95% attack detection with <1% false positives
+    - Simple implementation (50 lines of core logic)
+    - Minimal dependencies (numpy only)
+    - Easy to tune and operate
+
+  Start in "warn" mode (log, don't block) for 1 week of production validation,
+  then enable blocking after false positive rate is confirmed <0.5%.
+
+================================================================================
+END SUMMARY
+================================================================================

@@ -52,7 +52,7 @@ def test_store_message_with_cost(store):
     msg = Message(conversation_id="c1", role="assistant", content="hi", model="gpt-4")
     store.store_message(msg, cost_usd=0.0015)
 
-    messages = store.get_conversation("c1")
+    messages, _ = store.get_conversation("c1")
     assert len(messages) == 1
     assert messages[0]["cost_usd"] == 0.0015
 
@@ -62,7 +62,7 @@ def test_store_message_without_cost(store):
     msg = Message(conversation_id="c1", role="assistant", content="hi", model="llama3.2")
     store.store_message(msg)
 
-    messages = store.get_conversation("c1")
+    messages, _ = store.get_conversation("c1")
     assert messages[0]["cost_usd"] is None
 
 

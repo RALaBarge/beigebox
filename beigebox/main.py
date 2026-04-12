@@ -178,7 +178,8 @@ async def lifespan(app: FastAPI):
 
     # Storage
     sqlite_path, vector_store_path = get_storage_paths(cfg)
-    sqlite_store = SQLiteStore(sqlite_path)
+    _integrity_cfg = cfg.get("security", {}).get("memory_integrity", {})
+    sqlite_store = SQLiteStore(sqlite_path, integrity_config=_integrity_cfg)
     _storage_cfg  = cfg["storage"]
     _embed_cfg    = cfg["embedding"]
     _backend_type = _storage_cfg.get("vector_backend", "chromadb")
@@ -302,6 +303,12 @@ async def lifespan(app: FastAPI):
         blob_store=blob_store,
         egress_hooks=egress_hooks,
     )
+
+    # Late-bind the anomaly detector to the tool (proxy must exist first)
+    _aad_tool = tool_registry.get("api_anomaly_detector")
+    if _aad_tool and proxy.anomaly_detector:
+        _aad_tool.set_detector(proxy.anomaly_detector)
+        logger.info("APIAnomalyDetectorTool bound to proxy anomaly detector")
 
     _app_state = AppState(
         proxy=proxy,
@@ -705,9 +712,13 @@ async def chat_completions(request: Request):
 
     stream = body.get("stream", False)
 
+    # Extract client info for anomaly detection
+    client_ip = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("user-agent", "")
+
     if stream:
         return StreamingResponse(
-            _st.proxy.forward_chat_completion_stream(body),
+            _st.proxy.forward_chat_completion_stream(body, client_ip=client_ip, user_agent=user_agent),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -716,7 +727,7 @@ async def chat_completions(request: Request):
             },
         )
     else:
-        data = await _st.proxy.forward_chat_completion(body)
+        data = await _st.proxy.forward_chat_completion(body, client_ip=client_ip, user_agent=user_agent)
         from beigebox.proxy import _request_route as _rr
         _route_val = _rr.get("")
         extra = {"X-BeigeBox-Route": _route_val} if _route_val else {}

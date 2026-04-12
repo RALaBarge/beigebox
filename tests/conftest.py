@@ -87,3 +87,4 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "regression: regression tests")
     config.addinivalue_line("markers", "slow: slow test (>1 second)")
     config.addinivalue_line("markers", "benchmark: performance benchmark")
+    config.addinivalue_line("markers", "migration: database schema migration tests")

@@ -20,7 +20,7 @@ def test_store_and_retrieve(store):
     msg = Message(conversation_id="conv1", role="user", content="hello world", model="qwen3:32b")
     store.store_message(msg)
 
-    messages = store.get_conversation("conv1")
+    messages, _ = store.get_conversation("conv1")
     assert len(messages) == 1
     assert messages[0]["role"] == "user"
     assert messages[0]["content"] == "hello world"
@@ -32,7 +32,7 @@ def test_multiple_messages(store):
     store.store_message(Message(conversation_id="conv1", role="assistant", content="hello!"))
     store.store_message(Message(conversation_id="conv1", role="user", content="how are you?"))
 
-    messages = store.get_conversation("conv1")
+    messages, _ = store.get_conversation("conv1")
     assert len(messages) == 3
     assert messages[0]["role"] == "user"
     assert messages[1]["role"] == "assistant"
@@ -43,8 +43,10 @@ def test_separate_conversations(store):
     store.store_message(Message(conversation_id="conv1", role="user", content="msg1"))
     store.store_message(Message(conversation_id="conv2", role="user", content="msg2"))
 
-    assert len(store.get_conversation("conv1")) == 1
-    assert len(store.get_conversation("conv2")) == 1
+    msgs1, _ = store.get_conversation("conv1")
+    msgs2, _ = store.get_conversation("conv2")
+    assert len(msgs1) == 1
+    assert len(msgs2) == 1
 
 
 def test_stats(store):

@@ -30,7 +30,7 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "auto_summarization", "aggressive_summarization", "system_context", "generation", "models",
     "wasm", "web_ui", "voice", "wiretap", "semantic_cache", "classifier",
     "model_advertising", "zcommands", "advanced", "runtime", "skills",
-    "workspace", "hooks", "connections", "amf_mesh",
+    "workspace", "hooks", "connections", "amf_mesh", "security",
 }
 
 # ── Pydantic models for key sections ─────────────────────────────────────────
@@ -119,6 +119,56 @@ class _AggSumCfg(BaseModel):
     keep_last: int = 2
     model: str = ""
 
+class _RAGPoisoningCfg(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    enabled: bool = True
+    detection_mode: str = "warn"  # warn, quarantine, strict
+    sensitivity: float = 0.95
+    baseline_window: int = 1000
+    min_norm: float = 0.1
+    max_norm: float = 100.0
+
+class _MemoryIntegrityCfg(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    enabled: bool = True
+    mode: str = "log_only"  # log_only, quarantine, or strict
+    key_source: str = "env"  # env, file, or keyring
+    key_path: str = "~/.beigebox/memory.key"
+    dev_mode: bool = False  # graceful degradation if key missing (dev only)
+
+class _APIAnomalyCfg(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    enabled: bool = True
+    detection_mode: str = "warn"  # warn, rate_limit, block
+    baseline_window_seconds: int = 300  # 5-min rolling window
+    request_rate_threshold: int = 5  # max requests per minute
+    error_rate_threshold: float = 0.30  # max 30% errors
+    model_switch_threshold: int = 8  # max distinct models in window
+    latency_z_threshold: float = 3.0  # z-score for latency anomalies
+    payload_min_chars: int = 50  # minimum request size
+    payload_max_bytes: int = 100000  # maximum request size
+    ip_instability_threshold: int = 5  # max IPs per conversation
+    rules: dict = {}  # per-rule overrides
+
+class _MCPValidatorCfg(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    enabled: bool = False
+    allow_unsafe: bool = False
+    log_violations: bool = True
+    allow_localhost_cdp: bool = False
+    max_code_length: int = 10_000
+    max_query_length: int = 4_000
+    max_network_cidr: int = 24
+    max_ports: int = 100
+    max_network_timeout: float = 30.0
+
+class _SecurityCfg(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    rag_poisoning: _RAGPoisoningCfg = _RAGPoisoningCfg()
+    memory_integrity: _MemoryIntegrityCfg = _MemoryIntegrityCfg()
+    api_anomaly: _APIAnomalyCfg = _APIAnomalyCfg()
+    mcp_validator: _MCPValidatorCfg = _MCPValidatorCfg()
+
 class _BeigeBoxConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
     backends_enabled: bool = False
@@ -132,6 +182,7 @@ class _BeigeBoxConfig(BaseModel):
     cost_tracking: _CostTrackingCfg = _CostTrackingCfg()
     auto_summarization: _AutoSumCfg = _AutoSumCfg()
     aggressive_summarization: _AggSumCfg = _AggSumCfg()
+    security: _SecurityCfg = _SecurityCfg()
 
 
 def _validate_config(cfg: dict) -> None:

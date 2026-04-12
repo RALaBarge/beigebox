@@ -39,7 +39,7 @@ def test_fork_copies_all_messages(store):
     copied = store.fork_conversation("src", "fork1")
     assert copied == 3
 
-    forked = store.get_conversation("fork1")
+    forked, _ = store.get_conversation("fork1")
     assert len(forked) == 3
     assert forked[0]["content"] == "hello"
     assert forked[2]["content"] == "bye"
@@ -53,7 +53,7 @@ def test_fork_branch_at_limits_messages(store):
     copied = store.fork_conversation("src", "fork2", branch_at=1)
     assert copied == 2
 
-    forked = store.get_conversation("fork2")
+    forked, _ = store.get_conversation("fork2")
     assert len(forked) == 2
     assert forked[0]["content"] == "msg0"
     assert forked[1]["content"] == "msg1"
@@ -64,8 +64,8 @@ def test_fork_does_not_share_ids(store):
     store.store_message(Message(conversation_id="src", role="user", content="hi"))
     store.fork_conversation("src", "fork3")
 
-    src_msgs = store.get_conversation("src")
-    fork_msgs = store.get_conversation("fork3")
+    src_msgs, _ = store.get_conversation("src")
+    fork_msgs, _ = store.get_conversation("fork3")
 
     src_ids = {m["id"] for m in src_msgs}
     fork_ids = {m["id"] for m in fork_msgs}
@@ -76,7 +76,8 @@ def test_fork_empty_source_returns_zero(store):
     """Forking a non-existent conversation returns 0 and creates no messages."""
     copied = store.fork_conversation("nonexistent", "fork4")
     assert copied == 0
-    assert store.get_conversation("fork4") == []
+    msgs, _ = store.get_conversation("fork4")
+    assert msgs == []
 
 
 def test_fork_source_unchanged(store):
@@ -85,7 +86,7 @@ def test_fork_source_unchanged(store):
         store.store_message(Message(conversation_id="src", role="user", content=f"m{i}"))
 
     store.fork_conversation("src", "fork5")
-    src_after = store.get_conversation("src")
+    src_after, _ = store.get_conversation("src")
     assert len(src_after) == 3
 
 
@@ -95,7 +96,7 @@ def test_fork_preserves_cost_and_latency(store):
     store.store_message(msg, cost_usd=0.00042, latency_ms=512.0)
 
     store.fork_conversation("src", "fork6")
-    forked = store.get_conversation("fork6")
+    forked, _ = store.get_conversation("fork6")
     assert len(forked) == 1
     assert forked[0]["cost_usd"] == pytest.approx(0.00042)
     assert forked[0]["latency_ms"] == pytest.approx(512.0)
@@ -108,7 +109,7 @@ def test_fork_branch_at_zero_copies_one_message(store):
 
     copied = store.fork_conversation("src", "fork7", branch_at=0)
     assert copied == 1
-    forked = store.get_conversation("fork7")
+    forked, _ = store.get_conversation("fork7")
     assert forked[0]["content"] == "m0"
 
 

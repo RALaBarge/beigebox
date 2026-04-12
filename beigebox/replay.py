@@ -38,7 +38,7 @@ class ConversationReplayer:
             }
         """
         # Get messages from SQLite
-        messages = self.sqlite.get_conversation(conversation_id)
+        messages, _integrity = self.sqlite.get_conversation(conversation_id)
         if not messages:
             return {
                 "conversation_id": conversation_id,

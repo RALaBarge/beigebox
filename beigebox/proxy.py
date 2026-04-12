@@ -62,6 +62,7 @@ from beigebox.cache import SemanticCache, ToolResultCache
 from beigebox.aliases import AliasResolver
 from beigebox.guardrails import Guardrails
 from beigebox.validation.format import ResponseValidator
+from beigebox.security.anomaly_detector import APIAnomalyDetector
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +137,27 @@ class Proxy:
         # Request inspector — ring buffer of last N outbound payloads
         self._request_inspector: deque = deque(maxlen=5)
         self._inspector_counter: int = 0
+        # API Anomaly Detection — behavioral analysis for token extraction attacks
+        anom_cfg = self.cfg.get("security", {}).get("api_anomaly", {})
+        if anom_cfg.get("enabled", True):
+            self.anomaly_detector = APIAnomalyDetector(
+                window_seconds=anom_cfg.get("baseline_window_seconds", 300),
+                request_rate_threshold=anom_cfg.get("request_rate_threshold", 5),
+                error_rate_threshold=anom_cfg.get("error_rate_threshold", 0.30),
+                model_switch_threshold=anom_cfg.get("model_switch_threshold", 8),
+                latency_z_threshold=anom_cfg.get("latency_z_threshold", 3.0),
+                payload_min_chars=anom_cfg.get("payload_min_chars", 50),
+                payload_max_bytes=anom_cfg.get("payload_max_bytes", 100000),
+                ip_instability_threshold=anom_cfg.get("ip_instability_threshold", 5),
+            )
+            logger.info(
+                "APIAnomalyDetector initialized (mode=%s, window=%ds)",
+                anom_cfg.get("detection_mode", "warn"),
+                anom_cfg.get("baseline_window_seconds", 300),
+            )
+        else:
+            self.anomaly_detector = None
+        self._anomaly_cfg = anom_cfg
 
     # ------------------------------------------------------------------
     # Session cache helpers
@@ -1138,7 +1160,9 @@ class Proxy:
     # ------------------------------------------------------------------
     # ------------------------------------------------------------------
 
-    async def forward_chat_completion(self, body: dict) -> dict:
+    async def forward_chat_completion(
+        self, body: dict, client_ip: str = "unknown", user_agent: str = ""
+    ) -> dict:
         """Forward a non-streaming chat completion request."""
         import time as _time
         _t0 = _time.monotonic()
@@ -1209,6 +1233,38 @@ class Proxy:
                 "choices": [{"message": {"role": "assistant", "content": block.get("message", "Request blocked.")}}],
                 "model": "beigebox",
             }
+
+        # API Anomaly Detection — check for suspicious patterns
+        _t_anom = _time.monotonic()
+        if self.anomaly_detector:
+            _req_bytes = len(str(body).encode("utf-8"))
+            is_anom, triggered_rules = self.anomaly_detector.is_anomalous(client_ip, user_agent, _req_bytes)
+            if is_anom:
+                from beigebox.security.anomaly_detector import _compute_risk_score, _recommended_action
+                _risk = _compute_risk_score(triggered_rules)
+                mode = self._anomaly_cfg.get("detection_mode", "warn")
+                _action = _recommended_action(_risk, mode)
+                self.wire.log(
+                    direction="internal",
+                    role="system",
+                    content=f"anomaly detected: {', '.join(triggered_rules)} (ip={client_ip}, risk={_risk:.2f}, action={_action})",
+                    model=model,
+                    conversation_id=conversation_id,
+                    event_type="security_anomaly",
+                    meta={
+                        "rules_triggered": triggered_rules,
+                        "client_ip": client_ip,
+                        "risk_score": _risk,
+                        "recommended_action": _action,
+                        "detection_mode": mode,
+                    },
+                )
+                if _action == "block":
+                    return {
+                        "choices": [{"message": {"role": "assistant", "content": "Request blocked due to suspicious activity."}}],
+                        "model": "beigebox",
+                    }
+        _stages["anomaly_check"] = (_time.monotonic() - _t_anom) * 1000
 
         try:
             body, decision, is_synthetic, model = await self._run_request_pipeline(
@@ -1363,9 +1419,29 @@ class Proxy:
             timing=_stages,
         )
 
+        # Record request metrics for anomaly detection baseline updates
+        if self.anomaly_detector:
+            request_body_bytes = len(str(body).encode("utf-8"))
+            # Extract API key if available (use placeholder if not)
+            api_key = body.get("_bb_auth_key", "anonymous")
+            # Determine status code (200 for success, 5xx for error)
+            status_code = 200 if "error" not in data else 500
+            self.anomaly_detector.record_request(
+                ip=client_ip,
+                user_agent=user_agent,
+                api_key=api_key,
+                model=model,
+                request_bytes=request_body_bytes,
+                status_code=status_code,
+                latency_ms=total_ms,
+                conversation_id=conversation_id,
+            )
+
         return data
 
-    async def forward_chat_completion_stream(self, body: dict):
+    async def forward_chat_completion_stream(
+        self, body: dict, client_ip: str = "unknown", user_agent: str = ""
+    ):
         """
         Forward a streaming chat completion request.
         Yields SSE chunks to the client while buffering the full response for logging.
@@ -1426,6 +1502,43 @@ class Proxy:
             yield f"data: {chunk}\n"
             yield "data: [DONE]\n"
             return
+
+        # API Anomaly Detection — check for suspicious patterns
+        _t_anom = _time.monotonic()
+        _anomaly_triggered = False
+        if self.anomaly_detector:
+            _req_bytes = len(str(body).encode("utf-8"))
+            is_anom, triggered_rules = self.anomaly_detector.is_anomalous(client_ip, user_agent, _req_bytes)
+            if is_anom:
+                _anomaly_triggered = True
+                from beigebox.security.anomaly_detector import _compute_risk_score, _recommended_action
+                _risk = _compute_risk_score(triggered_rules)
+                mode = self._anomaly_cfg.get("detection_mode", "warn")
+                _action = _recommended_action(_risk, mode)
+                self.wire.log(
+                    direction="internal",
+                    role="system",
+                    content=f"anomaly detected: {', '.join(triggered_rules)} (ip={client_ip}, risk={_risk:.2f}, action={_action})",
+                    model=model,
+                    conversation_id=conversation_id,
+                    event_type="security_anomaly",
+                    meta={
+                        "rules_triggered": triggered_rules,
+                        "client_ip": client_ip,
+                        "risk_score": _risk,
+                        "recommended_action": _action,
+                        "detection_mode": mode,
+                    },
+                )
+                if _action == "block":
+                    chunk = json.dumps({
+                        "choices": [{"delta": {"content": "Request blocked due to suspicious activity."}, "index": 0}],
+                        "model": "beigebox",
+                    })
+                    yield f"data: {chunk}\n"
+                    yield "data: [DONE]\n"
+                    return
+        _stages["anomaly_check"] = (_time.monotonic() - _t_anom) * 1000
 
         try:
             body, decision, is_synthetic, model = await self._run_request_pipeline(
@@ -1744,6 +1857,22 @@ class Proxy:
             latency_ms=total_ms,
             timing=_stages,
         )
+
+        # Record request metrics for anomaly detection baseline updates
+        if self.anomaly_detector:
+            request_body_bytes = len(str(body).encode("utf-8"))
+            # Extract API key if available (use placeholder if not)
+            api_key = body.get("_bb_auth_key", "anonymous")
+            self.anomaly_detector.record_request(
+                ip=client_ip,
+                user_agent=user_agent,
+                api_key=api_key,
+                model=model,
+                request_bytes=request_body_bytes,
+                status_code=200,  # Stream completed successfully
+                latency_ms=total_ms,
+                conversation_id=conversation_id,
+            )
 
     async def list_models(self) -> dict:
         """Forward /v1/models request to backend(s), optionally rewriting model names.

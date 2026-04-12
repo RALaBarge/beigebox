@@ -9,9 +9,11 @@ import json
 import logging
 from pathlib import Path
 from contextlib import contextmanager
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from beigebox.storage.models import Message
+from beigebox.security.memory_integrity import ConversationIntegrityValidator, IntegrityAuditLog
+from beigebox.security.key_management import KeyManager
 
 logger = logging.getLogger(__name__)
 
@@ -242,16 +244,95 @@ MIGRATIONS = [
     "ALTER TABLE conversations ADD COLUMN user_id TEXT DEFAULT NULL",
     # v1.1 — per-turn context archive index (operator_turns table is in CREATE_TABLES)
     "SELECT 1",  # no-op placeholder; table created via CREATE TABLE IF NOT EXISTS above
+    # v1.2 — memory integrity validation columns
+    "ALTER TABLE messages ADD COLUMN message_hmac TEXT DEFAULT NULL",
+    "ALTER TABLE messages ADD COLUMN integrity_version INTEGER DEFAULT 1",
+    "ALTER TABLE messages ADD COLUMN tamper_detected BOOLEAN DEFAULT 0",
+    "ALTER TABLE conversations ADD COLUMN integrity_checked_at TEXT DEFAULT NULL",
 ]
 
 
 class SQLiteStore:
-    """Thread-safe SQLite conversation store."""
+    """Thread-safe SQLite conversation store with integrity validation."""
 
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, integrity_config: Optional[Dict] = None):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Initialize integrity validator if enabled
+        self.integrity_validator: Optional[ConversationIntegrityValidator] = None
+        self.integrity_mode: str = "log_only"
+        self._init_integrity(integrity_config or {})
+
         self._init_db()
+
+    @staticmethod
+    def _extract_signable_fields(msg: dict) -> dict:
+        """
+        Extract only the fields that are signed for integrity verification.
+
+        These must match the fields signed in store_message() to avoid mismatches.
+
+        Args:
+            msg: Full message dict from database
+
+        Returns:
+            Dict with only signable fields
+        """
+        signable_fields = {
+            "id", "conversation_id", "role", "content", "model",
+            "timestamp", "token_count"
+        }
+        return {k: v for k, v in msg.items() if k in signable_fields}
+
+    def _init_integrity(self, integrity_config: Dict) -> None:
+        """
+        Initialize integrity validation if enabled.
+
+        Args:
+            integrity_config: Config dict with keys: enabled, mode, key_source, key_path, dev_mode
+        """
+        # Default to disabled when no config is provided (empty dict).
+        # Explicit {"enabled": true} is required to activate integrity.
+        if not integrity_config or not integrity_config.get("enabled", False):
+            logger.info("Memory integrity validation disabled")
+            return
+
+        try:
+            mode = integrity_config.get("mode", "log_only")
+            key_source = integrity_config.get("key_source", "env")
+            key_path = integrity_config.get("key_path", "~/.beigebox/memory.key")
+            dev_mode = integrity_config.get("dev_mode", False)
+
+            # Expand ~ in path
+            if key_path.startswith("~"):
+                key_path = str(Path(key_path).expanduser())
+
+            # Load key from configured source
+            key = KeyManager.load_key(
+                key_source=key_source,
+                key_path=key_path,
+                dev_mode=dev_mode
+            )
+
+            if key is None:
+                logger.warning(
+                    "Memory integrity key not available (dev_mode=%s)", dev_mode
+                )
+                return
+
+            # Initialize validator
+            self.integrity_validator = ConversationIntegrityValidator(key)
+            self.integrity_mode = mode
+            logger.info(
+                "Memory integrity validation enabled (mode=%s, key_source=%s)",
+                mode, key_source
+            )
+
+        except Exception as e:
+            logger.error("Failed to initialize integrity validation: %s", e)
+            if not integrity_config.get("dev_mode", False):
+                raise
 
     def _init_db(self):
         with self._connect() as conn:
@@ -324,27 +405,139 @@ class SQLiteStore:
             row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
             return dict(row) if row else None
 
-    def store_message(self, msg: Message, cost_usd: float | None = None, latency_ms: float | None = None, ttft_ms: float | None = None):
-        """Store a single message. Creates conversation if needed."""
-        self.ensure_conversation(msg.conversation_id, msg.timestamp)
+    def store_message(self, msg: Message, cost_usd: float | None = None, latency_ms: float | None = None, ttft_ms: float | None = None, user_id: str | None = None):
+        """
+        Store a single message. Creates conversation if needed.
+
+        If integrity validation is enabled, computes and stores HMAC signature.
+
+        Args:
+            msg: Message to store
+            cost_usd: Optional cost in USD
+            latency_ms: Optional latency in milliseconds
+            ttft_ms: Optional time-to-first-token in milliseconds
+            user_id: Optional user ID (used for integrity signature)
+        """
+        self.ensure_conversation(msg.conversation_id, msg.timestamp, user_id)
+
+        # Compute HMAC signature if integrity is enabled
+        message_hmac = None
+        if self.integrity_validator and user_id:
+            msg_dict = {
+                "id": msg.id,
+                "conversation_id": msg.conversation_id,
+                "role": msg.role,
+                "content": msg.content,
+                "model": msg.model,
+                "timestamp": msg.timestamp,
+                "token_count": msg.token_count,
+            }
+            message_hmac = self.integrity_validator.sign_message(msg_dict, user_id)
+
         with self._connect() as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO messages
-                   (id, conversation_id, role, content, model, timestamp, token_count, cost_usd, latency_ms, ttft_ms)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (id, conversation_id, role, content, model, timestamp, token_count, cost_usd, latency_ms, ttft_ms, message_hmac, integrity_version, tamper_detected)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (msg.id, msg.conversation_id, msg.role, msg.content,
-                 msg.model, msg.timestamp, msg.token_count, cost_usd, latency_ms, ttft_ms),
+                 msg.model, msg.timestamp, msg.token_count, cost_usd, latency_ms, ttft_ms,
+                 message_hmac, 1, 0),
             )
         logger.debug("Stored message %s (role=%s, conv=%s)", msg.id, msg.role, msg.conversation_id)
 
-    def get_conversation(self, conversation_id: str) -> list[dict]:
-        """Retrieve all messages for a conversation in order."""
+    def get_conversation(self, conversation_id: str, user_id: str | None = None) -> tuple[list[dict], dict]:
+        """
+        Retrieve all messages for a conversation in order.
+
+        If integrity validation is enabled, verifies signatures on read.
+        Returns messages and integrity status.
+
+        Args:
+            conversation_id: Which conversation to retrieve
+            user_id: Optional user ID (required for signature verification)
+
+        Returns:
+            Tuple of (messages, integrity_status)
+            - messages: List of message dicts
+            - integrity_status: {
+                "valid": bool,
+                "tampered_messages": list[str],  # message IDs with invalid signatures
+                "unsigned_messages": list[str],  # message IDs with no signature
+              }
+        """
         with self._connect() as conn:
+            # Get conversation
+            conv = conn.execute(
+                "SELECT * FROM conversations WHERE id = ?",
+                (conversation_id,),
+            ).fetchone()
+
+            # Get all messages
             rows = conn.execute(
                 "SELECT * FROM messages WHERE conversation_id = ? ORDER BY timestamp",
                 (conversation_id,),
             ).fetchall()
-        return [dict(r) for r in rows]
+
+        messages = [dict(r) for r in rows]
+        integrity_status = {
+            "valid": True,
+            "tampered_messages": [],
+            "unsigned_messages": [],
+        }
+
+        # Verify integrity if enabled
+        if self.integrity_validator and user_id and messages:
+            unsigned = []
+            tampered = []
+
+            for msg in messages:
+                msg_sig = msg.get("message_hmac")
+
+                if not msg_sig:
+                    unsigned.append(msg["id"])
+                    continue
+
+                # Extract only signable fields for verification
+                msg_for_verify = self._extract_signable_fields(msg)
+
+                if not self.integrity_validator.verify_message(msg_for_verify, user_id, msg_sig):
+                    tampered.append(msg["id"])
+                    # Mark message as tampered in database
+                    with self._connect() as conn:
+                        conn.execute(
+                            "UPDATE messages SET tamper_detected = 1 WHERE id = ?",
+                            (msg["id"],)
+                        )
+
+            integrity_status["unsigned_messages"] = unsigned
+            integrity_status["tampered_messages"] = tampered
+
+            # Determine overall validity and handle based on mode
+            if unsigned or tampered:
+                integrity_status["valid"] = False
+
+                for msg_id in tampered:
+                    IntegrityAuditLog.log_violation(
+                        conversation_id, msg_id, user_id,
+                        "signature_mismatch", self.integrity_mode
+                    )
+
+                for msg_id in unsigned:
+                    IntegrityAuditLog.log_violation(
+                        conversation_id, msg_id, user_id,
+                        "missing_signature", self.integrity_mode
+                    )
+
+                # Handle based on mode
+                if self.integrity_mode == "strict":
+                    raise ValueError(
+                        f"Conversation {conversation_id} failed integrity check: "
+                        f"{len(tampered)} tampered, {len(unsigned)} unsigned"
+                    )
+                # "log_only" and "quarantine" both return the messages
+                # but mark them as suspect for higher-level handling
+
+        return messages, integrity_status
 
     def get_recent_conversations(self, limit: int = 20) -> list[dict]:
         """Get most recent conversations with their last message."""
@@ -499,7 +692,7 @@ class SQLiteStore:
         If branch_at is given, only messages 0..branch_at (inclusive) are copied.
         Returns the number of messages copied.
         """
-        messages = self.get_conversation(source_conv_id)
+        messages, _ = self.get_conversation(source_conv_id)
         if branch_at is not None:
             messages = messages[: branch_at + 1]
         if not messages:
@@ -545,7 +738,7 @@ class SQLiteStore:
 
         result = []
         for conv in conversations:
-            messages = self.get_conversation(conv["id"])
+            messages, _ = self.get_conversation(conv["id"])
             result.append({
                 "conversation_id": conv["id"],
                 "messages": [
