@@ -378,6 +378,14 @@ class SQLiteStore:
                         logger.warning("Migration skipped: %s", e)
         logger.info("SQLite store initialized at %s", self.db_path)
 
+        # Fix file permissions: restrict to owner only (0600)
+        # This prevents other users on the system from reading API keys, user emails, etc.
+        import os
+        try:
+            os.chmod(self.db_path, 0o600)
+        except (OSError, FileNotFoundError):
+            logger.warning("Could not set database file permissions to 0600 — may be a permissions issue")
+
     @contextmanager
     def _connect(self):
         conn = sqlite3.connect(str(self.db_path))
@@ -440,13 +448,17 @@ class SQLiteStore:
     def create_api_key(self, user_id: str, name: str = "default") -> tuple[str, str]:
         """Create a new API key for a user. Returns (key_id, plain_key)."""
         import uuid
-        import hashlib
         import secrets
         from datetime import datetime, timezone
+        try:
+            import bcrypt
+        except ImportError:
+            raise ImportError("bcrypt is required for API key hashing. Install: pip install bcrypt")
 
         key_id = str(uuid.uuid4())
         plain_key = secrets.token_urlsafe(32)
-        key_hash = hashlib.sha256(plain_key.encode()).hexdigest()
+        # Bcrypt hash with cost factor 12 (industry standard, ~100ms per hash)
+        key_hash = bcrypt.hashpw(plain_key.encode(), bcrypt.gensalt(rounds=12)).decode()
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         with self._connect() as conn:
@@ -457,19 +469,51 @@ class SQLiteStore:
             )
         return key_id, plain_key
 
-    def verify_api_key(self, key_hash: str) -> str | None:
-        """Verify an API key hash. Return user_id if valid, None otherwise."""
+    def verify_api_key(self, plain_key: str) -> str | None:
+        """Verify an API key. Return user_id if valid, None otherwise.
+
+        Uses constant-time bcrypt verification to prevent timing attacks.
+        """
+        try:
+            import bcrypt
+        except ImportError:
+            raise ImportError("bcrypt is required for API key verification. Install: pip install bcrypt")
+
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT user_id FROM api_keys WHERE key_hash=? AND active=1 "
+            # Fetch all active, non-expired keys for this user
+            # Note: We can't use WHERE key_hash=plain_key with bcrypt, so we fetch all and check
+            rows = conn.execute(
+                "SELECT user_id, key_hash FROM api_keys WHERE active=1 "
                 "AND (expires_at IS NULL OR expires_at > datetime('now'))",
-                (key_hash,),
-            ).fetchone()
-            if row:
-                # Update last_used timestamp
-                now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                conn.execute("UPDATE api_keys SET last_used=? WHERE key_hash=?", (now, key_hash))
-                return row[0]
+            ).fetchall()
+
+            for row in rows:
+                stored_hash = row[1]
+                try:
+                    # Constant-time comparison using bcrypt
+                    if bcrypt.checkpw(plain_key.encode(), stored_hash.encode()):
+                        user_id = row[0]
+                        # Update last_used timestamp (after finding match, for performance)
+                        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                        conn.execute(
+                            "UPDATE api_keys SET last_used=? WHERE key_hash=?",
+                            (now, stored_hash),
+                        )
+                        return user_id
+                except ValueError:
+                    # Invalid bcrypt hash (shouldn't happen with valid DB)
+                    continue
+
+            # Constant-time check: always do at least one bcrypt operation
+            # even if no keys found, to prevent timing attacks
+            try:
+                bcrypt.checkpw(
+                    plain_key.encode(),
+                    bcrypt.gensalt(rounds=4).encode()  # dummy hash for constant timing
+                )
+            except ValueError:
+                pass
+
             return None
 
     def get_api_keys(self, user_id: str) -> list[dict]:

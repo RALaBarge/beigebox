@@ -275,6 +275,10 @@ auth:
   # Static API key (for backwards compatibility — legacy mode)
   api_key: ""
 
+  # Rate limit for dynamically-generated API keys (user-generated via web UI)
+  # Static keys from config can have per-key limits; dynamic keys use this default
+  dynamic_key_rate_limit_rpm: 100  # 100 requests per minute per key
+
   # OAuth2 web UI authentication (GitHub / Google)
   # Enable "mode: oauth" to gate the web UI behind OAuth login
   web_ui:

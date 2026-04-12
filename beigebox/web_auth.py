@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 COOKIE_SESSION  = "bb_session"
 COOKIE_STATE    = "bb_oauth_state"
-_SESSION_MAX_AGE = 60 * 60 * 24 * 7   # 7 days
+_SESSION_MAX_AGE = 60 * 60 * 4   # 4 hours — industry standard for web sessions
 
 
 # ---------------------------------------------------------------------------
@@ -158,8 +158,23 @@ class GitHubProvider:
 
         # Check org membership if allowed_orgs specified
         if self._allowed_orgs:
-            # TODO: implement org membership check if needed
-            pass
+            # Query /user/orgs to get list of orgs user belongs to
+            orgs_resp = await client.get(
+                "https://api.github.com/user/orgs",
+                headers={"Authorization": f"token {access_token}"},
+                params={"per_page": 100},  # Paginate if user is in many orgs
+            )
+            orgs_resp.raise_for_status()
+            user_orgs = {org.get("login", "").lower() for org in orgs_resp.json()}
+
+            # Check if user is in at least one allowed org
+            allowed_orgs_lower = {org.lower() for org in self._allowed_orgs}
+            if not user_orgs & allowed_orgs_lower:  # Set intersection
+                raise PermissionError(
+                    f"User is not a member of any allowed organizations. "
+                    f"Allowed: {', '.join(self._allowed_orgs)}; "
+                    f"User orgs: {', '.join(user_orgs) if user_orgs else '(none)'}"
+                )
 
         return user
 
@@ -256,7 +271,7 @@ class WebAuthManager:
         if self.mode != "oauth":
             return
 
-        secret = _resolve_secret("bb-session") or os.environ.get("BB_SESSION_SECRET", "")
+        secret, secret_source = _resolve_secret("bb-session")
         if not secret:
             secret = secrets.token_hex(32)
             logger.warning(
@@ -264,16 +279,15 @@ class WebAuthManager:
                 "sessions will not survive a restart. "
                 "Fix: set BB_SESSION_SECRET env var  or:  agentauth add bb-session"
             )
+        else:
+            logger.info("WebAuth: BB_SESSION_SECRET resolved from %s", secret_source)
         self._signer = URLSafeTimedSerializer(secret, salt="bb-web-session")
 
         for prov_cfg in web_ui_cfg.get("providers", []):
             pname = prov_cfg.get("name", "").lower()
             if pname == "github":
                 client_id = prov_cfg.get("client_id", "").strip()
-                client_secret = (
-                    _resolve_secret("github")
-                    or os.environ.get("BB_GITHUB_CLIENT_SECRET", "")
-                )
+                client_secret, secret_source = _resolve_secret("github")
                 if not client_id or not client_secret:
                     logger.error(
                         "WebAuth: GitHub provider missing client_id or client_secret — skipping. "
@@ -285,13 +299,13 @@ class WebAuthManager:
                     client_secret=client_secret,
                     allowed_orgs=prov_cfg.get("allowed_orgs", []),
                 )
-                logger.info("WebAuth: GitHub provider registered (client_id=%s…)", client_id[:8])
+                logger.info(
+                    "WebAuth: GitHub provider registered (client_id=%s…, secret from %s)",
+                    client_id[:8], secret_source
+                )
             elif pname == "google":
                 client_id = prov_cfg.get("client_id", "").strip()
-                client_secret = (
-                    _resolve_secret("google")
-                    or os.environ.get("BB_GOOGLE_CLIENT_SECRET", "")
-                )
+                client_secret, secret_source = _resolve_secret("google")
                 if not client_id or not client_secret:
                     logger.error(
                         "WebAuth: Google provider missing client_id or client_secret — skipping. "
@@ -303,7 +317,10 @@ class WebAuthManager:
                     client_secret=client_secret,
                     allowed_emails=prov_cfg.get("allowed_emails", []),
                 )
-                logger.info("WebAuth: Google provider registered (client_id=%s…)", client_id[:8])
+                logger.info(
+                    "WebAuth: Google provider registered (client_id=%s…, secret from %s)",
+                    client_id[:8], secret_source
+                )
             else:
                 logger.warning("WebAuth: unknown provider '%s' — skipping", pname)
 
@@ -345,13 +362,23 @@ class WebAuthManager:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_secret(name: str) -> str | None:
-    """Resolve via agentauth keychain first, then fall back to None."""
+def _resolve_secret(name: str) -> tuple[str | None, str]:
+    """Resolve via agentauth keychain first, then env var. Return (value, source).
+
+    Returns:
+        (secret_value, source_description) where source is "keychain", "env_var", or "not_found"
+    """
     try:
         from agentauth.registry import get_token
         val = get_token(name)
         if val:
-            return val
-    except Exception:
-        pass
-    return None
+            return val, "keychain"
+    except Exception as e:
+        logger.debug("agentauth unavailable for '%s': %s", name, e)
+
+    env_key = f"BB_{name.upper()}_TOKEN"
+    val = os.environ.get(env_key)
+    if val:
+        return val, f"env_var ({env_key})"
+
+    return None, "not_found"

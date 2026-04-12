@@ -2512,3 +2512,78 @@ AttributeError: 'ParetoOptimizer' object has no attribute 'weighted_score'
 2026-04-12 18:55:53,649 [INFO] beigebox.main: Wiretap and payload log flushed and closed
 2026-04-12 18:55:53,680 [INFO] beigebox.main: BeigeBox shutting down
 2026-04-12 18:55:53,680 [INFO] beigebox.main: Wiretap and payload log flushed and closed
+2026-04-12 19:05:21,787 [INFO] beigebox.storage.sqlite_store: Memory integrity validation disabled
+2026-04-12 19:05:21,788 [INFO] beigebox.storage.sqlite_store: SQLite store initialized at data/beigebox.db
+2026-04-12 19:05:21,788 [INFO] beigebox.main: RAG poisoning detection: ENABLED (sensitivity=0.95)
+2026-04-12 19:05:22,054 [INFO] chromadb.telemetry.product.posthog: Anonymized telemetry enabled. See                     https://docs.trychroma.com/telemetry for more information.
+2026-04-12 19:05:22,125 [INFO] beigebox.security.rag_poisoning_detector: RAGPoisoningDetector initialized (sensitivity=0.95, z_threshold=3.11, baseline_window=1000, norm_range=[0.1, 100.0])
+2026-04-12 19:05:22,125 [INFO] beigebox.storage.backends.chroma: ChromaBackend initialised (path=data/chroma, thread-safe, rag_detection=True, mode=warn)
+2026-04-12 19:05:22,125 [INFO] beigebox.storage.vector_store: VectorStore initialised (backend=ChromaBackend, model=nomic-embed-text, quarantine=disabled)
+2026-04-12 19:05:22,125 [INFO] beigebox.storage.blob_store: BlobStore initialised at data/chroma/blobs
+2026-04-12 19:05:22,125 [INFO] beigebox.tools.validation: ParameterValidator initialized (enabled=True, mode=strict)
+2026-04-12 19:05:22,126 [INFO] beigebox.tools.calculator: CalculatorTool initialized
+2026-04-12 19:05:22,126 [INFO] beigebox.tools.datetime_tool: DateTimeTool initialized (local UTC-5.0)
+2026-04-12 19:05:22,131 [WARNING] beigebox.tools.system_info: bwrap probe failed (Command '['/usr/bin/bwrap', '--die-with-parent', '--unshare-all', '--ro-bind', '/usr', '/usr', '--ro-bind-try', '/bin', '/bin', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--chdir', '/tmp', '/bin/true']' returned non-zero exit status 1.) — falling back to busybox wrapper. Check kernel.unprivileged_userns_clone if unexpected.
+2026-04-12 19:05:22,131 [INFO] beigebox.tools.system_info: SystemInfoTool initialised (execution mode: busybox fallback)
+2026-04-12 19:05:22,134 [INFO] beigebox.tools.system_info: Shell allowlist: 0 commands
+2026-04-12 19:05:22,135 [INFO] beigebox.tools.memory: MemoryTool initialized (max_results=3, min_score=0.3, preprocess=False model=gemma3:4b)
+2026-04-12 19:05:22,135 [INFO] beigebox.tools.registry: CDP tool registered (ws_url=ws://localhost:9222)
+2026-04-12 19:05:22,135 [WARNING] beigebox.tools.apex_analyzer: ApexAnalyzerTool: no project root found. Searched: [PosixPath('/home/jinx/IdeaProjects'), PosixPath('/home/jinx/Projects')]
+2026-04-12 19:05:22,135 [INFO] beigebox.tools.registry: Apex analyzer registered (project_root=auto-detect macOS defaults)
+2026-04-12 19:05:22,135 [INFO] beigebox.tools.registry: Confluence crawler registered
+2026-04-12 19:05:22,135 [INFO] beigebox.tools.registry: APIAnomalyDetectorTool registered (detector late-bound from proxy)
+2026-04-12 19:05:22,135 [INFO] beigebox.tools.registry: PlanManager tool registered
+2026-04-12 19:05:22,135 [INFO] beigebox.tools.registry: Tool registry loaded: ['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp', 'apex_analyzer', 'confluence_crawler', 'api_anomaly_detector', 'plan_manager']
+2026-04-12 19:05:22,136 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'dice' ← dice.py (DiceTool)
+2026-04-12 19:05:22,136 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'doc_parser' ← doc_parser.py (DocParserTool)
+2026-04-12 19:05:22,136 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'repo' ← repo_tool.py (RepoTool)
+2026-04-12 19:05:22,136 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'units' ← units.py (UnitsTool)
+2026-04-12 19:05:22,136 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'wiretap_summary' ← wiretap_summary.py (WiretapSummaryTool)
+2026-04-12 19:05:22,137 [INFO] beigebox.tools.plugin_loader: Plugin loaded: 'zip_inspector' ← zip_inspector.py (ZipInspectorTool)
+2026-04-12 19:05:22,137 [INFO] beigebox.tools.plugin_loader: Plugin loader: registered 6 plugin(s): ['dice', 'doc_parser', 'repo', 'units', 'wiretap_summary', 'zip_inspector']
+2026-04-12 19:05:22,137 [INFO] beigebox.tools.registry: Tool registry after plugins: ['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp', 'apex_analyzer', 'confluence_crawler', 'api_anomaly_detector', 'plan_manager', 'dice', 'doc_parser', 'repo', 'units', 'wiretap_summary', 'zip_inspector']
+2026-04-12 19:05:22,137 [INFO] beigebox.agents.decision: DecisionAgent enabled (model=gemma3:4b, routes=[], tools=['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp', 'apex_analyzer', 'confluence_crawler', 'api_anomaly_detector', 'plan_manager', 'dice', 'doc_parser', 'repo', 'units', 'wiretap_summary', 'zip_inspector'])
+2026-04-12 19:05:22,137 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: simple
+2026-04-12 19:05:22,137 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: complex
+2026-04-12 19:05:22,137 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: code
+2026-04-12 19:05:22,137 [INFO] beigebox.agents.embedding_classifier: Loaded centroid: creative
+2026-04-12 19:05:22,138 [INFO] beigebox.backends.router: model_routes: pattern 'google/*' → backend 'openrouter'
+2026-04-12 19:05:22,138 [INFO] beigebox.backends.router: model_routes: pattern 'openai/*' → backend 'openrouter'
+2026-04-12 19:05:22,138 [INFO] beigebox.backends.router: model_routes: pattern 'meta-llama/*' → backend 'openrouter'
+2026-04-12 19:05:22,138 [INFO] beigebox.backends.router: model_routes: pattern 'anthropic/*' → backend 'openrouter'
+2026-04-12 19:05:22,138 [INFO] beigebox.backends.router: model_routes: pattern 'mistralai/*' → backend 'openrouter'
+2026-04-12 19:05:22,138 [INFO] beigebox.backends.router: model_routes: pattern 'x-ai/*' → backend 'openrouter'
+2026-04-12 19:05:22,138 [INFO] beigebox.backends.router: model_routes: pattern 'deepseek/*' → backend 'openrouter'
+2026-04-12 19:05:22,138 [INFO] beigebox.backends.router: model_routes: pattern 'qwen/*' → backend 'openrouter'
+2026-04-12 19:05:22,138 [INFO] beigebox.backends.router: model_routes: pattern 'cohere/*' → backend 'openrouter'
+2026-04-12 19:05:22,138 [INFO] beigebox.backends.router: model_routes: pattern 'nvidia/*' → backend 'openrouter'
+2026-04-12 19:05:22,138 [INFO] beigebox.backends.router: Multi-backend router initialized: ollama-local(p1) → openrouter(p3)
+2026-04-12 19:05:22,138 [INFO] beigebox.main: Multi-backend router: enabled (2 backends)
+2026-04-12 19:05:22,138 [INFO] beigebox.main: Cost tracking: enabled
+2026-04-12 19:05:22,138 [INFO] beigebox.auth: Auth: disabled (no keys configured)
+2026-04-12 19:05:22,139 [INFO] beigebox.agents.skill_loader: Loaded skill: beigebox-admin
+2026-04-12 19:05:22,140 [INFO] beigebox.agents.skill_loader: Loaded skill: pdf-processing
+2026-04-12 19:05:22,140 [INFO] beigebox.agents.skill_loader: Loaded skill: tone-ryan
+2026-04-12 19:05:22,140 [INFO] beigebox.main: MCP server: enabled (POST /mcp) — operator/run tool exposed
+2026-04-12 19:05:22,140 [INFO] beigebox.amf_mesh: AMF mesh: disabled (set amf_mesh.enabled: true in config.yaml)
+2026-04-12 19:05:22,142 [INFO] beigebox.security.extraction_detector: ExtractionDetector initialized (diversity_threshold=2.5, instruction_threshold=10, token_variance_threshold=0.0100, inversion_threshold=3, baseline_window=20, analysis_window=100)
+2026-04-12 19:05:22,142 [INFO] beigebox.main: Model extraction detection: ENABLED
+2026-04-12 19:05:22,150 [INFO] beigebox.security.enhanced_injection_guard: EnhancedInjectionGuard initialized (pattern=True, semantic=True, context=True, threshold=0.70)
+2026-04-12 19:05:22,150 [INFO] beigebox.main: Enhanced Injection Guard: initialized with semantic + pattern detection
+2026-04-12 19:05:22,150 [INFO] beigebox.security.rag_content_scanner: RAGContentScanner initialized (pattern=True, metadata=True, semantic=True, threshold=0.70)
+2026-04-12 19:05:22,150 [INFO] beigebox.main: RAG Content Scanner: initialized for pre-embed detection
+2026-04-12 19:05:22,150 [INFO] beigebox.security.anomaly_detector: APIAnomalyDetector initialized (sensitivity=medium, window=300s, z_threshold=3.0, rate_threshold=5/min, error_threshold=30.0%, model_switches=8, latency_z=3.0, min_baseline=50, db=in-memory)
+2026-04-12 19:05:22,150 [INFO] beigebox.proxy: APIAnomalyDetector initialized (mode=warn, window=300s)
+2026-04-12 19:05:22,150 [INFO] beigebox.main: APIAnomalyDetectorTool bound to proxy anomaly detector
+2026-04-12 19:05:22,150 [INFO] beigebox.main: BeigeBox started — listening on 0.0.0.0:8001, backend http://localhost:11434
+2026-04-12 19:05:22,150 [INFO] beigebox.main: Storage: SQLite=./data/beigebox.db, Vector=./data/chroma
+2026-04-12 19:05:22,150 [INFO] beigebox.main: Tools: ['calculator', 'datetime', 'system_info', 'workspace_file', 'document_search', 'memory', 'cdp', 'apex_analyzer', 'confluence_crawler', 'api_anomaly_detector', 'plan_manager', 'dice', 'doc_parser', 'repo', 'units', 'wiretap_summary', 'zip_inspector']
+2026-04-12 19:05:22,150 [INFO] beigebox.main: Hooks: []
+2026-04-12 19:05:22,150 [INFO] beigebox.main: Decision LLM: enabled
+2026-04-12 19:05:22,150 [INFO] beigebox.main: Embedding classifier: ready
+2026-04-12 19:05:22,150 [INFO] beigebox.main: Z-commands: enabled (prefix messages with 'z: <directive>')
+2026-04-12 19:05:22,150 [WARNING] beigebox.main: Operator agent: ENABLED — LLM-driven tool execution active (ALL registered tools)
+2026-04-12 19:05:22,204 [INFO] httpx: HTTP Request: POST http://localhost:11434/api/embed "HTTP/1.1 200 OK"
+2026-04-12 19:05:22,204 [INFO] beigebox.main: Embedding model 'nomic-embed-text' preloaded and pinned
+2026-04-12 19:05:24,394 [INFO] beigebox.main: BeigeBox shutting down
+2026-04-12 19:05:24,394 [INFO] beigebox.main: Wiretap and payload log flushed and closed

@@ -618,22 +618,26 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
 
         # If static key validation fails, try dynamic API keys from database
         if meta is None and _app_state.sqlite_store and token:
-            import hashlib
-            token_hash = hashlib.sha256(token.encode()).hexdigest()
-            user_id = _app_state.sqlite_store.verify_api_key(token_hash)
+            user_id = _app_state.sqlite_store.verify_api_key(token)
             if user_id:
-                # Create a pseudo-KeyMeta for dynamic keys (no rate limit, all endpoints/models allowed)
+                # Create a pseudo-KeyMeta for dynamic keys
+                # Apply default rate limit from config (not unlimited)
                 from beigebox.auth import KeyMeta
-                meta = KeyMeta(name=f"user:{user_id[:8]}", allowed_models=["*"], allowed_endpoints=["*"], rate_limit_rpm=0)
+                cfg = get_config()
+                default_rate_limit = cfg.get("auth", {}).get("dynamic_key_rate_limit_rpm", 100)
+                meta = KeyMeta(
+                    name=f"user:{user_id[:8]}",
+                    allowed_models=["*"],
+                    allowed_endpoints=["*"],
+                    rate_limit_rpm=default_rate_limit
+                )
 
         if meta is None:
+            # Don't leak auth methods to unauthenticated users
             return JSONResponse(
                 {
                     "error": {
-                        "message": (
-                            "Invalid API key. Provide it via "
-                            "Authorization: Bearer <key>, api-key header, or ?api_key= query param."
-                        ),
+                        "message": "Invalid or missing API key.",
                         "type": "invalid_request_error",
                         "code": "invalid_api_key",
                     }
@@ -1247,8 +1251,8 @@ async def oauth_callback(
     resp = RedirectResponse(url="/ui", status_code=302)
     resp.set_cookie(
         COOKIE_SESSION, session_token,
-        httponly=True, samesite="lax", secure=is_secure,
-        max_age=60 * 60 * 24 * 7,
+        httponly=True, samesite="strict", secure=is_secure,
+        max_age=60 * 60 * 4,  # 4 hours
     )
     resp.delete_cookie(COOKIE_STATE)
     resp.delete_cookie(_COOKIE_VERIFIER)
