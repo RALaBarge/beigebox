@@ -101,4 +101,4 @@ We're bootstrapped and looking for early adopters. If this resonates, we'd love 
 
 **GitHub:** https://github.com/beigebox-ai/beigebox  
 **Docs:** https://github.com/beigebox-ai/beigebox/blob/main/README.md  
-**SaaS:** https://aisolutionsunlimited.com/beigebox
+**SaaS:** https://aisolutionsunlimited.com/security

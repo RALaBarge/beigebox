@@ -22,7 +22,7 @@ Everything is prepped. This is your execution plan for Tuesday morning.
 **Recommended timeline: 9am - 12pm PT**
 
 ### 9:00am - Pre-Flight Check (10 min)
-- [ ] Test landing page loads: https://aisolutionsunlimited.com/beigebox
+- [ ] Test landing page loads: https://aisolutionsunlimited.com/security
 - [ ] Click a pricing button, verify Stripe checkout loads
 - [ ] Test mobile view (should look good on phone too)
 - [ ] Grab coffee ☕
@@ -70,7 +70,7 @@ Everything is prepped. This is your execution plan for Tuesday morning.
   Open source + managed SaaS. Bootstrapped.
   
   GitHub: https://github.com/beigebox-ai/beigebox
-  SaaS: https://aisolutionsunlimited.com/beigebox
+  SaaS: https://aisolutionsunlimited.com/security
   ```
 - [ ] Post on LinkedIn (similar, more formal tone)
 - [ ] Link to HackerNews post in both
@@ -193,7 +193,7 @@ The only thing left is to press "submit" on HackerNews Tuesday morning.
 
 ## Files You Have
 
-- `LAUNCH_LANDING_PAGE.html` — Deploy to aisolutionsunlimited.com/beigebox
+- `LAUNCH_LANDING_PAGE.html` — Deploy to aisolutionsunlimited.com/security
 - `LAUNCH_HACKERNEWS_POST.md` — Copy-paste into HN
 - `LAUNCH_DEVTO_POST.md` — Copy-paste into Dev.to
 - `LAUNCH_REDDIT_POSTS.md` — 3 Reddit post templates

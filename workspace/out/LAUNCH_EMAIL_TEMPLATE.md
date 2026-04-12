@@ -25,7 +25,7 @@ I built something I think you'll find useful: **BeigeBox**, a security control p
 https://github.com/beigebox-ai/beigebox
 
 **Managed SaaS (optional):** $99/mo (indie) → $999/mo (enterprise)
-https://aisolutionsunlimited.com/beigebox
+https://aisolutionsunlimited.com/security
 
 **Current status:** 
 - Phase 1 complete (0 critical vulns, 1461 passing tests, production ready)
@@ -40,7 +40,7 @@ I'd love your feedback, especially if you're:
 Give the open-source version a try if you have 30 minutes. Would love to hear what you think.
 
 GitHub: https://github.com/beigebox-ai/beigebox  
-SaaS: https://aisolutionsunlimited.com/beigebox
+SaaS: https://aisolutionsunlimited.com/security
 
 Questions? Hit reply or email hello@aisolutionsunlimited.com
 

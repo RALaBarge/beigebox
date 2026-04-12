@@ -15,7 +15,7 @@
 1. Go to Settings → Business Profile
 2. Fill in:
    - **Business name:** "BeigeBox" (or "BeigeBox AI")
-   - **Website:** https://aisolutionsunlimited.com/beigebox
+   - **Website:** https://aisolutionsunlimited.com/security
    - **Business type:** "Software as a Service (SaaS)"
    - **Description:** "LLM security control plane"
 3. Save

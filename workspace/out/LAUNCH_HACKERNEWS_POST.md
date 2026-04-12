@@ -2,7 +2,7 @@
 
 **Title:** BeigeBox: Security Control Plane for LLM Deployments (Open Source + SaaS)
 
-**URL:** https://aisolutionsunlimited.com/beigebox
+**URL:** https://aisolutionsunlimited.com/security
 
 ---
 
