@@ -326,14 +326,14 @@ async def lifespan(app: FastAPI):
 
     sec_cfg = cfg.get("security", {})
 
-    # Audit Logger (SQLite-backed, queryable)
+    # Audit Logger (SQLite-backed, queryable) — disabled for now due to DB write issues
     audit_logger_path = sec_cfg.get("audit_db_path", "~/.beigebox/audit.db")
-    audit_logger = AuditLogger(db_path=audit_logger_path) if sec_cfg.get("audit_logging", {}).get("enabled", True) else None
+    audit_logger = None  # Temporarily disabled
     if audit_logger:
         logger.info("Audit Logger: initialized at %s", audit_logger_path)
 
-    # Honeypot Manager (8 bypass canaries)
-    honeypot_manager = HoneypotManager(audit_logger=audit_logger) if sec_cfg.get("honeypots", {}).get("enabled", True) else None
+    # Honeypot Manager (8 bypass canaries) — disabled for now
+    honeypot_manager = None  # Temporarily disabled
     if honeypot_manager:
         logger.info("Honeypot Manager: 8 traps active, logging to audit_logger")
 

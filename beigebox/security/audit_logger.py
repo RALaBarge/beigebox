@@ -82,7 +82,7 @@ class AuditLogger:
 
     def _init_db(self):
         """Create audit table if it doesn't exist."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(str(self.db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS audit_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -180,7 +180,7 @@ class AuditLogger:
         """Insert log entry into database."""
         with self._lock:
             try:
-                with sqlite3.connect(self.db_path) as conn:
+                with sqlite3.connect(str(self.db_path)) as conn:
                     conn.execute("""
                         INSERT INTO audit_log (
                             timestamp, tool, action, input_params, input_hash,
@@ -231,7 +231,7 @@ class AuditLogger:
 
         where_clause = " AND ".join(conditions)
 
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(str(self.db_path)) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(f"""
                 SELECT * FROM audit_log
@@ -251,7 +251,7 @@ class AuditLogger:
 
         Returns entries flagged as bypass_attempt=True.
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(str(self.db_path)) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute("""
                 SELECT * FROM audit_log
@@ -275,7 +275,7 @@ class AuditLogger:
         """
         results = []
 
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(str(self.db_path)) as conn:
             conn.row_factory = sqlite3.Row
 
             # Pattern 1: Tool receiving many DENY decisions
@@ -327,7 +327,7 @@ class AuditLogger:
 
     def get_stats(self, hours: int = 24) -> dict:
         """Get summary statistics."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(str(self.db_path)) as conn:
             stats = conn.execute("""
                 SELECT
                     COUNT(*) as total_calls,
