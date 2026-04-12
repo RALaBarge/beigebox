@@ -199,6 +199,10 @@ tools:
   plugins:
     enabled: true
     path: ./plugins
+  bluetruth:
+    enabled: false                 # Requires bluTruth running (sudo blutruth serve)
+    api_url: "http://localhost:8484"
+    db_path: "~/.blutruth/events.db"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Embedding & Classification

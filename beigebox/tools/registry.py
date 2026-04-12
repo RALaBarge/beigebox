@@ -33,6 +33,7 @@ from beigebox.tools.confluence_crawler import ConfluenceCrawler
 from beigebox.tools.aura_recon import AuraReconTool
 from beigebox.tools.sf_ingest import SfIngestTool
 from beigebox.tools.atlassian import AtlassianTool
+from beigebox.tools.bluetruth import BlueTruthTool
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +240,15 @@ class ToolRegistry:
         pi_cfg = tools_cfg.get("python_interpreter", {})
         if pi_cfg.get("enabled", False):
             self.tools["python"] = PythonInterpreterTool()
+
+        # --- BlueTruth (Bluetooth diagnostic & device simulation — disabled by default) ---
+        # Requires bluTruth to be running (e.g., sudo blutruth serve)
+        bt_cfg = tools_cfg.get("bluetruth", {})
+        if bt_cfg.get("enabled", False):
+            db_path = bt_cfg.get("db_path")
+            api_url = bt_cfg.get("api_url", "http://localhost:8484")
+            self.tools["bluetruth"] = BlueTruthTool(db_path=db_path, api_url=api_url)
+            logger.info("BlueTruth tool registered (api_url=%s)", api_url)
 
         # Connection tool auto-enables whenever the top-level connections: section
         # is present in config.yaml — no separate enabled flag needed.
