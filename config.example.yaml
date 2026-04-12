@@ -203,6 +203,11 @@ tools:
     enabled: false                 # Requires bluTruth running (sudo blutruth serve)
     api_url: "http://localhost:8484"
     db_path: "~/.blutruth/events.db"
+  network_audit:
+    enabled: false                 # Local network discovery, port scan, CVE lookup (no root required)
+    timeout: 1.0                   # TCP connect timeout per port in seconds
+    concurrency: 200               # Max parallel TCP connections
+    max_hosts: 256                 # Max hosts to scan per subnet sweep
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Embedding & Classification

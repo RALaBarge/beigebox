@@ -34,6 +34,7 @@ from beigebox.tools.aura_recon import AuraReconTool
 from beigebox.tools.sf_ingest import SfIngestTool
 from beigebox.tools.atlassian import AtlassianTool
 from beigebox.tools.bluetruth import BlueTruthTool
+from beigebox.tools.network_audit import NetworkAuditTool
 
 logger = logging.getLogger(__name__)
 
@@ -249,6 +250,19 @@ class ToolRegistry:
             api_url = bt_cfg.get("api_url", "http://localhost:8484")
             self.tools["bluetruth"] = BlueTruthTool(db_path=db_path, api_url=api_url)
             logger.info("BlueTruth tool registered (api_url=%s)", api_url)
+
+        # --- NetworkAudit (local network discovery + port scanning — disabled by default) ---
+        # No external binaries required; uses stdlib socket + subprocess ping.
+        # Graceful degradation without root (TCP connect scan instead of SYN).
+        na_cfg = tools_cfg.get("network_audit", {})
+        if na_cfg.get("enabled", False):
+            self.tools["network_audit"] = NetworkAuditTool(
+                default_timeout=float(na_cfg.get("timeout", 1.0)),
+                default_concurrency=int(na_cfg.get("concurrency", 200)),
+                max_hosts=int(na_cfg.get("max_hosts", 256)),
+            )
+            logger.info("NetworkAudit tool registered (timeout=%.1fs, concurrency=%d)",
+                        na_cfg.get("timeout", 1.0), na_cfg.get("concurrency", 200))
 
         # Connection tool auto-enables whenever the top-level connections: section
         # is present in config.yaml — no separate enabled flag needed.
