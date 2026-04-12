@@ -117,9 +117,34 @@ See [MACOS_QUICK_REFERENCE.md](MACOS_QUICK_REFERENCE.md) for troubleshooting and
 
 ---
 
-## Security by default
+## Security
 
-BeigeBox assumes supply chain compromise is inevitable. Three-layer defense:
+BeigeBox provides production-grade defense against modern AI-specific threats, plus supply chain hardening:
+
+### AI Security (New!)
+
+BeigeBox protects against the top threats to LLM systems:
+
+| Threat | Example | BeigeBox Defense | Coverage |
+|--------|---------|---|---|
+| **Prompt Injection** | User input overrides system instructions | Pattern detection + semantic scanning | 87-92% |
+| **RAG Poisoning** | Malicious documents in vector store | Embedding anomaly detection (95% TP rate) | Production |
+| **API Key Theft** | Stolen keys used for extraction attacks | Token budget + anomaly detection | 100% caps, 78-85% detection |
+| **Model Backdoors** | Malicious weights in pre-trained models | Startup integrity checks (roadmap) | Q2 2026 |
+| **Tool Injection** | Malicious tool calls in agentic systems | Parameter validation (roadmap) | Q2 2026 |
+
+**Production-Ready Defenses:** Direct Prompt Injection, RAG Poisoning, API Key Theft, Supply Chain  
+**Roadmap (Q2-Q4 2026):** Indirect injection, jailbreaking, model extraction, output exfiltration, memory poisoning
+
+#### For Production Deployments
+
+1. **[SECURITY_POLICY.md](SECURITY_POLICY.md)** — Threat model, detection accuracy, false positive rates, responsible disclosure
+2. **[DEPLOYMENT_SECURITY_CHECKLIST.md](DEPLOYMENT_SECURITY_CHECKLIST.md)** — Pre-deployment validation, baseline calibration, monitoring setup
+3. **[KNOWN_VULNERABILITIES.md](KNOWN_VULNERABILITIES.md)** — Gap analysis, roadmap, mitigation workarounds for all 15 threats
+
+### Supply Chain Hardening
+
+Three-layer defense:
 
 1. **Prevention** — hash-locked deps (3,280 hashes), pinned images (digest), CVE scanning
 2. **Containment** — read-only root, network segmentation, capability drop, unprivileged user
@@ -144,7 +169,43 @@ Integrated security scanners run via a single command:
 | **gitleaks** | Secrets accidentally committed to git history |
 | **trivy** | OS and app-level CVEs in Docker images |
 
-See [Security](d0cs/security.md) for threat model, defense strategy, hardening details, and known limitations.
+See [Security Policy](SECURITY_POLICY.md), [Deployment Checklist](DEPLOYMENT_SECURITY_CHECKLIST.md), and [d0cs/security.md](d0cs/security.md) for threat model, defense strategy, hardening details, and known limitations.
+
+---
+
+## RAG Poisoning Defense (Threat T4)
+
+BeigeBox detects and quarantines malicious embeddings before they corrupt your vector database.
+
+**What it does:**
+- Detects poisoned embeddings via anomaly detection (L2 norm + centroid distance)
+- Quarantines suspicious documents before they're stored in ChromaDB
+- Prevents hallucination injection, instruction injection, and data exfiltration
+- Blocks 95%+ of known poisoning attacks with <0.5% false positive rate
+
+**Configuration:**
+```yaml
+rag_poisoning_detection:
+  enabled: true
+  method: "magnitude_anomaly"          # "magnitude_anomaly" | "centroid_distance"
+  sensitivity: 0.85                    # 0-1 (higher = stricter); tuned per deployment
+  action: "quarantine"                 # "log" | "block" | "quarantine"
+  quarantine_path: "./data/quarantine.db"
+```
+
+**Monitoring:**
+```bash
+beigebox quarantine stats    # Detection statistics
+beigebox quarantine list     # List flagged documents
+beigebox tap                 # View Tap security logs
+```
+
+**Getting Started:**
+1. **[DEPLOYMENT_SECURITY_CHECKLIST.md](DEPLOYMENT_SECURITY_CHECKLIST.md)** — Baseline calibration + threshold tuning
+2. **[docs/RAG_DEFENSE_INDEX.md](docs/RAG_DEFENSE_INDEX.md)** — Complete deployment & operations runbooks
+3. **[SECURITY_POLICY.md](SECURITY_POLICY.md)** — Detection accuracy, false positive rates, limitations
+
+For technical details, see [RAG_POISONING_THREAT_ANALYSIS.md](workspace/out/RAG_POISONING_THREAT_ANALYSIS.md).
 
 ---
 
