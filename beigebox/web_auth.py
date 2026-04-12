@@ -55,6 +55,15 @@ class OAuthUserInfo:
     provider: str = ""
 
 
+@dataclass
+class PasswordUserInfo:
+    """Simple username/password auth user."""
+    user_id: str
+    username: str
+    name: str
+    password_changed: bool = False  # Flag: has user reset initial password?
+
+
 # ---------------------------------------------------------------------------
 # Provider protocol — implement this to add a new provider
 # ---------------------------------------------------------------------------
@@ -254,6 +263,89 @@ class GoogleProvider:
         if self._allowed_emails and user.email.lower() not in self._allowed_emails:
             raise PermissionError(f"Email '{user.email}' not in allowed list")
         return user
+
+
+# ---------------------------------------------------------------------------
+# Simple Password Auth (for SaaS single-tenant deployments)
+# ---------------------------------------------------------------------------
+
+class SimplePasswordAuth:
+    """Minimal password-based auth: username is 'admin', customer sets password on first login."""
+
+    def __init__(self, store):
+        """Initialize with SQLite store for user credentials."""
+        self.store = store
+        self._signer = URLSafeTimedSerializer(
+            secrets.token_hex(32),
+            salt="bb-password-session"
+        )
+        # Ensure admin user exists
+        self._ensure_admin_user()
+
+    def _ensure_admin_user(self):
+        """Create admin user if doesn't exist."""
+        import uuid
+        existing = self.store.get_user("admin")
+        if not existing:
+            # Create with placeholder password (will be set on first login)
+            import bcrypt
+            placeholder_hash = bcrypt.hashpw(b"admin", bcrypt.gensalt(rounds=12)).decode()
+            # Store directly in users table (hack: use provider="password", sub="admin")
+            self.store.upsert_user(
+                provider="password",
+                sub="admin",
+                email="admin@localhost",
+                name="Admin",
+                picture=""
+            )
+
+    def login(self, password: str) -> tuple[str, bool]:
+        """Verify password. Return (session_token, password_needs_change).
+
+        Returns (token, False) if login successful and password already changed.
+        Returns (token, True) if login successful but using default password.
+        """
+        import bcrypt
+
+        # For now, check against hardcoded initial password
+        # In production, this would be stored in config or env var
+        initial_password = os.environ.get("BB_INITIAL_PASSWORD", "changeme")
+
+        try:
+            if bcrypt.checkpw(password.encode(), initial_password.encode()):
+                # Password matches — create session
+                token = self._signer.dumps({"user_id": "admin", "username": "admin"})
+                # Check if this is the default password (security flag)
+                password_is_default = password == "changeme"
+                return token, password_is_default
+        except (ValueError, TypeError):
+            pass
+
+        return None, False
+
+    def set_password(self, old_password: str, new_password: str) -> bool:
+        """Change password. Return True if successful."""
+        import bcrypt
+
+        # Verify old password first
+        token, _ = self.login(old_password)
+        if not token:
+            return False
+
+        # Update in environment (in production, would be stored encrypted in DB)
+        os.environ["BB_INITIAL_PASSWORD"] = new_password
+        return True
+
+    def sign_session(self, username: str) -> str:
+        """Sign a session token."""
+        return self._signer.dumps({"user_id": "admin", "username": username})
+
+    def verify_session(self, token: str) -> dict | None:
+        """Verify and decode session token."""
+        try:
+            return self._signer.loads(token, max_age=60 * 60 * 4)  # 4 hours
+        except (BadSignature, SignatureExpired):
+            return None
 
 
 # ---------------------------------------------------------------------------

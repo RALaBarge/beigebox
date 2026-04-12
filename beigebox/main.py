@@ -260,6 +260,12 @@ async def lifespan(app: FastAPI):
     # Web UI OAuth shim (optional — requires itsdangerous)
     web_auth = WebAuthManager(cfg.get("auth", {}).get("web_ui", {})) if WebAuthManager else None
 
+    # Simple password auth (optional — for single-tenant SaaS)
+    password_auth = None
+    if cfg.get("auth", {}).get("mode") == "password":
+        from beigebox.web_auth import SimplePasswordAuth
+        password_auth = SimplePasswordAuth(store) if store else None
+
     # MCP server — expose operator/run if operator is enabled
     _op_enabled_for_mcp = cfg.get("operator", {}).get("enabled", False)
     _op_mcp_factory = None
@@ -388,6 +394,7 @@ async def lifespan(app: FastAPI):
         embedding_classifier=embedding_classifier,
         auth_registry=auth_registry,
         web_auth=web_auth,
+        password_auth=password_auth,
         mcp_server=mcp_server,
         amf_advertiser=amf_advertiser,
         poisoning_detector=poisoning_detector,
@@ -1257,6 +1264,71 @@ async def oauth_callback(
     resp.delete_cookie(COOKIE_STATE)
     resp.delete_cookie(_COOKIE_VERIFIER)
     return resp
+
+
+@app.post("/auth/login")
+async def password_login(request: Request):
+    """Login with username/password (for simple password auth mode)."""
+    st = get_state()
+    if not hasattr(st, 'password_auth') or st.password_auth is None:
+        return JSONResponse({"error": "Password auth not enabled"}, status_code=501)
+
+    try:
+        body = await request.json()
+        username = body.get("username", "")
+        password = body.get("password", "")
+    except:
+        return JSONResponse({"error": "Invalid request"}, status_code=400)
+
+    if username != "admin":
+        return JSONResponse({"error": "Invalid credentials"}, status_code=401)
+
+    token, password_is_default = st.password_auth.login(password)
+    if not token:
+        return JSONResponse({"error": "Invalid credentials"}, status_code=401)
+
+    # Set session cookie
+    is_secure = request.url.scheme == "https"
+    resp = JSONResponse({
+        "authenticated": True,
+        "username": "admin",
+        "password_needs_change": password_is_default
+    })
+    resp.set_cookie(
+        COOKIE_SESSION, token,
+        httponly=True, samesite="strict", secure=is_secure,
+        max_age=60 * 60 * 4,
+    )
+    return resp
+
+
+@app.post("/auth/change-password")
+async def change_password(request: Request):
+    """Change password (required on first login)."""
+    st = get_state()
+    if not hasattr(st, 'password_auth') or st.password_auth is None:
+        return JSONResponse({"error": "Password auth not enabled"}, status_code=501)
+
+    # Verify session
+    token = request.cookies.get(COOKIE_SESSION, "")
+    user = st.password_auth.verify_session(token) if token else None
+    if not user:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    try:
+        body = await request.json()
+        old_password = body.get("old_password", "")
+        new_password = body.get("new_password", "")
+    except:
+        return JSONResponse({"error": "Invalid request"}, status_code=400)
+
+    if len(new_password) < 8:
+        return JSONResponse({"error": "Password must be at least 8 characters"}, status_code=400)
+
+    if st.password_auth.set_password(old_password, new_password):
+        return JSONResponse({"changed": True})
+    else:
+        return JSONResponse({"error": "Old password incorrect"}, status_code=401)
 
 
 @app.get("/auth/logout")

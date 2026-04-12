@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from beigebox.mcp_server import McpServer
     from beigebox.amf_mesh import AmfMeshAdvertiser
     from beigebox.observability.egress import EgressHook
-    from beigebox.web_auth import WebAuthManager
+    from beigebox.web_auth import WebAuthManager, SimplePasswordAuth
     from beigebox_security.integrations.poisoning import RAGPoisoningDetector
     from beigebox.security.extraction_detector import ExtractionDetector
     from beigebox.security.audit_logger import AuditLogger
@@ -48,6 +48,7 @@ class AppState:
     embedding_classifier: Any = None
     auth_registry: MultiKeyAuthRegistry | None = None
     web_auth: WebAuthManager | None = None
+    password_auth: SimplePasswordAuth | None = None
     mcp_server: McpServer | None = None
     amf_advertiser: AmfMeshAdvertiser | None = None
     poisoning_detector: RAGPoisoningDetector | None = None
