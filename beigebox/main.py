@@ -46,6 +46,7 @@ from beigebox.proxy import Proxy
 from beigebox.storage.sqlite_store import SQLiteStore
 from beigebox.storage.vector_store import VectorStore
 from beigebox.tools.registry import ToolRegistry
+from beigebox_security.integrations.poisoning import RAGPoisoningDetector
 from beigebox.agents.decision import DecisionAgent
 from beigebox.agents.embedding_classifier import get_embedding_classifier
 from beigebox.hooks import HookManager
@@ -187,10 +188,27 @@ async def lifespan(app: FastAPI):
     from beigebox.storage.backends import make_backend as _make_backend
     from beigebox.storage.blob_store import BlobStore
     from beigebox.config import get_primary_backend_url
+
+    # RAG poisoning detection initialization
+    poisoning_detector = None
+    _poisoning_cfg = cfg.get("embedding_poisoning_detection", {})
+    if _poisoning_cfg.get("enabled", True):
+        poisoning_detector = RAGPoisoningDetector(
+            sensitivity=_poisoning_cfg.get("sensitivity", 0.95),
+            baseline_window=_poisoning_cfg.get("baseline_window", 1000),
+            min_norm=_poisoning_cfg.get("min_norm", 0.1),
+            max_norm=_poisoning_cfg.get("max_norm", 100.0),
+        )
+        logger.info("RAG poisoning detection: ENABLED (sensitivity=%.2f)",
+                   _poisoning_cfg.get("sensitivity", 0.95))
+    else:
+        logger.warning("RAG poisoning detection: DISABLED")
+
     vector_store = VectorStore(
         embedding_model=_embed_cfg["model"],
         embedding_url=_embed_cfg.get("backend_url") or get_primary_backend_url(cfg),
         backend=_make_backend(_backend_type, path=_backend_path),
+        poisoning_detector=poisoning_detector,
     )
     blob_store = BlobStore(Path(vector_store_path) / "blobs")
 
@@ -325,6 +343,7 @@ async def lifespan(app: FastAPI):
         web_auth=web_auth,
         mcp_server=mcp_server,
         amf_advertiser=amf_advertiser,
+        poisoning_detector=poisoning_detector,
         egress_hooks=egress_hooks,
     )
 
@@ -807,6 +826,26 @@ async def stats():
     })
 
 
+@app.get("/metrics/quarantine")
+async def metrics_quarantine(format: str = "json"):
+    """Get RAG poisoning quarantine metrics."""
+    from beigebox.observability.poisoning_metrics import PoisoningMetrics
+    _st = get_state()
+
+    if not _st.sqlite_store:
+        return JSONResponse({"error": "SQLite store not initialized"}, status_code=503)
+
+    metrics = PoisoningMetrics(_st.sqlite_store)
+
+    if format == "prometheus":
+        return Response(
+            content=metrics.get_prometheus_format(),
+            media_type="text/plain; version=0.0.4",
+        )
+    else:  # json
+        return JSONResponse(metrics.get_json_metrics())
+
+
 @app.get("/beigebox/search")
 async def search_conversations(q: str, n: int = 5, role: str | None = None):
     """Semantic search over stored conversations (raw message hits)."""
@@ -937,6 +976,7 @@ async def health():
         "version": _BB_VERSION,
         "decision_llm": _st.decision_agent.enabled if _st.decision_agent else False,
         "backend_url": cfg.get("backend", {}).get("url", "http://localhost:11434").rstrip("/"),
+        "rag_poisoning_detection": "enabled" if _st.poisoning_detector else "disabled",
     })
 
 

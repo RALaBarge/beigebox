@@ -549,6 +549,135 @@ def cmd_eval(args):
         sys.exit(1)
 
 
+def cmd_quarantine_list(args):
+    """List quarantined embeddings."""
+    from beigebox.config import get_config, get_storage_paths
+    from beigebox.storage.sqlite_store import SQLiteStore
+
+    cfg = get_config()
+    sqlite_path, _ = get_storage_paths(cfg)
+    store = SQLiteStore(sqlite_path)
+
+    filters = args.filter or "all"
+    limit = args.limit or 100
+
+    records = store.search_quarantined(filters=filters, limit=limit)
+
+    if not records:
+        print(f"  No quarantined embeddings ({filters}).")
+        return
+
+    print(f"\n  Quarantined Embeddings ({filters})\n")
+    print(f"  {'ID':>5} {'Timestamp':<25} {'Document':<20} {'Confidence':>10} {'Reason':<35}")
+    print("  " + "─" * 110)
+
+    for rec in records:
+        doc_id = rec["document_id"][:18] + ".." if len(rec["document_id"]) > 20 else rec["document_id"]
+        confidence = rec["confidence"]
+        reason = rec["reason"][:33] + ".." if len(rec["reason"]) > 35 else rec["reason"]
+        timestamp = rec["timestamp"][:19] if rec["timestamp"] else "?"
+
+        print(
+            f"  {rec['id']:>5} {timestamp:<25} {doc_id:<20} {confidence:>10.3f} {reason:<35}"
+        )
+
+    print()
+
+
+def cmd_quarantine_review(args):
+    """Show full details for a quarantine record."""
+    import json
+    from beigebox.config import get_config, get_storage_paths
+    from beigebox.storage.sqlite_store import SQLiteStore
+
+    cfg = get_config()
+    sqlite_path, _ = get_storage_paths(cfg)
+    store = SQLiteStore(sqlite_path)
+
+    record_id = args.id
+
+    with store._connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM quarantined_embeddings WHERE id = ?",
+            (record_id,),
+        ).fetchone()
+
+    if not row:
+        print(f"  ✗  No quarantine record with ID {record_id}")
+        return
+
+    rec = dict(row)
+    print(f"\n  Quarantine Record #{rec['id']}\n")
+    print(f"  Timestamp:      {rec['timestamp']}")
+    print(f"  Document ID:    {rec['document_id']}")
+    print(f"  Embedding Hash: {rec['embedding_hash'] or '(not stored)'}")
+    print(f"  Confidence:     {rec['confidence']:.4f}")
+    print(f"  Method:         {rec['detector_method']}")
+    print(f"  Reason:\n    {rec['reason']}")
+    print()
+
+
+def cmd_quarantine_stats(args):
+    """Show quarantine statistics."""
+    from beigebox.config import get_config, get_storage_paths
+    from beigebox.storage.sqlite_store import SQLiteStore
+
+    cfg = get_config()
+    sqlite_path, _ = get_storage_paths(cfg)
+    store = SQLiteStore(sqlite_path)
+
+    stats = store.get_quarantine_stats()
+
+    print(f"\n  Quarantine Statistics\n")
+    print(f"  Total quarantined:     {stats['total']}")
+    print(f"  High confidence (>0.8): {stats['high_confidence']}")
+    print(f"  Medium (0.5-0.8):       {stats['medium_confidence']}")
+    print(f"  Last 24 hours:          {stats['last_24h']}")
+    print()
+
+    if stats["total"] > 0:
+        print(f"  Confidence Percentiles")
+        print(f"  ├─ P50: {stats['confidence_p50']:.4f}")
+        print(f"  └─ P95: {stats['confidence_p95']:.4f}")
+        print()
+
+        if stats["reasons"]:
+            print(f"  Top Reasons")
+            for i, (reason, count) in enumerate(sorted(stats["reasons"].items(), key=lambda x: x[1], reverse=True)[:5]):
+                prefix = "└─" if i == len(stats["reasons"]) - 1 else "├─"
+                reason_short = reason[:50] + ".." if len(reason) > 50 else reason
+                print(f"  {prefix} {reason_short}: {count}")
+            print()
+
+        if stats["methods"]:
+            print(f"  Detection Methods")
+            for i, (method, count) in enumerate(sorted(stats["methods"].items(), key=lambda x: x[1], reverse=True)):
+                prefix = "└─" if i == len(stats["methods"]) - 1 else "├─"
+                print(f"  {prefix} {method}: {count}")
+            print()
+
+
+def cmd_quarantine_purge(args):
+    """Purge old quarantine records."""
+    from beigebox.config import get_config, get_storage_paths
+    from beigebox.storage.sqlite_store import SQLiteStore
+
+    cfg = get_config()
+    sqlite_path, _ = get_storage_paths(cfg)
+    store = SQLiteStore(sqlite_path)
+
+    days = args.days or 30
+    dry_run = args.dry_run or False
+
+    count = store.purge_quarantine(days=days, dry_run=dry_run)
+
+    if dry_run:
+        print(f"\n  [DRY RUN] Would delete {count} quarantine records older than {days} days")
+    else:
+        print(f"\n  ✓ Deleted {count} quarantine records older than {days} days")
+    print()
+
+
 def cmd_tone(args):
     """Print the banner."""
     print(BANNER)
@@ -1135,6 +1264,34 @@ def main():
                        help="Write full JSON results to this file")
     _add_command(sub, ["experiment", "exp"],
                  "Run a context optimization discovery experiment", cmd_experiment, setup_experiment)
+
+    # quarantine / security / guard
+    def setup_quarantine_list(p):
+        p.add_argument("--filter", "-f", choices=["recent", "suspicious", "all"], default="all",
+                       help="Filter by time (recent=24h) or confidence (suspicious>0.8)")
+        p.add_argument("--limit", "-n", type=int, default=100,
+                       help="Max results to show")
+
+    _add_command(sub, ["quarantine-list", "qlist"],
+                 "List quarantined embeddings", cmd_quarantine_list, setup_quarantine_list)
+
+    def setup_quarantine_review(p):
+        p.add_argument("id", type=int, help="Quarantine record ID to review")
+
+    _add_command(sub, ["quarantine-review", "qreview"],
+                 "Show details for a quarantine record", cmd_quarantine_review, setup_quarantine_review)
+
+    _add_command(sub, ["quarantine-stats", "qstats"],
+                 "Show quarantine statistics", cmd_quarantine_stats)
+
+    def setup_quarantine_purge(p):
+        p.add_argument("--days", "-d", type=int, default=30,
+                       help="Delete records older than N days")
+        p.add_argument("--dry-run", action="store_true",
+                       help="Preview what would be deleted without deleting")
+
+    _add_command(sub, ["quarantine-purge", "qpurge"],
+                 "Purge old quarantine records", cmd_quarantine_purge, setup_quarantine_purge)
 
     args = parser.parse_args()
     if not args.command:

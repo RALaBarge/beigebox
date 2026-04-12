@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from beigebox.amf_mesh import AmfMeshAdvertiser
     from beigebox.observability.egress import EgressHook
     from beigebox.web_auth import WebAuthManager
+    from beigebox_security.integrations.poisoning import RAGPoisoningDetector
 
 
 @dataclass
@@ -44,6 +45,7 @@ class AppState:
     web_auth: WebAuthManager | None = None
     mcp_server: McpServer | None = None
     amf_advertiser: AmfMeshAdvertiser | None = None
+    poisoning_detector: RAGPoisoningDetector | None = None
     egress_hooks: list[Any] = field(default_factory=list)  # list[EgressHook]
     # Runtime registry: run_id → asyncio.Queue for harness steering injection.
     # Registered by active harness/ralph runs, consumed by /inject endpoint.

@@ -220,6 +220,22 @@ CREATE TABLE IF NOT EXISTS operator_turns (
 );
 CREATE INDEX IF NOT EXISTS idx_operator_turns_run ON operator_turns(run_id);
 CREATE INDEX IF NOT EXISTS idx_operator_turns_sha ON operator_turns(input_sha);
+
+CREATE TABLE IF NOT EXISTS quarantined_embeddings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    document_id TEXT NOT NULL,
+    embedding_hash TEXT,
+    confidence REAL NOT NULL,
+    reason TEXT,
+    detector_method TEXT DEFAULT 'magnitude'
+);
+CREATE INDEX IF NOT EXISTS idx_quarantined_embeddings_timestamp
+    ON quarantined_embeddings(timestamp);
+CREATE INDEX IF NOT EXISTS idx_quarantined_embeddings_document
+    ON quarantined_embeddings(document_id);
+CREATE INDEX IF NOT EXISTS idx_quarantined_embeddings_confidence
+    ON quarantined_embeddings(confidence);
 """
 
 # Migrations: append-only ALTER TABLE statements that add new columns to
@@ -404,6 +420,201 @@ class SQLiteStore:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
             return dict(row) if row else None
+
+    # ------------------------------------------------------------------
+    # RAG Poisoning Quarantine Management
+    # ------------------------------------------------------------------
+
+    def log_quarantine(
+        self,
+        document_id: str,
+        embedding: list | None,
+        confidence: float,
+        reason: str,
+        method: str = "magnitude",
+    ) -> int:
+        """
+        Log a quarantined embedding to the database.
+
+        Args:
+            document_id: ID of the message/document that was quarantined
+            embedding: Optional embedding vector (for hash computation)
+            confidence: Detection confidence [0.0, 1.0]
+            reason: Human-readable explanation
+            method: Detection method (e.g., 'magnitude', 'zscore', 'centroid')
+
+        Returns:
+            ID of the inserted record
+        """
+        import hashlib
+
+        embedding_hash = None
+        if embedding:
+            # Compute hash of embedding for fingerprinting
+            emb_bytes = str(embedding[:10]).encode()  # first 10 dims only
+            embedding_hash = hashlib.sha256(emb_bytes).hexdigest()[:16]
+
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """INSERT INTO quarantined_embeddings
+                   (document_id, embedding_hash, confidence, reason, detector_method)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (document_id, embedding_hash, confidence, reason, method),
+            )
+            return cursor.lastrowid
+
+    def search_quarantined(
+        self,
+        filters: str = "all",
+        limit: int = 100,
+    ) -> list[dict]:
+        """
+        Search quarantine table with optional filtering.
+
+        Args:
+            filters: 'recent' (24h), 'suspicious' (confidence > 0.8), or 'all'
+            limit: Max results to return
+
+        Returns:
+            List of quarantine records
+        """
+        from datetime import datetime, timedelta, timezone
+
+        query = "SELECT * FROM quarantined_embeddings"
+        params: list = []
+
+        if filters == "recent":
+            # Last 24 hours
+            cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+            query += " WHERE timestamp >= ?"
+            params.append(cutoff)
+        elif filters == "suspicious":
+            # High confidence (> 0.8)
+            query += " WHERE confidence > 0.8"
+
+        query += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_quarantine_stats(self) -> dict:
+        """
+        Get aggregate statistics about quarantined embeddings.
+
+        Returns:
+            {
+                "total": int,
+                "high_confidence": int,  # > 0.8
+                "medium_confidence": int,  # 0.5-0.8
+                "avg_confidence": float,
+                "confidence_p50": float,
+                "confidence_p95": float,
+                "reasons": {reason: count},
+                "methods": {method: count},
+                "last_24h": int,
+            }
+        """
+        from datetime import datetime, timedelta, timezone
+
+        with self._connect() as conn:
+            # Overall stats
+            total = conn.execute(
+                "SELECT COUNT(*) as cnt FROM quarantined_embeddings"
+            ).fetchone()["cnt"]
+
+            high = conn.execute(
+                "SELECT COUNT(*) as cnt FROM quarantined_embeddings WHERE confidence > 0.8"
+            ).fetchone()["cnt"]
+
+            medium = conn.execute(
+                "SELECT COUNT(*) as cnt FROM quarantined_embeddings WHERE confidence BETWEEN 0.5 AND 0.8"
+            ).fetchone()["cnt"]
+
+            avg_conf = conn.execute(
+                "SELECT AVG(confidence) as avg FROM quarantined_embeddings"
+            ).fetchone()["avg"]
+
+            p50 = conn.execute(
+                "SELECT confidence FROM quarantined_embeddings ORDER BY confidence LIMIT 1 OFFSET (SELECT COUNT(*)/2 FROM quarantined_embeddings)"
+            ).fetchone()
+            p50_val = p50["confidence"] if p50 else 0.0
+
+            # Percentile approximation (order by, skip)
+            p95_row = conn.execute(
+                """SELECT confidence FROM quarantined_embeddings
+                   ORDER BY confidence DESC LIMIT 1 OFFSET
+                   (SELECT MAX(0, CAST(COUNT(*) * 0.05 AS INTEGER)) FROM quarantined_embeddings)"""
+            ).fetchone()
+            p95_val = p95_row["confidence"] if p95_row else 0.0
+
+            # Reason breakdown
+            reason_rows = conn.execute(
+                """SELECT reason, COUNT(*) as cnt FROM quarantined_embeddings
+                   GROUP BY reason ORDER BY cnt DESC LIMIT 5"""
+            ).fetchall()
+            reasons = {row["reason"]: row["cnt"] for row in reason_rows}
+
+            # Method breakdown
+            method_rows = conn.execute(
+                """SELECT detector_method, COUNT(*) as cnt FROM quarantined_embeddings
+                   GROUP BY detector_method ORDER BY cnt DESC"""
+            ).fetchall()
+            methods = {row["detector_method"]: row["cnt"] for row in method_rows}
+
+            # Last 24h
+            cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+            last_24h = conn.execute(
+                "SELECT COUNT(*) as cnt FROM quarantined_embeddings WHERE timestamp >= ?",
+                (cutoff,),
+            ).fetchone()["cnt"]
+
+        return {
+            "total": total,
+            "high_confidence": high,
+            "medium_confidence": medium,
+            "avg_confidence": avg_conf or 0.0,
+            "confidence_p50": p50_val,
+            "confidence_p95": p95_val,
+            "reasons": reasons,
+            "methods": methods,
+            "last_24h": last_24h,
+        }
+
+    def purge_quarantine(
+        self,
+        days: int = 30,
+        dry_run: bool = False,
+    ) -> int:
+        """
+        Delete quarantine records older than N days.
+
+        Args:
+            days: Age threshold (delete records older than this)
+            dry_run: If True, count only (don't delete)
+
+        Returns:
+            Number of records deleted (or would be deleted in dry-run)
+        """
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+        with self._connect() as conn:
+            # Count
+            count = conn.execute(
+                "SELECT COUNT(*) as cnt FROM quarantined_embeddings WHERE timestamp < ?",
+                (cutoff,),
+            ).fetchone()["cnt"]
+
+            if not dry_run:
+                conn.execute(
+                    "DELETE FROM quarantined_embeddings WHERE timestamp < ?",
+                    (cutoff,),
+                )
+
+        return count
 
     def store_message(self, msg: Message, cost_usd: float | None = None, latency_ms: float | None = None, ttft_ms: float | None = None, user_id: str | None = None):
         """

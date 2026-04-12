@@ -16,10 +16,12 @@ To add a new vector database:
 """
 
 import logging
+from datetime import datetime, timezone
 
 import httpx
 
 from beigebox.storage.backends import VectorBackend, make_backend
+from beigebox_security.integrations.poisoning import RAGPoisoningDetector
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +41,13 @@ class VectorStore:
         backend: VectorBackend | None = None,
         # Legacy convenience: accept chroma_path and build the default backend
         chroma_path: str | None = None,
+        poisoning_detector: RAGPoisoningDetector | None = None,
+        sqlite_store = None,  # Optional SQLiteStore for quarantine logging
     ):
         self.embedding_model = embedding_model
         self.embedding_url = embedding_url.rstrip("/")
+        self.poisoning_detector = poisoning_detector
+        self.sqlite_store = sqlite_store  # For quarantine logging
 
         if backend is not None:
             self._backend = backend
@@ -54,9 +60,10 @@ class VectorStore:
             )
 
         logger.info(
-            "VectorStore initialised (backend=%s, model=%s)",
+            "VectorStore initialised (backend=%s, model=%s, quarantine=%s)",
             type(self._backend).__name__,
             self.embedding_model,
+            "enabled" if sqlite_store else "disabled",
         )
 
     # ------------------------------------------------------------------
@@ -142,6 +149,33 @@ class VectorStore:
             return
         try:
             embedding = self._get_embedding(content)
+            # Check for poisoned embeddings
+            if self.poisoning_detector:
+                is_poisoned, confidence, reason = self.poisoning_detector.is_poisoned(embedding)
+                if is_poisoned and confidence > 0.8:
+                    logger.warning("POISONED embedding detected [%s]: %s (confidence=%.2f)", message_id, reason, confidence)
+                    # Log to quarantine database
+                    if self.sqlite_store:
+                        self.sqlite_store.log_quarantine(
+                            document_id=message_id,
+                            embedding=embedding,
+                            confidence=confidence,
+                            reason=reason,
+                            method="magnitude",
+                        )
+                    return  # silently reject
+                elif is_poisoned and confidence > 0.5:
+                    logger.warning("SUSPICIOUS embedding [%s]: %s (confidence=%.2f)", message_id, reason, confidence)
+                    # Log suspicious embeddings to quarantine (warn mode)
+                    if self.sqlite_store:
+                        self.sqlite_store.log_quarantine(
+                            document_id=message_id,
+                            embedding=embedding,
+                            confidence=confidence,
+                            reason=reason,
+                            method="magnitude",
+                        )
+                    # Continue anyway (warn mode)
             self._backend.upsert(
                 ids=[message_id],
                 embeddings=[embedding],
@@ -171,6 +205,33 @@ class VectorStore:
             return
         try:
             embedding = await self._get_embedding_async(content)
+            # Check for poisoned embeddings
+            if self.poisoning_detector:
+                is_poisoned, confidence, reason = self.poisoning_detector.is_poisoned(embedding)
+                if is_poisoned and confidence > 0.8:
+                    logger.warning("POISONED embedding detected [%s]: %s (confidence=%.2f)", message_id, reason, confidence)
+                    # Log to quarantine database
+                    if self.sqlite_store:
+                        self.sqlite_store.log_quarantine(
+                            document_id=message_id,
+                            embedding=embedding,
+                            confidence=confidence,
+                            reason=reason,
+                            method="magnitude",
+                        )
+                    return  # silently reject
+                elif is_poisoned and confidence > 0.5:
+                    logger.warning("SUSPICIOUS embedding [%s]: %s (confidence=%.2f)", message_id, reason, confidence)
+                    # Log suspicious embeddings to quarantine (warn mode)
+                    if self.sqlite_store:
+                        self.sqlite_store.log_quarantine(
+                            document_id=message_id,
+                            embedding=embedding,
+                            confidence=confidence,
+                            reason=reason,
+                            method="magnitude",
+                        )
+                    # Continue anyway (warn mode)
             self._backend.upsert(
                 ids=[message_id],
                 embeddings=[embedding],
