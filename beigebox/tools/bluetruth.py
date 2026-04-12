@@ -256,7 +256,9 @@ class BlueTruthTool:
 
     def _insert_event(self, cur: sqlite3.Cursor, evt: dict) -> int:
         """Insert event into SQLite, return row ID."""
+        from datetime import datetime, timezone
         ts_mono_us = int(time.monotonic() * 1_000_000)
+        ts_wall = datetime.now(timezone.utc).isoformat()
         source = evt.get("source", "MANUAL")
         event_type = evt.get("event_type", "UNKNOWN")
         device = evt.get("device", "")
@@ -268,15 +270,16 @@ class BlueTruthTool:
             cur.execute(
                 """
                 INSERT INTO events
-                (ts_mono_us, source, event_type, device_addr, severity, stage, summary, raw_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (ts_mono_us, ts_wall, source, event_type, device_addr, severity, stage, summary, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (ts_mono_us, source, event_type, device, severity, stage, summary, json.dumps(evt)),
+                (ts_mono_us, ts_wall, source, event_type, device, severity, stage, summary, json.dumps(evt)),
             )
             return cur.lastrowid
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as e:
             # Table may not exist yet, return mock ID
-            logger.warning(f"Could not insert into events table (may not exist yet)")
+            logger.warning(f"Could not insert into events table: {e}")
+            self._next_event_id += 1
             return self._next_event_id
 
     def _inject_event(
@@ -443,7 +446,7 @@ class BlueTruthTool:
                 """
                 SELECT DISTINCT event_type, severity, COUNT(*) as count
                 FROM events
-                WHERE tags LIKE '%rule%' OR event_type LIKE '%RULE%'
+                WHERE tags_json LIKE '%rule%' OR event_type LIKE '%RULE%'
                 GROUP BY event_type, severity
                 ORDER BY count DESC
                 """
