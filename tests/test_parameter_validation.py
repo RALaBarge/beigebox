@@ -495,7 +495,7 @@ class TestInjectionDetector:
 
     def test_ldap_injection(self, detector):
         """LDAP wildcards should be detected."""
-        matches = detector.detect("*)(uid=*))(|(uid=*"))
+        matches = detector.detect("*)(uid=*))(|(uid=*")
 
         assert len(matches) > 0
 

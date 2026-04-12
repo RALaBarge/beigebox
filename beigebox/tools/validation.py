@@ -23,7 +23,6 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from beigebox.config import get_config
-from beigebox.observability.tap import tap
 
 logger = logging.getLogger(__name__)
 
