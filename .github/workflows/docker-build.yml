@@ -34,11 +34,16 @@ jobs:
 
       - name: Extract metadata
         id: meta
+        env:
+          REPO_LOWER: ${{ github.repository }}
         run: |
+          REPO_LOWER=$(echo "$REPO_LOWER" | tr '[:upper:]' '[:lower:]')
           if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "tags=${{ env.REGISTRY }}/${{ github.repository }}:${GITHUB_REF#refs/tags/},${{ env.REGISTRY }}/${{ github.repository }}:latest" >> $GITHUB_OUTPUT
+            echo "tags=${{ env.REGISTRY }}/${REPO_LOWER}:${GITHUB_REF#refs/tags/},${{ env.REGISTRY }}/${REPO_LOWER}:latest" >> $GITHUB_OUTPUT
+            echo "cache_ref=${{ env.REGISTRY }}/${REPO_LOWER}:buildcache" >> $GITHUB_OUTPUT
           else
-            echo "tags=${{ env.REGISTRY }}/${{ github.repository }}:${{ github.sha }},${{ env.REGISTRY }}/${{ github.repository }}:edge" >> $GITHUB_OUTPUT
+            echo "tags=${{ env.REGISTRY }}/${REPO_LOWER}:${{ github.sha }},${{ env.REGISTRY }}/${REPO_LOWER}:edge" >> $GITHUB_OUTPUT
+            echo "cache_ref=${{ env.REGISTRY }}/${REPO_LOWER}:buildcache" >> $GITHUB_OUTPUT
           fi
 
       - name: Build and push
@@ -48,5 +53,5 @@ jobs:
           file: ./docker/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}:buildcache,mode=max
+          cache-from: type=registry,ref=${{ steps.meta.outputs.cache_ref }}
+          cache-to: type=registry,ref=${{ steps.meta.outputs.cache_ref }},mode=max
