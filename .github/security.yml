@@ -1,0 +1,20 @@
+---
+# GitHub Security Policy
+version: 1.0
+
+reporting:
+  contacts:
+    - type: "email"
+      value: "security@ralabarge.dev"
+      
+  disclosure_preferences:
+    disclosure_timing: "after_fix"
+    disclosure_delay: "30 days"
+
+acknowledgments:
+  preferred: true
+  preferred_methods:
+    - "email"
+    - "github_advisory"
+    
+  credit_line: "Security researcher credited in release notes"
