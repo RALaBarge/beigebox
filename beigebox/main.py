@@ -702,14 +702,21 @@ _WEB_UI_PREFIXES = ("/web/",)
 
 class WebAuthMiddleware(BaseHTTPMiddleware):
     """
-    Gates web UI paths behind a signed session cookie when oauth is enabled.
+    Gates web UI paths behind a signed session cookie when oauth or password auth is enabled.
 
     API paths (/v1/, /api/) are not touched — those use Bearer token auth.
     The OAuth flow paths (/auth/*) are always exempt.
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        if _app_state is None or _app_state.web_auth is None or not _app_state.web_auth.is_enabled():
+        if _app_state is None:
+            return await call_next(request)
+
+        # Check if either OAuth or password auth is enabled
+        oauth_enabled = _app_state.web_auth is not None and _app_state.web_auth.is_enabled()
+        password_auth_enabled = _app_state.password_auth is not None
+
+        if not (oauth_enabled or password_auth_enabled):
             return await call_next(request)
 
         path = request.url.path
@@ -723,15 +730,25 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
         if not is_web:
             return await call_next(request)
 
-        # Validate session cookie
+        # Validate session cookie (check both OAuth and password auth)
         token = request.cookies.get(COOKIE_SESSION, "")
-        user  = _app_state.web_auth.verify_session(token) if token else None
+        user = None
+
+        if oauth_enabled and _app_state.web_auth:
+            user = _app_state.web_auth.verify_session(token) if token else None
+
+        if user is None and password_auth_enabled and _app_state.password_auth:
+            user = _app_state.password_auth.verify_session(token) if token else None
 
         if user is None:
             from starlette.responses import RedirectResponse
-            providers  = _app_state.web_auth.list_providers()
-            login_path = f"/auth/{providers[0]}/login" if providers else "/"
-            return RedirectResponse(url=login_path, status_code=302)
+            # Redirect to password auth login if enabled, otherwise OAuth
+            if password_auth_enabled:
+                return RedirectResponse(url="/auth/login", status_code=302)
+            else:
+                providers = _app_state.web_auth.list_providers()
+                login_path = f"/auth/{providers[0]}/login" if providers else "/"
+                return RedirectResponse(url=login_path, status_code=302)
 
         request.state.web_user = user
         return await call_next(request)
