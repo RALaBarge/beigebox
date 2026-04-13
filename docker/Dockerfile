@@ -55,10 +55,11 @@ COPY docker/config.docker.yaml config.yaml
 COPY scripts/ scripts/
 COPY hooks/ hooks/
 
-# ── Data directory ─────────────────────────────────────────────────────────
+# ── Data & logs directories ────────────────────────────────────────────────
 # /app/data is mounted as a named volume — runtime_config.yaml lives here
 # so it persists across image rebuilds (docker compose build && up).
-RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
+# /app/logs is where beigebox writes log files
+RUN mkdir -p /app/data /app/logs && chown -R appuser:appuser /app/data /app/logs && chmod 755 /app/logs
 
 USER appuser
 
