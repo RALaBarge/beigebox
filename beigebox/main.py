@@ -272,7 +272,7 @@ async def lifespan(app: FastAPI):
     password_auth = None
     if cfg.get("auth", {}).get("mode") == "password":
         from beigebox.web_auth import SimplePasswordAuth
-        password_auth = SimplePasswordAuth(store) if store else None
+        password_auth = SimplePasswordAuth(sqlite_store) if sqlite_store else None
 
     # MCP server — expose operator/run if operator is enabled
     _op_enabled_for_mcp = cfg.get("operator", {}).get("enabled", False)
