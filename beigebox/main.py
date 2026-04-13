@@ -91,8 +91,16 @@ def _setup_logging(cfg: dict):
     handlers: list[logging.Handler] = [logging.StreamHandler()]
     if log_file:
         from pathlib import Path
-        Path(log_file).parent.mkdir(parents=True, exist_ok=True)
-        handlers.append(logging.FileHandler(log_file))
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        # Ensure permissions are correct for non-root users
+        try:
+            log_path.parent.chmod(0o755)
+            handlers.append(logging.FileHandler(log_file))
+        except (OSError, PermissionError) as e:
+            # If file logging fails, fall back to stderr only
+            print(f"Warning: Could not set up file logging to {log_file}: {e}", flush=True)
+            print("Logging to stderr only", flush=True)
 
     logging.basicConfig(
         level=level,
