@@ -307,18 +307,26 @@ class SimplePasswordAuth:
         """
         import bcrypt
 
-        # For now, check against hardcoded initial password
-        # In production, this would be stored in config or env var
+        # Check against initial password (env var or default)
+        # This is for first-time setup; after password change, use stored hash
         initial_password = os.environ.get("BB_INITIAL_PASSWORD", "changeme")
 
+        # Simple comparison for initial/default password
+        if password == initial_password:
+            # Password matches — create session
+            token = self._signer.dumps({"user_id": "admin", "username": "admin"})
+            # Check if this is the default password (security flag)
+            password_is_default = password == "changeme"
+            return token, password_is_default
+
+        # Otherwise, try to check against stored hash in database
         try:
-            if bcrypt.checkpw(password.encode(), initial_password.encode()):
-                # Password matches — create session
-                token = self._signer.dumps({"user_id": "admin", "username": "admin"})
-                # Check if this is the default password (security flag)
-                password_is_default = password == "changeme"
-                return token, password_is_default
-        except (ValueError, TypeError):
+            user = self.store.get_user("admin")
+            if user and hasattr(user, 'password_hash') and user.password_hash:
+                if bcrypt.checkpw(password.encode(), user.password_hash.encode()):
+                    token = self._signer.dumps({"user_id": "admin", "username": "admin"})
+                    return token, False
+        except (ValueError, TypeError, AttributeError):
             pass
 
         return None, False
@@ -332,9 +340,18 @@ class SimplePasswordAuth:
         if not token:
             return False
 
-        # Update in environment (in production, would be stored encrypted in DB)
-        os.environ["BB_INITIAL_PASSWORD"] = new_password
-        return True
+        # Hash new password with bcrypt (cost factor 12 for security)
+        new_password_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt(rounds=12)).decode()
+
+        # Store in database
+        try:
+            # Update user's password hash in database
+            self.store.update_user_password("admin", new_password_hash)
+            # Also update env var as fallback
+            os.environ["BB_INITIAL_PASSWORD"] = new_password
+            return True
+        except Exception:
+            return False
 
     def sign_session(self, username: str) -> str:
         """Sign a session token."""

@@ -281,6 +281,8 @@ MIGRATIONS = [
     "ALTER TABLE messages ADD COLUMN integrity_version INTEGER DEFAULT 1",
     "ALTER TABLE messages ADD COLUMN tamper_detected BOOLEAN DEFAULT 0",
     "ALTER TABLE conversations ADD COLUMN integrity_checked_at TEXT DEFAULT NULL",
+    # v1.3 — password hash for simple password auth
+    "ALTER TABLE users ADD COLUMN password_hash TEXT DEFAULT NULL",
 ]
 
 
@@ -444,6 +446,20 @@ class SQLiteStore:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
             return dict(row) if row else None
+
+    def update_user_password(self, user_id: str, password_hash: str) -> bool:
+        """Update user's password hash. Returns True if successful."""
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    "UPDATE users SET password_hash = ? WHERE id = ?",
+                    (password_hash, user_id)
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Failed to update password for {user_id}: {e}")
+            return False
 
     def create_api_key(self, user_id: str, name: str = "default") -> tuple[str, str]:
         """Create a new API key for a user. Returns (key_id, plain_key)."""
