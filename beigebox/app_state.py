@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from beigebox.amf_mesh import AmfMeshAdvertiser
     from beigebox.observability.egress import EgressHook
     from beigebox.web_auth import WebAuthManager, SimplePasswordAuth
-    from beigebox_security.integrations.poisoning import RAGPoisoningDetector
+    from beigebox.security.rag_poisoning_detector import RAGPoisoningDetector
     from beigebox.security.extraction_detector import ExtractionDetector
     from beigebox.security.audit_logger import AuditLogger
     from beigebox.security.honeypots import HoneypotManager

@@ -46,7 +46,7 @@ from beigebox.proxy import Proxy
 from beigebox.storage.sqlite_store import SQLiteStore
 from beigebox.storage.vector_store import VectorStore
 from beigebox.tools.registry import ToolRegistry
-from beigebox_security.integrations.poisoning import RAGPoisoningDetector
+from beigebox.security.rag_poisoning_detector import RAGPoisoningDetector
 from beigebox.agents.decision import DecisionAgent
 from beigebox.agents.embedding_classifier import get_embedding_classifier
 from beigebox.hooks import HookManager

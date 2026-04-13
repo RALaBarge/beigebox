@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 import numpy as np
 
-from beigebox_security.integrations.poisoning import RAGPoisoningDetector
+from beigebox.security.rag_poisoning_detector import RAGPoisoningDetector
 from beigebox.storage.vector_store import VectorStore
 from beigebox.storage.backends import make_backend
 from beigebox.config import get_config

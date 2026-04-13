@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 import httpx
 
 from beigebox.storage.backends import VectorBackend, make_backend
-from beigebox_security.integrations.poisoning import RAGPoisoningDetector
+from beigebox.security.rag_poisoning_detector import RAGPoisoningDetector
 
 logger = logging.getLogger(__name__)
 

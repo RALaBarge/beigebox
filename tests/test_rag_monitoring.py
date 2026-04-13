@@ -364,7 +364,7 @@ class TestVectorStoreIntegration:
         """Test that VectorStore logs to quarantine when detector flags."""
         from beigebox.storage.vector_store import VectorStore
         from beigebox.storage.backends import make_backend
-        from beigebox_security.integrations.poisoning import RAGPoisoningDetector
+        from beigebox.security.rag_poisoning_detector import RAGPoisoningDetector
 
         sqlite_store = SQLiteStore(tmp_db)
 
