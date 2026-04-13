@@ -1,0 +1,117 @@
+# BeigeBoxSecurity - Ultra-Minimal Security-Only Config
+# Single-tenant proxy with ZERO bells & whistles
+# Focus: Security detection + audit logging only
+# Memory footprint: <500MB (no models loaded)
+
+features:
+  # DISABLED: All routing/LLM features
+  backends: false          # No multi-backend routing
+  decision_llm: false      # No routing LLM
+  classifier: false        # No embedding classifier
+  semantic_cache: false    # No caching
+  operator: false          # No tool use / ReAct agent
+  harness: false           # No multi-agent orchestrator
+  tools: false             # No function calling
+  cost_tracking: false     # No cost estimation
+  auto_summarization: false
+  system_context: false
+  wasm: false              # No WASM transforms
+  guardrails: false        # No content filtering
+  amf_mesh: false          # No service mesh
+  voice: false             # No speech-to-text
+  hooks: false             # No custom middleware
+
+  # ENABLED: Security & audit only
+  conversation_replay: false  # Don't store conversations (save disk)
+  wiretap: true             # Log all requests
+  payload_log: true         # Log full payloads for compliance
+
+server:
+  host: "0.0.0.0"
+  port: 1337
+  log_level: "INFO"
+  log_conversations: false  # Don't log conversation content
+
+# Single backend: pass-through proxy (no model loading)
+backend:
+  default_model: "pass-through"
+  url: "http://localhost:11434"  # Or use environment variable
+
+backends:
+  - name: "ollama"
+    url: "http://localhost:11434"
+    allowed_models: ["*"]
+    priority: 1
+
+models:
+  # Only embedding model (for security detection)
+  default: "pass-through"
+  embedding: "nomic-embed-text"  # Required for RAG scanner + extraction detector
+  summarization: null
+
+# Auth: Simple password
+auth:
+  dynamic_key_rate_limit_rpm: 100  # Basic rate limit
+  web_ui:
+    mode: "password"
+    password_auth:
+      enabled: true
+      default_password: "changeme"
+
+# Storage: Minimal (embeddings only)
+storage:
+  sqlite: "data/beigebox.db"
+  vector: "data/chroma"    # ChromaDB for embeddings (RAG scanner)
+  blob: null               # No blob storage
+
+# Security: ALL 6 LAYERS ACTIVE
+security:
+  audit_logging:
+    enabled: true
+    db_path: "data/audit.db"
+
+  injection_guard:
+    enabled: true
+    sensitivity: 0.95
+
+  rag_scanner:
+    enabled: true
+    sensitivity: 0.95
+
+  honeypots:
+    enabled: true
+
+  extraction_detector:
+    enabled: true
+    sensitivity: 0.85
+
+  anomaly_detector:
+    enabled: true
+
+# Routing: DISABLED (single backend only)
+routing:
+  default: "ollama"
+  rules: []
+
+# Observability: Minimal
+observability:
+  tap:
+    enabled: true
+  metrics:
+    enabled: false        # No metrics collection
+
+# Web UI: Disabled (use API)
+web_ui:
+  enabled: false
+
+# Logging: To file only
+logging:
+  level: "INFO"
+  file: "./logs/beigebox.log"
+  max_bytes: 10485760     # 10MB before rotation
+  backup_count: 3
+
+advanced:
+  session_cache_ttl: 3600
+  max_concurrent_requests: 50
+  request_timeout: 300
