@@ -1,388 +1,120 @@
-# beigebox config — Docker deployment (Phase-2 schema)
-# Uses container service names for networking.
-# For bare-metal, use config.yaml instead.
-#
-# SINGLE SOURCE OF TRUTH: Each feature defined exactly once. No duplicates.
-# Enable/disable via enabled: true/false in each block.
+# BeigeBoxSecurity - Ultra-Minimal Security-Only Config
+# Single-tenant proxy with ZERO bells & whistles
+# Focus: Security detection + audit logging only
+# Memory footprint: <500MB (no models loaded)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Middleware Server
-# ─────────────────────────────────────────────────────────────────────────────
+features:
+  # DISABLED: All routing/LLM features
+  backends: false          # No multi-backend routing
+  decision_llm: false      # No routing LLM
+  classifier: false        # No embedding classifier
+  semantic_cache: false    # No caching
+  operator: false          # No tool use / ReAct agent
+  harness: false           # No multi-agent orchestrator
+  tools: false             # No function calling
+  cost_tracking: false     # No cost estimation
+  auto_summarization: false
+  system_context: false
+  wasm: false              # No WASM transforms
+  guardrails: false        # No content filtering
+  amf_mesh: false          # No service mesh
+  voice: false             # No speech-to-text
+  hooks: false             # No custom middleware
+
+  # ENABLED: Security & audit only
+  conversation_replay: false  # Don't store conversations (save disk)
+  wiretap: true             # Log all requests
+  payload_log: true         # Log full payloads for compliance
+
 server:
   host: "0.0.0.0"
-  port: 8000
+  port: 1337
+  log_level: "INFO"
+  log_conversations: false  # Don't log conversation content
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Multi-Backend Routing
-# ─────────────────────────────────────────────────────────────────────────────
-backends_enabled: true
+# Single backend: pass-through proxy (no model loading)
+backend:
+  default_model: "pass-through"
+  url: "http://localhost:11434"  # Or use environment variable
+
 backends:
-  - provider: ollama
-    name: ollama-local
-    url: "http://host.docker.internal:11434"
-    timeout: 120
-    timeout_ms: 120000
+  - name: "ollama"
+    url: "http://localhost:11434"
+    allowed_models: ["*"]
     priority: 1
-    max_retries: 2
-    backoff_base: 1.5
-    backoff_max: 10.0
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Models — Unified allocation (Phase 2)
-# ─────────────────────────────────────────────────────────────────────────────
 models:
-  default: "qwen3:4b"              # Used by all subsystems unless overridden
-  profiles:
-    routing: "llama3.2:3b"         # Decision LLM / routing judge
-    agentic: "qwen3:4b"            # Operator / tool use
-    summary: "qwen3:4b"            # Context compression (future)
-  per_task:
-    pre_hook: null
-    post_hook: null
-    reflection: null
-    context_pruning: null
-  whitelist:
-    enabled: false
-    allowed_models: []
+  # Only embedding model (for security detection)
+  default: "pass-through"
+  embedding: "nomic-embed-text"  # Required for RAG scanner + extraction detector
+  summarization: null
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Storage
-# ─────────────────────────────────────────────────────────────────────────────
-storage:
-  type: sqlite
-  path: ./data/beigebox.db
-  vector_store_path: ./data/chroma
-  vector_backend: chromadb
-  log_conversations: true
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Embedding (for classifier, semantic cache, vector store)
-# ─────────────────────────────────────────────────────────────────────────────
+# Embedding (for security modules: RAG scanner, extraction detector)
 embedding:
   model: "nomic-embed-text"
   backend: "ollama"
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Routing Pipeline — Hybrid routing: session cache → classifier → decision LLM → backend
-# ─────────────────────────────────────────────────────────────────────────────
+# Auth: Simple password
+auth:
+  mode: "password"
+  dynamic_key_rate_limit_rpm: 100  # Basic rate limit
+
+# Storage: Minimal (embeddings only)
+storage:
+  type: sqlite
+  path: "data/beigebox.db"
+  vector_store_path: "data/chroma"    # ChromaDB for embeddings (RAG scanner)
+  vector_backend: chromadb
+  log_conversations: true
+
+# Security: ALL 6 LAYERS ACTIVE
+security:
+  audit_logging:
+    enabled: true
+    db_path: "data/audit.db"
+
+  injection_guard:
+    enabled: true
+    sensitivity: 0.95
+
+  rag_scanner:
+    enabled: true
+    sensitivity: 0.95
+
+  honeypots:
+    enabled: true
+
+  extraction_detector:
+    enabled: true
+    sensitivity: 0.85
+
+  anomaly_detector:
+    enabled: true
+
+# Routing: DISABLED (single backend only)
 routing:
-  session_cache:
-    ttl_seconds: 3600
-    max_entries: 1000
-    trim_to: 800
-    evict_every_writes: 100
+  default: "ollama"
+  rules: []
 
-  classifier:
+# Observability: Minimal
+observability:
+  tap:
     enabled: true
-    centroid_rebuild_interval: 3600
+  metrics:
+    enabled: false        # No metrics collection
 
-  semantic_cache:
-    enabled: true
-    similarity_threshold: 0.92
-    max_entries: 500
-    ttl_seconds: 3600
-
-  decision_llm:
-    enabled: true
-    temperature: 0.2
-    max_tokens: 256
-    system_prompt: "You are a helpful routing assistant that decides which tool or backend to use."
-    routes:
-      default:
-        model: "qwen3:4b"
-        description: "General purpose conversation and Q&A"
-        wasm_module: "opener_strip"
-      code:
-        model: "qwen3:4b"
-        description: "Code generation, debugging, technical programming tasks"
-      large:
-        model: "qwen3:4b"
-        description: "Complex reasoning, analysis, long-form writing"
-        wasm_module: "opener_strip"
-      fast:
-        model: "qwen3:4b"
-        description: "Quick responses, simple questions, brainstorming"
-        wasm_module: "opener_strip"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Tools (Function Calling)
-# ─────────────────────────────────────────────────────────────────────────────
-tools:
-  enabled: true
-  webhook_url: ""
-  registry:
-    - name: web_search
-      description: "Search the web for current information"
-      enabled: true
-      provider: "duckduckgo"
-      max_results: 5
-    - name: web_scraper
-      description: "Scrape a webpage for content"
-      enabled: true
-      max_content_length: 10000
-    - name: calculator
-      description: "Perform mathematical calculations"
-      enabled: true
-    - name: datetime_tool
-      description: "Get current date/time in any timezone"
-      enabled: true
-      local_tz_offset: -5.0
-    - name: system_info
-      description: "Get system information"
-      enabled: true
-    - name: google_search
-      description: "Google Custom Search"
-      enabled: false
-      api_key: "${GOOGLE_API_KEY}"
-      cse_id: "${GOOGLE_CSE_ID}"
-
-  memory:
-    enabled: true
-    max_results: 3
-    min_score: 0.3
-
-  document_search:
-    enabled: true
-    max_results: 15
-    min_score: 0.0
-
-  aura_recon:
-    enabled: true
-    ws_url: ws://host.docker.internal:9009
-    timeout: 30
-
-  sf_ingest:
-    enabled: true
-    ws_url: ws://host.docker.internal:9009
-    timeout: 60
-    out_dir: /app/workspace/out/rag/SF
-
-  # Live Jira + Confluence REST. Credentials read from env vars
-  # (ATLASSIAN_BASE_URL / ATLASSIAN_EMAIL / ATLASSIAN_API_TOKEN), set via
-  # ~/.beigebox/.env which docker-compose passes through with env_file.
-  atlassian:
-    enabled: true
-
-  browserbox:
-    enabled: true
-    ws_url: ws://host.docker.internal:9009
-    timeout: 10
-
-  cdp:
-    enabled: true
-    ws_url: ws://host.docker.internal:9222
-    timeout: 10
-
-  ensemble:
-    enabled: false
-    judge_model: ""
-    max_models: 6
-
-  plugins:
-    enabled: true
-    path: ./plugins
-    repo:
-      enabled: true
-    zip_inspector:
-      enabled: true
-    doc_parser:
-      enabled: true
-      max_ref_tokens: 4000
-      chunk_size: 800
-      chunk_overlap: 80
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Operator Agent (agentic tool use)
-# ─────────────────────────────────────────────────────────────────────────────
-operator:
-  enabled: true
-  max_iterations: 10
-  allowed_tools: []
-  browser_meta_tool: false
-  tool_profiles:
-    minimal:
-      - document_search
-      - calculator
-      - datetime_tool
-    standard:
-      - document_search
-      - memory
-      - web_search
-      - web_scraper
-      - calculator
-      - datetime_tool
-    full:
-      - document_search
-      - memory
-      - aura_recon
-      - sf_ingest
-      - web_search
-      - web_scraper
-      - calculator
-      - datetime_tool
-      - system_info
-  autonomous:
-    enabled: false
-    max_turns: 5
-  context_pruning:
-    enabled: false
-    model: ""
-    timeout: 8
-  reflection:
-    enabled: false
-    model: ""
-    timeout: 20
-  pre_hook:
-    enabled: false
-    model: "qwen3:4b"
-    max_iterations: 3
-  post_hook:
-    enabled: false
-    model: "qwen3:4b"
-    max_iterations: 3
-  shell:
-    enabled: true
-    shell_binary: "/usr/local/bin/bb"
-    allowed_commands:
-      - ls
-      - cat
-      - grep
-      - ps
-      - df
-      - free
-      - du
-      - uptime
-      - uname
-      - env
-      - printenv
-      - whoami
-      - id
-      - hostname
-      - date
-    blocked_patterns:
-      - "rm"
-      - "chmod"
-      - "chown"
-      - "chroot"
-      - "mv"
-      - "cp"
-      - "> "
-      - ">>"
-      - "sudo"
-      - "su "
-      - "| sh"
-      - "| bash"
-      - "| ash"
-      - "$()"
-      - "`"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Harness (multi-turn orchestration)
-# ─────────────────────────────────────────────────────────────────────────────
-harness:
-  enabled: true
-  ralph_enabled: false
-  retry:
-    max_retries: 2
-    backoff_base: 1.5
-    backoff_max: 10
-  stagger:
-    operator_seconds: 1.0
-    model_seconds: 0.4
-  store_runs: true
-  max_stored_runs: 1000
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Cost Tracking
-# ─────────────────────────────────────────────────────────────────────────────
-cost_tracking:
-  enabled: true
-  track_openrouter: true
-  track_local: false
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Conversation Replay
-# ─────────────────────────────────────────────────────────────────────────────
-conversation_replay:
-  enabled: true
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Hooks
-# ─────────────────────────────────────────────────────────────────────────────
-hooks:
+# Web UI: Disabled (use API)
+web_ui:
   enabled: false
-  directory: "./hooks"
 
-# ─────────────────────────────────────────────────────────────────────────────
-# WASM Transform Pipeline
-# ─────────────────────────────────────────────────────────────────────────────
-wasm:
-  enabled: true
-  timeout_ms: 5000
-  default_module: ""
-  modules:
-    pdf_oxide:
-      enabled: true
-      path: "/app/wasm_modules/pdf_oxide/pdf-oxide-wasi.wasm"
-      description: "Extract text/markdown from PDF files (pdf_oxide 0.3)"
-    passthrough:
-      enabled: false
-      path: "/app/wasm_modules/passthrough/target/wasm32-wasip1/release/passthrough.wasm"
-      description: "Identity transform — for testing"
-    json_extractor:
-      enabled: false
-      path: "/app/wasm_modules/json_extractor/target/wasm32-wasip1/release/json_extractor.wasm"
-      description: "Extract JSON objects from freeform text"
-    markdown_stripper:
-      enabled: false
-      path: "/app/wasm_modules/markdown_stripper/target/wasm32-wasip1/release/markdown_stripper.wasm"
-      description: "Strip markdown formatting to plain text"
-    opener_strip:
-      enabled: true
-      path: "/app/wasm_modules/opener_strip/target/wasm32-wasip1/release/opener_strip.wasm"
-      description: "Strip verbose opening phrases from responses"
-    pii_redactor:
-      enabled: false
-      path: "/app/wasm_modules/pii_redactor/target/wasm32-wasip1/release/pii_redactor.wasm"
-      description: "Redact PII (emails, phone numbers, SSNs) from text"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# AMF Mesh (disabled in Docker — no mDNS across container boundaries)
-# ─────────────────────────────────────────────────────────────────────────────
-amf_mesh:
-  enabled: false
-  instance_name: "beigebox"
-  host: "localhost"
-  port: null
-  trust_domain: "local"
-  nats_url: ""
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Logging & Observability
-# ─────────────────────────────────────────────────────────────────────────────
+# Logging: To file only
 logging:
-  level: "DEBUG"
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  file: "/app/logs/beigebox.log"
-  max_bytes: 10485760
-  backup_count: 5
+  level: "INFO"
+  file: "./logs/beigebox.log"
+  max_bytes: 10485760     # 10MB before rotation
+  backup_count: 3
 
-wiretap:
-  enabled: true
-  path: "./data/wire.jsonl"
-  max_lines: 100000
-  rotation_enabled: true
-  description: "Structured log of all messages through the proxy (for conversation tracing)"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Advanced
-# ─────────────────────────────────────────────────────────────────────────────
 advanced:
-  max_concurrent_requests: 10
-  embedding_batch_size: 32
-  wiretap_compress: false
-  runtime_config_check_interval: 1.0
-  mcp:
-    max_request_bytes: 1000000
-  backends:
-    latency_window_size: 100
+  session_cache_ttl: 3600
+  max_concurrent_requests: 50
+  request_timeout: 300

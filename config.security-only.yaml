@@ -49,20 +49,23 @@ models:
   embedding: "nomic-embed-text"  # Required for RAG scanner + extraction detector
   summarization: null
 
+# Embedding (for security modules: RAG scanner, extraction detector)
+embedding:
+  model: "nomic-embed-text"
+  backend: "ollama"
+
 # Auth: Simple password
 auth:
+  mode: "password"
   dynamic_key_rate_limit_rpm: 100  # Basic rate limit
-  web_ui:
-    mode: "password"
-    password_auth:
-      enabled: true
-      default_password: "changeme"
 
 # Storage: Minimal (embeddings only)
 storage:
-  sqlite: "data/beigebox.db"
-  vector: "data/chroma"    # ChromaDB for embeddings (RAG scanner)
-  blob: null               # No blob storage
+  type: sqlite
+  path: "data/beigebox.db"
+  vector_store_path: "data/chroma"    # ChromaDB for embeddings (RAG scanner)
+  vector_backend: chromadb
+  log_conversations: true
 
 # Security: ALL 6 LAYERS ACTIVE
 security:
