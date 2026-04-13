@@ -28,7 +28,7 @@ features:
 
 server:
   host: "0.0.0.0"
-  port: 1337
+  port: 8000
   log_level: "INFO"
   log_conversations: false  # Don't log conversation content
 
