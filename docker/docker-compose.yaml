@@ -66,65 +66,63 @@
 
 services:
   # ---------------------------------------------------------------------------
-  # Ollama — runs NATIVELY on the host (not in Docker)
+  # Ollama — containerized LLM inference engine
   # ---------------------------------------------------------------------------
-  # On macOS, Docker cannot pass through Metal GPU and the VM caps RAM at ~7 GiB,
-  # which made it impossible to load larger models (e.g. qwen3:30b-a3b needs ~18 GiB).
-  # We now run Ollama natively on the host so it can use Metal + full unified memory.
+  # Models are stored at OLLAMA_DATA (set in .env, defaults to ollama_data volume).
+  # FIRST_RUN.sh will detect existing ~/.ollama models and reuse them.
   #
-  # Host setup:
-  #   brew install ollama
-  #   brew services start ollama
-  #   ollama pull qwen3:30b-a3b nomic-embed-text qwen3:4b
+  # Docker VM RAM note (macOS/Windows): Docker Desktop defaults to ~8 GiB.
+  # llama3.2:3b (~2 GiB) is the safe default. Larger models (deepseek-r1,
+  # qwen3:30b+) need more RAM — increase Docker Desktop memory limit if needed.
   #
-  # The beigebox container reaches it via host.docker.internal:11434
-  # (see docker/config.docker.yaml → backends[0].url, and the extra_hosts mapping
-  # on the beigebox service below).
+  # For large models on macOS with full unified memory, run Ollama natively:
+  #   brew install ollama && brew services start ollama
+  #   Then change backends[0].url in config.docker.yaml to http://host.docker.internal:11434
+  #   and remove the depends_on: ollama from the beigebox service below.
   #
-  # To roll back to in-container Ollama: un-comment the service blocks below,
-  # restore backends[0].url to "http://ollama:11434", and `docker compose up -d ollama`.
-  # The original `ollama_data` volume is preserved as a safety net.
-  #
-  # ollama:
-  #   image: ollama/ollama@sha256:e771d18fe56724f01a6f691a5773df544f36f565fb37c93f0ddc5957007b7766
-  #   container_name: beigebox-ollama
-  #   ports:
-  #     - "${OLLAMA_PORT:-11434}:11434"
-  #   volumes:
-  #     - ${OLLAMA_DATA:-ollama_data}:/root/.ollama
-  #   tmpfs:
-  #     - /tmp
-  #   restart: unless-stopped
-  #   networks:
-  #     - llm
-  #   read_only: true
-  #   environment:
-  #     OLLAMA_NUM_PARALLEL: "3"
-  #   healthcheck:
-  #     test: ["CMD", "ollama", "list"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-  #     start_period: 40s
-  #
-  # ollama-model-pull:
-  #   image: curlimages/curl:latest
-  #   container_name: beigebox-model-pull
-  #   depends_on:
-  #     ollama:
-  #       condition: service_started
-  #   networks:
-  #     - llm
-  #   read_only: true
-  #   tmpfs:
-  #     - /tmp
-  #   command: >
-  #     sh -c "sleep 5 &&
-  #     curl -s http://ollama:11434/api/pull -d '{\"name\":\"qwen3:4b\"}' &&
-  #     curl -s http://ollama:11434/api/pull -d '{\"name\":\"llama3.2:3b\"}' &&
-  #     curl -s http://ollama:11434/api/pull -d '{\"name\":\"nomic-embed-text\"}' &&
-  #     curl -s http://ollama:11434/api/generate -d '{\"model\":\"qwen3:4b\",\"keep_alive\":-1}'"
-  #   restart: "no"
+  # NVIDIA GPU: uncomment the 'deploy' block below.
+  ollama:
+    image: ollama/ollama@sha256:e771d18fe56724f01a6f691a5773df544f36f565fb37c93f0ddc5957007b7766
+    container_name: beigebox-ollama
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ${OLLAMA_DATA:-ollama_data}:/root/.ollama
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    networks:
+      - llm
+    environment:
+      OLLAMA_NUM_PARALLEL: "3"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ---------------------------------------------------------------------------
+  # Ollama model bootstrap — pulls required models on first run, then exits.
+  # Re-runs are harmless (Ollama skips already-downloaded models).
+  # ---------------------------------------------------------------------------
+  ollama-model-pull:
+    image: curlimages/curl:latest
+    container_name: beigebox-model-pull
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - llm
+    read_only: true
+    tmpfs:
+      - /tmp
+    command: >
+      sh -c "
+      curl -sf http://ollama:11434/api/pull -d '{\"name\":\"llama3.2:3b\"}' &&
+      curl -sf http://ollama:11434/api/pull -d '{\"name\":\"nomic-embed-text\"}'
+      "
+    restart: "no"
 
   # ---------------------------------------------------------------------------
   # BeigeBox — transparent LLM proxy + middleware
@@ -180,8 +178,9 @@ services:
       - BEIGEBOX_HOST_METRICS_URL=${BEIGEBOX_HOST_METRICS_URL:-http://host.docker.internal:9119/metrics}
       - LOG_LEVEL=DEBUG
       - PYTHONUNBUFFERED=1
-    # ollama runs natively on the host now (see commented block above);
-    # beigebox reaches it via host.docker.internal:11434, so no depends_on.
+    depends_on:
+      ollama:
+        condition: service_healthy
     restart: unless-stopped
     # read_only: true removed to allow log file writing
     # Security maintained via: running as non-root, cap_drop: ALL, no-new-privileges
@@ -279,14 +278,13 @@ services:
       - /tmp
     networks:
       - tools
-    read_only: true
     environment:
       - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-whisper-small}
       - WHISPER__DEVICE=cpu
       - WHISPER__INFERENCE_DEVICE=cpu
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -310,7 +308,6 @@ services:
       - /tmp
     networks:
       - tools
-    read_only: true
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8880/health"]
