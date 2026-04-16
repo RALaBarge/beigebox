@@ -19,7 +19,7 @@ backends_enabled: true
 backends:
   - provider: ollama
     name: ollama-local
-    url: "http://host.docker.internal:11434"
+    url: "http://ollama:11434"
     timeout: 120
     timeout_ms: 120000
     priority: 1
@@ -31,11 +31,11 @@ backends:
 # Models — Unified allocation (Phase 2)
 # ─────────────────────────────────────────────────────────────────────────────
 models:
-  default: "qwen3:4b"              # Used by all subsystems unless overridden
+  default: "llama3.2:3b"       # Used by all subsystems unless overridden
   profiles:
-    routing: "llama3.2:3b"         # Decision LLM / routing judge
-    agentic: "qwen3:4b"            # Operator / tool use
-    summary: "qwen3:4b"            # Context compression (future)
+    routing: "llama3.2:3b"     # Decision LLM / routing judge
+    agentic: "llama3.2:3b"     # Operator / tool use
+    summary: "llama3.2:3b"     # Context compression (future)
   per_task:
     pre_hook: null
     post_hook: null
@@ -89,18 +89,18 @@ routing:
     system_prompt: "You are a helpful routing assistant that decides which tool or backend to use."
     routes:
       default:
-        model: "qwen3:4b"
+        model: "llama3.2:3b"
         description: "General purpose conversation and Q&A"
         wasm_module: "opener_strip"
       code:
-        model: "qwen3:4b"
+        model: "llama3.2:3b"
         description: "Code generation, debugging, technical programming tasks"
       large:
-        model: "qwen3:4b"
+        model: "llama3.2:3b"
         description: "Complex reasoning, analysis, long-form writing"
         wasm_module: "opener_strip"
       fast:
-        model: "qwen3:4b"
+        model: "llama3.2:3b"
         description: "Quick responses, simple questions, brainstorming"
         wasm_module: "opener_strip"
 
@@ -234,11 +234,11 @@ operator:
     timeout: 20
   pre_hook:
     enabled: false
-    model: "qwen3:4b"
+    model: "llama3.2:3b"
     max_iterations: 3
   post_hook:
     enabled: false
-    model: "qwen3:4b"
+    model: "llama3.2:3b"
     max_iterations: 3
   shell:
     enabled: true
