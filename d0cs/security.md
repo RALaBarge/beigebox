@@ -65,6 +65,50 @@ Ollama verifies blob SHA256 internally, but the registry is not hash-pinned at t
 
 Submodules are pinned by commit SHA (immutable), but the upstream repo is trusted on that SHA only. Review before `git submodule update`.
 
+### Go coordinator — zero external dependencies
+
+**AMF coordinator (Go) extracts critical libraries to eliminate supply chain risk:**
+
+| Component | Extraction | Lines | Protocols |
+|-----------|-----------|-------|-----------|
+| **NATS Client** | `internal/nats/client.go` | 350 | CONNECT, SUB, PUB, MSG, PING/PONG |
+| **mDNS Resolver** | `internal/mdns/mdns.go` | 300 | RFC 6762-6763 multicast DNS |
+| **DNS-SD Client** | `internal/dns/dns.go` | 200 | RFC 1035 (PTR, TXT, SRV queries) |
+| **UUID Generator** | `stack/id.go` | 18 | RFC 4122 v4 (stdlib crypto/rand) |
+
+**Threat Model:**
+
+Extracted libraries eliminate supply chain attacks at **three high-risk boundary points:**
+
+1. **Event fabric (NATS)** — Compromised nats-io/nats.go could inject malicious events, intercept messages, or trigger denial-of-service
+2. **Service discovery (mDNS/DNS)** — Compromised zeroconf or miekg/dns could advertise fake agents, redirect agent connections, or perform man-in-the-middle
+3. **ID generation (UUID)** — Compromised google/uuid (unlikely but possible) could generate predictable IDs, enabling session hijacking
+
+**Benefits:**
+
+- ✅ Isolated to point-in-time snapshot (no auto-updates expose new bugs)
+- ✅ Zero transitive dependencies (no supply chain contagion)
+- ✅ Uses only Go stdlib crypto (stdlib is security-critical, well-audited)
+- ✅ Protocols are RFC standards (stable, unlikely to break)
+
+**Costs:**
+
+- Maintenance of 850 LOC for critical I/O paths
+- No automatic bug fixes from upstream (manual porting required)
+- Responsibility for security updates in extracted code
+
+**Rationale:** Cost is justified because:
+1. Protocols change rarely (NATS stable since 2016, DNS/mDNS since 2008-2013)
+2. Supply chain is the top threat for coordinated systems
+3. AMF runs on isolated networks (limited exposure)
+4. Extracted code is reviewed at extraction time and locked in-tree
+
+**Maintenance:** See [amf/stack/EXTRACTED_SOURCES.md](../../amf/stack/EXTRACTED_SOURCES.md) for:
+- Extraction details (which functions, which protocols)
+- Security review checkpoints (when to audit extracted code)
+- How to port security patches from upstream
+- Decision matrix for future extractions
+
 ---
 
 ## Network Segmentation

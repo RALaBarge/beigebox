@@ -144,7 +144,7 @@ services:
       - ../2600/skills:/app/2600/skills:ro
       - ../workspace/out:/app/workspace/out:rw
       - ../workspace/mounts:/app/workspace/mounts:rw
-      - ../beigebox/web:/app/beigebox/web:ro
+      - ../beigebox:/app/beigebox:ro
       - ../wasm_modules:/app/wasm_modules:ro
       - ./logs:/app/logs
       - ~/.beigebox/chrome-cookies:/app/chrome-cookies:ro

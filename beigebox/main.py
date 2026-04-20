@@ -28,7 +28,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Request, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
@@ -191,11 +191,25 @@ async def lifespan(app: FastAPI):
     sqlite_store = SQLiteStore(sqlite_path, integrity_config=_integrity_cfg)
     _storage_cfg  = cfg["storage"]
     _embed_cfg    = cfg["embedding"]
-    _backend_type = _storage_cfg.get("vector_backend", "chromadb")
-    _backend_path = vector_store_path
+    _backend_type = _storage_cfg.get("vector_backend", "postgres")
     from beigebox.storage.backends import make_backend as _make_backend
     from beigebox.storage.blob_store import BlobStore
     from beigebox.config import get_primary_backend_url
+
+    # Build backend kwargs based on backend type
+    _backend_kwargs = {}
+    if _backend_type == "postgres":
+        _postgres_cfg = _storage_cfg.get("postgres", {})
+        _backend_kwargs = {
+            "connection_string": _postgres_cfg.get(
+                "connection_string",
+                os.environ.get("DATABASE_URL", "postgresql://localhost/beigebox")
+            ),
+            "pool_size": _postgres_cfg.get("pool_size", 5),
+        }
+    else:
+        # Fallback for other backends (chromadb, etc.)
+        _backend_kwargs = {"path": vector_store_path}
 
     # RAG poisoning detection initialization
     poisoning_detector = None
@@ -215,7 +229,7 @@ async def lifespan(app: FastAPI):
     vector_store = VectorStore(
         embedding_model=_embed_cfg["model"],
         embedding_url=_embed_cfg.get("backend_url") or get_primary_backend_url(cfg),
-        backend=_make_backend(_backend_type, path=_backend_path),
+        backend=_make_backend(_backend_type, **_backend_kwargs),
         poisoning_detector=poisoning_detector,
     )
     blob_store = BlobStore(Path(vector_store_path) / "blobs")
@@ -1289,6 +1303,145 @@ async def oauth_callback(
     resp.delete_cookie(COOKIE_STATE)
     resp.delete_cookie(_COOKIE_VERIFIER)
     return resp
+
+
+@app.get("/auth/login")
+async def get_login_page(request: Request):
+    """Serve login page (HTML form for password auth)."""
+    st = get_state()
+    if not hasattr(st, 'password_auth') or st.password_auth is None:
+        return FileResponse("beigebox/web/index.html", media_type="text/html")
+
+    login_html = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>BeigeBox Login</title>
+        <style>
+            body {
+                font-family: 'Fira Code', monospace;
+                background: #1A1A1A;
+                color: #D8DEE9;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+            }
+            .login-container {
+                background: #212121;
+                border: 1px solid #2E2E2E;
+                padding: 40px;
+                border-radius: 4px;
+                width: 300px;
+            }
+            h1 {
+                font-size: 24px;
+                margin-bottom: 30px;
+                color: #B48EAD;
+                text-align: center;
+            }
+            .form-group {
+                margin-bottom: 20px;
+            }
+            label {
+                display: block;
+                margin-bottom: 6px;
+                font-size: 12px;
+                color: #88C0D0;
+            }
+            input {
+                width: 100%;
+                padding: 8px 10px;
+                background: #1A1A1A;
+                color: #D8DEE9;
+                border: 1px solid #2E2E2E;
+                border-radius: 2px;
+                font-family: inherit;
+                font-size: 12px;
+                box-sizing: border-box;
+            }
+            input:focus {
+                outline: none;
+                border-color: #B48EAD;
+            }
+            button {
+                width: 100%;
+                padding: 10px;
+                background: #B48EAD;
+                color: #1A1A1A;
+                border: none;
+                border-radius: 2px;
+                font-family: inherit;
+                font-size: 12px;
+                font-weight: 500;
+                cursor: pointer;
+            }
+            button:hover {
+                background: #C39EBD;
+            }
+            .error {
+                color: #BF616A;
+                margin-top: 10px;
+                font-size: 11px;
+                display: none;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="login-container">
+            <h1>BeigeBox</h1>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" value="admin" readonly>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" autofocus>
+                </div>
+                <button type="submit">Login</button>
+                <div class="error" id="error"></div>
+            </form>
+        </div>
+        <script>
+            document.getElementById('loginForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const username = document.getElementById('username').value;
+                const password = document.getElementById('password').value;
+                const errorDiv = document.getElementById('error');
+
+                try {
+                    const response = await fetch('/auth/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username, password }),
+                        credentials: 'include'
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.password_needs_change) {
+                            window.location.href = '/auth/change-password';
+                        } else {
+                            window.location.href = '/';
+                        }
+                    } else {
+                        errorDiv.textContent = 'Invalid credentials';
+                        errorDiv.style.display = 'block';
+                    }
+                } catch (err) {
+                    errorDiv.textContent = 'Login failed: ' + err.message;
+                    errorDiv.style.display = 'block';
+                }
+            });
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(login_html)
 
 
 @app.post("/auth/login")

@@ -176,11 +176,12 @@ BeigeBox protects against the top threats to LLM systems:
 
 ### Supply Chain Hardening
 
-Three-layer defense:
+Four-layer defense:
 
-1. **Prevention** — hash-locked deps (3,280 hashes), pinned images (digest), CVE scanning
+1. **Prevention** — hash-locked deps, pinned images (digest), CVE scanning, critical libraries extracted
 2. **Containment** — read-only root, network segmentation, capability drop, unprivileged user
 3. **Detection** — comprehensive Tap logging, metrics, automated git hooks
+4. **Elimination** — zero external dependencies in AMF coordinator; minimal deps in Beigebox Python app
 
 Result: Compromised code gets **trapped in-memory, detected in 0.1s, cannot persist**.
 
@@ -200,6 +201,30 @@ Integrated security scanners run via a single command:
 | **semgrep** | Advanced pattern-based vulnerability detection |
 | **gitleaks** | Secrets accidentally committed to git history |
 | **trivy** | OS and app-level CVEs in Docker images |
+
+### Dependency Extraction (Critical Libraries)
+
+**Zero external dependencies in AMF coordinator.** The Go coordinator extracts and internalizes critical dependencies to eliminate supply chain attacks at the event fabric and discovery layers:
+
+| Library | Extracted | Status |
+|---------|-----------|--------|
+| **NATS** (event fabric) | ✅ Yes | `internal/nats/client.go` (350 LOC, no auth) |
+| **mDNS** (agent discovery) | ✅ Yes | `internal/mdns/mdns.go` (300 LOC) |
+| **DNS** (DNS-SD lookups) | ✅ Yes | `internal/dns/dns.go` (200 LOC) |
+| **UUID** (ID generation) | ✅ Yes | `stack/id.go` (18 LOC, stdlib crypto/rand) |
+
+**Security benefit:** Compromised NATS, zeroconf, or miekg/dns releases cannot affect the coordinator. The extracted code:
+- Is reviewed and locked to a point-in-time snapshot (no auto-updates)
+- Has zero reliance on transitive dependencies
+- Uses only Go stdlib (crypto/rand, net, encoding/json)
+- Implements stable, well-specified protocols (RFC 4122, RFC 1035, RFC 6762)
+
+**Trade-off:** Maintenance burden for critical I/O paths is accepted because:
+1. Protocols are stable (rarely change)
+2. Supply chain risk is eliminated (worth the cost)
+3. AMF runs on isolated networks (minimal exposure)
+
+See [amf/stack/EXTRACTED_SOURCES.md](amf/stack/EXTRACTED_SOURCES.md) for detailed extraction log and maintenance notes.
 
 See [Security Policy](SECURITY_POLICY.md), [Deployment Checklist](DEPLOYMENT_SECURITY_CHECKLIST.md), and [d0cs/security.md](d0cs/security.md) for threat model, defense strategy, hardening details, and known limitations.
 
