@@ -5730,9 +5730,9 @@ async def catch_all(path: str, request: Request):
     Keeps BeigeBox invisible to frontends and backends that use endpoints
     we haven't specifically implemented. All traffic is logged to wiretap.
     """
-    # Don't forward requests to our own beigebox/*, api/v1/*, or auth/* endpoints —
+    # Don't forward requests to our own beigebox/* or api/v1/* endpoints —
     # those are handled above; if we're here it means they 404'd internally.
-    if path.startswith("beigebox/") or path.startswith("api/v1/") or path.startswith("auth/"):
+    if path.startswith("beigebox/") or path.startswith("api/v1/"):
         return JSONResponse({"error": "not found", "path": path}, status_code=404)
 
     # Silently reject common browser noise (don't log to wiretap, don't forward to backend)
