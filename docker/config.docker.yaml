@@ -63,7 +63,7 @@ auth:
 storage:
   type: sqlite
   path: "data/beigebox.db"
-  vector_store_path: "data/chroma"    # ChromaDB for embeddings (RAG scanner)
+  vector_store_path: "data/chroma"
   vector_backend: chromadb
   log_conversations: true
 
