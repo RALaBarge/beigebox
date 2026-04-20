@@ -291,9 +291,10 @@ class PostgresBackend(VectorBackend):
                 params.insert(1, json.dumps(where))
 
             # Query using cosine distance (<-> operator)
+            # Cast embedding list to vector type using pgvector format
             cursor.execute(
                 f"""
-                SELECT id, document, metadata, embedding <-> %s AS distance
+                SELECT id, document, metadata, embedding <-> %s::vector AS distance
                 FROM embeddings
                 {where_clause}
                 ORDER BY distance
