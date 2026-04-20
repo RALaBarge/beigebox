@@ -3,7 +3,7 @@ Vector backend factory.
 
 Usage:
     from beigebox.storage.backends import make_backend
-    backend = make_backend("chromadb", path="./data/chroma")
+    backend = make_backend("postgres", connection_string="postgresql://localhost/beigebox")
 
 Adding a new backend:
     1. Create beigebox/storage/backends/<name>.py implementing VectorBackend.
@@ -20,21 +20,20 @@ _REGISTRY: dict[str, type[VectorBackend]] = {}
 def _register():
     """Lazy-import backends to avoid hard dependencies at import time.
 
-    chromadb is optional — importing it at module level would fail the entire
-    beigebox import for users who run without a vector store. The guard on
-    _REGISTRY ensures the import and class registration happen exactly once.
+    PostgreSQL + pgvector is the primary backend. Lazy import ensures we only
+    raise ImportError if the user explicitly tries to use a backend that's not installed.
     """
     global _REGISTRY
     if _REGISTRY:
         return
     try:
-        from .chroma import ChromaBackend
-        _REGISTRY["chromadb"] = ChromaBackend
-    except ImportError:
+        from .postgres import PostgresBackend
+        _REGISTRY["postgres"] = PostgresBackend
+    except ImportError as e:
         raise ImportError(
-            "chromadb is required for the default vector backend but is not installed. "
-            "Install it with: pip install chromadb"
-        )
+            "PostgreSQL vector backend requires psycopg2 and pgvector. "
+            "Install with: pip install psycopg2-binary pgvector"
+        ) from e
 
 
 def make_backend(backend_type: str, **kwargs) -> VectorBackend:

@@ -74,8 +74,18 @@ backends:
 storage:
   type: sqlite
   path: ./data/beigebox.db
-  vector_store_path: ./data/chroma
-  vector_backend: chromadb
+  vector_backend: postgres
+  postgres:
+    # PostgreSQL connection string for vector storage + semantic cache.
+    # Supports all psycopg2 connection string formats:
+    #   - Simple: postgresql://localhost/beigebox
+    #   - With auth: postgresql://user:password@host:5432/beigebox
+    #   - Environment variable: $DATABASE_URL
+    #
+    # The backend will auto-create the embeddings table and indexes on first run.
+    # Requires pgvector extension (installed automatically if you have superuser).
+    connection_string: postgresql://localhost/beigebox
+    pool_size: 5  # Connection pool size for concurrent queries
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Wiretap (Request/Response Logging)
