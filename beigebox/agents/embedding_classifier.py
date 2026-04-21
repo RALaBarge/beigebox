@@ -33,6 +33,7 @@ from beigebox.logging import log_classifier_run, log_embedding_decision
 import numpy as np
 import httpx
 
+from beigebox.constants import DEFAULT_EMBEDDING_MODEL
 from beigebox.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -200,7 +201,7 @@ class EmbeddingClassifier:
 
     def __init__(self):
         cfg = get_config()
-        self.embed_model = cfg.get("embedding", {}).get("model", "nomic-embed-text")
+        self.embed_model = cfg.get("embedding", {}).get("model", DEFAULT_EMBEDDING_MODEL)
         self.embed_url = cfg.get("embedding", {}).get(
             "backend_url", cfg["backend"]["url"]
         ).rstrip("/")

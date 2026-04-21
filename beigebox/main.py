@@ -34,6 +34,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from beigebox import __version__ as _BB_VERSION
+from beigebox.constants import DEFAULT_MODEL, DEFAULT_ROUTING_MODEL, DEFAULT_AGENTIC_MODEL, DEFAULT_SUMMARY_MODEL, DEFAULT_EMBEDDING_MODEL
 from beigebox.config import (
     get_config,
     get_runtime_config,
@@ -1683,10 +1684,10 @@ async def api_config():
         },
         # ── Models Registry (Phase 2 refactoring) ────────────────────
         "models": {
-            "default":       rt.get("models_default") or cfg.get("models", {}).get("default", "qwen3:4b"),
-            "routing":       rt.get("models_routing") or cfg.get("models", {}).get("profiles", {}).get("routing", "qwen3:4b"),
-            "agentic":       rt.get("models_agentic") or cfg.get("models", {}).get("profiles", {}).get("agentic", "qwen3:4b"),
-            "summary":       rt.get("models_summary") or cfg.get("models", {}).get("profiles", {}).get("summary", "qwen3:4b"),
+            "default":       rt.get("models_default") or cfg.get("models", {}).get("default", DEFAULT_MODEL),
+            "routing":       rt.get("models_routing") or cfg.get("models", {}).get("profiles", {}).get("routing", DEFAULT_ROUTING_MODEL),
+            "agentic":       rt.get("models_agentic") or cfg.get("models", {}).get("profiles", {}).get("agentic", DEFAULT_AGENTIC_MODEL),
+            "summary":       rt.get("models_summary") or cfg.get("models", {}).get("profiles", {}).get("summary", DEFAULT_SUMMARY_MODEL),
         },
         # ── Server ───────────────────────────────────────────────────
         "server": {
@@ -3419,7 +3420,7 @@ async def api_dgm_run(request: Request):
 
         try:
             cfg = get_config()
-            routing_model = cfg.get("models", {}).get("profiles", {}).get("routing", "qwen3:4b")
+            routing_model = cfg.get("models", {}).get("profiles", {}).get("routing", DEFAULT_ROUTING_MODEL)
             proxy_url = f"http://localhost:{cfg.get('server', {}).get('port', 8001)}"
 
             # Snapshot runtime config before any changes (used by revert endpoint)

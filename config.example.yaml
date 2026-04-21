@@ -102,11 +102,11 @@ wiretap:
 # ─────────────────────────────────────────────────────────────────────────────
 
 models:
-  default: "qwen3:4b"
+  default: "llama3.2:3b"
   profiles:
-    routing: "qwen3:4b"         # Decision LLM
-    agentic: "qwen3:4b"         # Operator
-    summary: "qwen3:4b"         # Auto-summarization
+    routing: "llama3.2:3b"      # Decision LLM (fast, lightweight)
+    agentic: "llama3.2:3b"      # Operator / tool use
+    summary: "llama3.2:3b"      # Auto-summarization
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Decision LLM (Intelligent Routing)

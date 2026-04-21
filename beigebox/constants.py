@@ -109,6 +109,23 @@ ROUTE_LARGE = "large"
 ROUTE_FAST = "fast"
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Model Defaults (Single Source of Truth)
+# ─────────────────────────────────────────────────────────────────────────────
+# Define all model defaults here. Config files and code fallbacks reference these.
+# Users can override at runtime via:
+#   1. request model parameter: {"model": "qwen3:30b"}
+#   2. runtime_config.yaml: models_default: qwen3:30b
+#   3. Z-command: "z: model=qwen3:30b"
+#
+# DO NOT hardcode model names elsewhere. Use these constants.
+
+DEFAULT_MODEL = "llama3.2:3b"                    # General chat (fast, good enough)
+DEFAULT_ROUTING_MODEL = "llama3.2:3b"            # Backend picker (fast, lightweight)
+DEFAULT_AGENTIC_MODEL = "llama3.2:3b"            # Tool use agent (multi-step reasoning)
+DEFAULT_SUMMARY_MODEL = "llama3.2:3b"            # Context compression (lightweight)
+DEFAULT_EMBEDDING_MODEL = "nomic-embed-text"     # Semantic search & caching (unchanged)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Z-Command Defaults
 # ─────────────────────────────────────────────────────────────────────────────
 
