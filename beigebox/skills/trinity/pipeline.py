@@ -47,6 +47,7 @@ class TrinityPipeline:
         models: Optional[Dict[str, str]] = None,
         budget: Optional[Dict[str, int]] = None,
         beigebox_url: str = "http://localhost:8000",
+        route_via_beigebox: bool = True,
         log_config: Optional[TrinityLogConfig] = None,
     ):
         self.repo_path = repo_path
@@ -68,7 +69,11 @@ class TrinityPipeline:
         self.log = TrinityLogger(self.audit_id, _log_cfg)
 
         self.chunker = TrinityChunker(repo_path, logger=self.log)
-        self.router = TrinityModelRouter(beigebox_url, logger=self.log)
+        self.router = TrinityModelRouter(
+            beigebox_url=beigebox_url,
+            route_via_beigebox=route_via_beigebox,
+            logger=self.log
+        )
 
         self.chunks: List[Dict] = []
         self.chunk_metadata: Dict = {}
