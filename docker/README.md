@@ -5,34 +5,30 @@ Run BeigeBox locally via Docker Compose with zero manual configuration.
 ## First Run: Interactive Setup
 
 ```bash
-./FIRST_RUN.sh       # Docker setup (models, profiles, ports)
-./launch.sh up -d    # Start the stack
+./launch.sh up -d    # First run: auto-runs setup wizard, then starts the stack
 ```
 
-**FIRST_RUN.sh:**
+**On first run:**
 1. **Auto-detects** your platform (macOS/Linux, ARM64/x86_64)
 2. **Asks 2 questions:**
    - Main use case (inference only, + voice, + browser, or both)
    - Model storage location (scans for existing, recommends default, or custom)
 3. **Saves config** to `~/.beigebox/config` (persistent across runs)
 4. **Updates .env** with OLLAMA_DATA path and development defaults
+5. **Starts the stack** immediately
 
-Then use:
+**Later runs** skip the wizard and just launch the stack with your saved settings.
 
+## Changing Settings Later
+
+**Hot-reload (no restart needed):**
+Edit `data/runtime_config.yaml` or use the API to change models, features, backends anytime.
+See `CONFIGURATION.md` for details.
+
+**Reconfigure everything:**
 ```bash
-./CONFIG_SETUP.sh    # BeigeBox app settings (features, models, tools, operator)
+./launch.sh --reset up -d    # Re-run setup wizard, then restart with new choices
 ```
-
-**CONFIG_SETUP.sh:**
-Customize BeigeBox features, backends, and tools anytime (hot-reloads without restart):
-- Features (semantic cache, cost tracking, decision LLM, operator, harness, WASM)
-- Models (default, routing, agentic, summary)
-- Backends (Ollama, OpenRouter, multi-backend routing)
-- Tools (web search, browser automation, document search)
-- Operator (max iterations, shell access, tool profiles)
-- Harness (multi-turn, retries, stagger)
-
-Each option includes a description of what it does.
 
 ## Launching the Stack
 
@@ -51,8 +47,7 @@ To override profiles on this run:
 
 | File | Purpose |
 |---|---|
-| `FIRST_RUN.sh` | Interactive setup wizard (run once) |
-| `launch.sh` | Docker Compose launcher (loads config, applies profiles) |
+| `launch.sh` | Docker Compose launcher + setup wizard (runs setup on first run, then launches) |
 | `docker-compose.yaml` | Service definitions (ollama, beigebox, voice, CDP, alt engines) |
 | `config.docker.yaml` | BeigeBox config (models, features, tools, routing) |
 | `env.example` | Environment template (copied to .env by FIRST_RUN) |
@@ -222,8 +217,7 @@ rm docker/.env
 rm -rf ../data/*
 
 # Then:
-./FIRST_RUN.sh
-./launch.sh up -d
+./launch.sh up -d    # Will auto-run setup wizard
 ```
 
 ## Troubleshooting
@@ -231,7 +225,7 @@ rm -rf ../data/*
 **Error: "All backends failed"**
 - Check models were pulled: `docker compose logs beigebox-model-pull`
 - Verify ollama is healthy: `docker compose logs ollama`
-- Manually pull model: `docker compose exec ollama ollama pull qwen3:4b`
+- Manually pull a model: `docker compose exec ollama ollama pull llama3.2:3b`
 
 **Error: "Unknown flag --profile"**
 - Docker Compose version too old (need v1.28+)
