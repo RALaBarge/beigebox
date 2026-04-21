@@ -28,6 +28,7 @@ from typing import Optional
 import httpx
 import numpy as np
 
+from beigebox.constants import DEFAULT_EMBEDDING_MODEL
 from beigebox.logging import log_cache_event
 
 logger = logging.getLogger(__name__)
@@ -173,7 +174,7 @@ class SemanticCache:
         self.ttl: float = float(sc_cfg.get("ttl_seconds", 3600))
 
         embed_cfg = cfg.get("embedding", {})
-        self._embed_model = embed_cfg.get("model", "nomic-embed-text")
+        self._embed_model = embed_cfg.get("model", DEFAULT_EMBEDDING_MODEL)
         self._embed_url = embed_cfg.get(
             "backend_url", cfg["backend"]["url"]
         ).rstrip("/")

@@ -22,17 +22,29 @@ cd "$(dirname "$0")"
 CONFIG_FILE="$HOME/.beigebox/config"
 if [[ ! -f "$CONFIG_FILE" ]]; then
   echo "[launch.sh] ERROR: No config found at $CONFIG_FILE"
-  echo "[launch.sh] Run ./FIRST_RUN.sh first to set up"
+  echo "[launch.sh]"
+  echo "[launch.sh] First time? Run setup:"
+  echo "[launch.sh]   cd $(dirname "$0") && ./FIRST_RUN.sh"
+  echo "[launch.sh]"
+  echo "[launch.sh] Already set up? Check that it matches:"
+  echo "[launch.sh]   $CONFIG_FILE"
   exit 1
 fi
 
+# Source config and export vars so docker-compose inherits them
+set -a
 source "$CONFIG_FILE"
+set +a
 echo "[launch.sh] Loaded config from $CONFIG_FILE"
+echo "[launch.sh] Using: BeigeBox=$BEIGEBOX_PORT, Ollama=$OLLAMA_PORT, Whisper=$WHISPER_PORT, Kokoro=$KOKORO_PORT"
 
 # Verify .env exists (should be created by FIRST_RUN.sh)
 if [[ ! -f .env ]]; then
-  echo "[launch.sh] ERROR: .env not found — FIRST_RUN.sh may have failed"
-  exit 1
+  echo "[launch.sh] WARNING: .env not found — creating from env.example"
+  cp env.example .env || {
+    echo "[launch.sh] ERROR: Could not copy env.example"
+    exit 1
+  }
 fi
 
 # Pin an unpinned image tag in docker-compose.yaml by digest.

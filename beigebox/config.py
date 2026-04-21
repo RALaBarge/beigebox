@@ -19,6 +19,7 @@ from typing import Optional
 from dotenv import load_dotenv
 
 from pydantic import BaseModel, ConfigDict, ValidationError
+from beigebox.constants import DEFAULT_MODEL, DEFAULT_EMBEDDING_MODEL
 
 _vlog = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ class _BackendCfg(BaseModel):
 
 class _ModelsCfg(BaseModel):
     model_config = ConfigDict(extra="allow")
-    default: str = "qwen3:4b"
+    default: str = DEFAULT_MODEL
     profiles: dict = {}
     per_task: dict = {}
     whitelist: dict = {}

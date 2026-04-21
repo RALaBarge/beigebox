@@ -17,22 +17,17 @@ Run BeigeBox locally via Docker Compose with zero manual configuration.
 3. **Saves config** to `~/.beigebox/config` (persistent across runs)
 4. **Updates .env** with OLLAMA_DATA path and development defaults
 
-Then use:
+## Changing Settings Later
 
+**Hot-reload (no restart needed):**
+Edit `data/runtime_config.yaml` or use the API to change models, features, backends anytime.
+See `CONFIGURATION.md` for details.
+
+**Reconfigure everything:**
 ```bash
-./CONFIG_SETUP.sh    # BeigeBox app settings (features, models, tools, operator)
+./FIRST_RUN.sh --reset    # Run setup wizard again
+./launch.sh up -d         # Restart with new choices
 ```
-
-**CONFIG_SETUP.sh:**
-Customize BeigeBox features, backends, and tools anytime (hot-reloads without restart):
-- Features (semantic cache, cost tracking, decision LLM, operator, harness, WASM)
-- Models (default, routing, agentic, summary)
-- Backends (Ollama, OpenRouter, multi-backend routing)
-- Tools (web search, browser automation, document search)
-- Operator (max iterations, shell access, tool profiles)
-- Harness (multi-turn, retries, stagger)
-
-Each option includes a description of what it does.
 
 ## Launching the Stack
 
@@ -231,7 +226,7 @@ rm -rf ../data/*
 **Error: "All backends failed"**
 - Check models were pulled: `docker compose logs beigebox-model-pull`
 - Verify ollama is healthy: `docker compose logs ollama`
-- Manually pull model: `docker compose exec ollama ollama pull qwen3:4b`
+- Manually pull a model: `docker compose exec ollama ollama pull llama3.2:3b`
 
 **Error: "Unknown flag --profile"**
 - Docker Compose version too old (need v1.28+)
