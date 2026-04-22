@@ -171,6 +171,7 @@ services:
     environment:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GOOGLE_CSE_ID=${GOOGLE_CSE_ID:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OLLAMA_HOST=${OLLAMA_HOST:-ollama}
       - BROWSERBOX_WS_URL=${BROWSERBOX_WS_URL:-ws://host.docker.internal:9009}
       - CDP_COOKIES_PATH=/app/chrome-cookies
@@ -497,6 +498,29 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — Vector store backend for embeddings
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: beigebox-postgres
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: beigebox
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - llm
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
 volumes:
   ollama_data:
   whisper_cache:
@@ -506,6 +530,7 @@ volumes:
   executorch_models:
   chrome_data:
   claude_home:
+  postgres_data:
 
 # ---------------------------------------------------------------------------
 # Network segmentation — isolate blast radius if any service is compromised
@@ -521,9 +546,15 @@ networks:
   llm:
     driver: bridge
     internal: false
+    driver_opts:
+      com.docker.network.bridge.name: br-llm
   tools:
     driver: bridge
     internal: false
+    driver_opts:
+      com.docker.network.bridge.name: br-tools
   inference:
     driver: bridge
     internal: false
+    driver_opts:
+      com.docker.network.bridge.name: br-inference
