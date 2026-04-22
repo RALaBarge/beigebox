@@ -76,41 +76,21 @@ run_setup_wizard() {
     echo -e "${GREEN}✓${NC} Detected: $DISPLAY_PLATFORM ($DISPLAY_ARCH)"
     echo ""
 
-    # Question 1: What do you want to do?
-    echo -e "${YELLOW}What's your main use case?${NC}"
+    # Question 1: What features do you want?
+    echo -e "${YELLOW}Which optional features do you want?${NC}"
     echo ""
-    echo "  1. LLM inference only (default)"
-    echo "  2. + Speech I/O (voice/STT/TTS)"
-    echo "  3. + Browser automation (CDP)"
-    echo "  4. Everything (voice + browser)"
+    echo "  1. None (LLM inference only) — default"
+    echo "  2. Browser automation (CDP)"
     echo ""
 
-    read -p "Choose [1-4, default 1]: " -r USE_CASE
+    read -p "Choose [1-2, default 1]: " -r USE_CASE
     USE_CASE=${USE_CASE:-1}
 
     PROFILES=""
     case "$USE_CASE" in
         2)
-            if $IS_MACOS && $IS_ARM64; then
-                PROFILES="apple"
-                echo -e "${GREEN}✓${NC} Will add: native arm64 voice I/O"
-            else
-                PROFILES="voice"
-                echo -e "${GREEN}✓${NC} Will add: voice I/O"
-            fi
-            ;;
-        3)
             PROFILES="cdp"
             echo -e "${GREEN}✓${NC} Will add: browser automation"
-            ;;
-        4)
-            if $IS_MACOS && $IS_ARM64; then
-                PROFILES="apple,cdp"
-                echo -e "${GREEN}✓${NC} Will add: native voice I/O + browser automation"
-            else
-                PROFILES="voice,cdp"
-                echo -e "${GREEN}✓${NC} Will add: voice I/O + browser automation"
-            fi
             ;;
         *)
             echo -e "${GREEN}✓${NC} Core only: LLM inference + proxy"
@@ -362,40 +342,6 @@ fi
 
 # Then append CLI args (e.g., up, -d, etc.)
 ARGS+=("${@:+$@}")
-
-HAS_VOICE=false
-HAS_APPLE=false
-
-for arg in "${ARGS[@]:-}"; do
-  [[ "$arg" == "voice"              || "$arg" == "--profile=voice" ]] && HAS_VOICE=true
-  [[ "$arg" == "apple"              || "$arg" == "--profile=apple" ]] && HAS_APPLE=true
-done
-
-if [[ "${IS_ARM64:-false}" == true && "$HAS_VOICE" == true && "$HAS_APPLE" == false ]]; then
-  echo "[launch.sh] Apple Silicon detected — swapping --profile voice → --profile apple"
-  NEW_ARGS=()
-  for arg in "${ARGS[@]:-}"; do
-    if   [[ "$arg" == "voice"            ]]; then NEW_ARGS+=("apple")
-    elif [[ "$arg" == "--profile=voice"  ]]; then NEW_ARGS+=("--profile=apple")
-    else NEW_ARGS+=("$arg")
-    fi
-  done
-  ARGS=("${NEW_ARGS[@]}")
-fi
-
-FINAL_HAS_VOICE=false; FINAL_HAS_APPLE=false
-for arg in "${ARGS[@]:-}"; do
-  [[ "$arg" == "voice" || "$arg" == "--profile=voice" ]] && FINAL_HAS_VOICE=true
-  [[ "$arg" == "apple" || "$arg" == "--profile=apple" ]] && FINAL_HAS_APPLE=true
-done
-if [[ "$FINAL_HAS_VOICE" == true && "$FINAL_HAS_APPLE" == true ]]; then
-  echo "[launch.sh] WARNING: both 'voice' and 'apple' profiles active — they share ports :9000/:8880"
-fi
-
-if [[ "$FINAL_HAS_APPLE" == true ]]; then
-  pin_image_digest "fedirz/faster-whisper-server:latest-cpu"
-  pin_image_digest "ghcr.io/remsky/kokoro-fastapi-cpu:latest-arm64"
-fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Execute Docker Compose with final args

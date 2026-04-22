@@ -328,21 +328,6 @@ web_ui:
   voice_enabled: false
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Voice (Speech-to-Text + Text-to-Speech)
-# ─────────────────────────────────────────────────────────────────────────────
-# Enable features.voice above, then set service URLs.
-# Docker voice profile: whisper → :9000  kokoro → :8880
-# From inside Docker, use http://host.docker.internal:<port>
-
-voice:
-  stt_url: ""            # e.g. http://localhost:9000  (or host.docker.internal in Docker)
-  tts_url: ""            # e.g. http://localhost:8880
-  tts_model: "kokoro"
-  tts_voice: "af_bella"  # kokoro: af_bella af_sarah am_adam  openai: alloy echo fable
-  tts_speed: 1.0
-  tts_autoplay: false
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Logging
 # ─────────────────────────────────────────────────────────────────────────────
 

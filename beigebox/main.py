@@ -1673,7 +1673,6 @@ async def api_config():
             "wasm":                  rt.get("features_wasm", cfg.get("features", {}).get("wasm", cfg.get("wasm", {}).get("enabled", False))),
             "guardrails":            rt.get("features_guardrails", cfg.get("features", {}).get("guardrails", cfg.get("guardrails", {}).get("enabled", False))),
             "amf_mesh":              rt.get("features_amf_mesh", cfg.get("features", {}).get("amf_mesh", cfg.get("amf_mesh", {}).get("enabled", False))),
-            "voice":                 rt.get("features_voice", cfg.get("features", {}).get("voice", cfg.get("voice", {}).get("enabled", False))),
             "hooks":                 rt.get("features_hooks", cfg.get("features", {}).get("hooks", cfg.get("hooks", {}).get("enabled", False))),
         },
         # ── Backend ──────────────────────────────────────────────────
@@ -1825,17 +1824,6 @@ async def api_config():
         "web_ui": {
             "vi_mode":      rt.get("web_ui_vi_mode", False),
             "palette":      rt.get("web_ui_palette", "default"),
-            "voice_enabled": rt.get("voice_enabled", False),
-            "voice_hotkey":  rt.get("voice_hotkey", ""),
-        },
-        # ── Voice / Audio ─────────────────────────────────────────────
-        "voice": {
-            "stt_url":      rt.get("stt_url") or cfg.get("voice", {}).get("stt_url", ""),
-            "tts_url":      rt.get("tts_url") or cfg.get("voice", {}).get("tts_url", ""),
-            "tts_model":    rt.get("tts_model") or cfg.get("voice", {}).get("tts_model", "tts-1"),
-            "tts_voice":    rt.get("tts_voice") or cfg.get("voice", {}).get("tts_voice", "alloy"),
-            "tts_speed":    rt.get("tts_speed") or cfg.get("voice", {}).get("tts_speed", 1.0),
-            "tts_autoplay": rt.get("tts_autoplay", cfg.get("voice", {}).get("tts_autoplay", False)),
         },
         # ── Runtime session overrides ─────────────────────────────────
         "runtime": {
@@ -1914,8 +1902,6 @@ async def api_config_save(request: Request):
         # Web UI
         "web_ui_vi_mode":               "web_ui_vi_mode",
         "web_ui_palette":               "web_ui_palette",
-        "voice_enabled":                "voice_enabled",
-        "voice_hotkey":                 "voice_hotkey",
         # Features (Phase 1 refactoring)
         "features_backends":            "features_backends",
         "features_decision_llm":        "features_decision_llm",
@@ -1933,7 +1919,6 @@ async def api_config_save(request: Request):
         "features_wasm":                "features_wasm",
         "features_guardrails":          "features_guardrails",
         "features_amf_mesh":            "features_amf_mesh",
-        "features_voice":               "features_voice",
         "features_hooks":               "features_hooks",
         # Models Registry (Phase 2 refactoring)
         "models_default":               "models_default",
@@ -1989,13 +1974,6 @@ async def api_config_save(request: Request):
         "gen_seed":                     "gen_seed",
         "gen_stop":                     "gen_stop",
         "gen_force":                    "gen_force",
-        # Voice / Audio
-        "stt_url":                      "stt_url",
-        "tts_url":                      "tts_url",
-        "tts_model":                    "tts_model",
-        "tts_voice":                    "tts_voice",
-        "tts_speed":                    "tts_speed",
-        "tts_autoplay":                 "tts_autoplay",
         # WASM
         "wasm_default_module":          "wasm_default_module",
         "wasm_enabled":                 "wasm_enabled",
@@ -5079,19 +5057,6 @@ async def ui():
 # Catch-all below handles anything not listed here.
 # ---------------------------------------------------------------------------
 
-def _get_voice_url(kind: str) -> str | None:
-    """
-    Return the configured STT or TTS base URL from runtime config, falling back
-    to config.yaml voice section, then None (which means use backend.url).
-    kind: 'stt' or 'tts'
-    """
-    rt = get_runtime_config()
-    cfg = get_config()
-    voice_cfg = cfg.get("voice", {})
-    key = f"{kind}_url"
-    return rt.get(key) or voice_cfg.get(key) or None
-
-
 async def _wire_and_forward(request: Request, route_label: str, override_base_url: str | None = None) -> StreamingResponse:
     """
     Generic forward: log to wiretap, stream response from backend verbatim.
@@ -5154,22 +5119,6 @@ async def _wire_and_forward(request: Request, route_label: str, override_base_ur
 
     return StreamingResponse(_stream(), media_type="application/octet-stream")
 
-
-# OpenAI Audio — STT / TTS (forwarded to configured voice services or backend)
-@app.post("/v1/audio/transcriptions")
-async def audio_transcriptions(request: Request):
-    """STT — forward to configured STT service or backend."""
-    return await _wire_and_forward(request, "audio/transcriptions", _get_voice_url("stt"))
-
-@app.post("/v1/audio/speech")
-async def audio_speech(request: Request):
-    """TTS — forward to configured TTS service or backend."""
-    return await _wire_and_forward(request, "audio/speech", _get_voice_url("tts"))
-
-@app.post("/v1/audio/translations")
-async def audio_translations(request: Request):
-    """Audio translation — forward to backend."""
-    return await _wire_and_forward(request, "audio/translations", _get_voice_url("stt"))
 
 # OpenAI Embeddings
 @app.post("/v1/embeddings")

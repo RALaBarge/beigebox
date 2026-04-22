@@ -11,7 +11,7 @@ Run BeigeBox locally via Docker Compose with zero manual configuration.
 **On first run:**
 1. **Auto-detects** your platform (macOS/Linux, ARM64/x86_64)
 2. **Asks 2 questions:**
-   - Main use case (inference only, + voice, + browser, or both)
+   - Optional features (browser automation, alt inference engines)
    - Model storage location (scans for existing, recommends default, or custom)
 3. **Saves config** to `~/.beigebox/config` (persistent across runs)
 4. **Updates .env** with OLLAMA_DATA path and development defaults
@@ -48,7 +48,7 @@ To override profiles on this run:
 | File | Purpose |
 |---|---|
 | `launch.sh` | Docker Compose launcher + setup wizard (runs setup on first run, then launches) |
-| `docker-compose.yaml` | Service definitions (ollama, beigebox, voice, CDP, alt engines) |
+| `docker-compose.yaml` | Service definitions (ollama, beigebox, postgres, CDP, alt engines) |
 | `config.docker.yaml` | BeigeBox config (models, features, tools, routing) |
 | `env.example` | Environment template (copied to .env by FIRST_RUN) |
 | `.env` | Runtime env (OLLAMA_DATA, ports, API keys) |
@@ -96,8 +96,6 @@ Enable features via FIRST_RUN or manual flags:
 |---|---|---|
 | **(default)** | ollama, beigebox | LLM inference only |
 | `cdp` | + chrome | Browser automation (operator web tools) |
-| `voice` | + whisper, kokoro (x86) | Speech I/O on Linux/WSL |
-| `apple` | + whisper-apple, kokoro-apple (arm64) | Speech I/O on macOS (native ARM64) |
 | `engines-cpp` | + llama-cpp | Lightweight C++ inference (GGUF quantized) |
 | `engines-vllm` | + vllm | Production-grade inference (batching, fast generation) |
 | `engines-executorch` | + executorch | Edge inference (Meta's lightweight runtime) |
@@ -105,14 +103,14 @@ Enable features via FIRST_RUN or manual flags:
 
 Combine profiles:
 ```bash
-./launch.sh --profile cdp --profile apple up -d    # browser + voice
+./launch.sh --profile cdp up -d    # browser automation
 ```
 
 ## Network & Storage
 
 **Networks:**
-- `llm` — beigebox ↔ ollama (LLM inference + embeddings)
-- `tools` — beigebox ↔ whisper, kokoro, chrome (I/O + automation)
+- `llm` — beigebox ↔ ollama + postgres (LLM inference + embeddings)
+- `tools` — beigebox ↔ chrome (browser automation)
 - `inference` — beigebox ↔ llama-cpp, vllm, executorch (alt engines)
 
 Cross-network isolation prevents compromised services from reaching critical paths.
@@ -194,18 +192,12 @@ Then restart:
 ./launch.sh up -d
 ```
 
-### Add speech I/O later
+### Add browser automation later
 
-If you didn't choose voice in FIRST_RUN, add it later:
+If you didn't choose CDP in setup, add it later:
 
-**macOS:**
 ```bash
-./launch.sh --profile apple up -d
-```
-
-**Linux/WSL:**
-```bash
-./launch.sh --profile voice up -d
+./launch.sh --profile cdp up -d
 ```
 
 ### Wipe everything and start fresh
@@ -251,7 +243,6 @@ cp env.example .env
 # Then:
 docker compose up -d                           # core only
 docker compose --profile cdp up -d             # add browser automation
-docker compose --profile apple up -d           # add voice (macOS ARM64)
 ```
 
 Health check:
