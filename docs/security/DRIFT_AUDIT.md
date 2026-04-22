@@ -40,7 +40,7 @@ Commit `072a4271` had to manually change **28 files** just to swap `llama3.2:3b`
 
 To change the default model globally:
 1. Edit `config.yaml` ❌
-2. Edit `config.example.yaml` ❌
+2. Edit `docker/config.example.yaml` ❌
 3. Edit `docker/config.docker.yaml` ❌
 4. Edit `docker/config.yaml` ❌
 5. Edit `beigebox/config.py` ❌
@@ -110,9 +110,8 @@ Four files define nearly identical model configurations:
 
 | File | qwen3:4b refs | nomic-embed | Lines |
 |------|------|---------|-------|
-| `config.example.yaml` | 7 | 1 | Full example |
+| `docker/config.example.yaml` | 7 | 1 | Full example |
 | `docker/config.docker.yaml` | 10 | 1 | Docker defaults |
-| `docker/config.yaml` | 4 | 1 | Docker copy |
 | `config.yaml` | 1 | 1 | Production |
 
 **No single source of truth.** If you update one, the others drift.
