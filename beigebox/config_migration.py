@@ -12,6 +12,15 @@ This module handles backward compatibility by auto-converting old format to new.
 import logging
 from typing import Any, Dict, Optional
 
+from beigebox.constants import (
+    DEFAULT_MODEL,
+    DEFAULT_ROUTING_MODEL,
+    DEFAULT_AGENTIC_MODEL,
+    DEFAULT_SUMMARY_MODEL,
+    DEFAULT_EMBEDDING_MODEL,
+    SEMANTIC_CACHE_DEFAULT_SIMILARITY,
+)
+
 _log = logging.getLogger(__name__)
 
 
@@ -73,12 +82,12 @@ def migrate_v1_to_v2(config: Dict[str, Any]) -> Dict[str, Any]:
     # ─ Phase 2: Models Registry & Agents ─────────────────────────────────
 
     models = {
-        "default": config.get("backend", {}).get("default_model", "qwen3:4b"),
+        "default": config.get("backend", {}).get("default_model", DEFAULT_MODEL),
         "profiles": {
-            "routing": config.get("decision_llm", {}).get("model", "qwen3:4b"),
-            "agentic": config.get("operator", {}).get("model", "qwen3:4b"),
-            "summary": config.get("auto_summarization", {}).get("summary_model", "qwen3:4b"),
-            "embedding": config.get("embedding", {}).get("model", "nomic-embed-text"),
+            "routing": config.get("decision_llm", {}).get("model", DEFAULT_ROUTING_MODEL),
+            "agentic": config.get("operator", {}).get("model", DEFAULT_AGENTIC_MODEL),
+            "summary": config.get("auto_summarization", {}).get("summary_model", DEFAULT_SUMMARY_MODEL),
+            "embedding": config.get("embedding", {}).get("model", DEFAULT_EMBEDDING_MODEL),
         },
         "per_task": {},
         "whitelist": config.get("local_models", {"enabled": False, "allowed_models": []}),
@@ -130,7 +139,7 @@ def migrate_v1_to_v2(config: Dict[str, Any]) -> Dict[str, Any]:
             },
             "3_semantic_cache": {
                 "enabled": features["semantic_cache"],
-                "similarity_threshold": config.get("semantic_cache", {}).get("similarity_threshold", 0.95),
+                "similarity_threshold": config.get("semantic_cache", {}).get("similarity_threshold", SEMANTIC_CACHE_DEFAULT_SIMILARITY),
                 "max_entries": config.get("semantic_cache", {}).get("max_entries", 10000),
                 "ttl_seconds": config.get("semantic_cache", {}).get("ttl_seconds", 3600),
             },

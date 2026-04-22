@@ -28,7 +28,7 @@ from typing import Optional
 import httpx
 import numpy as np
 
-from beigebox.constants import DEFAULT_EMBEDDING_MODEL
+from beigebox.constants import DEFAULT_EMBEDDING_MODEL, SEMANTIC_CACHE_DEFAULT_SIMILARITY
 from beigebox.logging import log_cache_event
 
 logger = logging.getLogger(__name__)
@@ -161,7 +161,7 @@ class SemanticCache:
 
     Config keys (under ``semantic_cache:``):
       enabled            bool   false  — master switch
-      similarity_threshold  float  0.92  — minimum cosine similarity for a hit
+      similarity_threshold  float  0.95  — minimum cosine similarity for a hit (from constants)
       max_entries        int    500   — LRU-evict oldest when full
       ttl_seconds        float  3600  — entries older than this are ignored
     """
@@ -169,7 +169,7 @@ class SemanticCache:
     def __init__(self, cfg: dict):
         sc_cfg = cfg.get("semantic_cache", {})
         self.enabled: bool = sc_cfg.get("enabled", False)
-        self.threshold: float = float(sc_cfg.get("similarity_threshold", 0.92))
+        self.threshold: float = float(sc_cfg.get("similarity_threshold", SEMANTIC_CACHE_DEFAULT_SIMILARITY))
         self.max_entries: int = int(sc_cfg.get("max_entries", 500))
         self.ttl: float = float(sc_cfg.get("ttl_seconds", 3600))
 

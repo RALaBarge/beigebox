@@ -51,7 +51,7 @@ RUN if [ "${REQUIRE_HASHES}" = "true" ]; then \
 
 # ── Application code ───────────────────────────────────────────────────────
 COPY beigebox/ beigebox/
-COPY docker/config.docker.yaml config.yaml
+COPY docker/config.yaml config.yaml
 COPY scripts/ scripts/
 COPY hooks/ hooks/
 
