@@ -344,6 +344,41 @@ fi
 ARGS+=("${@:+$@}")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Pre-flight: Ensure required models are available
+# ─────────────────────────────────────────────────────────────────────────────
+ensure_models() {
+  local models=("llama3.2:3b" "nomic-embed-text")
+
+  echo "[launch.sh] Checking for required models…"
+
+  if ! command -v ollama &> /dev/null; then
+    echo "[launch.sh] ⚠️  ollama not found in PATH. Install with: brew install ollama (macOS) or see https://ollama.ai"
+    return 1
+  fi
+
+  for model in "${models[@]}"; do
+    if ollama list | grep -q "^$model"; then
+      echo "[launch.sh] ✓ $model"
+    else
+      echo "[launch.sh] Pulling $model (first run, may take a minute)…"
+      ollama pull "$model" || {
+        echo "[launch.sh] ERROR: Failed to pull $model. Check ollama is running."
+        return 1
+      }
+    fi
+  done
+  echo "[launch.sh] ✓ All required models available"
+  return 0
+}
+
+# Only check models on startup (not on down/restart)
+if [[ "${ARGS[*]}" == *"up"* ]]; then
+  ensure_models || {
+    echo "[launch.sh] WARNING: Some models unavailable. BeigeBox will start but may fail on first request."
+  }
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Execute Docker Compose with final args
 # ─────────────────────────────────────────────────────────────────────────────
 echo "[launch.sh] docker compose ${ARGS[*]}"
