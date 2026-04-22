@@ -139,7 +139,7 @@ services:
     ports:
       - "${BEIGEBOX_PORT:-1337}:8000"
     volumes:
-      - ../data:/app/data
+      - beigebox_data:/app/data
       - ../hooks:/app/hooks:ro
       - ../2600/skills:/app/2600/skills:ro
       - ../workspace/out:/app/workspace/out:rw
@@ -183,6 +183,10 @@ services:
       - PYTHONUNBUFFERED=1
     # ollama runs natively on the host now (see commented block above);
     # beigebox reaches it via host.docker.internal:11434, so no depends_on.
+    # postgres is required for vector embeddings
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     # read_only: true removed to allow log file writing
     # Security maintained via: running as non-root, cap_drop: ALL, no-new-privileges
@@ -522,6 +526,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  beigebox_data:
   ollama_data:
   whisper_cache:
   kokoro_models:
