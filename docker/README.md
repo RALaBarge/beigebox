@@ -49,7 +49,7 @@ To override profiles on this run:
 |---|---|
 | `launch.sh` | Docker Compose launcher + setup wizard (runs setup on first run, then launches) |
 | `docker-compose.yaml` | Service definitions (ollama, beigebox, postgres, CDP, alt engines) |
-| `config.docker.yaml` | BeigeBox config (models, features, tools, routing) |
+| `config.yaml` | BeigeBox config (models, features, tools, routing) |
 | `env.example` | Environment template (copied to .env by FIRST_RUN) |
 | `.env` | Runtime env (OLLAMA_DATA, ports, API keys) |
 | `Dockerfile` | BeigeBox container image |
@@ -81,8 +81,8 @@ REQUIRE_HASHES=false      # dev default (change to true for prod)
 
 Edit for advanced options (GPU, custom API keys, etc.).
 
-### docker/config.docker.yaml (container)
-BeigeBox application config inside the container:
+### docker/config.yaml (container)
+BeigeBox application config inside the container (copied from docker/config.yaml):
 - Default model and routing decisions
 - Feature toggles (semantic cache, cost tracking, etc.)
 - Tool registry, operator settings, wasm modules
@@ -255,4 +255,4 @@ curl http://localhost:1337/beigebox/health
 - **[../README.md](../README.md)** — Quick start, architecture, features
 - **[../CLAUDE.md](../CLAUDE.md)** — Development guide, config schema, subsystem map
 - **[../d0cs/deployment.md](../d0cs/deployment.md)** — Full deployment options (Kubernetes, Systemd, etc.)
-- **[../d0cs/configuration.md](../d0cs/configuration.md)** — config.docker.yaml reference
+- **[../d0cs/configuration.md](../d0cs/configuration.md)** — config.yaml reference

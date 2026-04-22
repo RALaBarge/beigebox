@@ -61,7 +61,7 @@ services:
   #   ollama pull qwen3:30b-a3b nomic-embed-text qwen3:4b
   #
   # The beigebox container reaches it via host.docker.internal:11434
-  # (see docker/config.docker.yaml → backends[0].url, and the extra_hosts mapping
+  # (see docker/config.yaml → backends[0].url, and the extra_hosts mapping
   # on the beigebox service below).
   #
   # To roll back to in-container Ollama: un-comment the service blocks below,
@@ -149,8 +149,7 @@ services:
     # if it doesn't exist, compose will warn but the container still starts
     # and the atlassian tool returns a "credentials not configured" error.
     env_file:
-      - path: ${HOME}/.beigebox/.env
-        required: false
+      - ${HOME}/.beigebox/.env
     environment:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GOOGLE_CSE_ID=${GOOGLE_CSE_ID:-}
