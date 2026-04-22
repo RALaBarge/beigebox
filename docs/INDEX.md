@@ -67,7 +67,7 @@ Complete reference for BeigeBox deployment, configuration, and usage.
 - `runtime_config.yaml` — Hot-reload config (defaults, toggles)
 - `docker/docker-compose.yaml` — Docker deployment
 - `docker/.env` — Environment variables (GPU, ports, API keys)
-- `docker/beigebox.yaml` — Operator agent config (if using operator features)
+- `docker/MS_APM_beigebox.yaml` — Operator agent config / Microsoft APM manifest (if using operator features)
 
 ### Deployment
 
