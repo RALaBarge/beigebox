@@ -62,33 +62,28 @@ pip install -e .
 git clone https://github.com/ralabarge/beigebox.git
 cd beigebox/docker
 
-# Run interactive setup (auto-detects platform, asks 2 questions):
-./FIRST_RUN.sh
-
-# Then start the stack:
+# Run interactive setup and start the stack:
 ./launch.sh up -d
 ```
 
 Open **http://localhost:1337** for the web UI. The OpenAI-compatible API is at `http://localhost:1337/v1`.
 
-### What FIRST_RUN.sh does
+### What launch.sh setup does
 
-The setup wizard auto-detects your platform (macOS/Linux, ARM64/x86) and asks:
+The setup wizard (first run only) auto-detects your platform (macOS/Linux, ARM64/x86) and asks:
 
-1. **What's your main use case?**
-   - LLM inference only (default)
-   - + Speech I/O (voice/STT/TTS)
+1. **What optional features do you want?**
+   - None (LLM inference only) — default
    - + Browser automation (CDP)
-   - Everything (voice + browser)
 
 2. **Where should Ollama store models?**
    - Default: `/Users/$(whoami)/.ollama` (macOS) or `/home/$(whoami)/.ollama` (Linux)
    - Scans for existing models and reuses them if found
    - Or specify a custom path
 
-Your choices are saved to `~/.beigebox/config`. `launch.sh` auto-applies them on every run — no CLI args needed after setup.
+Your choices are saved to `~/.beigebox/config` (user-level, shared across all BeigeBox versions). `launch.sh` auto-applies them on every run — no CLI args needed after setup.
 
-**Changing setup later?** Edit `~/.beigebox/config` or re-run `./FIRST_RUN.sh`.
+**Changing setup later?** Run `./launch.sh --reset up -d` to re-run the wizard.
 
 ### Manual setup (advanced)
 
@@ -102,8 +97,6 @@ cp env.example .env
 # Then run docker compose directly:
 docker compose up -d                    # core only
 docker compose --profile cdp up -d      # + browser automation
-docker compose --profile voice up -d    # + voice I/O (x86/Linux)
-docker compose --profile apple up -d    # + voice I/O (macOS ARM64)
 ```
 
 See [Deployment](d0cs/deployment.md#quick-start) for all profiles and production setup.
@@ -120,12 +113,11 @@ git checkout macos
 brew install ollama
 brew services start ollama
 
-# Pre-pull models (one-time, ~22GB)
-ollama pull qwen3:30b-a3b qwen3:4b nomic-embed-text
+# Pre-pull models (one-time)
+ollama pull llama3.2:3b nomic-embed-text
 
 # Then run Docker
 cd docker
-./FIRST_RUN.sh
 ./launch.sh up -d
 ```
 

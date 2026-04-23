@@ -16,10 +16,11 @@ Open your terminal in the `docker/` folder and run:
 
 **What happens:**
 1. **First time only:** You'll be asked 2 simple questions
-   - Do you want browser automation? (yes/no)
+   - Do you want browser automation (CDP)? (yes/no)
    - Where should models be stored? (use the default, or pick a custom folder)
 2. Models are automatically downloaded (`llama3.2:3b` and `nomic-embed-text`)
 3. BeigeBox starts automatically
+4. Your choices are saved to `~/.beigebox/config` (shared across all BeigeBox versions on your machine)
 
 **That's it!** Open your browser to **http://localhost:1337**
 
@@ -141,6 +142,52 @@ If you added `--profile cdp`:
 
 ---
 
+## 📦 Multi-Version Development
+
+If you're working on multiple versions of BeigeBox (e.g., local dev + GitHub version), here's what's shared and what's separate:
+
+### Shared Across All Versions
+- `~/.beigebox/config` — User-level configuration (ports, features, model location)
+- `~/.ollama/models` — Model files (Ollama is typically run on the host, not in Docker)
+
+### Per-Version
+- `docker/.env` — Environment variables specific to this repo copy
+- `beigebox_data` volume — Docker-managed storage (conversations, embeddings)
+- `docker/logs/` — Logs for this specific deployment
+
+**Tip:** If you want both versions to use the same models and settings, just run `./launch.sh up -d` from each version — they'll automatically pick up the shared config and models from your home directory.
+
+---
+
+## 🌐 Docker Networking
+
+To connect to services running inside the Docker containers:
+
+### From the Host Machine
+Use `localhost` + the exposed port:
+```bash
+# Connect to BeigeBox API
+curl http://localhost:1337/v1/...
+
+# Connect to Ollama inference (if exposed)
+curl http://localhost:11434/api/tags
+```
+
+### From Inside a Container
+Use the service name + internal port (no `localhost`):
+```bash
+# From inside beigebox container, reach Ollama on the host:
+curl http://host.docker.internal:11434/api/tags
+```
+
+### Attaching to a Container for Debugging
+```bash
+docker exec -it beigebox /bin/bash
+# Now you're inside the container — can debug, check logs, etc.
+```
+
+---
+
 ## 🚀 Advanced: Custom Configuration
 
 ### Using a Different Model
@@ -231,6 +278,18 @@ Then restart BeigeBox:
 **Problem:** Old version of Docker.
 
 **Fix:** Update Docker Desktop from [docker.com](https://docker.com)
+
+### "Permission denied" when creating `~/.beigebox/config`
+
+**Problem:** The `~/.beigebox` directory is owned by root and you can't write to it.
+
+**Fix:**
+```bash
+sudo chown -R $(whoami) ~/.beigebox
+chmod 755 ~/.beigebox
+```
+
+Then re-run `launch.sh up -d`.
 
 ### "Mounts denied" on macOS
 

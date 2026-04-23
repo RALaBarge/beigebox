@@ -180,20 +180,10 @@ run_setup_wizard() {
     read -p "> " -r CUSTOM_OLLAMA_PORT
     OLLAMA_PORT=${CUSTOM_OLLAMA_PORT:-11434}
 
-    echo "Whisper (STT):       [Enter for 9000]"
-    read -p "> " -r CUSTOM_WHISPER_PORT
-    WHISPER_PORT=${CUSTOM_WHISPER_PORT:-9000}
-
-    echo "Kokoro (TTS):        [Enter for 8880]"
-    read -p "> " -r CUSTOM_KOKORO_PORT
-    KOKORO_PORT=${CUSTOM_KOKORO_PORT:-8880}
-
     echo ""
     echo -e "${GREEN}✓${NC} Ports configured:"
     echo "  BeigeBox Web UI → localhost:$BEIGEBOX_PORT (fixed)"
     echo "  Ollama Inference → localhost:$OLLAMA_PORT"
-    echo "  Whisper (STT)   → localhost:$WHISPER_PORT"
-    echo "  Kokoro (TTS)    → localhost:$KOKORO_PORT"
     echo ""
 
     # Create config
@@ -212,8 +202,6 @@ PROFILES=$PROFILES
 OLLAMA_DATA=$OLLAMA_DATA
 OLLAMA_PORT=$OLLAMA_PORT
 BEIGEBOX_PORT=$BEIGEBOX_PORT
-WHISPER_PORT=$WHISPER_PORT
-KOKORO_PORT=$KOKORO_PORT
 CHROME_PORT=9222
 EOF
 
@@ -228,15 +216,11 @@ EOF
         sed -i '' "s|^OLLAMA_DATA=.*|OLLAMA_DATA=$OLLAMA_DATA|" .env || true
         sed -i '' "s|^BEIGEBOX_PORT=.*|BEIGEBOX_PORT=1337|" .env || true
         sed -i '' "s|^OLLAMA_PORT=.*|OLLAMA_PORT=$OLLAMA_PORT|" .env || true
-        sed -i '' "s|^WHISPER_PORT=.*|WHISPER_PORT=$WHISPER_PORT|" .env || true
-        sed -i '' "s|^KOKORO_PORT=.*|KOKORO_PORT=$KOKORO_PORT|" .env || true
         sed -i '' "s|^REQUIRE_HASHES=.*|REQUIRE_HASHES=false|" .env || true
     else
         sed -i "s|^OLLAMA_DATA=.*|OLLAMA_DATA=$OLLAMA_DATA|" .env || true
         sed -i "s|^BEIGEBOX_PORT=.*|BEIGEBOX_PORT=1337|" .env || true
         sed -i "s|^OLLAMA_PORT=.*|OLLAMA_PORT=$OLLAMA_PORT|" .env || true
-        sed -i "s|^WHISPER_PORT=.*|WHISPER_PORT=$WHISPER_PORT|" .env || true
-        sed -i "s|^KOKORO_PORT=.*|KOKORO_PORT=$KOKORO_PORT|" .env || true
         sed -i "s|^REQUIRE_HASHES=.*|REQUIRE_HASHES=false|" .env || true
     fi
 
@@ -267,7 +251,7 @@ else
 
     # Verify all required vars are present
     MISSING=false
-    for var in BEIGEBOX_PORT OLLAMA_PORT WHISPER_PORT KOKORO_PORT OLLAMA_DATA; do
+    for var in BEIGEBOX_PORT OLLAMA_PORT OLLAMA_DATA; do
         if [[ -z "${!var:-}" ]]; then
             echo "[launch.sh] WARNING: Config is missing $var — re-running setup..."
             MISSING=true
@@ -284,7 +268,7 @@ fi
 [[ -z "${BEIGEBOX_PORT:-}" ]] && { set -a; source "$CONFIG_FILE"; set +a; }
 
 echo "[launch.sh] Loaded config from $CONFIG_FILE"
-echo "[launch.sh] Using: BeigeBox=$BEIGEBOX_PORT, Ollama=$OLLAMA_PORT, Whisper=$WHISPER_PORT, Kokoro=$KOKORO_PORT"
+echo "[launch.sh] Using: BeigeBox=$BEIGEBOX_PORT, Ollama=$OLLAMA_PORT"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Verify .env exists (should be created by setup wizard or already present)
