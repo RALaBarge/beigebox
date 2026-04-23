@@ -128,6 +128,12 @@ services:
       - ../workspace/out:/app/workspace/out:rw
       - ../workspace/mounts:/app/workspace/mounts:rw
       - ../beigebox:/app/beigebox:ro
+      # Toolbox tab writes land here — layered :rw over the :ro root so only the
+      # user-editable surfaces (tools + skills + plugins) are writable. Core code
+      # stays immutable per commit 169ec232 (read-only root defense-in-depth).
+      - ../beigebox/tools:/app/beigebox/tools:rw
+      - ../beigebox/skills:/app/beigebox/skills:rw
+      - ../plugins:/app/plugins:rw
       - ../wasm_modules:/app/wasm_modules:ro
       - ./logs:/app/logs
       - ~/.beigebox/chrome-cookies:/app/chrome-cookies:ro

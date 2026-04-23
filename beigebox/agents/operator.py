@@ -479,7 +479,7 @@ class Operator:
         from pathlib import Path as _Path
         skills_path = (
             self.cfg.get("skills", {}).get("path")
-            or str(_Path(__file__).parent.parent.parent / "2600" / "skills")
+            or str(_Path(__file__).parent.parent / "skills")
         )
         self._skills_dir = skills_path
         self._skills = load_skills(skills_path)

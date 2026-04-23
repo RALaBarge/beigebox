@@ -1820,6 +1820,7 @@
   <div class="tab" data-tab="discovery" onclick="switchTab('discovery')"><span class="tab-key">5</span>Lab</div>
   <div class="tab" data-tab="studio"    onclick="switchTab('studio')">   <span class="tab-key">6</span>Studio</div>
   <div class="tab" data-tab="security"  onclick="switchTab('security')"> <span class="tab-key">7</span>Security</div>
+  <div class="tab" data-tab="toolbox"   onclick="switchTab('toolbox')">  <span class="tab-key">8</span>Toolbox</div>
 </div>
 
 <!-- ── Content ─────────────────────────────────────────────────────────── -->
@@ -2705,6 +2706,23 @@
       <span class="last-updated" id="sec-updated"></span>
     </div>
     <div class="scroll-area" id="sec-body">
+      <div class="empty"><span class="spinner"></span> Loading…</div>
+    </div>
+  </div>
+
+  <!-- 8. Toolbox: MCP / Tools / Skills -->
+  <div class="panel" id="panel-toolbox">
+    <div class="subnav">
+      <button class="subnav-active" onclick="switchToolboxSub('mcp')">MCP</button>
+      <button onclick="switchToolboxSub('tools')">Tools</button>
+      <button onclick="switchToolboxSub('skills')">Skills</button>
+    </div>
+    <div class="toolbar">
+      <button onclick="loadToolbox()">↺ Refresh</button>
+      <span class="toolbar-spacer"></span>
+      <span class="last-updated" id="tb-updated"></span>
+    </div>
+    <div class="scroll-area" id="tb-body">
       <div class="empty"><span class="spinner"></span> Loading…</div>
     </div>
   </div>
@@ -4010,9 +4028,11 @@ function switchTab(name) {
   if (name === 'discovery') loadDiscoveryOpportunities();
   if (name === 'studio')    loadStudio();
   if (name === 'security')  loadSecurityPanel();
+  if (name === 'toolbox')   loadToolbox();
 
   // Stop Studio context polling when leaving Studio tab
   if (name !== 'studio') stopStudio();
+  if (name !== 'toolbox') stopToolboxValidateLoop();
 
   // Show background operator indicator if leaving operator tab while a run is in progress
   if (name !== 'operator' && _lastOpRunId) {
@@ -4022,7 +4042,7 @@ function switchTab(name) {
 
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
-  const map = {'1':'dashboard','2':'tap','3':'chat','4':'harness','5':'discovery','6':'studio','7':'security'};
+  const map = {'1':'dashboard','2':'tap','3':'chat','4':'harness','5':'discovery','6':'studio','7':'security','8':'toolbox'};
   if (map[e.key]) switchTab(map[e.key]);
   // [ ] to page chat panes
   if (e.key === '[') chatPagePrev();
@@ -4200,6 +4220,352 @@ async function loadSecurityPanel() {
     document.getElementById('sec-updated').textContent = `updated ${now}`;
   } catch(e) {
     el.innerHTML = featureDisabledMsg('Security', e.message);
+  }
+}
+
+// ── Toolbox (Tab 8) — MCP / Tools / Skills inspection + editing ─────────────
+
+let _toolboxSub = 'mcp';
+let _toolboxEditsEnabled = false;
+let _toolboxCurrent = null; // {kind: 'tool'|'skill', name, path}
+
+function switchToolboxSub(sub) {
+  _toolboxSub = sub;
+  stopToolboxValidateLoop();
+  _toolboxCurrent = null;
+  document.querySelectorAll('#panel-toolbox .subnav button').forEach(b =>
+    b.classList.toggle('subnav-active', b.textContent.trim().toLowerCase() === sub));
+  loadToolbox();
+}
+
+async function loadToolbox() {
+  const el = document.getElementById('tb-body');
+  el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
+  try {
+    if (_toolboxSub === 'mcp') await renderToolboxMcp(el);
+    else if (_toolboxSub === 'tools') await renderToolboxTools(el);
+    else if (_toolboxSub === 'skills') await renderToolboxSkills(el);
+    const now = new Date().toLocaleTimeString();
+    document.getElementById('tb-updated').textContent = `updated ${now}`;
+  } catch(e) {
+    el.innerHTML = `<div class="error" style="padding:12px">${esc(e.message)}</div>`;
+  }
+}
+
+async function renderToolboxMcp(el) {
+  const info = await api('/api/v1/mcp/info');
+  _toolboxEditsEnabled = !!info.edits_enabled;
+  let html = '';
+  html += toolboxEditsBanner();
+  html += '<div class="section-header">MCP Server</div>';
+  html += '<div class="card-grid">';
+  html += card('Endpoint', info.endpoint || '-', info.transport || '');
+  html += card('Tools', info.registered_tool_count, 'registered in tool registry');
+  html += card('Skills', info.skill_count, 'SKILL.md files discovered');
+  html += card('Resident', (info.resident_tools || []).length, 'exposed by default to MCP');
+  html += '</div>';
+  html += '<div class="section-header">Resident Tools</div>';
+  const resident = info.resident_tools || [];
+  if (!resident.length) {
+    html += '<div class="empty">No resident tools reported.</div>';
+  } else {
+    html += '<div style="display:flex;flex-wrap:wrap;gap:6px;padding:6px 12px">';
+    for (const n of resident) {
+      html += `<span style="font-family:monospace;font-size:11px;padding:3px 8px;background:var(--bg-panel);border:1px solid var(--bg-border);border-radius:2px">${esc(n)}</span>`;
+    }
+    html += '</div>';
+    html += '<div style="padding:8px 12px;color:var(--fg-dim);font-size:11px">Extended tools (not in resident set) are exposed via the <code>discover_tools</code> meta-tool.</div>';
+  }
+  el.innerHTML = html;
+}
+
+async function renderToolboxTools(el) {
+  const data = await api('/api/v1/toolbox/tools');
+  _toolboxEditsEnabled = !!data.edits_enabled;
+  const tools = data.tools || [];
+  let html = toolboxEditsBanner();
+  const newBtn = _toolboxEditsEnabled
+    ? '<button onclick="createNewTool()">+ New Tool</button>'
+    : '<button disabled title="Enable toolbox.edits_enabled in config.yaml">+ New Tool</button>';
+  html += `<div style="padding:4px 12px 0 12px;display:flex;align-items:center;gap:8px">
+    ${newBtn}
+    <span style="color:var(--fg-dim);font-size:11px">Creates <code>plugins/&lt;name&gt;.py</code>. Restart required.</span>
+  </div>`;
+  html += '<div style="display:grid;grid-template-columns: 260px 1fr;gap:12px;padding:8px 12px">';
+  // Left: list
+  html += '<div style="border:1px solid var(--bg-border);max-height:70vh;overflow-y:auto">';
+  if (!tools.length) {
+    html += '<div class="empty" style="padding:12px">No tools registered.</div>';
+  } else {
+    for (const t of tools) {
+      const enabledDot = t.enabled === true ? '●' : (t.enabled === false ? '○' : '·');
+      const dotColor = t.enabled === true ? 'var(--green)' : (t.enabled === false ? 'var(--fg-dim)' : 'var(--fg-dim)');
+      html += `<div class="tb-row" onclick="openToolEditor('${esc(t.name)}')" style="padding:6px 10px;border-bottom:1px solid var(--bg-border);cursor:pointer;font-size:12px">
+        <div><span style="color:${dotColor};margin-right:6px">${enabledDot}</span><span style="font-family:monospace">${esc(t.name)}</span></div>
+        <div style="color:var(--fg-dim);font-size:10px;margin-top:2px;margin-left:14px">${esc((t.description || '').slice(0, 80))}</div>
+      </div>`;
+    }
+  }
+  html += '</div>';
+  // Right: editor placeholder
+  html += '<div id="tb-editor-pane"><div class="empty" style="padding:12px">Select a tool to view source.</div></div>';
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+async function renderToolboxSkills(el) {
+  const data = await api('/api/v1/toolbox/skills');
+  _toolboxEditsEnabled = !!data.edits_enabled;
+  const skills = data.skills || [];
+  let html = toolboxEditsBanner();
+  const newBtn = _toolboxEditsEnabled
+    ? '<button onclick="createNewSkill()">+ New Skill</button>'
+    : '<button disabled title="Enable toolbox.edits_enabled in config.yaml">+ New Skill</button>';
+  html += `<div style="padding:4px 12px 0 12px;display:flex;align-items:center;gap:8px">
+    ${newBtn}
+    <span style="color:var(--fg-dim);font-size:11px">Creates <code>beigebox/skills/&lt;name&gt;/SKILL.md</code>. Restart required.</span>
+  </div>`;
+  html += `<div style="padding:8px 12px;color:var(--fg-dim);font-size:11px">skills_dir: <code>${esc(data.skills_dir || '')}</code></div>`;
+  html += '<div style="display:grid;grid-template-columns: 280px 1fr;gap:12px;padding:0 12px 12px">';
+  html += '<div style="border:1px solid var(--bg-border);max-height:70vh;overflow-y:auto">';
+  if (!skills.length) {
+    html += `<div class="empty" style="padding:12px;font-size:11px;line-height:1.6">No SKILL.md files found.<br><br>Add a skill by creating <code>&lt;skills_dir&gt;/&lt;name&gt;/SKILL.md</code> with YAML frontmatter:<pre style="font-size:10px;margin-top:6px">---
+name: my-skill
+description: What it does
+---
+(body)</pre></div>`;
+  } else {
+    for (const s of skills) {
+      html += `<div class="tb-row" onclick="openSkillEditor('${esc(s.path)}','${esc(s.name)}')" style="padding:6px 10px;border-bottom:1px solid var(--bg-border);cursor:pointer;font-size:12px">
+        <div style="font-family:monospace">${esc(s.name)}</div>
+        <div style="color:var(--fg-dim);font-size:10px;margin-top:2px">${esc((s.description || '').slice(0, 100))}</div>
+      </div>`;
+    }
+  }
+  html += '</div>';
+  html += '<div id="tb-editor-pane"><div class="empty" style="padding:12px">Select a skill to view source.</div></div>';
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function toolboxEditsBanner() {
+  if (_toolboxEditsEnabled) {
+    return '<div style="padding:8px 12px;background:var(--bg-panel);border-left:3px solid var(--green);font-size:11px;margin:8px 12px;color:var(--fg-dim)">✎ Edits enabled. Saved changes require a BeigeBox restart to take effect.</div>';
+  }
+  return '<div style="padding:8px 12px;background:var(--bg-panel);border-left:3px solid var(--yellow);font-size:11px;margin:8px 12px;color:var(--fg-dim)">⚠ Edits are <b>disabled</b>. Set <code>toolbox.edits_enabled: true</code> in <code>config.yaml</code> and restart to enable writing from the UI.</div>';
+}
+
+async function createNewTool() {
+  const name = prompt("New tool name\n(lowercase letters/digits/underscores, starts with a letter):", "my_tool");
+  if (!name) return;
+  try {
+    const resp = await api('/api/v1/toolbox/tools/new', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim() }),
+    });
+    if (resp.plugins_enabled === false) {
+      alert("Created " + resp.path + "\n\n⚠ tools.plugins.enabled is false in config.yaml — flip it to true and restart for the new tool to register.");
+    }
+    _toolboxCurrent = { kind: 'tool', name: resp.name, path: resp.path };
+    const pane = document.getElementById('tb-editor-pane');
+    if (pane) {
+      try {
+        const data = await api(`/api/v1/toolbox/tools/${encodeURIComponent(resp.name)}/source`);
+        renderEditor(pane, {
+          title: resp.name + ' (new — unsaved edits below)',
+          subtitle: data.path,
+          content: data.content || '',
+          saveLabel: 'Save (requires restart to register)',
+        });
+      } catch(e) {
+        pane.innerHTML = `<div class="error" style="padding:12px">${esc(e.message)}</div>`;
+      }
+    }
+  } catch(e) {
+    alert(e.message);
+  }
+}
+
+async function createNewSkill() {
+  const name = prompt("New skill name\n(lowercase letters/digits/underscores/hyphens, starts with a letter):", "my-skill");
+  if (!name) return;
+  try {
+    const resp = await api('/api/v1/toolbox/skills/new', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim() }),
+    });
+    await loadToolbox();
+    openSkillEditor(resp.path, resp.name);
+  } catch(e) {
+    alert(e.message);
+  }
+}
+
+async function openToolEditor(name) {
+  const pane = document.getElementById('tb-editor-pane');
+  if (!pane) return;
+  pane.innerHTML = '<div class="empty" style="padding:12px"><span class="spinner"></span> Loading…</div>';
+  try {
+    const data = await api(`/api/v1/toolbox/tools/${encodeURIComponent(name)}/source`);
+    _toolboxCurrent = { kind: 'tool', name, path: data.path };
+    renderEditor(pane, {
+      title: name,
+      subtitle: data.path,
+      content: data.content || '',
+      saveLabel: 'Save (requires restart)',
+    });
+  } catch(e) {
+    pane.innerHTML = `<div class="error" style="padding:12px">${esc(e.message)}</div>`;
+  }
+}
+
+async function openSkillEditor(path, name) {
+  const pane = document.getElementById('tb-editor-pane');
+  if (!pane) return;
+  pane.innerHTML = '<div class="empty" style="padding:12px"><span class="spinner"></span> Loading…</div>';
+  try {
+    const data = await api(`/api/v1/toolbox/skills/source?path=${encodeURIComponent(path)}`);
+    _toolboxCurrent = { kind: 'skill', name, path: data.path };
+    renderEditor(pane, {
+      title: name || path,
+      subtitle: data.path,
+      content: data.content || '',
+      saveLabel: 'Save (requires restart)',
+    });
+  } catch(e) {
+    pane.innerHTML = `<div class="error" style="padding:12px">${esc(e.message)}</div>`;
+  }
+}
+
+function renderEditor(pane, opts) {
+  const disabled = _toolboxEditsEnabled ? '' : 'disabled';
+  const isTool = _toolboxCurrent && _toolboxCurrent.kind === 'tool';
+  const showLint = isTool;
+  const showGutter = isTool;
+  const body = showGutter
+    ? `<div style="position:relative;min-height:55vh;background:var(--bg)">
+         <div style="position:absolute;top:0;left:0;bottom:0;width:44px;background:var(--bg-panel);border-right:1px solid var(--bg-border);overflow:hidden;pointer-events:none">
+           <div id="tb-editor-gutter" style="padding:10px 8px 10px 0;font-family:monospace;font-size:12px;line-height:1.5;color:var(--fg-dim);text-align:right;white-space:pre"></div>
+         </div>
+         <textarea id="tb-editor-textarea" spellcheck="false" oninput="updateToolboxGutter()" onscroll="syncToolboxGutter()" style="width:100%;box-sizing:border-box;min-height:55vh;font-family:monospace;font-size:12px;line-height:1.5;background:var(--bg);color:var(--fg);border:0;outline:0;padding:10px 10px 10px 52px;resize:vertical">${esc(opts.content)}</textarea>
+       </div>`
+    : `<textarea id="tb-editor-textarea" spellcheck="false" style="width:100%;box-sizing:border-box;min-height:55vh;font-family:monospace;font-size:12px;background:var(--bg);color:var(--fg);border:0;outline:0;padding:10px;resize:vertical">${esc(opts.content)}</textarea>`;
+  pane.innerHTML = `
+    <div style="border:1px solid var(--bg-border)">
+      <div style="padding:8px 12px;border-bottom:1px solid var(--bg-border);background:var(--bg-panel)">
+        <div style="font-family:monospace;font-size:13px">${esc(opts.title)}</div>
+        <div style="color:var(--fg-dim);font-size:10px;margin-top:2px">${esc(opts.subtitle)}</div>
+      </div>
+      ${body}
+      <div style="padding:8px 12px;border-top:1px solid var(--bg-border);background:var(--bg-panel);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <button class="primary" onclick="saveToolboxCurrent()" ${disabled}>${esc(opts.saveLabel)}</button>
+        ${showLint ? '<span id="tb-lint-status" style="font-size:11px" title="Dry-run syntax check every 5s"></span>' : ''}
+        <span style="flex:1"></span>
+        <span id="tb-save-status" style="color:var(--fg-dim);font-size:11px"></span>
+      </div>
+    </div>
+  `;
+  _toolboxLastValidated = null;
+  if (showGutter) updateToolboxGutter();
+  if (showLint) startToolboxValidateLoop();
+  else stopToolboxValidateLoop();
+}
+
+function updateToolboxGutter() {
+  const ta = document.getElementById('tb-editor-textarea');
+  const gutter = document.getElementById('tb-editor-gutter');
+  if (!ta || !gutter) return;
+  const count = ta.value.split('\n').length;
+  const lines = new Array(count);
+  for (let i = 0; i < count; i++) lines[i] = i + 1;
+  gutter.textContent = lines.join('\n');
+  syncToolboxGutter();
+}
+
+function syncToolboxGutter() {
+  const ta = document.getElementById('tb-editor-textarea');
+  const gutter = document.getElementById('tb-editor-gutter');
+  if (!ta || !gutter) return;
+  gutter.style.transform = `translateY(${-ta.scrollTop}px)`;
+}
+
+let _toolboxValidateInterval = null;
+let _toolboxLastValidated = null;
+
+function startToolboxValidateLoop() {
+  stopToolboxValidateLoop();
+  toolboxValidateTick();
+  _toolboxValidateInterval = setInterval(toolboxValidateTick, 5000);
+}
+
+function stopToolboxValidateLoop() {
+  if (_toolboxValidateInterval) {
+    clearInterval(_toolboxValidateInterval);
+    _toolboxValidateInterval = null;
+  }
+  _toolboxLastValidated = null;
+}
+
+async function toolboxValidateTick() {
+  const ta = document.getElementById('tb-editor-textarea');
+  const status = document.getElementById('tb-lint-status');
+  if (!ta || !status || !_toolboxCurrent) {
+    stopToolboxValidateLoop();
+    return;
+  }
+  const content = ta.value;
+  if (content === _toolboxLastValidated) return;
+  _toolboxLastValidated = content;
+  try {
+    const resp = await api('/api/v1/toolbox/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: _toolboxCurrent.kind, content }),
+    });
+    if (resp.valid) {
+      status.style.color = 'var(--green)';
+      status.textContent = '✓ syntax ok';
+    } else {
+      status.style.color = 'var(--red)';
+      const lineInfo = resp.line ? ` (line ${resp.line})` : '';
+      status.textContent = `✗ ${resp.error}${lineInfo}`;
+    }
+  } catch(e) {
+    status.style.color = 'var(--fg-dim)';
+    status.textContent = '';
+  }
+}
+
+async function saveToolboxCurrent() {
+  if (!_toolboxCurrent) return;
+  const ta = document.getElementById('tb-editor-textarea');
+  const status = document.getElementById('tb-save-status');
+  if (!ta || !status) return;
+  const content = ta.value;
+  status.style.color = 'var(--fg-dim)';
+  status.textContent = 'saving…';
+  try {
+    let resp;
+    if (_toolboxCurrent.kind === 'tool') {
+      resp = await api(`/api/v1/toolbox/tools/${encodeURIComponent(_toolboxCurrent.name)}/source`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+    } else {
+      resp = await api('/api/v1/toolbox/skills/source', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: _toolboxCurrent.path, content }),
+      });
+    }
+    status.style.color = 'var(--green)';
+    status.textContent = `saved (${resp.length || content.length} bytes) — restart to activate`;
+  } catch(e) {
+    status.style.color = 'var(--red)';
+    status.textContent = e.message;
   }
 }
 
