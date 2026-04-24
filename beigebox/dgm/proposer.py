@@ -186,7 +186,8 @@ class DGMProposer:
             return None
 
         latency_ms = (time.monotonic() - t_start) * 1000
-        raw = resp.json()["choices"][0]["message"]["content"]
+        from beigebox.response_normalizer import normalize_response
+        raw = normalize_response(resp.json()).content
 
         return self._parse(raw, latency_ms)
 

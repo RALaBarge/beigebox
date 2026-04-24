@@ -464,7 +464,8 @@ class DiscoveryRunner:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 resp = await client.post(url, json=body)
                 if resp.status_code == 200:
-                    return resp.json()["choices"][0]["message"]["content"]
+                    from beigebox.response_normalizer import normalize_response
+                    return normalize_response(resp.json()).content
                 logger.warning("_call_llm got HTTP %s from %s", resp.status_code, url)
         except Exception as exc:
             logger.warning("_call_llm failed (%s): %s", url, exc)

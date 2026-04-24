@@ -138,10 +138,8 @@ class ResponseValidator:
             return ValidationResult(valid=True, format=fmt)
 
         try:
-            choices = data.get("choices", [])
-            if not choices:
-                return ValidationResult(valid=True, format=fmt)
-            content = choices[0].get("message", {}).get("content", "")
+            from beigebox.response_normalizer import normalize_response
+            content = normalize_response(data).content
             if not content:
                 return ValidationResult(valid=True, format=fmt)
 

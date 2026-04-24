@@ -111,8 +111,8 @@ class Reflector:
                     json=payload,
                 )
                 resp.raise_for_status()
-                data = resp.json()
-                insight = data["choices"][0]["message"]["content"].strip()
+                from beigebox.response_normalizer import normalize_response
+                insight = normalize_response(resp.json()).content.strip()
                 if insight:
                     self._insight = insight
         except asyncio.CancelledError:

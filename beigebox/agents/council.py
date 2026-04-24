@@ -104,7 +104,8 @@ async def _chat(
             },
         )
         resp.raise_for_status()
-        return _strip_think(resp.json()["choices"][0]["message"]["content"])
+        from beigebox.response_normalizer import normalize_response
+        return _strip_think(normalize_response(resp.json()).content)
 
 
 async def _fetch_models(backend_url: str) -> list[str]:

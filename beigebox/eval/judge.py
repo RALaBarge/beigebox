@@ -120,7 +120,8 @@ class JudgeRubric:
                     json=body,
                 )
                 resp.raise_for_status()
-                raw_text = resp.json()["choices"][0]["message"]["content"].strip()
+                from beigebox.response_normalizer import normalize_response
+                raw_text = normalize_response(resp.json()).content.strip()
                 return self._parse_scores(raw_text)
 
         except Exception as e:

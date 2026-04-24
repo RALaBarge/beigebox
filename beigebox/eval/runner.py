@@ -191,7 +191,8 @@ class EvalRunner:
                     timeout=120.0,
                 )
                 resp.raise_for_status()
-                output = resp.json()["choices"][0]["message"]["content"]
+                from beigebox.response_normalizer import normalize_response
+                output = normalize_response(resp.json()).content
             except Exception as e:
                 error = str(e)
 

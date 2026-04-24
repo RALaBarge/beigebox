@@ -32,6 +32,7 @@ import httpx
 
 from beigebox.config import get_config, get_runtime_config
 from beigebox.logging import log_payload_event
+from beigebox.response_normalizer import normalize_response
 from beigebox.agents.skill_loader import load_skills, skills_to_xml, skills_fingerprint
 
 logger = logging.getLogger(__name__)
@@ -673,7 +674,7 @@ class Operator:
                         json=payload,
                     )
                     resp.raise_for_status()
-                    result = resp.json()["choices"][0]["message"]["content"]
+                    result = normalize_response(resp.json()).content
 
                     log_payload_event("operator_response", response=result, model=self._model, backend=_backend_url)
 
@@ -716,7 +717,7 @@ class Operator:
                         json=payload,
                     )
                     resp.raise_for_status()
-                    result = resp.json()["choices"][0]["message"]["content"]
+                    result = normalize_response(resp.json()).content
 
                     log_payload_event("operator_response", response=result, model=self._model, backend=_backend_url)
 

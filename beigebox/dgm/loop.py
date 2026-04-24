@@ -482,7 +482,8 @@ class DGMLoop:
             )
             resp.raise_for_status()
 
-        return resp.json()["choices"][0]["message"]["content"]
+        from beigebox.response_normalizer import normalize_response
+        return normalize_response(resp.json()).content
 
 
 # ── Fallback probes for fresh installs ────────────────────────────────────

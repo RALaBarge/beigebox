@@ -25,11 +25,9 @@ class BackendResponse:
 
     @property
     def content(self) -> str:
-        """Extract assistant content from response data."""
-        choices = self.data.get("choices", [])
-        if choices:
-            return choices[0].get("message", {}).get("content", "")
-        return ""
+        """Extract assistant content from response data via the response normalizer."""
+        from beigebox.response_normalizer import normalize_response
+        return normalize_response(self.data).content
 
 
 class BaseBackend(abc.ABC):
@@ -37,6 +35,11 @@ class BaseBackend(abc.ABC):
     Abstract base for LLM backends.
     Each backend knows how to forward requests and report health.
     """
+
+    # Profile name passed to the request normalizer at the BackendRouter level.
+    # Subclasses override this string if they need a non-default dialect
+    # (see beigebox.request_normalizer.DEFAULT_PROFILES).
+    egress_profile: str = "openai_compat"
 
     def __init__(self, name: str, url: str, timeout: int = 120, priority: int = 1,
                  timeout_ms: int | None = None):

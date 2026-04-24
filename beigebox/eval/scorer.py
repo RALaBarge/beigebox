@@ -84,7 +84,8 @@ def score_llm_judge(
     try:
         resp = httpx.post(f"{backend_url}/v1/chat/completions", json=body, timeout=30.0)
         resp.raise_for_status()
-        raw = resp.json()["choices"][0]["message"]["content"].strip()
+        from beigebox.response_normalizer import normalize_response
+        raw = normalize_response(resp.json()).content.strip()
         # Strip markdown fences if present
         if raw.startswith("```"):
             raw = "\n".join(raw.split("\n")[1:]).rstrip("`").strip()

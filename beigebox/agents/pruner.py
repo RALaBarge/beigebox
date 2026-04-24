@@ -324,7 +324,8 @@ class ContextPruner:
                     json=payload,
                 )
                 resp.raise_for_status()
-                return resp.json()["choices"][0]["message"]["content"].strip() or None
+                from beigebox.response_normalizer import normalize_response
+                return normalize_response(resp.json()).content.strip() or None
         except Exception as exc:
             logger.debug("Pruner LLM pass failed: %s", exc)
             return None

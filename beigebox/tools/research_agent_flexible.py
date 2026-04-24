@@ -39,6 +39,7 @@ from typing import Any
 import httpx
 
 from beigebox.config import get_config, get_runtime_config
+from beigebox.response_normalizer import normalize_response
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +131,7 @@ class OllamaAdapter(BackendAdapter):
                 f"{self.base_url}/v1/chat/completions", json=payload,
             )
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
+            return normalize_response(resp.json()).content
 
     async def health(self):
         try:
@@ -173,7 +174,7 @@ class OpenRouterAdapter(BackendAdapter):
                 headers=self._headers(), json=payload,
             )
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
+            return normalize_response(resp.json()).content
 
     async def health(self):
         if not self.api_key:
@@ -216,7 +217,7 @@ class OpenAIAdapter(BackendAdapter):
                 headers=self._headers(), json=payload,
             )
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
+            return normalize_response(resp.json()).content
 
     async def health(self):
         if not self.api_key:

@@ -277,7 +277,8 @@ class DecisionAgent:
                 resp.raise_for_status()
                 data = resp.json()
 
-            content = data["choices"][0]["message"]["content"]
+            from beigebox.response_normalizer import normalize_response
+            content = normalize_response(data).content
             decision = self._parse_response(content)
             latency_ms = (time.monotonic() - _t0) * 1000
 

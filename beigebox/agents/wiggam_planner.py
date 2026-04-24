@@ -154,8 +154,8 @@ class WiggamPlanner:
                     headers={"Content-Type": "application/json"},
                 )
                 resp.raise_for_status()
-                data = resp.json()
-                content = data["choices"][0]["message"]["content"]
+                from beigebox.response_normalizer import normalize_response
+                content = normalize_response(resp.json()).content
                 # Strip markdown code fences if present
                 content = content.strip()
                 if content.startswith("```"):

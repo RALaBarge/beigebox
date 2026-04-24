@@ -202,7 +202,8 @@ class DGMJudge:
         resp.raise_for_status()
         latency_ms = (time.monotonic() - t_start) * 1000
 
-        content = resp.json()["choices"][0]["message"]["content"]
+        from beigebox.response_normalizer import normalize_response
+        content = normalize_response(resp.json()).content
         parsed = extract_json_object(content)
 
         winner = str(parsed.get("winner", "tie")).upper()

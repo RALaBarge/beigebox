@@ -24,6 +24,7 @@ from pathlib import Path
 import httpx
 
 from beigebox.config import get_config, get_runtime_config
+from beigebox.response_normalizer import normalize_response
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,7 @@ class ResearchAgentTool:
                 json=payload,
             )
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
+            return normalize_response(resp.json()).content
 
     async def _chat_async(self, messages: list[dict], temperature: float = 0.3) -> str:
         """Async LLM call via OpenAI-compatible endpoint."""
@@ -122,7 +123,7 @@ class ResearchAgentTool:
                 json=payload,
             )
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
+            return normalize_response(resp.json()).content
 
     def _parse_findings(self, raw: str, topic: str) -> dict:
         """Extract structured findings from LLM output."""

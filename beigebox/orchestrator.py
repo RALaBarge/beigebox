@@ -146,15 +146,15 @@ class ParallelOrchestrator:
                 data = resp.json()
 
             latency = (time.monotonic() - t0) * 1000
-            choices = data.get("choices", [])
-            content = choices[0].get("message", {}).get("content", "") if choices else ""
+            from beigebox.response_normalizer import normalize_response
+            normalized = normalize_response(data)
 
             return {
                 "task": index,
                 "model": model,
-                "content": content,
+                "content": normalized.content,
                 "latency_ms": round(latency, 1),
-                "tokens": data.get("usage", {}).get("total_tokens", 0),
+                "tokens": normalized.usage.total_tokens,
             }
         except asyncio.TimeoutError:
             return {"task": index, "error": f"Task timeout ({self.task_timeout}s)"}

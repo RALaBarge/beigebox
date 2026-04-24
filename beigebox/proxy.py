@@ -61,15 +61,15 @@ from beigebox.backends.openrouter import _COST_SENTINEL_PREFIX
 from beigebox.cache import SemanticCache, ToolResultCache
 from beigebox.aliases import AliasResolver
 from beigebox.guardrails import Guardrails
+from beigebox.response_normalizer import (
+    estimate_tokens as _estimate_tokens,
+    normalize_response,
+    normalize_stream_delta,
+)
 from beigebox.validation.format import ResponseValidator
 from beigebox.security.anomaly_detector import APIAnomalyDetector
 
 logger = logging.getLogger(__name__)
-
-
-def _estimate_tokens(text: str) -> int:
-    """Rough token estimate: ~4 chars per token for English text."""
-    return max(1, len(text) // 4)
 class Proxy:
     """Transparent proxy between frontend and Ollama backend."""
     def __init__(
@@ -1369,9 +1369,9 @@ class Proxy:
         # NameError on the post-hook line when is_synthetic=True or choices=[].
         assistant_content = ""
         if not is_synthetic:
-            choices = data.get("choices", [])
-            if choices:
-                assistant_content = choices[0].get("message", {}).get("content", "")
+            normalized = normalize_response(data)
+            if normalized.content or normalized.tool_calls:
+                assistant_content = normalized.content
                 response_latency = response.latency_ms if self.backend_router and response.ok else None
                 await self._log_response(conversation_id, assistant_content, model, cost_usd=cost_usd, latency_ms=response_latency)
                 log_payload_event("proxy_response", response=assistant_content, model=model,
@@ -1459,7 +1459,7 @@ class Proxy:
         body = self._dedupe_consecutive_messages(body)
 
         # Log request start
-        prompt_tokens = _estimate_tokens(str(body.get("messages", [])))
+        prompt_tokens = _estimate_tokens(body.get("messages", []))
         try:
             log_request_started(model, prompt_tokens)
         except Exception:
@@ -1662,13 +1662,9 @@ class Proxy:
                         continue
                     try:
                         chunk = json.loads(data_str)
-                        delta = (
-                            chunk.get("choices", [{}])[0]
-                            .get("delta", {})
-                            .get("content", "")
-                        )
-                        if delta:
-                            full_response.append(delta)
+                        nd = normalize_stream_delta(chunk)
+                        if nd.content_delta:
+                            full_response.append(nd.content_delta)
                     except (json.JSONDecodeError, IndexError):
                         pass
         else:
@@ -1710,13 +1706,9 @@ class Proxy:
                                     continue
                                 try:
                                     chunk = json.loads(data_str)
-                                    delta = (
-                                        chunk.get("choices", [{}])[0]
-                                        .get("delta", {})
-                                        .get("content", "")
-                                    )
-                                    if delta:
-                                        full_response.append(delta)
+                                    nd = normalize_stream_delta(chunk)
+                                    if nd.content_delta:
+                                        full_response.append(nd.content_delta)
                                 except (json.JSONDecodeError, IndexError):
                                     pass
             except httpx.TimeoutException:

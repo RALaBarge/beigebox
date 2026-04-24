@@ -15,6 +15,7 @@ import time
 import httpx
 
 from beigebox.backends.base import BaseBackend, BackendResponse
+from beigebox.response_normalizer import normalize_response
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,8 @@ _COST_SENTINEL_PREFIX = "__bb_cost__:"
 
 class OpenRouterBackend(BaseBackend):
     """Backend for OpenRouter API."""
+
+    egress_profile = "openrouter"
 
     def __init__(
         self,
@@ -61,28 +64,13 @@ class OpenRouterBackend(BaseBackend):
 
     @staticmethod
     def _extract_cost(data: dict) -> float | None:
-        """
-        Extract cost from OpenRouter response.
-        OpenRouter includes usage info; cost may be in the response body
-        or computed from token counts and known pricing.
-        """
-        # Direct cost field (some OpenRouter responses include this)
-        if "cost_usd" in data:
-            try:
-                return float(data["cost_usd"])
-            except (ValueError, TypeError):
-                pass
+        """Cost extraction delegates to the response normalizer.
 
-        # Check usage.cost (alternative location)
-        usage = data.get("usage", {})
-        if "cost" in usage:
-            try:
-                return float(usage["cost"])
-            except (ValueError, TypeError):
-                pass
-
-        # If no explicit cost, return None — we can't compute it without pricing tables
-        return None
+        Kept as a static method only because the streaming path below already
+        calls ``self._extract_cost(chunk)`` per SSE chunk; preserving the
+        signature avoids churn while collapsing the duplicated logic.
+        """
+        return normalize_response(data).cost_usd
 
     async def forward(self, body: dict) -> BackendResponse:
         """Forward a non-streaming request to OpenRouter."""
@@ -141,16 +129,15 @@ class OpenRouterBackend(BaseBackend):
         """
         Forward a streaming request to OpenRouter, yielding SSE lines.
 
-        Requests `include_usage: true` so OpenRouter appends a final chunk
-        with token counts and cost before [DONE]. After the stream ends,
-        yields a sentinel line `__bb_cost__:<float>` so the proxy can record
-        the cost without breaking the SSE protocol to the client.
+        ``stream_options.include_usage = true`` is set upstream by the
+        request normalizer's ``openrouter`` profile, so OpenRouter appends a
+        final chunk with token counts and cost before [DONE]. After the
+        stream ends, yields a sentinel line ``__bb_cost__:<float>`` so the
+        proxy can record the cost without breaking the SSE protocol to the
+        client.
         """
         if not self.api_key:
             raise RuntimeError("No API key configured for OpenRouter")
-
-        # Ask OpenRouter to include usage/cost in the final chunk
-        stream_body = {**body, "stream_options": {"include_usage": True}}
 
         cost_usd: float | None = None
 
@@ -160,7 +147,7 @@ class OpenRouterBackend(BaseBackend):
                     "POST",
                     f"{self.url}/chat/completions",
                     headers=self._headers(),
-                    json=stream_body,
+                    json=body,
                 ) as resp:
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():

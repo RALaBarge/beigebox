@@ -93,7 +93,8 @@ class MemoryTool:
                 timeout=_PREPROCESS_TIMEOUT,
             )
             resp.raise_for_status()
-            keywords = resp.json()["choices"][0]["message"]["content"].strip()
+            from beigebox.response_normalizer import normalize_response
+            keywords = normalize_response(resp.json()).content.strip()
             if keywords:
                 logger.debug("memory preprocess: %r → %r", raw_query, keywords)
                 return keywords

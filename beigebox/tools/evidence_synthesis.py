@@ -117,7 +117,8 @@ class EvidenceSynthesisTool:
                 json=payload,
             )
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
+            from beigebox.response_normalizer import normalize_response
+            return normalize_response(resp.json()).content
 
     def _format_findings_for_prompt(self, findings_list: list[dict]) -> str:
         """Format findings into a structured prompt block."""

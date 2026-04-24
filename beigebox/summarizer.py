@@ -57,8 +57,8 @@ async def _call_llm(prompt: str, model: str, backend_url: str) -> str:
                 json=payload,
             )
             resp.raise_for_status()
-            data = resp.json()
-            return data["choices"][0]["message"]["content"].strip()
+            from beigebox.response_normalizer import normalize_response
+            return normalize_response(resp.json()).content.strip()
     except Exception as e:
         logger.warning("auto_summarizer: LLM call failed: %s", e)
         return ""
