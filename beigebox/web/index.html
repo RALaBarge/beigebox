@@ -397,6 +397,38 @@
   }
   .msg.assistant .meta { color: var(--lavender-dim); }
 
+  /* Reasoning / thinking block for reasoning models (o-series, DeepSeek-R1, etc.).
+     Stream handler accumulates delta.reasoning / reasoning_content / thinking
+     into this block, rendered above the content inside the assistant bubble. */
+  .msg.assistant .thinking-block {
+    margin-bottom: 8px;
+    font-size: 12px;
+  }
+  .msg.assistant .thinking-block > summary {
+    cursor: pointer;
+    color: var(--fg-muted);
+    font-style: italic;
+    user-select: none;
+    list-style: none;
+  }
+  .msg.assistant .thinking-block > summary::before { content: '▸ '; opacity: 0.6; }
+  .msg.assistant .thinking-block[open] > summary::before { content: '▾ '; opacity: 0.6; }
+  .msg.assistant .thinking-block > summary:hover { color: var(--lavender); }
+  .msg.assistant .thinking-block > .thinking-body {
+    margin: 4px 0 0;
+    padding: 6px 8px;
+    background: var(--bg);
+    border-left: 2px solid var(--lavender-dim);
+    color: var(--fg-muted);
+    font-style: italic;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 11px;
+    line-height: 1.4;
+    max-height: 240px;
+    overflow-y: auto;
+  }
+
   #chat-input-area {
     padding: 10px 16px;
     padding-bottom: max(10px, env(safe-area-inset-bottom));
@@ -6313,10 +6345,41 @@ async function sendToPane(pane, text, forceOp) {
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let fullText = '';
+      let fullReasoning = '';
       let assistantDiv = null;
       let bubble = null;
+      let thinkingBody = null;
       let isError = false;
       pane._streaming = { text: '', model: model || 'assistant' };
+
+      // Lazy-creates the assistant bubble the first time either a content or
+      // reasoning delta arrives. Idempotent.
+      const ensureBubble = (usedModel) => {
+        if (assistantDiv) return;
+        pane._streaming.model = usedModel;
+        pane._streaming.startTs = Date.now();
+        const liveArea = document.getElementById(`pane-msgs-${pane.id}`);
+        if (liveArea) {
+          assistantDiv = appendMsgToPane(pane.id, 'assistant', '', usedModel, liveArea, pane._streaming.startTs);
+          if (assistantDiv) assistantDiv.dataset.streaming = 'true';
+          bubble = assistantDiv?.querySelector('.bubble');
+        }
+      };
+
+      const ensureThinkingBlock = () => {
+        if (thinkingBody || !bubble) return;
+        const details = document.createElement('details');
+        details.className = 'thinking-block';
+        details.open = true;
+        const summary = document.createElement('summary');
+        summary.textContent = '💭 Thinking…';
+        const body = document.createElement('pre');
+        body.className = 'thinking-body';
+        details.appendChild(summary);
+        details.appendChild(body);
+        bubble.insertBefore(details, bubble.firstChild);
+        thinkingBody = body;
+      };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -6365,43 +6428,72 @@ async function sendToPane(pane, text, forceOp) {
               continue;
             }
 
-            const delta = j.choices?.[0]?.delta?.content || '';
-            if (delta) {
+            const choiceDelta = j.choices?.[0]?.delta || {};
+            const delta = choiceDelta.content || '';
+            // Reasoning models surface chain-of-thought on one of these fields
+            // depending on provider (OpenAI o-series, DeepSeek-R1, Trinity,
+            // Claude thinking). Mirrors response_normalizer's aliases.
+            const reasoningDelta =
+              choiceDelta.reasoning_content ||
+              choiceDelta.reasoning ||
+              choiceDelta.thinking || '';
+
+            if (delta || reasoningDelta) {
               // Dismiss the load hint and mark model as seen on first token
               if (_loadHintId) {
                 document.getElementById(_loadHintId)?.remove();
                 _loadHintId = null;
                 _seenModels.add(_modelKey);
               }
-              fullText += delta;
-              pane._streaming.text = fullText;
-              if (!assistantDiv) {
-                const usedModel = j.model || model || 'assistant';
-                pane._streaming.model = usedModel;
-                pane._streaming.startTs = Date.now();
-                const liveArea = document.getElementById(`pane-msgs-${pane.id}`);
-                if (liveArea) {
-                  assistantDiv = appendMsgToPane(pane.id, 'assistant', '', usedModel, liveArea, pane._streaming.startTs);
-                  if (assistantDiv) assistantDiv.dataset.streaming = 'true';
-                  bubble = assistantDiv?.querySelector('.bubble');
-                }
-              }
+              ensureBubble(j.model || model || 'assistant');
               // Re-find bubble if DOM was rebuilt (page switch)
               if (bubble && !bubble.isConnected) {
                 const liveArea = document.getElementById(`pane-msgs-${pane.id}`);
                 assistantDiv = liveArea?.querySelector('[data-streaming="true"]') || null;
                 bubble = assistantDiv?.querySelector('.bubble') || null;
+                thinkingBody = bubble?.querySelector('.thinking-body') || null;
               }
-              if (bubble) bubble.textContent = fullText;
+
+              if (reasoningDelta) {
+                fullReasoning += reasoningDelta;
+                ensureThinkingBlock();
+                if (thinkingBody) {
+                  thinkingBody.textContent += reasoningDelta;
+                  thinkingBody.scrollTop = thinkingBody.scrollHeight;
+                }
+              }
+
+              if (delta) {
+                fullText += delta;
+                pane._streaming.text = fullText;
+                if (bubble) {
+                  // textContent wipes the thinking block — re-grab its node and
+                  // put it back after setting the text. Cheaper than wrapping
+                  // content in a separate element during the streaming phase.
+                  const tb = bubble.querySelector('.thinking-block');
+                  bubble.textContent = fullText;
+                  if (tb) bubble.insertBefore(tb, bubble.firstChild);
+                }
+              }
               _scrollNearBottom(document.getElementById(`pane-msgs-${pane.id}`));
             }
           } catch {}
         }
       }
       if (_loadHintId) { document.getElementById(_loadHintId)?.remove(); _seenModels.add(_modelKey); }
-      if (fullText) {
+      if (fullText || fullReasoning) {
         delete pane._streaming;
         if (assistantDiv) delete assistantDiv.dataset.streaming;
+        // Collapse the thinking block and stamp a char count on its summary so
+        // users can re-expand it later without it getting in the way.
+        if (fullReasoning && assistantDiv) {
+          const tb = assistantDiv.querySelector('.thinking-block');
+          if (tb) {
+            tb.open = false;
+            const sum = tb.querySelector('summary');
+            if (sum) sum.textContent = `💭 Thinking (${fullReasoning.length.toLocaleString()} chars)`;
+          }
+        }
         // Stamp the token estimate on the message meta line
         if (assistantDiv) {
           const meta = assistantDiv.querySelector('.meta');
@@ -6412,10 +6504,16 @@ async function sendToPane(pane, text, forceOp) {
           }
         }
         pane.history.push({ role: 'assistant', content: fullText, model: model || 'assistant', _ts: pane._streaming?.startTs || Date.now() });
-        // Render markdown on final text (streaming used plain textContent)
+        // Render markdown on final text (streaming used plain textContent).
+        // Preserve the thinking block across the innerHTML reset by grabbing
+        // its outerHTML first and prepending it to the formatted output.
         if (assistantDiv) {
           const bub = assistantDiv.querySelector('.bubble');
-          if (bub) bub.innerHTML = _formatOutput(fullText);
+          if (bub) {
+            const tb = bub.querySelector('.thinking-block');
+            const tbHTML = tb ? tb.outerHTML : '';
+            bub.innerHTML = tbHTML + _formatOutput(fullText);
+          }
         }
         updateCtxUsage(pane);
         // force_reload is one-shot — clear after use so next send doesn't re-evict
