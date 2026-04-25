@@ -377,7 +377,7 @@ class TestVectorStoreIntegration:
             vs = VectorStore(
                 embedding_model="nomic-embed-text",
                 embedding_url="http://localhost:11434",
-                backend=make_backend("chromadb", path=chroma_dir),
+                backend=make_backend("memory"),
                 poisoning_detector=detector,
                 sqlite_store=sqlite_store,
             )
@@ -412,7 +412,7 @@ class TestVectorStoreIntegration:
             vs = VectorStore(
                 embedding_model="nomic-embed-text",
                 embedding_url="http://localhost:11434",
-                backend=make_backend("chromadb", path=chroma_dir),
+                backend=make_backend("memory"),
                 sqlite_store=None,  # No quarantine
             )
 

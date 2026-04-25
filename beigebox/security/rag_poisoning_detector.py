@@ -212,3 +212,23 @@ class RAGPoisoningDetector:
             self._std_norm = 1.0
             self._count = 0
         logger.info("RAGPoisoningDetector baseline reset")
+
+    def export_baseline(self) -> dict:
+        """Serialize baseline state to a JSON-safe dict for persistence/transfer."""
+        with self._lock:
+            return {
+                "norms": list(self._norms),
+                "mean_norm": self._mean_norm,
+                "std_norm": self._std_norm,
+                "count": self._count,
+            }
+
+    def import_baseline(self, state: dict) -> None:
+        """Restore baseline state from a previously exported dict."""
+        with self._lock:
+            self._norms.clear()
+            for n in state.get("norms", []):
+                self._norms.append(float(n))
+            self._mean_norm = float(state.get("mean_norm", 0.0))
+            self._std_norm = float(state.get("std_norm", 1.0)) or 1.0
+            self._count = int(state.get("count", len(self._norms)))

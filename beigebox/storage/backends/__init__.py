@@ -20,20 +20,36 @@ _REGISTRY: dict[str, type[VectorBackend]] = {}
 def _register():
     """Lazy-import backends to avoid hard dependencies at import time.
 
-    PostgreSQL + pgvector is the primary backend. Lazy import ensures we only
-    raise ImportError if the user explicitly tries to use a backend that's not installed.
+    PostgreSQL + pgvector is the primary production backend.
+    MemoryBackend is a hermetic in-memory option used by the test suite and
+    available for ephemeral workloads.
+
+    Each import is independently guarded — failing to load one backend
+    doesn't disqualify the others.
     """
     global _REGISTRY
     if _REGISTRY:
         return
     try:
+        from .memory import MemoryBackend
+        _REGISTRY["memory"] = MemoryBackend
+    except ImportError as e:
+        # numpy is a hard project dep — this should never fire — but keep
+        # the registry construction tolerant rather than crashing import.
+        import warnings
+        warnings.warn(f"MemoryBackend unavailable: {e}", RuntimeWarning)
+    try:
         from .postgres import PostgresBackend
         _REGISTRY["postgres"] = PostgresBackend
     except ImportError as e:
-        raise ImportError(
-            "PostgreSQL vector backend requires psycopg2 and pgvector. "
-            "Install with: pip install psycopg2-binary pgvector"
-        ) from e
+        # Postgres is the production backend; without it we surface a clear
+        # error. Memory-only operation is still possible for tests.
+        import warnings
+        warnings.warn(
+            f"PostgresBackend unavailable ({e}); only memory backend registered. "
+            "Install with: pip install psycopg2-binary pgvector",
+            RuntimeWarning,
+        )
 
 
 def make_backend(backend_type: str, **kwargs) -> VectorBackend:

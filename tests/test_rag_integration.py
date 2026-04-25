@@ -43,7 +43,7 @@ def test_vector_store_accepts_poisoning_detector():
     """Test 2: VectorStore initializes with detector parameter."""
     with tempfile.TemporaryDirectory() as tmpdir:
         detector = RAGPoisoningDetector(sensitivity=0.95)
-        backend = make_backend("chromadb", path=tmpdir)
+        backend = make_backend("memory")
 
         store = VectorStore(
             embedding_model="test-model",
@@ -60,7 +60,7 @@ def test_vector_store_accepts_poisoning_detector():
 def test_vector_store_works_without_detector():
     """Test 2b: VectorStore still works when detector is None."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        backend = make_backend("chromadb", path=tmpdir)
+        backend = make_backend("memory")
 
         store = VectorStore(
             embedding_model="test-model",
@@ -104,7 +104,7 @@ def test_detector_rejects_zero_embedding():
 
     assert is_poisoned
     assert confidence > 0.5
-    assert "Magnitude below minimum" in reason
+    assert "magnitude below minimum" in reason.lower()
 
 
 @pytest.mark.unit
@@ -126,7 +126,7 @@ def test_detector_rejects_huge_embedding():
 
     assert is_poisoned
     assert confidence > 0.5
-    assert "Magnitude above maximum" in reason
+    assert "magnitude above maximum" in reason.lower()
 
 
 @pytest.mark.unit
@@ -214,7 +214,7 @@ async def test_vector_store_detects_poisoned_on_store():
             legitimate = np.ones(384, dtype=np.float32)
             detector.update_baseline(legitimate)
 
-        backend = make_backend("chromadb", path=tmpdir)
+        backend = make_backend("memory")
         store = VectorStore(
             embedding_model="nomic-embed-text",
             embedding_url="http://localhost:11434",
@@ -306,7 +306,7 @@ def test_detector_thread_safety():
 def test_vector_store_none_detector_doesnt_break():
     """Test: VectorStore works normally when detector is None."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        backend = make_backend("chromadb", path=tmpdir)
+        backend = make_backend("memory")
 
         # VectorStore with no detector should not raise
         store = VectorStore(
