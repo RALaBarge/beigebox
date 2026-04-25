@@ -50,6 +50,9 @@ class AppState:
     web_auth: WebAuthManager | None = None
     password_auth: SimplePasswordAuth | None = None
     mcp_server: McpServer | None = None
+    # Pen/sec MCP — separate registry of offensive-security tool wrappers,
+    # mounted at POST /pen-mcp. None when disabled.
+    security_mcp_server: McpServer | None = None
     amf_advertiser: AmfMeshAdvertiser | None = None
     poisoning_detector: RAGPoisoningDetector | None = None
     extraction_detector: ExtractionDetector | None = None

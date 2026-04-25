@@ -498,6 +498,15 @@ class McpServer:
                 "isError": True,
             }
 
+        # Structured MCP content (e.g. images from cdp.screenshot) — pass through
+        # the native content blocks so vision-capable clients receive them as-is.
+        from beigebox.tools._media import MCP_CONTENT_KEY
+        if isinstance(result, dict) and MCP_CONTENT_KEY in result:
+            return {
+                "content": result[MCP_CONTENT_KEY],
+                "isError": False,
+            }
+
         return {
             "content": [{"type": "text", "text": result}],
             "isError": False,

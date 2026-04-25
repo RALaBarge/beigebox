@@ -379,9 +379,14 @@ class ToolRegistry:
         """Return names of all registered tools."""
         return list(self.tools.keys())
 
-    def run_tool(self, name: str, input_text: str) -> str | None:
+    def run_tool(self, name: str, input_text: str) -> str | dict | None:
         """
-        Run a tool by name. Returns result string or None.
+        Run a tool by name. Returns a result (string or structured dict) or None.
+
+        Most tools return a string. A tool MAY return a dict carrying the
+        ``__beigebox_mcp_content__`` sentinel (see beigebox.tools._media); the
+        MCP server unwraps that into native MCP content blocks (e.g. images),
+        and text-only consumers fall back through ``_text_fallback``.
 
         Steps:
         1. Validate input (parameter validation, injection detection)
@@ -427,8 +432,12 @@ class ToolRegistry:
         elapsed_ms = (time.monotonic() - start) * 1000
 
         # Step 3: Notify and log
+        # Notifier expects a string; collapse structured (image-content) results
+        # to their text fallback before sending. Pass-through for normal str.
         if result is not None:
-            self.notifier.notify(name, input_text, result, elapsed_ms)
+            from beigebox.tools._media import is_mcp_content, text_fallback
+            notify_str = text_fallback(result) if is_mcp_content(result) else result
+            self.notifier.notify(name, input_text, notify_str, elapsed_ms)
 
         # Log tool success
         try:

@@ -326,6 +326,28 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("MCP server: enabled (POST /mcp)")
 
+    # Pen/Sec MCP — separate endpoint exposing offensive-security tool wrappers
+    # (nmap, nuclei, sqlmap, ffuf, …). Disabled by default; enable in config.yaml:
+    #   security_mcp:
+    #     enabled: true
+    security_mcp_server = None
+    _sec_mcp_cfg = cfg.get("security_mcp", {})
+    if _sec_mcp_cfg.get("enabled"):
+        from beigebox.security_mcp import build_default_registry as _build_sec_registry
+        _sec_registry = _build_sec_registry()
+        # Make every security tool resident — there's no progressive-disclosure
+        # value here (small, focused tool surface), so list them all up front.
+        security_mcp_server = McpServer(
+            _sec_registry,
+            resident_tools=set(_sec_registry.list_tools()),
+        )
+        logger.info(
+            "Pen/Sec MCP server: enabled (POST /pen-mcp) — %d wrappers loaded",
+            len(_sec_registry.list_tools()),
+        )
+    else:
+        logger.info("Pen/Sec MCP server: disabled (set security_mcp.enabled: true to enable)")
+
     # AMF mesh advertisement (mDNS + NATS heartbeat)
     amf_advertiser = AmfMeshAdvertiser(cfg, tool_names=tool_registry.list_tools())
     await amf_advertiser.start()
@@ -419,6 +441,7 @@ async def lifespan(app: FastAPI):
         web_auth=web_auth,
         password_auth=password_auth,
         mcp_server=mcp_server,
+        security_mcp_server=security_mcp_server,
         amf_advertiser=amf_advertiser,
         poisoning_detector=poisoning_detector,
         extraction_detector=extraction_detector,
@@ -1113,6 +1136,39 @@ async def mcp_endpoint(request: Request):
     result = await _st.mcp_server.handle(body)
     if result is None:
         # Notification — no response body
+        from starlette.responses import Response as _Response
+        return _Response(status_code=202)
+    return JSONResponse(result)
+
+
+@app.post("/pen-mcp")
+async def pen_mcp_endpoint(request: Request):
+    """
+    Pen/Sec MCP server — separate JSON-RPC endpoint exposing offensive-security
+    tool wrappers (nmap, nuclei, sqlmap, ffuf, …). Same protocol as /mcp; just
+    a different registry so security tooling stays out of the default surface.
+
+    Enable via config.yaml: ``security_mcp.enabled: true``.
+    Auth: same ApiKeyMiddleware as /mcp; add /pen-mcp to a key's allowed_endpoints.
+    """
+    _st = get_state()
+    if _st.security_mcp_server is None:
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": None,
+             "error": {"code": -32603,
+                       "message": "Pen/Sec MCP server disabled (set security_mcp.enabled in config)"}},
+            status_code=503,
+        )
+    try:
+        body = await request.json()
+    except Exception as e:
+        logger.debug("Pen/Sec MCP parse error: %s", str(e)[:200])
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
+            status_code=400,
+        )
+    result = await _st.security_mcp_server.handle(body)
+    if result is None:
         from starlette.responses import Response as _Response
         return _Response(status_code=202)
     return JSONResponse(result)

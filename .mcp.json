@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@latest",
+        "--caps", "vision,pdf,devtools",
+        "--image-responses", "allow",
+        "--snapshot-mode", "full",
+        "--viewport-size", "1280x800"
+      ]
+    }
+  }
+}
