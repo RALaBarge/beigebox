@@ -101,3 +101,19 @@ class SecurityTool:
         if not isinstance(arg, str):
             return False
         return not any(ch in arg for ch in _FORBIDDEN_CHARS)
+
+    @staticmethod
+    def safe_path(path: str, must_exist: bool = True) -> bool:
+        """
+        Validate a filesystem path for tools that read local files (binwalk,
+        exiftool, john, etc.). Rejects shell metachars; optionally verifies
+        the path exists. Does not enforce a sandbox — operator is trusted.
+        """
+        from pathlib import Path
+        if not path or not isinstance(path, str) or len(path) > 4096:
+            return False
+        if any(ch in path for ch in _FORBIDDEN_CHARS - {"/"}):
+            return False
+        if must_exist and not Path(path).exists():
+            return False
+        return True

@@ -10,7 +10,10 @@ Adding a new wrapper:
 """
 from beigebox.security_mcp.tools.network import (
     NmapScanTool,
+    NmapAdvancedScanTool,
     MasscanScanTool,
+    RustscanScanTool,
+    FierceScanTool,
     DnsenumScanTool,
 )
 from beigebox.security_mcp.tools.recon import (
@@ -21,28 +24,81 @@ from beigebox.security_mcp.tools.recon import (
 )
 from beigebox.security_mcp.tools.web import (
     NucleiScanTool,
+    KatanaCrawlTool,
     FfufScanTool,
     GobusterScanTool,
+    FeroxbusterScanTool,
+    DirsearchScanTool,
     NiktoScanTool,
     SqlmapScanTool,
+    DalfoxXssScanTool,
     WpscanScanTool,
+)
+from beigebox.security_mcp.tools.discovery import (
+    GauDiscoveryTool,
+    WaybackurlsDiscoveryTool,
+    ArjunParameterDiscoveryTool,
+    ParamspiderMiningTool,
+    HakrawlerCrawlTool,
+)
+from beigebox.security_mcp.tools.lateral import (
+    Enum4linuxScanTool,
+    Enum4linuxNgScanTool,
+    SmbmapScanTool,
+    NetexecScanTool,
+)
+from beigebox.security_mcp.tools.creds import (
+    HydraAttackTool,
+    JohnCrackTool,
+    HashcatCrackTool,
+)
+from beigebox.security_mcp.tools.binary import (
+    BinwalkAnalyzeTool,
+    ExiftoolExtractTool,
+    ChecksecAnalyzeTool,
 )
 
 ALL_TOOL_FACTORIES = [
     # Network discovery / port scanning
     NmapScanTool,
+    NmapAdvancedScanTool,
     MasscanScanTool,
+    RustscanScanTool,
+    FierceScanTool,
     DnsenumScanTool,
     # Subdomain / asset discovery
     AmassScanTool,
     SubfinderScanTool,
     HttpxProbeTool,
     WafW00fScanTool,
-    # Web vuln / fuzz
+    # Web vuln / fuzz / crawl
     NucleiScanTool,
+    KatanaCrawlTool,
     FfufScanTool,
     GobusterScanTool,
+    FeroxbusterScanTool,
+    DirsearchScanTool,
     NiktoScanTool,
     SqlmapScanTool,
+    DalfoxXssScanTool,
     WpscanScanTool,
+    # URL / parameter discovery (passive intel)
+    GauDiscoveryTool,
+    WaybackurlsDiscoveryTool,
+    ArjunParameterDiscoveryTool,
+    ParamspiderMiningTool,
+    HakrawlerCrawlTool,
+    # SMB / AD / lateral
+    Enum4linuxScanTool,
+    Enum4linuxNgScanTool,
+    SmbmapScanTool,
+    NetexecScanTool,
+    # Credentials / cracking (require authorization=true)
+    HydraAttackTool,
+    JohnCrackTool,
+    HashcatCrackTool,
+    # Binary / forensics
+    BinwalkAnalyzeTool,
+    ExiftoolExtractTool,
+    ChecksecAnalyzeTool,
 ]

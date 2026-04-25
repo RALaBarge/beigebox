@@ -133,6 +133,94 @@ class MasscanScanTool(SecurityTool):
         return out
 
 
+class NmapAdvancedScanTool(SecurityTool):
+    name = "nmap_advanced_scan"
+    binary = "nmap"
+    description = (
+        "Heavy NSE-script-driven nmap scan. JSON input:\n"
+        "  {\"target\": \"...\", \"script_category\": \"vuln|safe|default|discovery\", "
+        "\"ports\": \"-\", \"timeout\": 1800}\n"
+        "script_category drives --script= selection."
+    )
+
+    SCRIPT_CATEGORIES = {"vuln", "safe", "default", "discovery", "exploit", "auth", "intrusive"}
+
+    def _run(self, parsed: dict) -> dict:
+        target = parsed.get("target", "")
+        if not self.safe_target(target):
+            return {"ok": False, "error": "invalid target"}
+        cat = str(parsed.get("script_category", "default"))
+        if cat not in self.SCRIPT_CATEGORIES:
+            return {"ok": False, "error": f"script_category must be one of {sorted(self.SCRIPT_CATEGORIES)}"}
+        ports = str(parsed.get("ports", "-"))
+        if not self.safe_arg(ports):
+            return {"ok": False, "error": "unsafe ports"}
+        timeout = int(parsed.get("timeout", 1800))
+        argv = ["nmap", "-sS", "-sV", "-Pn", "-T4", "-p", ports,
+                "--script", cat, "-oX", "-", target]
+        res = run_argv(argv, timeout=timeout)
+        out = json.loads(res.to_json_str())
+        try:
+            findings = _parse_nmap_xml(res.stdout)
+            if findings is not None:
+                out["findings"] = findings
+                out["stdout"] = f"(XML parsed: {len(findings)} hosts)"
+        except Exception:
+            pass
+        return out
+
+
+class RustscanScanTool(SecurityTool):
+    name = "rustscan_scan"
+    binary = "rustscan"
+    description = (
+        "Ultra-fast port scanner that pipes results into nmap. JSON input:\n"
+        "  {\"target\": \"...\", \"ports\": \"1-65535\", \"batch_size\": 4500, "
+        "\"ulimit\": 5000, \"nmap_args\": \"-sV -A\", \"timeout\": 600}"
+    )
+
+    def _run(self, parsed: dict) -> dict:
+        target = parsed.get("target", "")
+        if not self.safe_target(target):
+            return {"ok": False, "error": "invalid target"}
+        ports = str(parsed.get("ports", "1-65535"))
+        if not self.safe_arg(ports):
+            return {"ok": False, "error": "unsafe ports"}
+        batch = int(parsed.get("batch_size", 4500))
+        ulimit = int(parsed.get("ulimit", 5000))
+        nmap_args = parsed.get("nmap_args")
+        timeout = int(parsed.get("timeout", 600))
+        argv = ["rustscan", "-a", target, "-r", ports,
+                "-b", str(batch), "--ulimit", str(ulimit), "--accessible"]
+        if nmap_args:
+            # Split nmap args on spaces (each piece must be safe). rustscan
+            # passes them through after `--`.
+            parts = nmap_args.split()
+            if not all(self.safe_arg(p) for p in parts):
+                return {"ok": False, "error": "unsafe nmap_args"}
+            argv += ["--", *parts]
+        res = run_argv(argv, timeout=timeout)
+        return json.loads(res.to_json_str())
+
+
+class FierceScanTool(SecurityTool):
+    name = "fierce_scan"
+    binary = "fierce"
+    description = (
+        "DNS recon / zone-walk. JSON input:\n"
+        "  {\"domain\": \"example.com\", \"timeout\": 300}"
+    )
+
+    def _run(self, parsed: dict) -> dict:
+        domain = parsed.get("domain", "")
+        if not self.safe_target(domain):
+            return {"ok": False, "error": "invalid domain"}
+        timeout = int(parsed.get("timeout", 300))
+        argv = ["fierce", "--domain", domain]
+        res = run_argv(argv, timeout=timeout)
+        return json.loads(res.to_json_str())
+
+
 class DnsenumScanTool(SecurityTool):
     name = "dnsenum_scan"
     binary = "dnsenum"

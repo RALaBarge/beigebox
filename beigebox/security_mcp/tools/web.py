@@ -188,6 +188,124 @@ class SqlmapScanTool(SecurityTool):
         return json.loads(res.to_json_str())
 
 
+class KatanaCrawlTool(SecurityTool):
+    name = "katana_crawl"
+    binary = "katana"
+    description = (
+        "Headless JS-aware web crawler (ProjectDiscovery). JSON input:\n"
+        "  {\"url\": \"https://example.com\", \"depth\": 3, \"js_crawl\": true, "
+        "\"timeout\": 600}"
+    )
+
+    def _run(self, parsed: dict) -> dict:
+        url = parsed.get("url", "")
+        if not self.safe_target(url, allow_url=True):
+            return {"ok": False, "error": "invalid url"}
+        depth = int(parsed.get("depth", 3))
+        js = bool(parsed.get("js_crawl", True))
+        timeout = int(parsed.get("timeout", 600))
+        argv = ["katana", "-u", url, "-d", str(depth), "-jsonl", "-silent", "-no-color"]
+        if js:
+            argv.append("-jc")
+        res = run_argv(argv, timeout=timeout)
+        out = json.loads(res.to_json_str())
+        urls = []
+        for line in res.stdout.splitlines():
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    urls.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        if urls:
+            out["urls"] = urls
+            out["url_count"] = len(urls)
+            out["stdout"] = f"({len(urls)} URLs crawled)"
+        return out
+
+
+class FeroxbusterScanTool(SecurityTool):
+    name = "feroxbuster_scan"
+    binary = "feroxbuster"
+    description = (
+        "Recursive content discovery. JSON input:\n"
+        "  {\"url\": \"https://example.com\", "
+        "\"wordlist\": \"/usr/share/wordlists/dirb/common.txt\", "
+        "\"depth\": 4, \"threads\": 50, \"timeout\": 900}"
+    )
+
+    def _run(self, parsed: dict) -> dict:
+        url = parsed.get("url", "")
+        if not self.safe_target(url, allow_url=True):
+            return {"ok": False, "error": "invalid url"}
+        wordlist = parsed.get("wordlist", "/usr/share/wordlists/dirb/common.txt")
+        if not self.safe_arg(wordlist):
+            return {"ok": False, "error": "unsafe wordlist"}
+        depth = int(parsed.get("depth", 4))
+        threads = int(parsed.get("threads", 50))
+        timeout = int(parsed.get("timeout", 900))
+        argv = ["feroxbuster", "-u", url, "-w", wordlist,
+                "-d", str(depth), "-t", str(threads), "--silent", "--json"]
+        res = run_argv(argv, timeout=timeout)
+        out = json.loads(res.to_json_str())
+        results = [json.loads(l) for l in res.stdout.splitlines() if l.strip().startswith("{")]
+        if results:
+            out["results"] = results
+            out["result_count"] = len(results)
+        return out
+
+
+class DirsearchScanTool(SecurityTool):
+    name = "dirsearch_scan"
+    binary = "dirsearch"
+    description = (
+        "Python directory brute-forcer. JSON input:\n"
+        "  {\"url\": \"https://example.com\", \"extensions\": \"php,html,js\", "
+        "\"threads\": 30, \"timeout\": 900}"
+    )
+
+    def _run(self, parsed: dict) -> dict:
+        url = parsed.get("url", "")
+        if not self.safe_target(url, allow_url=True):
+            return {"ok": False, "error": "invalid url"}
+        ext = str(parsed.get("extensions", "php,html,js,txt"))
+        if not self.safe_arg(ext):
+            return {"ok": False, "error": "unsafe extensions"}
+        threads = int(parsed.get("threads", 30))
+        timeout = int(parsed.get("timeout", 900))
+        argv = ["dirsearch", "-u", url, "-e", ext,
+                "-t", str(threads), "--format", "json", "-o", "/dev/stdout", "--quiet"]
+        res = run_argv(argv, timeout=timeout)
+        return json.loads(res.to_json_str())
+
+
+class DalfoxXssScanTool(SecurityTool):
+    name = "dalfox_xss_scan"
+    binary = "dalfox"
+    description = (
+        "XSS vulnerability scanner. JSON input:\n"
+        "  {\"url\": \"https://example.com/search?q=test\", "
+        "\"mode\": \"url|pipe|file\", \"timeout\": 600}"
+    )
+
+    def _run(self, parsed: dict) -> dict:
+        url = parsed.get("url", "")
+        if not self.safe_target(url, allow_url=True):
+            return {"ok": False, "error": "invalid url"}
+        mode = str(parsed.get("mode", "url"))
+        if mode not in ("url", "pipe", "file"):
+            return {"ok": False, "error": "mode must be url|pipe|file"}
+        timeout = int(parsed.get("timeout", 600))
+        argv = ["dalfox", mode, url, "--format", "json", "--silence"]
+        res = run_argv(argv, timeout=timeout)
+        out = json.loads(res.to_json_str())
+        try:
+            out["results"] = json.loads(res.stdout) if res.stdout.strip() else []
+        except json.JSONDecodeError:
+            pass
+        return out
+
+
 class WpscanScanTool(SecurityTool):
     name = "wpscan_scan"
     binary = "wpscan"
