@@ -15,9 +15,14 @@ class NmapScanTool(SecurityTool):
         "  {\"target\": \"scanme.nmap.org\", \"ports\": \"1-1000\", "
         "\"profile\": \"default|quick|service|aggressive\", "
         "\"scripts\": [\"vuln\"], \"timeout\": 600}\n"
-        "Returns parsed XML (-oX -) findings as JSON when possible, raw stdout otherwise."
+        "Returns parsed XML (-oX -) findings as JSON when possible.\n"
+        "Note: SYN scan (-sS) requires root; we auto-fall-back to TCP connect "
+        "(-sT) when not running as root. -sT is slower but produces the same "
+        "structural output."
     )
 
+    # Profiles use -sS by default (faster, stealthier). Auto-rewritten to -sT
+    # when running as a non-root user — see _run.
     PROFILES = {
         "default": ["-sS", "-sV", "-Pn"],
         "quick": ["-sS", "-T4", "--top-ports", "100", "-Pn"],
@@ -26,6 +31,7 @@ class NmapScanTool(SecurityTool):
     }
 
     def _run(self, parsed: dict) -> dict:
+        import os
         target = parsed.get("target", "")
         if not self.safe_target(target):
             return {"ok": False, "error": "invalid target (no shell metachars; hostname/ip[/cidr][:port] only)"}
@@ -36,7 +42,18 @@ class NmapScanTool(SecurityTool):
         scripts = parsed.get("scripts") or []
         timeout = int(parsed.get("timeout", 600))
 
-        argv = ["nmap", *self.PROFILES[profile], "-oX", "-"]
+        flags = list(self.PROFILES[profile])
+        # Fall back to TCP connect when not root (SYN scan would just exit 1).
+        # The 'aggressive' profile uses -A which implies -sS — replace too.
+        if os.geteuid() != 0:
+            flags = ["-sT" if f == "-sS" else f for f in flags]
+            if "-A" in flags:
+                idx = flags.index("-A")
+                # -A == -sS + -sV + -sC + -O + --traceroute. Without root,
+                # do the same set with -sT.
+                flags[idx:idx + 1] = ["-sT", "-sV", "-sC"]
+
+        argv = ["nmap", *flags, "-oX", "-"]
         if ports:
             if not self.safe_arg(str(ports)):
                 return {"ok": False, "error": "unsafe ports value"}
