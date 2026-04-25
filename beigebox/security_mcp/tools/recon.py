@@ -100,34 +100,15 @@ class HttpxProbeTool(SecurityTool):
         if status:
             argv.append("-status-code")
 
-        # feed targets via stdin to keep them out of argv length limits + safe
-        import subprocess, time
-        from beigebox.security_mcp._run import which, RunResult
-        resolved = which("httpx")
-        if resolved is None:
-            return {"ok": False, "error": "binary 'httpx' not on PATH (this is ProjectDiscovery's httpx, not the Python package)"}
-        start = time.monotonic()
-        try:
-            proc = subprocess.run(
-                [resolved, *argv[1:]],
-                input="\n".join(targets),
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            return {"ok": False, "error": f"timeout after {timeout}s"}
-        elapsed = time.monotonic() - start
-        rows = [json.loads(l) for l in (proc.stdout or "").splitlines() if l.strip().startswith("{")]
-        return {
-            "ok": proc.returncode == 0,
-            "binary": "httpx",
-            "duration_s": round(elapsed, 2),
-            "returncode": proc.returncode,
-            "results": rows,
-            "stderr": (proc.stderr or "")[:8000],
-        }
+        # Feed targets via stdin (avoids argv length limits + matches httpx's
+        # documented usage). run_argv handles the missing-binary case cleanly.
+        res = run_argv(argv, timeout=timeout, stdin="\n".join(targets))
+        out = json.loads(res.to_json_str())
+        rows = [json.loads(l) for l in res.stdout.splitlines() if l.strip().startswith("{")]
+        if rows:
+            out["results"] = rows
+            out["result_count"] = len(rows)
+        return out
 
 
 class WafW00fScanTool(SecurityTool):

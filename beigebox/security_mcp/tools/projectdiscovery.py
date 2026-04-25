@@ -2,11 +2,9 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import time
 
 from beigebox.security_mcp._base import SecurityTool
-from beigebox.security_mcp._run import run_argv, which
+from beigebox.security_mcp._run import run_argv
 
 
 class NaabuScanTool(SecurityTool):
@@ -67,22 +65,11 @@ class DnsxResolveTool(SecurityTool):
             return {"ok": False, "error": "unsafe record_types"}
         timeout = int(parsed.get("timeout", 120))
 
-        resolved = which("dnsx")
-        if resolved is None:
-            return {"ok": False, "error": "binary 'dnsx' not on PATH"}
-        argv = [resolved, "-silent", "-json", "-no-color", "-resp", "-t", rtypes]
-        start = time.monotonic()
-        try:
-            proc = subprocess.run(argv, input="\n".join(domains),
-                                  capture_output=True, text=True,
-                                  timeout=timeout, check=False)
-        except subprocess.TimeoutExpired:
-            return {"ok": False, "error": f"timeout after {timeout}s"}
-        rows = [json.loads(l) for l in (proc.stdout or "").splitlines() if l.strip().startswith("{")]
-        return {
-            "ok": proc.returncode == 0,
-            "binary": "dnsx",
-            "duration_s": round(time.monotonic() - start, 2),
-            "results": rows,
-            "stderr": (proc.stderr or "")[:4000],
-        }
+        argv = ["dnsx", "-silent", "-json", "-no-color", "-resp", "-t", rtypes]
+        res = run_argv(argv, timeout=timeout, stdin="\n".join(domains))
+        out = json.loads(res.to_json_str())
+        rows = [json.loads(l) for l in res.stdout.splitlines() if l.strip().startswith("{")]
+        if rows:
+            out["results"] = rows
+            out["result_count"] = len(rows)
+        return out

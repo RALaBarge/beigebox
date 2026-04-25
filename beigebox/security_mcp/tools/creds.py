@@ -14,6 +14,7 @@ from beigebox.security_mcp._run import run_argv
 class HydraAttackTool(SecurityTool):
     name = "hydra_attack"
     binary = "hydra"
+    requires_auth = True
     description = (
         "Online password brute-forcer. JSON input:\n"
         "  {\"target\": \"10.0.0.5\", \"service\": \"ssh|ftp|http-get|smb|...\", "
@@ -30,8 +31,6 @@ class HydraAttackTool(SecurityTool):
     }
 
     def _run(self, parsed: dict) -> dict:
-        if not parsed.get("authorization"):
-            return {"ok": False, "error": "set 'authorization': true to confirm you have permission for this attack"}
         target = parsed.get("target", "")
         service = str(parsed.get("service", ""))
         if not self.safe_target(target):
@@ -69,6 +68,7 @@ class HydraAttackTool(SecurityTool):
 class JohnCrackTool(SecurityTool):
     name = "john_crack"
     binary = "john"
+    requires_auth = True
     description = (
         "John the Ripper offline hash cracking. JSON input:\n"
         "  {\"hash_file\": \"/path/to/hashes.txt\", "
@@ -78,8 +78,6 @@ class JohnCrackTool(SecurityTool):
     )
 
     def _run(self, parsed: dict) -> dict:
-        if not parsed.get("authorization"):
-            return {"ok": False, "error": "set 'authorization': true"}
         hash_file = parsed.get("hash_file", "")
         if not self.safe_path(hash_file):
             return {"ok": False, "error": "hash_file invalid or missing"}
@@ -115,6 +113,7 @@ class JohnCrackTool(SecurityTool):
 class HashcatCrackTool(SecurityTool):
     name = "hashcat_crack"
     binary = "hashcat"
+    requires_auth = True
     description = (
         "GPU-accelerated hash cracking. JSON input:\n"
         "  {\"hash_file\": \"/path/to/hashes.txt\", "
@@ -125,8 +124,6 @@ class HashcatCrackTool(SecurityTool):
     )
 
     def _run(self, parsed: dict) -> dict:
-        if not parsed.get("authorization"):
-            return {"ok": False, "error": "set 'authorization': true"}
         hash_file = parsed.get("hash_file", "")
         if not self.safe_path(hash_file):
             return {"ok": False, "error": "hash_file invalid or missing"}

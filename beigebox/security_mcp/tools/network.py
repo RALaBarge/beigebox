@@ -2,9 +2,27 @@
 from __future__ import annotations
 
 import json
+import os
+import shlex
 
 from beigebox.security_mcp._base import SecurityTool
 from beigebox.security_mcp._run import run_argv
+
+
+def _root_safe_flags(flags: list[str]) -> list[str]:
+    """Rewrite nmap flags for non-root execution.
+
+    -sS (SYN scan) silently fails for non-root users with "QUITTING!", and
+    -A implies -sS. When we're not root, swap -sS → -sT (TCP connect) and
+    expand -A to its non-root-runnable component flags.
+    """
+    if os.geteuid() == 0:
+        return flags
+    flags = ["-sT" if f == "-sS" else f for f in flags]
+    if "-A" in flags:
+        idx = flags.index("-A")
+        flags[idx:idx + 1] = ["-sT", "-sV", "-sC"]
+    return flags
 
 
 class NmapScanTool(SecurityTool):
@@ -31,7 +49,6 @@ class NmapScanTool(SecurityTool):
     }
 
     def _run(self, parsed: dict) -> dict:
-        import os
         target = parsed.get("target", "")
         if not self.safe_target(target):
             return {"ok": False, "error": "invalid target (no shell metachars; hostname/ip[/cidr][:port] only)"}
@@ -42,17 +59,7 @@ class NmapScanTool(SecurityTool):
         scripts = parsed.get("scripts") or []
         timeout = int(parsed.get("timeout", 600))
 
-        flags = list(self.PROFILES[profile])
-        # Fall back to TCP connect when not root (SYN scan would just exit 1).
-        # The 'aggressive' profile uses -A which implies -sS — replace too.
-        if os.geteuid() != 0:
-            flags = ["-sT" if f == "-sS" else f for f in flags]
-            if "-A" in flags:
-                idx = flags.index("-A")
-                # -A == -sS + -sV + -sC + -O + --traceroute. Without root,
-                # do the same set with -sT.
-                flags[idx:idx + 1] = ["-sT", "-sV", "-sC"]
-
+        flags = _root_safe_flags(list(self.PROFILES[profile]))
         argv = ["nmap", *flags, "-oX", "-"]
         if ports:
             if not self.safe_arg(str(ports)):
@@ -173,8 +180,8 @@ class NmapAdvancedScanTool(SecurityTool):
         if not self.safe_arg(ports):
             return {"ok": False, "error": "unsafe ports"}
         timeout = int(parsed.get("timeout", 1800))
-        argv = ["nmap", "-sS", "-sV", "-Pn", "-T4", "-p", ports,
-                "--script", cat, "-oX", "-", target]
+        flags = _root_safe_flags(["-sS", "-sV", "-Pn", "-T4"])
+        argv = ["nmap", *flags, "-p", ports, "--script", cat, "-oX", "-", target]
         res = run_argv(argv, timeout=timeout)
         out = json.loads(res.to_json_str())
         try:
@@ -210,9 +217,12 @@ class RustscanScanTool(SecurityTool):
         argv = ["rustscan", "-a", target, "-r", ports,
                 "-b", str(batch), "--ulimit", str(ulimit), "--accessible"]
         if nmap_args:
-            # Split nmap args on spaces (each piece must be safe). rustscan
-            # passes them through after `--`.
-            parts = nmap_args.split()
+            # Properly shell-tokenize so the user can pass quoted args like
+            # '--script "vuln and safe"'. rustscan passes them through after `--`.
+            try:
+                parts = shlex.split(nmap_args)
+            except ValueError as exc:
+                return {"ok": False, "error": f"unparseable nmap_args: {exc}"}
             if not all(self.safe_arg(p) for p in parts):
                 return {"ok": False, "error": "unsafe nmap_args"}
             argv += ["--", *parts]

@@ -98,9 +98,8 @@ class TheharvesterScanTool(SecurityTool):
         limit = int(parsed.get("limit", 500))
         timeout = int(parsed.get("timeout", 600))
 
-        from beigebox.security_mcp._run import which
-        binary = ("theHarvester" if which("theHarvester")
-                  else "theharvester" if which("theharvester") else None)
+        from beigebox.security_mcp._run import which_any
+        _, binary = which_any("theHarvester", "theharvester")
         if binary is None:
             return {"ok": False, "error": "neither 'theHarvester' nor 'theharvester' on PATH"}
         argv = [binary, "-d", domain, "-b", sources, "-l", str(limit), "-f", "/dev/stdout"]
@@ -137,6 +136,7 @@ class CewlWordlistGenTool(SecurityTool):
 class MsfvenomGenerateTool(SecurityTool):
     name = "msfvenom_generate"
     binary = "msfvenom"
+    requires_auth = True
     description = (
         "Generate a Metasploit payload (one-shot, non-interactive). JSON input:\n"
         "  {\"payload\": \"linux/x64/meterpreter/reverse_tcp\", "
@@ -147,8 +147,6 @@ class MsfvenomGenerateTool(SecurityTool):
     )
 
     def _run(self, parsed: dict) -> dict:
-        if not parsed.get("authorization"):
-            return {"ok": False, "error": "set 'authorization': true"}
         payload = str(parsed.get("payload", ""))
         if not payload or not self.safe_arg(payload):
             return {"ok": False, "error": "payload required and must be safe"}
@@ -160,8 +158,8 @@ class MsfvenomGenerateTool(SecurityTool):
         if not self.safe_arg(fmt):
             return {"ok": False, "error": "unsafe format"}
         out_path = parsed.get("out_path", "")
-        if out_path and not self.safe_path(out_path, must_exist=False):
-            return {"ok": False, "error": "unsafe out_path"}
+        if out_path and not self.safe_path(out_path, must_exist=False, forbid_traversal=True):
+            return {"ok": False, "error": "unsafe out_path (no shell metachars, no '..' segments)"}
         options = parsed.get("options") or {}
         if not isinstance(options, dict):
             return {"ok": False, "error": "options must be a dict"}

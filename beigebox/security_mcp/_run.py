@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,11 +60,25 @@ def which(binary: str) -> str | None:
     return shutil.which(binary)
 
 
+def which_any(*names: str) -> tuple[str | None, str | None]:
+    """
+    Return (resolved_path, name_used) for the first installed binary in *names*,
+    or (None, None) if none are installed. Useful for tools shipped under
+    multiple names (impacket-secretsdump vs secretsdump.py, netexec vs nxc, …).
+    """
+    for n in names:
+        resolved = shutil.which(n)
+        if resolved is not None:
+            return resolved, n
+    return None, None
+
+
 def run_argv(
     argv: list[str],
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
     cwd: str | Path | None = None,
     extra_env: dict[str, str] | None = None,
+    stdin: str | None = None,
 ) -> RunResult:
     """
     Run *argv* with a hard timeout and capture stdout/stderr.
@@ -70,10 +86,12 @@ def run_argv(
     *argv* MUST be a list (subprocess invoked with shell=False). The first
     element is the binary; we resolve it via shutil.which to give a clean
     'binary not installed' message when it's missing.
-    """
-    import os
-    import time
 
+    *stdin*, when provided, is fed to the process's standard input. Many
+    pen/sec tools (gau, waybackurls, hakrawler, httpx, dnsx) accept their
+    targets via stdin instead of argv — this avoids per-tool subprocess
+    boilerplate.
+    """
     if not argv:
         return RunResult(False, "", [], -1, "", "", 0.0, error="empty argv")
 
@@ -94,6 +112,7 @@ def run_argv(
     try:
         proc = subprocess.run(
             full_argv,
+            input=stdin,
             capture_output=True,
             text=True,
             timeout=timeout,

@@ -22,6 +22,7 @@ def _safe_creds(parsed: dict, tool: SecurityTool) -> tuple[bool, dict]:
 class ImpacketSecretsdumpTool(SecurityTool):
     name = "impacket_secretsdump"
     binary = "impacket-secretsdump"  # also installed as 'secretsdump.py' on some systems
+    requires_auth = True
     description = (
         "Dump SAM/LSA/DCSync secrets via impacket. JSON input:\n"
         "  {\"target\": \"DC.example.com\", \"domain\": \"EXAMPLE\", "
@@ -30,8 +31,6 @@ class ImpacketSecretsdumpTool(SecurityTool):
     )
 
     def _run(self, parsed: dict) -> dict:
-        if not parsed.get("authorization"):
-            return {"ok": False, "error": "set 'authorization': true"}
         target = parsed.get("target", "")
         if not self.safe_target(target):
             return {"ok": False, "error": "invalid target"}
@@ -44,9 +43,8 @@ class ImpacketSecretsdumpTool(SecurityTool):
         nthash = parsed.get("hash", "")
         timeout = int(parsed.get("timeout", 600))
 
-        from beigebox.security_mcp._run import which
-        binary = ("impacket-secretsdump" if which("impacket-secretsdump")
-                  else "secretsdump.py" if which("secretsdump.py") else None)
+        from beigebox.security_mcp._run import which_any
+        _, binary = which_any("impacket-secretsdump", "secretsdump.py")
         if binary is None:
             return {"ok": False, "error": "neither 'impacket-secretsdump' nor 'secretsdump.py' on PATH"}
 
@@ -76,6 +74,7 @@ class ImpacketSecretsdumpTool(SecurityTool):
 class ImpacketGetuserspnsTool(SecurityTool):
     name = "impacket_getuserspns"
     binary = "impacket-GetUserSPNs"
+    requires_auth = True
     description = (
         "Kerberoasting — request TGS for SPN-bearing accounts. JSON input:\n"
         "  {\"target\": \"DC.example.com\", \"domain\": \"EXAMPLE\", "
@@ -84,8 +83,6 @@ class ImpacketGetuserspnsTool(SecurityTool):
     )
 
     def _run(self, parsed: dict) -> dict:
-        if not parsed.get("authorization"):
-            return {"ok": False, "error": "set 'authorization': true"}
         target = parsed.get("target", "")
         if not self.safe_target(target):
             return {"ok": False, "error": "invalid target"}
@@ -99,9 +96,8 @@ class ImpacketGetuserspnsTool(SecurityTool):
             return {"ok": False, "error": "domain and username are required"}
         timeout = int(parsed.get("timeout", 300))
 
-        from beigebox.security_mcp._run import which
-        binary = ("impacket-GetUserSPNs" if which("impacket-GetUserSPNs")
-                  else "GetUserSPNs.py" if which("GetUserSPNs.py") else None)
+        from beigebox.security_mcp._run import which_any
+        _, binary = which_any("impacket-GetUserSPNs", "GetUserSPNs.py")
         if binary is None:
             return {"ok": False, "error": "neither 'impacket-GetUserSPNs' nor 'GetUserSPNs.py' on PATH"}
 
@@ -118,6 +114,7 @@ class ImpacketGetuserspnsTool(SecurityTool):
 class ImpacketGetnpusersTool(SecurityTool):
     name = "impacket_getnpusers"
     binary = "impacket-GetNPUsers"
+    requires_auth = True
     description = (
         "AS-REP roasting — request AS-REP for users with no preauth. JSON input:\n"
         "  {\"target\": \"DC.example.com\", \"domain\": \"EXAMPLE\", "
@@ -125,8 +122,6 @@ class ImpacketGetnpusersTool(SecurityTool):
     )
 
     def _run(self, parsed: dict) -> dict:
-        if not parsed.get("authorization"):
-            return {"ok": False, "error": "set 'authorization': true"}
         target = parsed.get("target", "")
         if not self.safe_target(target):
             return {"ok": False, "error": "invalid target"}
@@ -138,9 +133,8 @@ class ImpacketGetnpusersTool(SecurityTool):
             return {"ok": False, "error": "users_file invalid or missing"}
         timeout = int(parsed.get("timeout", 300))
 
-        from beigebox.security_mcp._run import which
-        binary = ("impacket-GetNPUsers" if which("impacket-GetNPUsers")
-                  else "GetNPUsers.py" if which("GetNPUsers.py") else None)
+        from beigebox.security_mcp._run import which_any
+        _, binary = which_any("impacket-GetNPUsers", "GetNPUsers.py")
         if binary is None:
             return {"ok": False, "error": "neither 'impacket-GetNPUsers' nor 'GetNPUsers.py' on PATH"}
 

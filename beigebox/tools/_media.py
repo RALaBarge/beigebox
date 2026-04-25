@@ -42,6 +42,24 @@ def image_content(
 
     if len(png_bytes) > max_bytes and downscale and mime == "image/png":
         png_bytes, summary = _maybe_downscale_png(png_bytes, max_bytes, summary)
+        if not png_bytes:
+            # Pillow missing + over cap; refuse rather than emit an oversized image.
+            return {
+                MCP_CONTENT_KEY: [{"type": "text", "text": summary}],
+                TEXT_FALLBACK_KEY: summary,
+            }
+
+    # Hard cap: even with downscale=False or non-PNG mime, never emit more
+    # than max_bytes. (Same limit Claude Desktop and most MCP clients enforce.)
+    if len(png_bytes) > max_bytes:
+        msg = (
+            f"image refused: {len(png_bytes)/1024:.0f} KB exceeds the "
+            f"{max_bytes/1024:.0f} KB hard cap (downscale={downscale}, mime={mime})"
+        )
+        return {
+            MCP_CONTENT_KEY: [{"type": "text", "text": msg}],
+            TEXT_FALLBACK_KEY: msg,
+        }
 
     try:
         b64 = base64.b64encode(png_bytes).decode("ascii")
@@ -62,15 +80,24 @@ def image_content(
 
 
 def _maybe_downscale_png(png_bytes: bytes, max_bytes: int, summary: str) -> tuple[bytes, str]:
-    """Downscale a PNG until it fits under max_bytes, or give up if Pillow missing."""
+    """Downscale a PNG until it fits under max_bytes, or hard-fail if Pillow missing.
+
+    Returns a (bytes, summary) pair. On failure (Pillow absent and
+    image > max_bytes) returns an empty-bytes tuple with a clear error
+    summary so the caller can short-circuit instead of emitting an
+    oversized image to the MCP client.
+    """
     try:
         from PIL import Image  # type: ignore[import]
     except ImportError:
         logger.warning(
-            "image_content: image is %d bytes (>%d) but Pillow not installed; passing through",
+            "image_content: image is %d bytes (>%d) and Pillow not installed; refusing to emit",
             len(png_bytes), max_bytes,
         )
-        return png_bytes, summary + f" [warning: {len(png_bytes)/1024:.0f} KB exceeds {max_bytes/1024:.0f} KB cap]"
+        return b"", (
+            f"image refused: {len(png_bytes)/1024:.0f} KB exceeds the {max_bytes/1024:.0f} KB "
+            f"cap and Pillow is not installed (pip install pillow) to downscale"
+        )
 
     try:
         img = Image.open(io.BytesIO(png_bytes))

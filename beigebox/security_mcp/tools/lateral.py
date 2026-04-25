@@ -94,6 +94,7 @@ class SmbmapScanTool(SecurityTool):
 class NetexecScanTool(SecurityTool):
     name = "netexec_scan"
     binary = "netexec"  # also installed as 'nxc' on some systems
+    requires_auth = True
     description = (
         "Successor to crackmapexec. SMB / WinRM / MSSQL / SSH / LDAP enumeration "
         "and credential testing. JSON input:\n"
@@ -106,8 +107,6 @@ class NetexecScanTool(SecurityTool):
     PROTOCOLS = {"smb", "winrm", "mssql", "ssh", "ldap", "ftp", "rdp", "vnc"}
 
     def _run(self, parsed: dict) -> dict:
-        if not parsed.get("authorization"):
-            return {"ok": False, "error": "set 'authorization': true to confirm you have permission to test the target"}
         proto = str(parsed.get("protocol", "smb"))
         if proto not in self.PROTOCOLS:
             return {"ok": False, "error": f"protocol must be one of {sorted(self.PROTOCOLS)}"}
@@ -124,8 +123,8 @@ class NetexecScanTool(SecurityTool):
         timeout = int(parsed.get("timeout", 600))
 
         # Resolve binary — prefer 'netexec' but fall back to 'nxc'.
-        from beigebox.security_mcp._run import which
-        binary = "netexec" if which("netexec") else ("nxc" if which("nxc") else None)
+        from beigebox.security_mcp._run import which_any
+        _, binary = which_any("netexec", "nxc")
         if binary is None:
             return {"ok": False, "error": "neither 'netexec' nor 'nxc' on PATH"}
 

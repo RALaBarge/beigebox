@@ -28,8 +28,8 @@ class TestsslScanTool(SecurityTool):
             return {"ok": False, "error": f"severity must be one of {sorted(self.SEVERITY)}"}
         timeout = int(parsed.get("timeout", 1200))
 
-        from beigebox.security_mcp._run import which
-        binary = "testssl.sh" if which("testssl.sh") else ("testssl" if which("testssl") else None)
+        from beigebox.security_mcp._run import which_any
+        _, binary = which_any("testssl.sh", "testssl")
         if binary is None:
             return {"ok": False, "error": "neither 'testssl.sh' nor 'testssl' on PATH"}
         argv = [binary, "--quiet", "--color", "0", "--severity", severity,

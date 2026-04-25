@@ -162,10 +162,14 @@ class NiktoScanTool(SecurityTool):
 class SqlmapScanTool(SecurityTool):
     name = "sqlmap_scan"
     binary = "sqlmap"
+    requires_auth = True  # extra flags can include --os-shell etc → RCE
     description = (
         "SQL injection detection / exploitation. JSON input:\n"
         "  {\"url\": \"https://example.com/page?id=1\", \"level\": 1, "
-        "\"risk\": 1, \"batch\": true, \"timeout\": 1800, \"extra\": []}"
+        "\"risk\": 1, \"batch\": true, \"timeout\": 1800, \"extra\": [], "
+        "\"authorization\": true}\n"
+        "REQUIRES authorization=true — extra args allow flags like --os-shell "
+        "that escalate to RCE on the target."
     )
 
     def _run(self, parsed: dict) -> dict:
