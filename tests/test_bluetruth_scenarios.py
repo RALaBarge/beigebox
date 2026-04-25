@@ -32,6 +32,7 @@ def temp_db():
             CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ts_mono_us INTEGER NOT NULL,
+                ts_wall TEXT,
                 source TEXT NOT NULL,
                 event_type TEXT NOT NULL,
                 device_addr TEXT,

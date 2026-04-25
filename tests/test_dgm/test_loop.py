@@ -34,6 +34,7 @@ def make_verdict(winner: str, confidence: float = 0.8) -> JudgeVerdict:
 def make_proposal(key: str = "models.default", value: str = "qwen3:4b") -> Proposal:
     return Proposal(
         patch=Patch(key=key, value=value, reasoning="test reason"),
+        file_patch=None,
         raw_response='{"key": "models.default", "value": "qwen3:4b"}',
         latency_ms=50.0,
     )
