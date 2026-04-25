@@ -327,6 +327,15 @@ hooks:
   enabled: false
   directory: "./hooks"
 
+  # Webhook emitter — POSTs run_start / run_end events to a remote URL.
+  # Env var BEIGEBOX_WEBHOOK_URL overrides `url` if set.
+  webhook_emitter:
+    enabled: false
+    url: ""                        # e.g. https://hooks.example.com/beigebox
+    timeout_ms: 1500               # per-POST hard timeout
+    queue_size: 256                # bounded; events drop on overflow
+    include_user_message: false    # opt-in; off by default for privacy
+
 # ─────────────────────────────────────────────────────────────────────────────
 # WASM Transform Pipeline
 # ─────────────────────────────────────────────────────────────────────────────
