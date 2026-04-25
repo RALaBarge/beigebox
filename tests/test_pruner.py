@@ -77,7 +77,10 @@ def test_prune_returns_original_if_longer():
 
 def test_prune_returns_compressed_when_shorter():
     pruner = ContextPruner("model", "http://localhost:11434")
-    ctx = "A very long context " * 50
+    # Must clear two guards:
+    # - turn_n >= skip_first_turns (default 4)
+    # - len(ctx) > llm_threshold (default 3000) so the LLM pass actually fires
+    ctx = "A very long context " * 200  # 4000 chars
     compressed = "Short compressed context."
     with patch("beigebox.agents.pruner.httpx.Client") as MockClient:
         mock_resp = MagicMock()
@@ -85,7 +88,7 @@ def test_prune_returns_compressed_when_shorter():
             "choices": [{"message": {"content": compressed}}]
         }
         MockClient.return_value.__enter__.return_value.post.return_value = mock_resp
-        result = pruner.prune(ctx, "implement step 2")
+        result = pruner.prune(ctx, "implement step 2", turn_n=5)
     assert result == compressed
 
 

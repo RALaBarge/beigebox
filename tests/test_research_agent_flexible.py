@@ -169,9 +169,13 @@ class TestAuthHandling:
         assert result is True
 
     def test_openrouter_health_false_without_key(self):
-        adapter = OpenRouterAdapter(api_key="")
-        result = asyncio.get_event_loop().run_until_complete(adapter.health())
-        assert result is False
+        # Clear env var so the adapter's env-fallback doesn't pick up a real key
+        # from the developer shell.
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("OPENROUTER_API_KEY", None)
+            adapter = OpenRouterAdapter(api_key="")
+            result = asyncio.get_event_loop().run_until_complete(adapter.health())
+            assert result is False
 
     def test_openai_health_false_without_key(self):
         adapter = OpenAIAdapter(api_key="")

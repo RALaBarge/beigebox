@@ -53,7 +53,7 @@ class TestIsThinker:
         assert _is_thinker("deepseek-r:latest") is True
 
     def test_llama_not_thinker(self):
-        assert _is_thinker("qwen3:4b") is False
+        assert _is_thinker("llama3.2:3b") is False
 
     def test_qwen25_not_thinker(self):
         assert _is_thinker("qwen2.5:7b") is False
