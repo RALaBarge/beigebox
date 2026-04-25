@@ -866,6 +866,144 @@ def cmd_discover_models(args):
     print()
 
 
+def cmd_models(args):
+    """Pull the OpenRouter model catalog from a running BeigeBox instance.
+
+    Hits /api/v1/openrouter/models (already sanitized — id/name/context_length/pricing)
+    and renders a sortable, filterable table. JSON escape hatch via --json.
+    """
+    import httpx
+
+    url = (args.url or "http://localhost:1337").rstrip("/")
+    try:
+        resp = httpx.get(f"{url}/api/v1/openrouter/models", timeout=20)
+        resp.raise_for_status()
+        models = resp.json().get("data", [])
+    except Exception as e:
+        print(f"  ✗  Cannot reach BeigeBox at {url}: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    if not models:
+        print("  No OpenRouter models — backend not configured or API key missing.",
+              file=sys.stderr)
+        sys.exit(1)
+
+    # Filter
+    if args.search:
+        needle = args.search.lower()
+        models = [
+            m for m in models
+            if needle in m.get("id", "").lower() or needle in m.get("name", "").lower()
+        ]
+
+    # Sort
+    def _price(m, key):
+        try:
+            return float((m.get("pricing") or {}).get(key) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    sort_key = (args.sort or "id").lower()
+    sorters = {
+        "id":      lambda m: m.get("id", ""),
+        "name":    lambda m: m.get("name", "") or "",
+        "context": lambda m: -int(m.get("context_length") or 0),
+        "prompt":  lambda m: _price(m, "prompt"),
+        "comp":    lambda m: _price(m, "completion"),
+    }
+    if sort_key not in sorters:
+        print(f"  ✗  unknown --sort value: {sort_key}. "
+              f"Choose from: {', '.join(sorters)}", file=sys.stderr)
+        sys.exit(2)
+    models.sort(key=sorters[sort_key])
+
+    if args.limit:
+        models = models[: args.limit]
+
+    if args.json:
+        import json
+        print(json.dumps(models, indent=2))
+        return
+
+    # Table
+    print(f"  OpenRouter catalog — {len(models)} model(s)")
+    if args.search:
+        print(f"  Filter: '{args.search}'")
+    print("  " + "─" * 96)
+    print(f"  {'ID':<48} {'Ctx':>9} {'Prompt $/1K':>13} {'Comp $/1K':>13}")
+    print("  " + "─" * 96)
+    for m in models:
+        mid = m.get("id", "?")
+        ctx = m.get("context_length") or 0
+        pricing = m.get("pricing") or {}
+        # OpenRouter prices are per-token; show per-1K-token for human eyes.
+        try:
+            p_prompt = float(pricing.get("prompt") or 0) * 1000.0
+            p_comp = float(pricing.get("completion") or 0) * 1000.0
+        except (TypeError, ValueError):
+            p_prompt = p_comp = 0.0
+        print(
+            f"  {mid:<48} "
+            f"{ctx:>9,} "
+            f"{('$%.5f' % p_prompt):>13} "
+            f"{('$%.5f' % p_comp):>13}"
+        )
+    print()
+
+
+def cmd_rankings(args):
+    """Show Artificial Analysis top-15 agentic + coding rankings via the BB cache.
+
+    Hits /api/v1/artificial-analysis/rankings (1-hour-cached scrape). JSON
+    escape hatch via --json.
+    """
+    import httpx
+
+    url = (args.url or "http://localhost:1337").rstrip("/")
+    try:
+        resp = httpx.get(f"{url}/api/v1/artificial-analysis/rankings", timeout=25)
+        resp.raise_for_status()
+        data = resp.json() or {}
+    except Exception as e:
+        print(f"  ✗  Cannot reach BeigeBox at {url}: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    agentic = data.get("agentic", []) or []
+    coding = data.get("coding", []) or []
+
+    if args.json:
+        import json
+        print(json.dumps(data, indent=2))
+        return
+
+    def _print_board(title, entries, limit):
+        if not entries:
+            print(f"  {title}: (no data)")
+            return
+        entries = entries[:limit]
+        print(f"  {title}")
+        print("  " + "─" * 70)
+        print(f"  {'#':>3}  {'Model':<48} {'Score':>10}")
+        print("  " + "─" * 70)
+        for i, m in enumerate(entries, 1):
+            name = m.get("model") or m.get("name") or m.get("id") or "?"
+            score_raw = m.get("score") if "score" in m else m.get("intelligence_index")
+            try:
+                score = f"{float(score_raw):.2f}"
+            except (TypeError, ValueError):
+                score = "—"
+            print(f"  {i:>3}  {name[:48]:<48} {score:>10}")
+        print()
+
+    limit = args.top or 15
+    track = (args.track or "both").lower()
+    print()
+    if track in ("agentic", "both"):
+        _print_board("Agentic ranking (Artificial Analysis)", agentic, limit)
+    if track in ("coding", "both"):
+        _print_board("Coding ranking (Artificial Analysis)", coding, limit)
+
+
 def cmd_deployment_plan(args):
     """Print a capacity summary: VRAM headroom and potential OOM risks."""
     import httpx
@@ -1224,6 +1362,35 @@ def main():
 
     _add_command(sub, ["discover-models", "discover"],
                  "Discover and display model resource specs", cmd_discover_models, setup_discover_models)
+
+    def setup_models(p):
+        p.add_argument("--url", "-u", default=None,
+                       help="BeigeBox URL (default: http://localhost:1337)")
+        p.add_argument("--search", "-s", default=None,
+                       help="Substring filter on id and name (case-insensitive)")
+        p.add_argument("--sort", default="id",
+                       help="Sort by: id | name | context | prompt | comp (default: id)")
+        p.add_argument("--limit", "-n", type=int, default=None,
+                       help="Show only the first N rows after sort/filter")
+        p.add_argument("--json", action="store_true",
+                       help="Output raw JSON instead of a table")
+
+    _add_command(sub, ["models", "mdl", "ls-models"],
+                 "Pull the OpenRouter catalog (id/context/pricing)", cmd_models, setup_models)
+
+    def setup_rankings(p):
+        p.add_argument("--url", "-u", default=None,
+                       help="BeigeBox URL (default: http://localhost:1337)")
+        p.add_argument("--track", default="both",
+                       help="Which board: agentic | coding | both (default: both)")
+        p.add_argument("--top", "-n", type=int, default=None,
+                       help="Show only the first N entries (default: 15)")
+        p.add_argument("--json", action="store_true",
+                       help="Output raw JSON instead of a table")
+
+    _add_command(sub, ["rankings", "rank", "top"],
+                 "Top agentic + coding model rankings (Artificial Analysis)",
+                 cmd_rankings, setup_rankings)
 
     def setup_deployment_plan(p):
         p.add_argument("--url", "-u", default=None,
