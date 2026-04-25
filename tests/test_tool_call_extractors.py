@@ -164,6 +164,19 @@ def test_bare_json_dominates_content():
     assert rewritten == ""
 
 
+def test_bare_json_with_short_prefix_glitch_lifted():
+    """Real-world: a model emits a short tokenization glitch then clean JSON.
+    Captured from qwen/qwen3-next-80b-a3b-instruct returning
+    " מדה\\n{\"name\":\"get_weather\",\"arguments\":{\"city\":\"SF\"}}".
+    Short prefix (≤16 chars and <15% of stripped) should still extract."""
+    content = ' מדה\n{"name": "get_weather", "arguments": {"city": "San Francisco"}}'
+    calls, rewritten = extract_tool_calls(content)
+    assert calls is not None
+    assert calls[0]["function"]["name"] == "get_weather"
+    assert json.loads(calls[0]["function"]["arguments"]) == {"city": "San Francisco"}
+    assert rewritten == ""
+
+
 def test_bare_json_inside_prose_paragraph_not_extracted():
     content = (
         "I would call the tool with input like "
@@ -210,12 +223,18 @@ def test_malformed_xml_falls_through_to_next_extractor():
     assert calls[0]["function"]["name"] == "fallback"
 
 
-def test_extraction_disabled_by_default():
-    """normalize_response without the kwarg never extracts."""
+def test_extraction_enabled_by_default():
+    """normalize_response now extracts on by default; explicit opt-out works."""
     content = '{"name": "ping", "arguments": {"host": "1.1.1.1"}}'
+    # Default: extract
     n = normalize_response(_wrap(content))
-    assert n.tool_calls is None
-    assert n.content == content  # untouched
+    assert n.tool_calls is not None
+    assert n.tool_calls[0]["function"]["name"] == "ping"
+    assert n.content == ""
+    # Explicit opt-out: pass through
+    n2 = normalize_response(_wrap(content), enable_tool_call_extraction=False)
+    assert n2.tool_calls is None
+    assert n2.content == content
 
 
 def test_extraction_enabled_lifts_into_normalized_response():

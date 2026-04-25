@@ -345,27 +345,42 @@ def _extract_react(content, declared_tools, errors):
 def _extract_bare_json(content, declared_tools, errors):
     """Last-resort: content is essentially-only-JSON and sniffs as a tool call.
 
-    Guard: the JSON span must cover ≥ 60% of stripped content. Otherwise we'd
-    grab examples embedded in prose.
+    Tolerates a short non-JSON prefix (≤ 16 chars AND < 15% of stripped length)
+    to handle prefix-glitch tokens some models emit before the actual tool call
+    JSON (observed: a Hebrew artifact " מדה\\n" before clean JSON from
+    qwen3-next-80b). The remaining JSON must still cover ≥ 60% of stripped
+    content. Anything longer than that is treated as "JSON example embedded
+    in prose" and rejected.
     """
     try:
         stripped = content.strip()
-        if not stripped or stripped[0] not in "{[":
+        if not stripped:
             return None
-        # Try to parse the whole stripped content first
+        # Locate the earliest '{' or '['
+        first_brace = -1
+        for j, ch in enumerate(stripped):
+            if ch in "{[":
+                first_brace = j
+                break
+        if first_brace < 0:
+            return None
+        prefix = stripped[:first_brace]
+        if len(prefix) > 16 and len(prefix) > 0.15 * len(stripped):
+            return None
+        json_part = stripped[first_brace:]
         try:
-            obj = json.loads(stripped)
+            obj = json.loads(json_part)
         except (json.JSONDecodeError, ValueError):
             return None
-        # Coverage check
-        if len(stripped) / max(len(content.strip()), 1) < 0.6:
+        # Coverage: the JSON span must dominate
+        if len(json_part) / max(len(stripped), 1) < 0.6:
             return None
         calls = list(_coerce_call_objects(
             obj, declared_tools, 0, "bare_json", require_sniff=True,
         ))
         if not calls:
             return None
-        # Strip the whole matched region — the model returned only this
+        # Strip the whole matched region — the model returned essentially only this
         return calls, ""
     except (re.error, AttributeError) as e:
         errors.append(f"extractor_failed:bare_json:{type(e).__name__}")
