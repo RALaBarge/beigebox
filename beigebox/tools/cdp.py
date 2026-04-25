@@ -30,6 +30,7 @@ Operator call format:
     {"tool": "cdp.scroll",        "input": {"x": 0, "y": 500}}
     {"tool": "cdp.eval",          "input": "document.title"}
     {"tool": "cdp.list_tabs",     "input": ""}
+    {"tool": "cdp.wait_for_selector", "input": {"selector": "#app", "state": "visible", "timeout": 10}}
 
     Phase 2 (Network, Performance, Storage):
     {"tool": "cdp.network",       "input": {"action": "capture", "limit": 50}}
@@ -204,6 +205,7 @@ class CDPTool:
         cdp.scroll       — Scroll to (x, y)
         cdp.eval         — Evaluate JS expression (returns value as string)
         cdp.list_tabs    — List open tabs via HTTP /json/list
+        cdp.wait_for_selector — Wait until selector reaches a DOM state
     """
 
     capture_tool_io: bool = True
@@ -223,6 +225,8 @@ class CDPTool:
         '  cdp.scroll       — Scroll page:      {"tool": "cdp.scroll", "input": {"x": 0, "y": 500}}\n'
         '  cdp.eval         — Evaluate JS:      {"tool": "cdp.eval", "input": "document.title"}\n'
         "  cdp.list_tabs    — List open tabs:   {\"tool\": \"cdp.list_tabs\", \"input\": \"\"}\n"
+        '  cdp.wait_for_selector — Wait for DOM state: {"tool": "cdp.wait_for_selector", "input": {"selector": "#app", "state": "visible", "timeout": 10}}\n'
+        '                       state ∈ {attached, visible, hidden, detached} (default "visible")\n'
         "\n"
         "PHASE 2 (Network, Performance, Storage):\n"
         '  cdp.network      — Capture requests: {"tool": "cdp.network", "input": {"action": "capture", "limit": 50}}\n'
@@ -321,6 +325,8 @@ class CDPTool:
             return await self._scroll(inp)
         elif method == "eval":
             return await self._eval(str(inp))
+        elif method == "wait_for_selector":
+            return await self._wait_for_selector(inp)
         # Phase 2
         elif method == "network":
             return await self._network(inp)
@@ -736,6 +742,103 @@ class CDPTool:
         except Exception as exc:
             self._client = None
             logger.warning("cdp._eval failed: %s", exc)
+            return f"Error: {exc}"
+
+    async def _wait_for_selector(self, inp: Any) -> str:
+        """
+        Block until *selector* reaches the requested DOM *state*, or *timeout* elapses.
+
+        Input: {"selector": "#submit", "state": "visible", "timeout": 10}
+             or a plain selector string (defaults: state="visible", timeout=10s).
+
+        States:
+            attached  — element exists in the DOM
+            visible   — attached + non-zero size + not display:none/visibility:hidden
+            hidden    — element absent OR present but not visible
+            detached  — element absent from the DOM
+
+        The wait is bounded by the outer run() future cap (self._timeout + 5s),
+        so requests longer than that get clamped.
+        """
+        if isinstance(inp, dict):
+            selector = inp.get("selector", "")
+            state = inp.get("state", "visible")
+            timeout = float(inp.get("timeout", 10))
+        elif isinstance(inp, str):
+            try:
+                parsed = json.loads(inp)
+                if isinstance(parsed, dict):
+                    selector = parsed.get("selector", "")
+                    state = parsed.get("state", "visible")
+                    timeout = float(parsed.get("timeout", 10))
+                else:
+                    selector = inp
+                    state = "visible"
+                    timeout = 10.0
+            except (json.JSONDecodeError, ValueError):
+                selector = inp
+                state = "visible"
+                timeout = 10.0
+        else:
+            return "Error: cdp.wait_for_selector input must be {selector, state?, timeout?} or a plain string"
+
+        if not selector:
+            return "Error: selector required for cdp.wait_for_selector"
+        if state not in ("attached", "visible", "hidden", "detached"):
+            return f"Error: state must be one of attached/visible/hidden/detached (got '{state}')"
+
+        # Clamp to the outer run() future cap so we never get killed mid-poll.
+        max_wait = max(1.0, self._timeout + 4.0)
+        timeout = min(timeout, max_wait)
+
+        check_expr = (
+            f"(function() {{"
+            f"  var el = document.querySelector({json.dumps(selector)});"
+            f"  if (!el) return 'absent';"
+            f"  var r = el.getBoundingClientRect();"
+            f"  var cs = window.getComputedStyle(el);"
+            f"  var visible = r.width > 0 && r.height > 0"
+            f"    && cs.visibility !== 'hidden' && cs.display !== 'none' && cs.opacity !== '0';"
+            f"  return visible ? 'visible' : 'attached';"
+            f"}}())"
+        )
+
+        target_reached = {
+            "attached": lambda s: s in ("attached", "visible"),
+            "visible":  lambda s: s == "visible",
+            "hidden":   lambda s: s in ("absent", "attached"),
+            "detached": lambda s: s == "absent",
+        }[state]
+
+        deadline = time.monotonic() + timeout
+        poll_interval = 0.1
+        last_status = "absent"
+        try:
+            client = await self._get_client()
+            while True:
+                result = await client.send("Runtime.evaluate", {
+                    "expression": check_expr,
+                    "returnByValue": True,
+                })
+                last_status = result.get("result", {}).get("value", "absent")
+                if target_reached(last_status):
+                    elapsed = timeout - max(0.0, deadline - time.monotonic())
+                    return f"Selector '{selector}' reached state '{state}' in {elapsed:.2f}s (status={last_status})"
+                if time.monotonic() >= deadline:
+                    return (
+                        f"Error: timed out after {timeout:.1f}s waiting for '{selector}' "
+                        f"to be '{state}' (last status: {last_status})"
+                    )
+                await asyncio.sleep(poll_interval)
+        except TimeoutError:
+            self._client = None
+            return f"Error: wait_for_selector eval timed out after {self._timeout}s (per-command)"
+        except RuntimeError as exc:
+            self._client = None
+            return f"Error: {exc}"
+        except Exception as exc:
+            self._client = None
+            logger.warning("cdp._wait_for_selector failed: %s", exc)
             return f"Error: {exc}"
 
     # ------------------------------------------------------------------
