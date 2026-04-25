@@ -138,7 +138,9 @@ See [MACOS_QUICK_REFERENCE.md](MACOS_QUICK_REFERENCE.md) for troubleshooting and
 | **Observability** | Tap unified logging (18+ event types); Grafana dashboards; per-request tracing |
 | **Orchestration** | Harness multi-turn harness; ensemble parallel execution; multi-agent coordination |
 | **Storage** | SQLite (conversations, metrics) + ChromaDB (embeddings); hot-reload config |
-| **Tools** | Chrome DevTools Protocol; operator agentic tools; RAG via document search; MCP server + custom plugins |
+| **Tools** | Chrome DevTools Protocol (with vision-content screenshots + `wait_for_selector`); operator agentic tools; RAG via document search; primary MCP server + custom plugins |
+| **Pen/Sec MCP** | Optional second MCP endpoint at `/pen-mcp` exposing 53 offensive-security tool wrappers (nmap, nuclei, sqlmap, ffuf, amass, impacket, hydra, …). Off by default. See [security_mcp/README.md](beigebox/security_mcp/README.md) |
+| **Browser automation** | Built-in CDP tool + project-level Playwright MCP (`.mcp.json`) for headless Chromium driving with vision feedback to Claude Code/Desktop |
 | **Post-processing** | WASM module support; output normalization; streaming transforms |
 
 ---
@@ -190,7 +192,7 @@ Integrated security scanners run via a single command:
 
 | Scanner | What it checks |
 |---|---|
-| **pip-audit** | Known CVEs in Python dependencies |
+| **pip-audit** | Known CVEs in Python dependencies (also gated automatically by the `pre-push` git hook) |
 | **bandit** | Static security analysis of source code |
 | **semgrep** | Advanced pattern-based vulnerability detection |
 | **gitleaks** | Secrets accidentally committed to git history |
@@ -260,6 +262,50 @@ For technical details, see [RAG_POISONING_THREAT_ANALYSIS.md](workspace/out/RAG_
 
 ---
 
+## Pen/Sec MCP (offensive tooling)
+
+A second, opt-in MCP endpoint mounted at `POST /pen-mcp` exposes 53 wrapped *nix offensive-security tools. Separate registry from the default `/mcp` surface so security tooling stays out of normal LLM tool lists. Built clean (argv-list `subprocess.run` only — no shell metachar concatenation, no f-string injection), with conservative target/arg validation and structured-error returns when binaries aren't installed.
+
+**Tool surface** (organized by kill-chain phase):
+
+| Category | Tools |
+|---|---|
+| Network discovery | `nmap_scan` (auto -sT fallback when non-root), `nmap_advanced_scan`, `masscan_scan`, `rustscan_scan`, `fierce_scan`, `dnsenum_scan` |
+| Subdomain / asset | `amass_scan`, `subfinder_scan`, `httpx_probe`, `wafw00f_scan` |
+| Web vuln / fuzz / crawl | `nuclei_scan`, `katana_crawl`, `ffuf_scan`, `gobuster_scan`, `feroxbuster_scan`, `dirsearch_scan`, `nikto_scan`, `sqlmap_scan`, `dalfox_xss_scan`, `wpscan_scan` |
+| URL / param discovery | `gau_discovery`, `waybackurls_discovery`, `arjun_parameter_discovery`, `paramspider_mining`, `hakrawler_crawl` |
+| SSL/TLS / SSH audit | `testssl_scan`, `sslscan_scan`, `ssh_audit_scan` |
+| SMB / NetBIOS / LDAP / SNMP | `enum4linux_scan`, `enum4linux_ng_scan`, `smbmap_scan`, `netexec_scan`, `snmpwalk_scan`, `onesixtyone_scan`, `nbtscan_scan`, `ldapsearch_scan` |
+| AD / Kerberos | `impacket_secretsdump`, `impacket_getuserspns`, `impacket_getnpusers`, `kerbrute_userenum` |
+| Credentials / cracking | `hydra_attack`, `john_crack`, `hashcat_crack` |
+| OSINT / exploit lookup | `whatweb_scan`, `searchsploit_lookup`, `theharvester_scan`, `cewl_wordlist_gen`, `msfvenom_generate` |
+| Binary / forensics | `binwalk_analyze`, `exiftool_extract`, `checksec_analyze` |
+| ProjectDiscovery extras | `naabu_scan`, `dnsx_resolve` |
+
+**Authorization gate.** Destructive wrappers (`hydra_attack`, `john_crack`, `hashcat_crack`, `netexec_scan`, all impacket AD tools, `msfvenom_generate`) require an explicit `"authorization": true` field in the input — prevents the LLM from inferring authorization from a vague prompt.
+
+**Enable** in `config.yaml`:
+```yaml
+security_mcp:
+  enabled: true
+```
+
+**Register with Claude Code** in `.mcp.json`:
+```json
+{
+  "mcpServers": {
+    "beigebox-pensec": {
+      "url": "http://localhost:1337/pen-mcp",
+      "headers": {"Authorization": "Bearer YOUR_BEIGEBOX_KEY"}
+    }
+  }
+}
+```
+
+Inspired by [HexStrike AI](https://github.com/0x4m4/hexstrike-ai) (MIT) — re-implemented cleanly without HexStrike's known shell-injection issues. Full install line and per-tool JSON schemas in [beigebox/security_mcp/README.md](beigebox/security_mcp/README.md).
+
+---
+
 ## Documentation
 
 - **[Security](d0cs/security.md)** — Supply chain hardening, read-only root, network segmentation, threat model, defense layers
@@ -270,6 +316,7 @@ For technical details, see [RAG_POISONING_THREAT_ANALYSIS.md](workspace/out/RAG_
 - **[Observability](d0cs/observability.md)** — Tap event types, metrics, debugging
 - **[Agents & Tools](d0cs/agents.md)** — Operator, orchestration, multi-turn, group chat, RAG
 - **[Tools & Integrations](d0cs/tools.md)** — CDP, plugins, MCP server, document search
+- **[Pen/Sec MCP](beigebox/security_mcp/README.md)** — Offensive-security tool wrappers via the optional `/pen-mcp` endpoint
 - **[Deployment](d0cs/deployment.md)** — Docker Compose, Kubernetes, Systemd, production setup
 - **[API Reference](d0cs/api-reference.md)** — Endpoints, request/response formats, examples
 
