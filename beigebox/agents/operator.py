@@ -800,8 +800,32 @@ class Operator:
             return f"Error running {name}: {e}"
 
         # ToolResult: use structured observation; plain strings pass through as-is.
+        # Structured MCP content (dict with __beigebox_mcp_content__) collapses
+        # to its text fallback for the text-based ReAct loop. If a blob store
+        # is configured, persist the raw image bytes and embed a blob:// ref
+        # so a future tool/skill can re-fetch the screenshot.
         if isinstance(result, ToolResult):
             raw_result = result.to_observation()
+        elif isinstance(result, dict):
+            from beigebox.tools._media import (
+                MCP_CONTENT_KEY, is_mcp_content, text_fallback, extract_image_bytes,
+            )
+            if is_mcp_content(result):
+                fallback = text_fallback(result)
+                img_bytes = extract_image_bytes(result)
+                if img_bytes is not None and self._blob_store is not None:
+                    # blob_store.write expects str; the read path also UTF-8 decodes.
+                    # Store as base64 so the existing string API continues to work
+                    # and a future fetcher can re-decode on read.
+                    try:
+                        import base64 as _b64
+                        img_hash = self._blob_store.write(_b64.b64encode(img_bytes).decode("ascii"))
+                        fallback = f"{fallback} [blob://{img_hash[:16]} (base64-png, {len(img_bytes)} bytes)]"
+                    except Exception as e:
+                        logger.warning("blob write of image bytes failed: %s", e)
+                raw_result = fallback
+            else:
+                raw_result = str(result)
         else:
             raw_result = str(result)
 

@@ -278,8 +278,14 @@ class CDPTool:
     # Sync entry point for the tool registry
     # ------------------------------------------------------------------
 
-    def run(self, input_str: str) -> str:
-        """Parse input JSON and dispatch to the appropriate CDP method."""
+    def run(self, input_str: str) -> str | dict:
+        """Parse input JSON and dispatch to the appropriate CDP method.
+
+        Most methods return str. `cdp.screenshot` returns an MCP image-content
+        envelope dict (see beigebox.tools._media); the MCP server unwraps it
+        into an `image` content block, while text-only consumers fall back
+        through ``_text_fallback``.
+        """
         try:
             params = json.loads(input_str.strip())
         except json.JSONDecodeError:
@@ -307,7 +313,7 @@ class CDPTool:
     # Async dispatch
     # ------------------------------------------------------------------
 
-    async def _dispatch(self, method: str, inp: Any) -> str:
+    async def _dispatch(self, method: str, inp: Any) -> str | dict:
         # Phase 1
         if method == "list_tabs":
             return await self._list_tabs()
@@ -469,11 +475,13 @@ class CDPTool:
             logger.warning("cdp._navigate failed: %s", exc)
             return f"Error: {exc}"
 
-    async def _screenshot(self) -> str:
+    async def _screenshot(self) -> dict | str:
         """
         Capture a screenshot of the current tab.
-        Returns a summary with base64 PNG prefix (first 200 chars shown in context).
-        Full base64 is truncated — the operator should treat this as a visual confirmation.
+
+        On success returns an MCP image-content envelope (see beigebox.tools._media)
+        so vision-capable MCP clients receive a real `image` content block. On
+        failure returns an error string consistent with the rest of this tool.
         """
         try:
             client = await self._get_client()
@@ -482,15 +490,16 @@ class CDPTool:
             data_b64 = result.get("data", "")
             if not data_b64:
                 return "Error: screenshot returned empty data"
-            # Estimate image size from base64 length
-            approx_bytes = len(data_b64) * 3 // 4
-            kb = approx_bytes // 1024
-            preview = data_b64[:200]
-            return (
-                f"Screenshot captured: ~{kb} KB PNG\n"
-                f"base64_preview (first 200 chars): {preview}...\n"
-                f"[Full base64 stored via capture_tool_io. "
-                f"Total length: {len(data_b64)} chars]"
+            try:
+                png_bytes = base64.b64decode(data_b64, validate=True)
+            except Exception as exc:
+                return f"Error: screenshot returned invalid base64: {exc}"
+            from beigebox.tools._media import image_content
+            kb = len(png_bytes) / 1024
+            return image_content(
+                png_bytes,
+                summary=f"Screenshot captured: PNG, ~{kb:.1f} KB",
+                mime="image/png",
             )
         except TimeoutError:
             self._client = None
