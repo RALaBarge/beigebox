@@ -1,0 +1,14 @@
+# host-audit target list
+# One entry per line. Lines starting with # are comments.
+# Forms:
+#   local                       — the machine running the audit
+#   label=local
+#   user@host                   — SSH key auth (uses ~/.ssh/config)
+#   alias                       — SSH alias
+#   user:password@host          — sshpass (password on disk is a risk; prefer keys)
+#   label=TARGET                — prepend a display label
+
+localhost
+# debian=ryan@192.168.1.235
+# mac=useruser@192.168.1.214
+# lab=ryan@lab.tailnet-name.ts.net

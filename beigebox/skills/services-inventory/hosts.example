@@ -1,0 +1,9 @@
+# services-inventory host config
+# Copy to: ~/.config/beigebox/inventory-hosts
+# Format:  "label ssh-target"  or just "ssh-target"
+# Include "localhost" to probe the local host as part of the aggregation.
+
+localhost
+# debian  user@debian.home
+# lab     user@192.168.1.50
+# prod    my-ssh-alias-from-ssh-config

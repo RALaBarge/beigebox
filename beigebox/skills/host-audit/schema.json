@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://beigebox.local/skills/host-audit/schema.json",
+  "title": "host-audit snapshot",
+  "description": "Schema for a single host audit result emitted by host-audit/scripts/audit.sh (--format json or --save). Each object describes one machine at one point in time.",
+  "type": "object",
+  "required": ["schema_version", "reachable"],
+  "properties": {
+    "schema_version": {
+      "description": "Version of this schema. Bumped on breaking field changes.",
+      "type": "string",
+      "const": "1"
+    },
+    "audit_time": {
+      "description": "UTC timestamp the audit was taken. Filled by orchestrator, not probe.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "label": {
+      "description": "Display label for the target. Filled by orchestrator.",
+      "type": "string"
+    },
+    "target": {
+      "description": "Original target string (ssh-target or 'local'). Passwords are NOT persisted; only user@host is kept.",
+      "type": "string"
+    },
+    "auth_method": {
+      "description": "How the probe was delivered. Passwords are never stored.",
+      "type": "string",
+      "enum": ["local", "ssh", "sshpass"]
+    },
+    "reachable": {
+      "type": "boolean",
+      "description": "Whether the probe completed. If false, 'error' explains why and most other fields may be absent."
+    },
+    "error": { "type": ["string", "null"] },
+    "hostname": { "type": ["string", "null"] },
+    "os": {
+      "type": "object",
+      "properties": {
+        "family": { "type": "string", "examples": ["Linux", "Darwin"] },
+        "pretty": { "type": "string" },
+        "kernel": { "type": "string" },
+        "arch":   { "type": "string" }
+      }
+    },
+    "hw": {
+      "type": "object",
+      "properties": {
+        "cores":     { "type": "number" },
+        "memory_gb": { "type": "number" },
+        "gpu":       { "type": ["string", "null"] },
+        "disks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "mount": { "type": "string" },
+              "size":  { "type": "string" },
+              "used":  { "type": "string" },
+              "pct":   { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "properties": {
+        "interfaces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name":  { "type": "string" },
+              "state": { "type": "string" },
+              "ips":   { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "all_ips": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "tools": {
+      "description": "Names of detected binaries relevant to container/VM/host tooling.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "containers": {
+      "type": "object",
+      "properties": {
+        "docker": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name":  { "type": "string" },
+              "image": { "type": "string" },
+              "ports": { "type": ["string", "null"] },
+              "state": { "type": "string" }
+            }
+          }
+        },
+        "lxc_classic_dirs": { "type": "array", "items": { "type": "string" } },
+        "lxd": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name":   { "type": "string" },
+              "status": { "type": "string" },
+              "ipv4":   { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "incus": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name":   { "type": "string" },
+              "status": { "type": "string" },
+              "ipv4":   { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "libvirt": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "listeners": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "addr": { "type": "string" },
+          "proc": { "type": "string" }
+        }
+      }
+    },
+    "hints": { "type": "array", "items": { "type": "string" } },
+    "sudo_needed": { "type": "array", "items": { "type": "string" } }
+  }
+}
