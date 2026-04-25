@@ -224,11 +224,18 @@ class RAGPoisoningDetector:
             }
 
     def import_baseline(self, state: dict) -> None:
-        """Restore baseline state from a previously exported dict."""
+        """Restore baseline state from a previously exported dict.
+
+        Defensive: clamps `_count` to at least `len(_norms)` so a hand-built
+        state dict with `count=0` and `norms=[...]` doesn't leave the detector
+        thinking it has no baseline. `_count` represents total updates ever
+        (can exceed the rolling window), so honour the caller's value when
+        it's at least the deque length.
+        """
         with self._lock:
             self._norms.clear()
             for n in state.get("norms", []):
                 self._norms.append(float(n))
             self._mean_norm = float(state.get("mean_norm", 0.0))
             self._std_norm = float(state.get("std_norm", 1.0)) or 1.0
-            self._count = int(state.get("count", len(self._norms)))
+            self._count = max(int(state.get("count", 0)), len(self._norms))

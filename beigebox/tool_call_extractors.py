@@ -43,6 +43,15 @@ Extractor = Callable[[str, "set[str] | None", "list[str]"],
                      "tuple[list[dict], str] | None"]
 
 
+# Hard cap on content length the extractor pipeline will consider. Several
+# patterns use `.*?` with DOTALL; without a length bound, an adversarial
+# model output (long alternating brackets, deeply-nested fences) can force
+# catastrophic backtracking. 256 KiB is comfortably above any realistic
+# tool-call payload — anything larger is almost certainly not a single tool
+# call worth lifting and isn't worth the risk.
+MAX_EXTRACTION_CHARS = 256 * 1024
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Validation
 # ─────────────────────────────────────────────────────────────────────────────
@@ -495,6 +504,12 @@ def extract_tool_calls(
         return None, content if isinstance(content, str) else ""
     if errors is None:
         errors = []
+    # ReDoS guard: refuse to run pattern-matching extractors on oversized
+    # content. Fall straight through to a no-op rather than burn CPU on a
+    # backtracking storm.
+    if len(content) > MAX_EXTRACTION_CHARS:
+        errors.append(f"extraction_skipped:content_too_large:{len(content)}")
+        return None, content
     pipeline = extractors if extractors is not None else DEFAULT_EXTRACTOR_PIPELINE
     for ex in pipeline:
         result = ex(content, declared_tools, errors)

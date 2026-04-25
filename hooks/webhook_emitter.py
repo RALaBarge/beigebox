@@ -52,10 +52,12 @@ logger = logging.getLogger(__name__)
 SCHEMA_VERSION = 1
 DEFAULT_TIMEOUT_MS = 1500
 DEFAULT_QUEUE_SIZE = 256
-_T0_KEY = "_bb_webhook_t0"
+_T0_KEY = "_bb_webhook_t0"  # stashed on `context` (side channel), not on body
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Background emitter — single daemon thread, lazy-started, drains a queue.
+# A supervisor wraps the worker so a fatal exception (MemoryError, etc.) gets
+# a clean re-spawn rather than silently halting all future events.
 # ─────────────────────────────────────────────────────────────────────────────
 
 _emitter_lock = threading.Lock()
@@ -63,52 +65,83 @@ _emitter_queue: queue.Queue[tuple[str, dict, int]] | None = None
 _emitter_thread: threading.Thread | None = None
 
 
-def _emitter_worker(q: queue.Queue) -> None:
-    """Pulls (url, payload, timeout_ms) off the queue and POSTs.
+def _emit_one(url: str, payload: dict, timeout_ms: int) -> None:
+    """POST a single payload. Catches expected HTTP / network failures."""
+    try:
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json",
+                     "User-Agent": "beigebox-webhook-emitter/1"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=timeout_ms / 1000.0) as resp:
+            if resp.status >= 400:
+                logger.warning(
+                    "webhook_emitter: %s returned HTTP %d", url, resp.status
+                )
+    except urllib.error.URLError as e:
+        logger.warning("webhook_emitter: %s -> URLError: %s", url, e.reason)
+    except (TimeoutError, OSError) as e:
+        logger.warning("webhook_emitter: %s -> %s: %s", url, type(e).__name__, e)
+    except Exception as e:  # noqa: BLE001 — last resort, mustn't kill worker
+        logger.exception("webhook_emitter: unexpected error: %s", e)
 
-    Failures are logged and dropped — retry policy is "none". The hook fires
-    twice per request, so a transient network blip costs at most one missing
-    pair on the receiver's side."""
+
+def _emitter_worker(q: queue.Queue) -> None:
+    """Drain the queue forever. Per-iteration BaseException safety: any
+    catastrophe (MemoryError, etc.) breaks the loop and lets the supervisor
+    re-spawn rather than silently strand the queue."""
     while True:
         url, payload, timeout_ms = q.get()
         try:
-            data = json.dumps(payload).encode("utf-8")
-            req = urllib.request.Request(
-                url,
-                data=data,
-                headers={"Content-Type": "application/json",
-                         "User-Agent": "beigebox-webhook-emitter/1"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=timeout_ms / 1000.0) as resp:
-                if resp.status >= 400:
-                    logger.warning(
-                        "webhook_emitter: %s returned HTTP %d", url, resp.status
-                    )
-        except urllib.error.URLError as e:
-            logger.warning("webhook_emitter: %s -> URLError: %s", url, e.reason)
-        except (TimeoutError, OSError) as e:
-            logger.warning("webhook_emitter: %s -> %s: %s", url, type(e).__name__, e)
-        except Exception as e:  # noqa: BLE001 — last resort, mustn't kill worker
-            logger.exception("webhook_emitter: unexpected error: %s", e)
-        finally:
+            _emit_one(url, payload, timeout_ms)
+        except BaseException as e:  # noqa: BLE001 — see above
+            logger.error("webhook_emitter: worker hit %s: %s — supervisor will respawn",
+                         type(e).__name__, e)
             q.task_done()
+            raise
+        finally:
+            try:
+                q.task_done()
+            except ValueError:
+                # task_done called twice (we already called it in the BaseException
+                # branch) — benign
+                pass
+
+
+def _emitter_supervisor(q: queue.Queue, queue_size: int) -> None:
+    """Wraps _emitter_worker. If the worker dies, log loudly and respawn after
+    a short backoff so the next event isn't lost. Bounded restart rate."""
+    backoff_s = 1.0
+    max_backoff_s = 30.0
+    while True:
+        try:
+            _emitter_worker(q)
+            # _emitter_worker is an infinite loop; if it returns cleanly we
+            # treat it like a death and respawn anyway.
+        except BaseException as e:  # noqa: BLE001
+            logger.error("webhook_emitter: supervisor caught %s: %s; respawning in %.1fs",
+                         type(e).__name__, e, backoff_s)
+        time.sleep(backoff_s)
+        backoff_s = min(backoff_s * 2, max_backoff_s)
 
 
 def _ensure_emitter(queue_size: int) -> queue.Queue:
-    """Lazy-start the worker thread. Idempotent; safe under racing callers."""
+    """Lazy-start the supervised worker. Idempotent; safe under racing callers."""
     global _emitter_queue, _emitter_thread
     with _emitter_lock:
         if _emitter_queue is None:
             _emitter_queue = queue.Queue(maxsize=queue_size)
             _emitter_thread = threading.Thread(
-                target=_emitter_worker,
-                args=(_emitter_queue,),
-                name="bb-webhook-emitter",
+                target=_emitter_supervisor,
+                args=(_emitter_queue, queue_size),
+                name="bb-webhook-emitter-supervisor",
                 daemon=True,
             )
             _emitter_thread.start()
-            logger.info("webhook_emitter worker thread started (queue_size=%d)",
+            logger.info("webhook_emitter supervisor started (queue_size=%d)",
                         queue_size)
         return _emitter_queue
 
@@ -202,7 +235,10 @@ def _common_envelope(event: str, body: dict, context: dict, hook_cfg: dict) -> d
 
 
 def pre_request(body: dict, context: dict) -> dict:
-    """Stash a monotonic start time on the body and emit run_start."""
+    """Stash a monotonic start time on the CONTEXT (not the body) and emit
+    run_start. Putting the timestamp on the body would leak `_bb_webhook_t0`
+    upstream to the LLM provider — context is per-request and never forwarded.
+    """
     hook_cfg = _hook_config(context)
     if not hook_cfg.get("enabled", False):
         return body
@@ -211,7 +247,7 @@ def pre_request(body: dict, context: dict) -> dict:
     if not url:
         return body
 
-    body[_T0_KEY] = time.monotonic()
+    context[_T0_KEY] = time.monotonic()
 
     payload = _common_envelope("run_start", body, context, hook_cfg)
     payload["total_chars"] = sum(
@@ -237,7 +273,12 @@ def post_response(body: dict, response: dict, context: dict) -> dict:
 
     payload = _common_envelope("run_end", body, context, hook_cfg)
 
-    t0 = body.get(_T0_KEY)
+    # Read t0 from the context (where pre_request stashed it). Fall back to
+    # body for backwards compatibility with any caller still using the old
+    # convention; pop it so a stale value can't leak forward.
+    t0 = context.pop(_T0_KEY, None)
+    if t0 is None:
+        t0 = body.pop(_T0_KEY, None)
     if isinstance(t0, (int, float)):
         payload["latency_ms"] = round((time.monotonic() - t0) * 1000.0, 1)
 

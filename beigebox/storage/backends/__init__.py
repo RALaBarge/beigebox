@@ -12,9 +12,12 @@ Adding a new backend:
     No other changes required.
 """
 
+import threading
+
 from .base import VectorBackend
 
 _REGISTRY: dict[str, type[VectorBackend]] = {}
+_REGISTRY_LOCK = threading.Lock()
 
 
 def _register():
@@ -25,31 +28,39 @@ def _register():
     available for ephemeral workloads.
 
     Each import is independently guarded — failing to load one backend
-    doesn't disqualify the others.
+    doesn't disqualify the others. Thread-safe: the populate step is
+    serialized so concurrent first-callers can't see a partially-built
+    registry.
     """
     global _REGISTRY
+    # Fast path: registry already built, no lock needed
     if _REGISTRY:
         return
-    try:
-        from .memory import MemoryBackend
-        _REGISTRY["memory"] = MemoryBackend
-    except ImportError as e:
-        # numpy is a hard project dep — this should never fire — but keep
-        # the registry construction tolerant rather than crashing import.
-        import warnings
-        warnings.warn(f"MemoryBackend unavailable: {e}", RuntimeWarning)
-    try:
-        from .postgres import PostgresBackend
-        _REGISTRY["postgres"] = PostgresBackend
-    except ImportError as e:
-        # Postgres is the production backend; without it we surface a clear
-        # error. Memory-only operation is still possible for tests.
-        import warnings
-        warnings.warn(
-            f"PostgresBackend unavailable ({e}); only memory backend registered. "
-            "Install with: pip install psycopg2-binary pgvector",
-            RuntimeWarning,
-        )
+    with _REGISTRY_LOCK:
+        # Re-check under the lock — another thread may have populated while
+        # we were waiting
+        if _REGISTRY:
+            return
+        try:
+            from .memory import MemoryBackend
+            _REGISTRY["memory"] = MemoryBackend
+        except ImportError as e:
+            # numpy is a hard project dep — this should never fire — but keep
+            # the registry construction tolerant rather than crashing import.
+            import warnings
+            warnings.warn(f"MemoryBackend unavailable: {e}", RuntimeWarning)
+        try:
+            from .postgres import PostgresBackend
+            _REGISTRY["postgres"] = PostgresBackend
+        except ImportError as e:
+            # Postgres is the production backend; without it we surface a clear
+            # error. Memory-only operation is still possible for tests.
+            import warnings
+            warnings.warn(
+                f"PostgresBackend unavailable ({e}); only memory backend registered. "
+                "Install with: pip install psycopg2-binary pgvector",
+                RuntimeWarning,
+            )
 
 
 def make_backend(backend_type: str, **kwargs) -> VectorBackend:

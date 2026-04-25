@@ -264,18 +264,25 @@ def _extract_cost(data: dict) -> float | None:
 def normalize_response(
     data: dict | None,
     *,
-    enable_tool_call_extraction: bool = False,
+    enable_tool_call_extraction: bool = True,
     declared_tools: set[str] | None = None,
     sanitize_unicode: bool = False,
 ) -> NormalizedResponse:
     """Normalize a full chat-completion response dict. Never raises.
 
-    If `enable_tool_call_extraction=True` and the upstream message has no
-    structured `tool_calls` but the content text appears to contain one or
-    more tool invocations (Anthropic XML, fenced JSON, LangChain, ReAct,
-    etc.), extract them via the tool_call_extractors pipeline and lift them
-    into NormalizedResponse.tool_calls. Matched markers are stripped from
-    `content`. Off by default — caller opts in.
+    Tool-call extraction is **on by default**: if the upstream message has
+    no structured `tool_calls` array but the content text appears to contain
+    one or more tool invocations (Anthropic XML, fenced JSON, LangChain
+    Action/Action-Input, ReAct, explicit markers, bare-JSON dominating the
+    response), the tool_call_extractors pipeline lifts them into
+    NormalizedResponse.tool_calls and strips the matched span from
+    `content`. Costs nothing on the happy path — the module is lazy-imported
+    only when extraction actually runs. Pass `enable_tool_call_extraction=
+    False` to opt out.
+
+    The extractor's false-positive guards (name regex, placeholder reject
+    list, declared_tools allowlist, 60% coverage threshold for bare JSON)
+    are conservative; non-tool prose passes through untouched.
 
     If `sanitize_unicode=True`, both `content` and `reasoning` are passed
     through an NFKC + control-char + lone-surrogate scrub. Aimed at the
@@ -536,6 +543,8 @@ def finalize_stream(
     deltas: Iterable[NormalizedDelta],
     *,
     sanitize_unicode: bool = False,
+    enable_tool_call_extraction: bool = True,
+    declared_tools: set[str] | None = None,
 ) -> NormalizedResponse:
     """Assemble a stream of NormalizedDeltas into a final NormalizedResponse.
 
@@ -595,6 +604,25 @@ def finalize_stream(
     usage = _extract_usage(last_usage_raw or {}, errors)
     cost_usd = _extract_cost(last_usage_raw or {}) if last_usage_raw else None
     tool_calls = _merge_tool_call_chunks(tool_chunks)
+
+    # Extraction symmetry with normalize_response: if streaming produced no
+    # structured tool_calls but the assembled content looks like one (a model
+    # that emits the call as XML / fenced JSON / bare JSON in plain text),
+    # lift it. Lazy-imported so the cold path costs nothing.
+    if (
+        enable_tool_call_extraction
+        and tool_calls is None
+        and content
+    ):
+        from beigebox.tool_call_extractors import extract_tool_calls
+        lifted, rewritten = extract_tool_calls(
+            content,
+            declared_tools=declared_tools,
+            errors=errors,
+        )
+        if lifted:
+            tool_calls = lifted
+            content = rewritten
 
     return NormalizedResponse(
         content=content,

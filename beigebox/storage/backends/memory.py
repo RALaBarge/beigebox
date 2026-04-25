@@ -87,7 +87,8 @@ class MemoryBackend(VectorBackend):
                 if self._detection_mode == "warn":
                     pass  # fall through to store
                 elif self._detection_mode == "quarantine":
-                    self._quarantine_count += 1
+                    with self._lock:
+                        self._quarantine_count += 1
                     continue
                 elif self._detection_mode == "strict":
                     raise ValueError(msg)

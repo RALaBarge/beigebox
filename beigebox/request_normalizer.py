@@ -76,6 +76,32 @@ class NormalizedRequest:
 # ---------------------------------------------------------------------------
 
 
+def _shallow_with_deep_messages(body: dict) -> dict:
+    """Cheap immutability layer for normalize_request.
+
+    Rules need to be free to mutate the body without touching the caller's
+    dict. A full deepcopy of every request is wasteful when messages contain
+    large base64 vision payloads (multimodal requests). Instead:
+      - shallow-copy the top-level dict
+      - deepcopy ONLY the structures rules actually rewrite (messages, tools,
+        tool_choice, stream_options)
+      - leave large opaque values (vision parts within a message that we
+        don't restructure) referenced as-is
+
+    Note: `coerce_messages_rule` runs first and replaces `body["messages"]`
+    with a new list, so subsequent message mutations land on the new list.
+    The deepcopy here is belt-and-suspenders against rules that mutate
+    in place before the coerce runs (or after, on a non-replaced sublist).
+    """
+    out = dict(body)  # shallow copy
+    if isinstance(body.get("messages"), list):
+        out["messages"] = copy.deepcopy(body["messages"])
+    for k in ("tools", "tool_choice", "stream_options"):
+        if k in body and isinstance(body[k], (dict, list)):
+            out[k] = copy.deepcopy(body[k])
+    return out
+
+
 def _replace_messages(body: dict, messages: list[dict]) -> dict:
     """Return a copy of ``body`` with ``messages`` swapped in."""
     return {**body, "messages": messages}
@@ -645,22 +671,52 @@ DEFAULT_MODEL_PROFILE_RULES: list[tuple[Callable[[str], bool], str]] = [
 ]
 
 
+# Capability layers — extra rules composed on TOP of whichever provider
+# profile the caller picked, when the model warrants the capability. This
+# fixes the prior failure mode where target=openrouter + model=o4-mini
+# applied openrouter's stream_options rule but skipped the o-series rules
+# (drop sampling, rename max_tokens), so the request went upstream with
+# parameters the model rejects.
+#
+# Rules in a capability layer must be IDEMPOTENT — they may compose with
+# a profile that already contains the same logic (e.g. target=openai_reasoning
+# already drops temperature; the layer's drop is a no-op then). Both
+# `drop_keys_rule` (drops absent keys silently) and `rename_key_rule`
+# (renames absent keys silently) satisfy this.
+DEFAULT_CAPABILITY_LAYERS: list[tuple[Callable[[str], bool], str, list[Rule]]] = [
+    (
+        lambda m: is_reasoning_model(m),
+        "openai_reasoning_caps",
+        [
+            drop_keys_rule(_OPENAI_REASONING_DROP, reason="o_series"),
+            rename_key_rule("max_tokens", "max_completion_tokens"),
+        ],
+    ),
+]
+
+
 def _resolve_profile(
     target: str | TargetProfile | None,
     model: Any,
     profiles: dict[str, TargetProfile],
     autodetect: list[tuple[Callable[[str], bool], str]],
 ) -> tuple[TargetProfile, str | None]:
-    """Pick the effective profile.
+    """Pick the effective base profile.
 
     Returns (profile, redirect_note). redirect_note is non-None when the
     caller's target was changed by autodetection — used as a transform tag.
+
+    Note: capability layering (extra rules added on top of the chosen
+    profile when the model warrants them) is handled separately in
+    normalize_request via DEFAULT_CAPABILITY_LAYERS, so a request to
+    `openrouter` with an o-series model gets BOTH the openrouter profile's
+    stream_options and the o-series capability rules.
     """
     if isinstance(target, TargetProfile):
         return target, None
 
     # Explicit string target wins over autodetect — but openai_compat is
-    # ambiguous (vanilla vs reasoning), so we still let autodetect upgrade it.
+    # ambiguous (vanilla vs reasoning), so we still let autodetect redirect it.
     if isinstance(target, str) and target in profiles:
         if target == "openai_compat" and isinstance(model, str):
             for predicate, redirect in autodetect:
@@ -679,6 +735,38 @@ def _resolve_profile(
     if isinstance(target, str) and target not in profiles:
         note = f"target_unknown:{target}->openai_compat"
     return fallback, note
+
+
+def _capability_rules_for(
+    model: Any,
+    profile_name: str,
+    layers: list[tuple[Callable[[str], bool], str, list[Rule]]],
+) -> list[tuple[str, list[Rule]]]:
+    """Return capability rule sets that apply to this model and aren't
+    already implied by the chosen profile.
+
+    Each returned entry is (capability_name, rules). The caller is expected
+    to append these after the profile's own rules so canonical→provider
+    transforms run before capability tweaks.
+    """
+    if not isinstance(model, str):
+        return []
+    out: list[tuple[str, list[Rule]]] = []
+    # Skip capability layers when the chosen profile is already the
+    # capability-bearing one (avoids the no-op double-apply tag spam).
+    SKIP_FOR_PROFILE = {
+        "openai_reasoning": {"openai_reasoning_caps"},
+    }
+    skip = SKIP_FOR_PROFILE.get(profile_name, set())
+    for predicate, cap_name, rules in layers:
+        if cap_name in skip:
+            continue
+        try:
+            if predicate(model):
+                out.append((cap_name, rules))
+        except Exception:
+            continue
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -747,11 +835,11 @@ def normalize_request(
         )
 
     raw = body
-    # Deepcopy at pipeline entry — rules are free to mutate; caller's dict
-    # stays pristine. (Panel-convergent: multiple reviewers flagged in-place
-    # mutation of the caller's request body as a latent footgun, especially
-    # for clients reusing a request template across tries.)
-    body = copy.deepcopy(body)
+    # Cheap-deepcopy: shallow-copy the top-level dict, then deepcopy only the
+    # mutable structures rules might touch (messages, tools, tool_choice,
+    # stream_options). Skips a full deepcopy of base64 vision payloads —
+    # caller's outer dict stays pristine, the rules see fresh nested dicts.
+    body = _shallow_with_deep_messages(body)
 
     if profiles is not None:
         registry = profiles
@@ -763,8 +851,18 @@ def normalize_request(
     if redirect:
         transforms.append(redirect)
 
+    # Capability layering: apply extra rules the model warrants on top of the
+    # chosen provider profile (e.g. o-series rules on top of openrouter).
+    capability_pairs = _capability_rules_for(
+        body.get("model"), profile.name, DEFAULT_CAPABILITY_LAYERS,
+    )
+    capability_rules: list[Rule] = []
+    for cap_name, rules in capability_pairs:
+        transforms.append(f"capability_layer:{cap_name}")
+        capability_rules.extend(rules)
+
     out = body
-    for rule in (*profile.rules, *extra_rules):
+    for rule in (*profile.rules, *capability_rules, *extra_rules):
         try:
             out = rule(out, transforms)
         except Exception as exc:  # rules must never break the pipeline

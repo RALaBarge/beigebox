@@ -120,8 +120,13 @@ def test_pre_request_payload(hook, captured):
             {"role": "user", "content": "hello world"},
         ],
     }
-    out = hook.pre_request(body, _ctx())
-    assert "_bb_webhook_t0" in out
+    ctx = _ctx()
+    out = hook.pre_request(body, ctx)
+    # t0 stashed on the CONTEXT (side channel), not on the body — the body
+    # is forwarded to the upstream LLM and we don't want hook-internal
+    # bookkeeping leaking out.
+    assert "_bb_webhook_t0" not in out
+    assert "_bb_webhook_t0" in ctx
     assert len(captured) == 1
     url, payload, timeout = captured[0]
     assert url == "https://hook.example/x"
@@ -155,7 +160,6 @@ def test_post_response_payload(hook, captured):
     body = {
         "model": "openai/gpt-4o-mini",
         "messages": [{"role": "user", "content": "hi"}],
-        "_bb_webhook_t0": time.monotonic() - 0.5,
     }
     response = {
         "choices": [
@@ -164,7 +168,9 @@ def test_post_response_payload(hook, captured):
         ],
         "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
     }
-    out = hook.post_response(body, response, _ctx())
+    ctx = _ctx()
+    ctx["_bb_webhook_t0"] = time.monotonic() - 0.5  # simulate pre_request stash
+    out = hook.post_response(body, response, ctx)
     assert out is response
     assert len(captured) == 1
     payload = captured[0][1]
@@ -196,6 +202,29 @@ def test_post_response_handles_malformed_response(hook, captured):
     assert payload["event"] == "run_end"
     assert payload["prompt_tokens"] is None
     assert payload["finish_reason"] is None
+
+
+def test_t0_does_not_leak_into_body(hook, captured):
+    """The body forwarded upstream must not have hook-internal bookkeeping
+    keys (regression for the leak DeepSeek flagged in code review)."""
+    body = {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
+    ctx = _ctx()
+    body_after_pre = hook.pre_request(body, ctx)
+    assert "_bb_webhook_t0" not in body_after_pre
+    assert "_bb_webhook_t0" not in body  # pre_request returns the same dict ref
+    assert "_bb_webhook_t0" in ctx       # but t0 lives on the side channel
+
+
+def test_t0_popped_from_context_after_post(hook, captured):
+    """Avoid stale t0 leaking into a subsequent request that reuses the ctx."""
+    body = {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
+    ctx = _ctx()
+    hook.pre_request(body, ctx)
+    assert "_bb_webhook_t0" in ctx
+    response = {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": {}}
+    hook.post_response(body, response, ctx)
+    assert "_bb_webhook_t0" not in ctx
 
 
 def test_run_start_and_run_end_share_request_id(hook, captured):
