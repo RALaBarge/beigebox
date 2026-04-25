@@ -176,7 +176,10 @@ async def test_router_forward_tries_priority_order():
     router.backends[0].forward = AsyncMock(return_value=success_resp)
     router.backends[1].forward = AsyncMock()  # Should not be called
 
-    result = await router.forward({"model": "llama3.2", "messages": []})
+    # Patch global config check so this test isn't affected by runtime_config.yaml
+    # state OR by config.yaml absence (it lives at docker/config.yaml, not repo root).
+    with patch.object(router, "_global_allow_openrouter_for_plain_models", return_value=False):
+        result = await router.forward({"model": "llama3.2", "messages": []})
     assert result.ok
     assert result.backend_name == "local"
     router.backends[1].forward.assert_not_called()

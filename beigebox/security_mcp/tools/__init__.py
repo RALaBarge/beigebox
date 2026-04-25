@@ -57,6 +57,34 @@ from beigebox.security_mcp.tools.binary import (
     ExiftoolExtractTool,
     ChecksecAnalyzeTool,
 )
+from beigebox.security_mcp.tools.tls import (
+    TestsslScanTool,
+    SslscanScanTool,
+    SshAuditScanTool,
+)
+from beigebox.security_mcp.tools.protocols import (
+    SnmpwalkScanTool,
+    OnesixtyoneScanTool,
+    NbtscanScanTool,
+    LdapsearchScanTool,
+)
+from beigebox.security_mcp.tools.ad import (
+    ImpacketSecretsdumpTool,
+    ImpacketGetuserspnsTool,
+    ImpacketGetnpusersTool,
+    KerbruteUserenumTool,
+)
+from beigebox.security_mcp.tools.osint import (
+    WhatwebScanTool,
+    SearchsploitLookupTool,
+    TheharvesterScanTool,
+    CewlWordlistGenTool,
+    MsfvenomGenerateTool,
+)
+from beigebox.security_mcp.tools.projectdiscovery import (
+    NaabuScanTool,
+    DnsxResolveTool,
+)
 
 ALL_TOOL_FACTORIES = [
     # Network discovery / port scanning
@@ -101,4 +129,27 @@ ALL_TOOL_FACTORIES = [
     BinwalkAnalyzeTool,
     ExiftoolExtractTool,
     ChecksecAnalyzeTool,
+    # SSL/TLS / SSH config audit
+    TestsslScanTool,
+    SslscanScanTool,
+    SshAuditScanTool,
+    # SNMP / NetBIOS / LDAP
+    SnmpwalkScanTool,
+    OnesixtyoneScanTool,
+    NbtscanScanTool,
+    LdapsearchScanTool,
+    # Active Directory / Kerberos (impacket + kerbrute) — most require authorization
+    ImpacketSecretsdumpTool,
+    ImpacketGetuserspnsTool,
+    ImpacketGetnpusersTool,
+    KerbruteUserenumTool,
+    # OSINT / exploit lookup / payload gen
+    WhatwebScanTool,
+    SearchsploitLookupTool,
+    TheharvesterScanTool,
+    CewlWordlistGenTool,
+    MsfvenomGenerateTool,
+    # ProjectDiscovery extras
+    NaabuScanTool,
+    DnsxResolveTool,
 ]

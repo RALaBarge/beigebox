@@ -1,10 +1,11 @@
 # BeigeBox Pen/Sec MCP
 
-A separate MCP endpoint (`POST /pen-mcp`) exposing 35 wrapped offensive-security
+A separate MCP endpoint (`POST /pen-mcp`) exposing 53 wrapped offensive-security
 tools spanning network scanning, web vuln, subdomain enum, URL/parameter
-discovery, SMB/AD lateral, credential testing, and binary forensics. Uses
-the same JSON-RPC McpServer implementation as `/mcp` but with its own
-registry so security tooling stays out of the default tool surface.
+discovery, SSL/TLS audit, SNMP/NetBIOS/LDAP, SMB/AD lateral, Kerberos
+(impacket + kerbrute), credential testing, OSINT, and binary forensics.
+Uses the same JSON-RPC McpServer implementation as `/mcp` but with its
+own registry so security tooling stays out of the default tool surface.
 
 Inspired by [HexStrike AI](https://github.com/0x4m4/hexstrike-ai) (MIT). We
 re-implement the *nix wrappers cleanly using argv-list `subprocess.run`
@@ -51,11 +52,17 @@ sudo apt-get install -y \
   wafw00f hydra john hashcat \
   enum4linux enum4linux-ng smbmap netexec \
   binwalk exiftool checksec \
-  arjun paramspider seclists
+  arjun paramspider seclists \
+  testssl.sh sslscan ssh-audit \
+  snmp onesixtyone nbtscan ldap-utils \
+  impacket-scripts kerbrute \
+  whatweb exploitdb theharvester cewl metasploit-framework
 # ProjectDiscovery + go-tools (not all in apt):
 go install github.com/projectdiscovery/httpx/cmd/httpx@latest
 go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
 go install github.com/projectdiscovery/katana/cmd/katana@latest
+go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
+go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
 go install github.com/lc/gau/v2/cmd/gau@latest
 go install github.com/tomnomnom/waybackurls@latest
 go install github.com/hakluke/hakrawler@latest
@@ -67,7 +74,7 @@ nuclei -ut   # update templates
 Wrappers gracefully report `binary 'X' not found on PATH` if a tool isn't
 installed — the rest keep working.
 
-## Tool list (35 wrappers)
+## Tool list (53 wrappers)
 
 ### Network discovery / port scanning
 | Tool | Binary | Notes |
@@ -131,6 +138,44 @@ installed — the rest keep working.
 | `binwalk_analyze` | `binwalk` | Firmware / blob signature scan + extract |
 | `exiftool_extract` | `exiftool` | Metadata extraction (any file) |
 | `checksec_analyze` | `checksec` | ELF protections (NX, PIE, RELRO, canary) |
+
+### SSL / TLS / SSH config audit
+| Tool | Binary | Notes |
+|---|---|---|
+| `testssl_scan` | `testssl.sh` | Comprehensive TLS / cipher / cert audit |
+| `sslscan_scan` | `sslscan` | Quick TLS cipher dump |
+| `ssh_audit_scan` | `ssh-audit` | SSH cipher/kex/MAC + CVE check |
+
+### SNMP / NetBIOS / LDAP enumeration
+| Tool | Binary | Notes |
+|---|---|---|
+| `snmpwalk_scan` | `snmpwalk` | Walk SNMP tree (v1/v2c/v3) |
+| `onesixtyone_scan` | `onesixtyone` | Fast SNMP community-string scanner |
+| `nbtscan_scan` | `nbtscan` | NetBIOS name service scan |
+| `ldapsearch_scan` | `ldapsearch` | LDAP query (anonymous or bound) |
+
+### Active Directory / Kerberos — most require `authorization: true`
+| Tool | Binary | Notes |
+|---|---|---|
+| `impacket_secretsdump` | `impacket-secretsdump` | SAM / LSA / DCSync dump |
+| `impacket_getuserspns` | `impacket-GetUserSPNs` | Kerberoasting (TGS request) |
+| `impacket_getnpusers` | `impacket-GetNPUsers` | AS-REP roasting (no preauth) |
+| `kerbrute_userenum` | `kerbrute` | Kerberos username enum |
+
+### OSINT / exploit lookup / payload generation
+| Tool | Binary | Notes |
+|---|---|---|
+| `whatweb_scan` | `whatweb` | Web technology fingerprinting |
+| `searchsploit_lookup` | `searchsploit` | Local Exploit-DB keyword/CVE search |
+| `theharvester_scan` | `theHarvester` | OSINT email / subdomain / employee gathering |
+| `cewl_wordlist_gen` | `cewl` | Spider a site to generate a custom wordlist |
+| `msfvenom_generate` | `msfvenom` | One-shot Metasploit payload gen — requires `authorization: true` |
+
+### ProjectDiscovery extras
+| Tool | Binary | Notes |
+|---|---|---|
+| `naabu_scan` | `naabu` | Fast SYN port scanner |
+| `dnsx_resolve` | `dnsx` | Bulk DNS resolver / probe |
 
 ## Invocation
 

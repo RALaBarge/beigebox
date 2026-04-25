@@ -335,12 +335,9 @@ async def lifespan(app: FastAPI):
     if _sec_mcp_cfg.get("enabled"):
         from beigebox.security_mcp import build_default_registry as _build_sec_registry
         _sec_registry = _build_sec_registry()
-        # Make every security tool resident — there's no progressive-disclosure
-        # value here (small, focused tool surface), so list them all up front.
-        security_mcp_server = McpServer(
-            _sec_registry,
-            resident_tools=set(_sec_registry.list_tools()),
-        )
+        # Empty set => expose every registered tool (no progressive disclosure).
+        # Right call here: small, focused surface — list them all up front.
+        security_mcp_server = McpServer(_sec_registry, resident_tools=set())
         logger.info(
             "Pen/Sec MCP server: enabled (POST /pen-mcp) — %d wrappers loaded",
             len(_sec_registry.list_tools()),

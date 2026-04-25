@@ -231,10 +231,19 @@ class McpServer:
     # ------------------------------------------------------------------
 
     def _get_resident_set(self) -> set[str]:
-        """Return the effective resident tool set."""
-        if self._resident_tools is not None:
-            return self._resident_tools
-        return _DEFAULT_RESIDENT_TOOLS
+        """Return the effective resident tool set.
+
+        - resident_tools=None      → use the default resident set
+        - resident_tools=set()     → expose ALL registered tools (disables
+                                     progressive disclosure)
+        - resident_tools={'a','b'} → expose exactly those tools
+        """
+        if self._resident_tools is None:
+            return _DEFAULT_RESIDENT_TOOLS
+        if not self._resident_tools:
+            # Empty set: caller wants every tool resident.
+            return set(self._registry.tools.keys())
+        return self._resident_tools
 
     def _build_capability_index(self) -> list[_CapabilityEntry]:
         """Build compact index entries for all NON-resident registered tools."""
