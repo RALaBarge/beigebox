@@ -227,8 +227,21 @@ def _extract_cost(data: dict) -> float | None:
 # ---------------------------------------------------------------------------
 
 
-def normalize_response(data: dict | None) -> NormalizedResponse:
-    """Normalize a full chat-completion response dict. Never raises."""
+def normalize_response(
+    data: dict | None,
+    *,
+    enable_tool_call_extraction: bool = False,
+    declared_tools: set[str] | None = None,
+) -> NormalizedResponse:
+    """Normalize a full chat-completion response dict. Never raises.
+
+    If `enable_tool_call_extraction=True` and the upstream message has no
+    structured `tool_calls` but the content text appears to contain one or
+    more tool invocations (Anthropic XML, fenced JSON, LangChain, ReAct,
+    etc.), extract them via the tool_call_extractors pipeline and lift them
+    into NormalizedResponse.tool_calls. Matched markers are stripped from
+    `content`. Off by default — caller opts in.
+    """
     errors: list[str] = []
 
     if not isinstance(data, dict):
@@ -286,6 +299,23 @@ def normalize_response(data: dict | None) -> NormalizedResponse:
         tool_calls = None
     if isinstance(tool_calls, list) and not tool_calls:
         tool_calls = None  # empty list == "no tool calls"
+
+    # Optional: lift tool calls out of free-text content when the upstream
+    # didn't use structured tool_calls. Skip if upstream already populated.
+    if (
+        enable_tool_call_extraction
+        and tool_calls is None
+        and content
+    ):
+        from beigebox.tool_call_extractors import extract_tool_calls
+        lifted, rewritten = extract_tool_calls(
+            content,
+            declared_tools=declared_tools,
+            errors=errors,
+        )
+        if lifted:
+            tool_calls = lifted
+            content = rewritten
 
     role_raw = message.get("role")
     role = role_raw if isinstance(role_raw, str) and role_raw else "assistant"
