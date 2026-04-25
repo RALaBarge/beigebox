@@ -21,13 +21,47 @@ Covers:
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterable
 
 
 # Order matters: first non-empty string wins. Covers OpenRouter, OpenAI o-series,
 # DeepSeek-R1, Anthropic thinking, and the Arcee Trinity shape we hit in the wild.
 _REASONING_FIELDS: tuple[str, ...] = ("reasoning_content", "reasoning", "thinking")
+
+
+# Encoding-level sanitization — strips control chars (except whitespace), lone
+# surrogates, and non-decodable byte sequences. Triggered by sanitize_unicode=True
+# on normalize_response or finalize_stream. Aimed at the kimi-k2.6 mojibake case
+# (panel-convergent: opt-in, off by default — don't lie about upstream output).
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_LONE_SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
+
+
+def _sanitize_text(text: str) -> str:
+    """Encoding-level scrub. Idempotent; never raises.
+
+    NFKC normalize → drop control chars (keep \\t \\n \\r) → strip lone
+    surrogates → round-trip through UTF-8 with errors='replace' to flush any
+    other surrogate pairs. Doesn't touch CJK, doesn't try to detect garbled
+    semantics — just makes sure the string is encoding-clean for downstream
+    JSON serializers, terminals, and HTTP frames.
+    """
+    if not text:
+        return text
+    try:
+        text = unicodedata.normalize("NFKC", text)
+    except (TypeError, ValueError):
+        pass
+    text = _CONTROL_CHARS_RE.sub("", text)
+    text = _LONE_SURROGATE_RE.sub("�", text)
+    try:
+        text = text.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+    except (UnicodeError, AttributeError):
+        pass
+    return text
 
 
 @dataclass
@@ -232,6 +266,7 @@ def normalize_response(
     *,
     enable_tool_call_extraction: bool = False,
     declared_tools: set[str] | None = None,
+    sanitize_unicode: bool = False,
 ) -> NormalizedResponse:
     """Normalize a full chat-completion response dict. Never raises.
 
@@ -241,6 +276,13 @@ def normalize_response(
     etc.), extract them via the tool_call_extractors pipeline and lift them
     into NormalizedResponse.tool_calls. Matched markers are stripped from
     `content`. Off by default — caller opts in.
+
+    If `sanitize_unicode=True`, both `content` and `reasoning` are passed
+    through an NFKC + control-char + lone-surrogate scrub. Aimed at the
+    kimi-k2.6-style mojibake case observed in the live test matrix. Off by
+    default so the normalizer doesn't quietly lie about upstream output;
+    callers can flip it per-call (e.g., on a per-profile policy at the
+    backend layer).
     """
     errors: list[str] = []
 
@@ -316,6 +358,12 @@ def normalize_response(
         if lifted:
             tool_calls = lifted
             content = rewritten
+
+    if sanitize_unicode:
+        if content:
+            content = _sanitize_text(content)
+        if reasoning:
+            reasoning = _sanitize_text(reasoning)
 
     role_raw = message.get("role")
     role = role_raw if isinstance(role_raw, str) and role_raw else "assistant"
@@ -441,3 +489,121 @@ def normalize_stream_line(line: str | None) -> NormalizedDelta | None:
         )
 
     return normalize_stream_delta(chunk)
+
+
+# ---------------------------------------------------------------------------
+# Stream finalization
+# ---------------------------------------------------------------------------
+
+
+def _merge_tool_call_chunks(chunks: list) -> list[dict] | None:
+    """Best-effort assembly of streamed OpenAI tool_calls deltas into final shape.
+
+    Each chunk has an `index` (which call it belongs to), and may contain a
+    partial `id`, `type`, or `function.{name, arguments}`. Arguments stream as
+    a string, possibly across many chunks. Reassembly is tolerant: missing
+    fields stay missing; out-of-order indexes are honoured.
+    """
+    if not chunks:
+        return None
+    by_index: dict[int, dict] = {}
+    fallback_idx = 0
+    for c in chunks:
+        if not isinstance(c, dict):
+            continue
+        idx_raw = c.get("index")
+        idx = idx_raw if isinstance(idx_raw, int) else fallback_idx
+        if idx_raw is None:
+            fallback_idx += 1
+        bucket = by_index.setdefault(idx, {"function": {}})
+        if isinstance(c.get("id"), str):
+            bucket["id"] = c["id"]
+        if isinstance(c.get("type"), str):
+            bucket["type"] = c["type"]
+        fn = c.get("function") if isinstance(c.get("function"), dict) else {}
+        if isinstance(fn.get("name"), str):
+            bucket["function"]["name"] = bucket["function"].get("name", "") + fn["name"]
+        if isinstance(fn.get("arguments"), str):
+            bucket["function"]["arguments"] = (
+                bucket["function"].get("arguments", "") + fn["arguments"]
+            )
+    if not by_index:
+        return None
+    return [by_index[k] for k in sorted(by_index.keys())]
+
+
+def finalize_stream(
+    deltas: Iterable[NormalizedDelta],
+    *,
+    sanitize_unicode: bool = False,
+) -> NormalizedResponse:
+    """Assemble a stream of NormalizedDeltas into a final NormalizedResponse.
+
+    Useful when a caller has been collecting deltas (e.g., to render the UI
+    incrementally) and now needs the canonical final shape — same as what a
+    non-streaming call would have returned. Concatenates content + reasoning,
+    merges tool_call deltas by index, picks the last finish_reason it saw,
+    and pulls usage from the most recent delta whose raw chunk carried it
+    (OpenRouter / OpenAI emit a usage-bearing chunk near the end).
+
+    Total: never raises. Empty iterable → empty NormalizedResponse with
+    ``errors=["no_deltas"]``.
+
+    Args:
+        deltas: Any iterable of NormalizedDelta (list, generator, etc.)
+        sanitize_unicode: see normalize_response.
+    """
+    errors: list[str] = []
+    content_parts: list[str] = []
+    reasoning_parts: list[str] = []
+    tool_chunks: list = []
+    finish_reason: str | None = None
+    last_usage_raw: dict | None = None
+    last_chunk_raw: dict = {}
+    saw_any = False
+
+    for d in deltas:
+        if not isinstance(d, NormalizedDelta):
+            errors.append("delta_not_normalized")
+            continue
+        saw_any = True
+        if d.content_delta:
+            content_parts.append(d.content_delta)
+        if d.reasoning_delta:
+            reasoning_parts.append(d.reasoning_delta)
+        if d.tool_calls_delta:
+            tool_chunks.extend(d.tool_calls_delta)
+        if d.finish_reason:
+            finish_reason = d.finish_reason
+        if isinstance(d.raw, dict) and isinstance(d.raw.get("usage"), dict):
+            last_usage_raw = d.raw
+        if isinstance(d.raw, dict):
+            last_chunk_raw = d.raw
+
+    if not saw_any:
+        errors.append("no_deltas")
+
+    content = "".join(content_parts)
+    reasoning = "".join(reasoning_parts) or None
+
+    if sanitize_unicode:
+        if content:
+            content = _sanitize_text(content)
+        if reasoning:
+            reasoning = _sanitize_text(reasoning)
+
+    usage = _extract_usage(last_usage_raw or {}, errors)
+    cost_usd = _extract_cost(last_usage_raw or {}) if last_usage_raw else None
+    tool_calls = _merge_tool_call_chunks(tool_chunks)
+
+    return NormalizedResponse(
+        content=content,
+        reasoning=reasoning,
+        tool_calls=tool_calls,
+        finish_reason=finish_reason,
+        role="assistant",
+        usage=usage,
+        cost_usd=cost_usd,
+        raw=last_chunk_raw,
+        errors=errors,
+    )

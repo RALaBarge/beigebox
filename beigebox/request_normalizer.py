@@ -30,7 +30,9 @@ anthropic). The dict is mutable — register your own with
 """
 from __future__ import annotations
 
+import copy
 import json
+import threading
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable
 
@@ -619,10 +621,21 @@ def _build_default_profiles() -> dict[str, TargetProfile]:
 
 DEFAULT_PROFILES: dict[str, TargetProfile] = _build_default_profiles()
 
+# Guards reads/writes of DEFAULT_PROFILES. The registry is intended to be
+# stable post-startup, but the ABI lets callers register at any time, so we
+# protect both paths against torn dicts under concurrent registrations.
+_REGISTRY_LOCK = threading.Lock()
+
 
 def register_profile(profile: TargetProfile, *, registry: dict[str, TargetProfile] | None = None) -> None:
-    """Register a profile so it can be addressed by name. Mutates the registry in place."""
-    (registry if registry is not None else DEFAULT_PROFILES)[profile.name] = profile
+    """Register a profile so it can be addressed by name. Mutates the registry in place.
+
+    Thread-safe against concurrent register_profile calls and against
+    normalize_request reading DEFAULT_PROFILES at the same time.
+    """
+    target = registry if registry is not None else DEFAULT_PROFILES
+    with _REGISTRY_LOCK:
+        target[profile.name] = profile
 
 
 # Default model→profile autodetection. First match wins. List items are
@@ -683,6 +696,29 @@ def normalize_request(
 ) -> NormalizedRequest:
     """Rewrite a chat-completion request body for the chosen target.
 
+    Pipeline guarantees (in order — rules within a profile compose):
+
+        1. The caller's ``body`` is **deepcopy'd** at entry. Rules mutate the
+           copy freely; the caller's dict is never modified in place.
+        2. The profile's rules run in the order declared on
+           ``TargetProfile.rules``. Convention is::
+
+               messages_coerce
+                  → strip_message_fields  (drop prior-turn reasoning)
+                  → collapse_system
+                  → canonicalize_tools / tool_choice / tool_messages
+                  → drop / rename / set_default  (provider-specific)
+
+           Cross-cutting transforms (messages, tools) come before
+           provider-specific transforms (rename ``max_tokens`` →
+           ``max_completion_tokens`` for o-series, set
+           ``stream_options.include_usage`` for OpenRouter, etc.) so each
+           provider's rules see canonical inputs.
+        3. ``extra_rules`` run after the profile's rules — one-off tweaks
+           without defining a whole profile.
+        4. A single rule that raises is caught, logged into ``errors``,
+           and skipped; subsequent rules still run.
+
     Args:
         body: Canonical OpenAI-compat request dict. None / non-dict yields an
             empty body with an error tag.
@@ -711,7 +747,17 @@ def normalize_request(
         )
 
     raw = body
-    registry = profiles if profiles is not None else DEFAULT_PROFILES
+    # Deepcopy at pipeline entry — rules are free to mutate; caller's dict
+    # stays pristine. (Panel-convergent: multiple reviewers flagged in-place
+    # mutation of the caller's request body as a latent footgun, especially
+    # for clients reusing a request template across tries.)
+    body = copy.deepcopy(body)
+
+    if profiles is not None:
+        registry = profiles
+    else:
+        with _REGISTRY_LOCK:
+            registry = dict(DEFAULT_PROFILES)
     detect = autodetect if autodetect is not None else DEFAULT_MODEL_PROFILE_RULES
     profile, redirect = _resolve_profile(target, body.get("model"), registry, detect)
     if redirect:
