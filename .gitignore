@@ -4,8 +4,9 @@ docker/docker-compose.yml
 docker/docker-compose.yaml
 .env
 
-# Local configs — copy from *.example.yaml, customize, never commit
-config.yaml
+# Repo-root user config (docker/config.yaml is the tracked default baked into the image)
+/config.yaml
+# Local runtime overrides (mounted at runtime, never baked in)
 runtime_config.yaml
 
 # Python
