@@ -29,9 +29,11 @@ dependencies = [
     "psutil>=5.9.0",
     "pynvml>=11.5.0",
     "itsdangerous>=2.0",
-    "python-multipart>=0.0.9",
+    "python-multipart>=0.0.26",  # CVE-2026-40347 fixed in 0.0.26
     "bcrypt>=4.0.0",
     "beigebox-security>=0.1.0-beta",
+    # Transitive but pinned for CVE-2026-41066 (lxml < 6.1.0).
+    "lxml>=6.1.0",
 ]
 
 [tool.setuptools.packages.find]
