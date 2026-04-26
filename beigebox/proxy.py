@@ -1390,9 +1390,10 @@ class Proxy:
                     "conversation_id": conversation_id,
                     "latency_ms": round(_stages.get("backend", 0), 1),
                 })
-                _maybe_response = locals().get("response")
-                if _maybe_response is not None and getattr(_maybe_response, "request_summary", None):
-                    _resp_meta["request"] = _maybe_response.request_summary
+                # response is initialized to None at the top of this function
+                # (line ~1323), so a plain attr access is safe — no locals() trick.
+                if response is not None and response.request_summary:
+                    _resp_meta["request"] = response.request_summary
                 log_payload_event("proxy_response", response=assistant_content, model=model,
                                backend=backend_name, conversation_id=conversation_id,
                         latency_ms=round(_stages.get("backend", 0), 1),

@@ -317,13 +317,25 @@ class MultiBackendRouter:
 
         Returns the full ``NormalizedRequest`` (not just its body) so the
         caller can stash ``nr.summary(...)`` on the BackendResponse. The proxy
-        then merges that into its single per-request wire event — which is
-        also why the previous debug/warning logs here were removed: their
-        information now flows through the typed summary instead of stringly
-        formatted log lines.
+        then merges that into its single per-request wire event for
+        structured/queryable observability.
+
+        We also keep terse stdlib logs here so on-prem operators can see
+        normalization activity without enabling ``payload_log_enabled``.
         """
         profile = getattr(backend, "egress_profile", "openai_compat")
-        return normalize_request(body, target=profile)
+        nr = normalize_request(body, target=profile)
+        if nr.transforms:
+            logger.debug(
+                "normalize_request[%s/%s]: %s",
+                backend.name, nr.target, ",".join(nr.transforms),
+            )
+        if nr.errors:
+            logger.warning(
+                "normalize_request[%s/%s] errors: %s",
+                backend.name, nr.target, ",".join(nr.errors),
+            )
+        return nr
 
     async def forward(self, body: dict) -> BackendResponse:
         """
