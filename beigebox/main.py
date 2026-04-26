@@ -631,30 +631,43 @@ _AUTH_EXEMPT_PREFIXES = ("/web/", "/auth/")
 
 
 def _emit_auth_denied(reason_code: str, principal_name: str, principal_type: str,
-                      endpoint_path: str) -> None:
+                      endpoint_path: str, request: Request | None = None) -> None:
     """Emit an `auth_denied` wire event before a 401/403/429 return.
 
-    Per the observability rubric: auth denials must never be silent —
-    they're load-bearing for breach forensics and rate-limit tuning.
-    Best-effort: failure to emit the event MUST NOT block the deny response.
+    Per the observability rubric: auth denials must never be silent — they're
+    load-bearing for breach forensics and rate-limit tuning. ``request``, when
+    provided, is mined for ``client_ip`` and ``user_agent`` so the event has
+    enough context for an analyst to triage without a separate lookup.
+
+    Best-effort: failure to emit MUST NOT block the deny response. We log
+    (not silently swallow) the failure so a broken wire dispatcher surfaces
+    in the stdlib log instead of disappearing.
     """
+    if not (_app_state and _app_state.proxy and _app_state.proxy.wire):
+        return
+    meta: dict = {
+        "reason_code": reason_code,
+        "principal_name": principal_name,
+        "principal_type": principal_type,
+        "endpoint": endpoint_path,
+    }
+    if request is not None:
+        try:
+            meta["client_ip"] = request.client.host if request.client else None
+            meta["user_agent"] = request.headers.get("user-agent")
+        except Exception:  # request introspection — keep meta partial on failure
+            pass
     try:
-        if _app_state and _app_state.proxy and _app_state.proxy.wire:
-            _app_state.proxy.wire.log(
-                direction="inbound",
-                role="auth",
-                content=f"deny {reason_code}: {principal_name or '?'} → {endpoint_path}",
-                event_type="auth_denied",
-                source="auth_middleware",
-                meta={
-                    "reason_code": reason_code,
-                    "principal_name": principal_name,
-                    "principal_type": principal_type,
-                    "endpoint": endpoint_path,
-                },
-            )
+        _app_state.proxy.wire.log(
+            direction="inbound",
+            role="auth",
+            content=f"deny {reason_code}: {principal_name or '?'} → {endpoint_path}",
+            event_type="auth_denied",
+            source="auth_middleware",
+            meta=meta,
+        )
     except Exception:
-        pass
+        logger.warning("auth_denied wire emit failed", exc_info=True)
 
 
 class ApiKeyMiddleware(BaseHTTPMiddleware):
@@ -713,7 +726,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                 )
 
         if meta is None:
-            _emit_auth_denied("invalid_api_key", "unknown", "api_key", path)
+            _emit_auth_denied("invalid_api_key", "unknown", "api_key", path, request)
             # Don't leak auth methods to unauthenticated users
             return JSONResponse(
                 {
@@ -728,7 +741,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
 
         # Rate limit
         if not _app_state.auth_registry.check_rate_limit(meta):
-            _emit_auth_denied("rate_limit_exceeded", meta.name, "api_key", path)
+            _emit_auth_denied("rate_limit_exceeded", meta.name, "api_key", path, request)
             return JSONResponse(
                 {
                     "error": {
@@ -742,7 +755,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
 
         # Endpoint ACL
         if not _app_state.auth_registry.check_endpoint(meta, path):
-            _emit_auth_denied("endpoint_not_allowed", meta.name, "api_key", path)
+            _emit_auth_denied("endpoint_not_allowed", meta.name, "api_key", path, request)
             return JSONResponse(
                 {
                     "error": {

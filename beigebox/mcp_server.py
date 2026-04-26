@@ -433,37 +433,61 @@ class McpServer:
         import time as _time
         from beigebox.logging import log_tool_call as _log_tool_call
 
-        name: str = params.get("name", "").strip()
-        arguments: dict = params.get("arguments") or {}
-
-        if not name:
-            raise ValueError("tools/call requires 'name'")
-
-        # Prefer the idiomatic "input" key that our tool schema defines.
-        # Fall back to JSON-encoding the whole arguments dict so callers that
-        # pass structured arguments (e.g. {"query": "..."}) still work.
-        if "input" in arguments:
-            input_text = str(arguments["input"])
-        else:
-            input_text = json.dumps(arguments)
-
-        _MCP_INPUT_LIMIT = 1_000_000  # 1 MB
-        if len(input_text) > _MCP_INPUT_LIMIT:
-            raise ValueError(f"Input too large ({len(input_text)} chars, limit {_MCP_INPUT_LIMIT})")
-
-        logger.info("MCP tools/call: %s (input=%r)", name, input_text[:120])
+        # Start the timer FIRST so even early validation errors get a wire
+        # event (catches the input-size raise + any other ValueError below).
         _t0 = _time.monotonic()
-        _emit_meta = {"server": self._server_label, "input_length": len(input_text)}
+        name: str = (params.get("name") or "").strip()
+        # Mutable holder lets the inner code "set" the outcome; the finally
+        # block fires the event exactly once. If no inner code set a status,
+        # the finally records it as an unhandled error — guards against a
+        # future return path forgetting to call _emit().
+        _outcome: dict = {"status": None, "error": None, "input_length": 0}
 
         def _emit(status: str, error: str | None = None) -> None:
+            _outcome["status"] = status
+            _outcome["error"] = error
+
+        try:
+            arguments: dict = params.get("arguments") or {}
+
+            if not name:
+                _emit("error", error="missing_name")
+                raise ValueError("tools/call requires 'name'")
+
+            # Prefer the idiomatic "input" key that our tool schema defines.
+            # Fall back to JSON-encoding the whole arguments dict so callers
+            # that pass structured arguments (e.g. {"query": "..."}) still work.
+            if "input" in arguments:
+                input_text = str(arguments["input"])
+            else:
+                input_text = json.dumps(arguments)
+            _outcome["input_length"] = len(input_text)
+
+            _MCP_INPUT_LIMIT = 1_000_000  # 1 MB
+            if len(input_text) > _MCP_INPUT_LIMIT:
+                _emit("error", error="input_too_large")
+                raise ValueError(f"Input too large ({len(input_text)} chars, limit {_MCP_INPUT_LIMIT})")
+
+            logger.info("MCP tools/call: %s (input=%r)", name, input_text[:120])
+            return await self._tools_call_dispatch(name, input_text, _emit)
+        finally:
+            # If no inner branch set a status, treat it as an unhandled
+            # exception — keeps the "exactly one event per call" guarantee.
+            if _outcome["status"] is None:
+                _outcome["status"] = "error"
+                _outcome["error"] = _outcome["error"] or "unhandled_exception"
             _log_tool_call(
-                tool_name=name,
-                status=status,
+                tool_name=name or "(no_name)",
+                status=_outcome["status"],
                 latency_ms=(_time.monotonic() - _t0) * 1000,
-                error=error,
+                error=_outcome["error"],
                 source=self._server_label,
-                extra_meta=_emit_meta,
+                extra_meta={"server": self._server_label,
+                            "input_length": _outcome["input_length"]},
             )
+
+    async def _tools_call_dispatch(self, name: str, input_text: str, _emit) -> dict:
+        """Inner dispatch — split out so _tools_call can wrap it in try/finally."""
 
         # discover_tools — search the capability index and return summaries
         if name == "discover_tools":

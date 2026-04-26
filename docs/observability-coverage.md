@@ -14,7 +14,7 @@ For *how to query* the events listed here, see [observability.md](observability.
 |---|---|---|
 | Model I/O — request/response normalizers + payload logging | ✅ Sealed | Request and response normalizers expose `.summary(context)`; `log_payload_event(extra_meta=...)` carries it onto Tap. |
 | Proxy request lifecycle (non-streaming) | ✅ Sealed | Auth → routing → normalize → backend → response all emit. |
-| Proxy request lifecycle (streaming) | 🟡 Partial | `proxy_stream_response` event missing `NormalizedResponse.summary()` — no finish_reason / usage / tool_calls count. |
+| Proxy request lifecycle (streaming) | ✅ Sealed | `proxy_stream_response` carries the same `NormalizedResponse.summary()` shape as non-streaming — finish_reason defaults to `"stop"` since stream completion is the only success path here. |
 | Operator agentic loop | ✅ Sealed | `operator_start`, `operator_thought`, `operator_tool_call`, `operator_tool_result`, `operator_iteration_end`, `operator_nudge`, `operator_finish`. |
 | Decision agent routing tier | ✅ Sealed | `decision_llm_result` (prompt_len, decision, confidence, latency). |
 | Embedding classifier | ✅ Sealed | `classifier_result`, `embedding_decision`. |
@@ -26,9 +26,9 @@ For *how to query* the events listed here, see [observability.md](observability.
 | SQLite dual-write | ✅ Sealed | Every wire event lands in `wire_events` table. |
 | Audit logger (security decisions) | ✅ Sealed | Separate `audit.db`, not on the Tap bus. |
 | Payload.jsonl | ✅ Sealed | Full request/response capture, gated by `payload_log_enabled`. |
-| MCP `/mcp` tool calls | 🟡 Partial | No per-call wire event; tool calls flow through operator (which logs) but `_tools_call` emits nothing of its own. |
-| MCP `/pen-mcp` tool calls (security_mcp) | 🔴 Gap | Entire endpoint has no observability tier. Wrappers run unmonitored. |
-| Auth (key validation, ACL, rate limit) | 🟡 Partial | 401/403/429 returned correctly but **no wire event** — silent denials. |
+| MCP `/mcp` tool calls | ✅ Sealed | Per-call `tool_call` wire event from `_tools_call` (try/finally guarantees exactly one emit per call); `source="mcp"` and `extra_meta` carry server label + input_length. |
+| MCP `/pen-mcp` tool calls (security_mcp) | ✅ Sealed | Same dispatch as `/mcp`; tagged `source="pen-mcp"` so events are distinguishable in Tap. |
+| Auth (key validation, ACL, rate limit) | ✅ Sealed | `auth_denied` wire event before every 401/403/429 return; meta carries reason_code, principal, endpoint, client_ip, user_agent. |
 | Hooks (pre/post-request HookManager) | 🔴 Gap | Execution and errors silent. |
 | Z-commands | 🔴 Gap | No events on receipt / parse / execute. |
 | Extraction detector | 🟡 Partial | `log_extraction_attempt()` defined in `logging.py` but **never called**. |
@@ -91,23 +91,23 @@ any rule and **doesn't** emit, add observability before you ship.
 
 ---
 
+## Recently closed (kept for traceability)
+
+- **Streaming response normalizer summary** — closed in `d29bfd6`. `proxy_stream_response` now carries the same `.summary()` shape as non-streaming.
+- **Auth denial wire events** — closed in `d29bfd6`. `auth_denied` event fires before every 401/403/429 with reason_code + principal + endpoint + client_ip + user_agent.
+- **MCP `/mcp` + `/pen-mcp` per-call events** — closed in `d29bfd6`. `_tools_call` wraps every dispatch with try/finally so every call emits exactly one `tool_call` event tagged with `source="mcp"` or `source="pen-mcp"`.
+
 ## Open gaps (in priority order)
 
 Each is paired with the file:line where the emit should land and the event_type to use. Re-rank as your incident history evolves.
 
-1. **Streaming response normalizer summary** *(HIGH — blocks streaming cost attribution)*
-   - `proxy.py:~1787` — assemble `normalize_response({"choices": [...]}).summary(...)` after stream finalization, pass via `extra_meta=...` to `log_payload_event("proxy_stream_response", ...)`.
-2. **Auth denial wire events** *(HIGH — required for breach forensics, rate-limit tuning)*
-   - `main.py:685-722` — emit `auth_denied` (subtype: `invalid_key`, `rate_limit_exceeded`, `endpoint_not_allowed`) before each 401/403/429 return. Fields: principal_name, principal_type, endpoint_path, reason_code.
-3. **MCP `/mcp` and `/pen-mcp` tool invocation events** *(HIGH for `/pen-mcp` — currently invisible)*
-   - `mcp_server.py:_tools_call` — emit `mcp_tool_call` before/after tool execution. Fields: server (`mcp` or `pen-mcp`), tool_name, input_length, status, latency_ms, error.
-4. **Hook execution timing + errors** *(MEDIUM — silent post-processing)*
+1. **Hook execution timing + errors** *(MEDIUM — silent post-processing)*
    - Wrap `HookManager.run_pre_request()` / `run_post_response()` callsites in proxy.py. Event: `hook_pre_request`, `hook_post_response`. Fields: hook_count, hook_names, total_latency_ms, hook_errors.
-5. **Z-command receipt / execute** *(MEDIUM — forensics, exploit detection)*
+2. **Z-command receipt / execute** *(MEDIUM — forensics, exploit detection)*
    - Locate Z-command parser. Events: `z_command_received`, `z_command_executed`, `z_command_error`. Fields: command_name, arguments_hash (not raw — security), latency_ms, status.
-6. **CDP action wire events** *(MEDIUM — browser automation debugging)*
+3. **CDP action wire events** *(MEDIUM — browser automation debugging)*
    - `tools/cdp.py` — `_screenshot`, `_navigate`, `_click`, etc. Event: `cdp_action` with action subtype. Fields: action_type, latency_ms, status, error, result_size_kb (screenshot).
-7. **Injection guard / RAG poisoning detection events** *(MEDIUM — security calibration)*
+4. **Injection guard / RAG poisoning detection events** *(MEDIUM — security calibration)*
    - `proxy.py` injection_guard callsites + `storage/backends/memory.py:82`. Event: `security_anomaly`. Fields: detector_type, pattern, input_hash, confidence, action.
 
 ### Side findings worth noting

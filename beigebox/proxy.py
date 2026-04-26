@@ -1790,7 +1790,13 @@ class Proxy:
             complete_text = "".join(full_response)
             if complete_text:
                 _stream_meta = normalize_response({
-                    "choices": [{"message": {"role": "assistant", "content": complete_text}}],
+                    "choices": [{
+                        "message": {"role": "assistant", "content": complete_text},
+                        # Streams that complete without an explicit finish_reason
+                        # default to "stop" — matches OpenAI/OpenRouter semantics
+                        # and keeps the summary consistent with non-streaming.
+                        "finish_reason": "stop",
+                    }],
                     "usage": {
                         "prompt_tokens": prompt_tokens or 0,
                         "completion_tokens": _estimate_tokens(complete_text),
