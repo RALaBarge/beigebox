@@ -479,11 +479,17 @@ def log_payload_event(
     backend: str = "",
     conversation_id: str = "",
     latency_ms: float = 0.0,
+    extra_meta: dict | None = None,
 ) -> None:
     """Log a full LLM payload — summary onto Tap bus, full body to payload.jsonl.
 
     Gate-checked here so call sites need no conditional logic.
     Only active when payload_log_enabled: true in runtime_config.
+
+    ``extra_meta`` (typically ``NormalizedRequest.summary()`` or
+    ``NormalizedResponse.summary()``) is merged into the bus event's meta.
+    Lets call sites carry normalizer-derived fields (transforms, errors,
+    usage, finish_reason, …) without re-extracting them at every site.
     """
     from beigebox.config import get_runtime_config
     if not get_runtime_config().get("payload_log_enabled", False):
@@ -498,6 +504,13 @@ def log_payload_event(
             summary += f" [{msg_count} msgs]"
         if latency_ms:
             summary += f" ({latency_ms:.0f}ms)"
+        meta: dict = {
+            "backend": backend,
+            "conversation_id": conversation_id,
+            "latency_ms": latency_ms,
+        }
+        if extra_meta:
+            meta.update(extra_meta)
         wire.log(
             direction="outbound" if payload else "inbound",
             role="payload",
@@ -505,11 +518,7 @@ def log_payload_event(
             model=model,
             event_type="payload",
             source=source,
-            meta={
-                "backend": backend,
-                "conversation_id": conversation_id,
-                "latency_ms": latency_ms,
-            },
+            meta=meta,
         )
 
     # Full body written to payload.jsonl — off the bus, separate concern

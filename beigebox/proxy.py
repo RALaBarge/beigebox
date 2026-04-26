@@ -1283,6 +1283,11 @@ class Proxy:
         if not is_synthetic:
             await self._log_messages(conversation_id, body.get("messages", []), model)
 
+        # The request-side wire event will be enriched with normalizer
+        # transforms after the backend call (see below) — at this point we
+        # haven't yet selected a backend, so the per-backend normalizer hasn't
+        # run. We emit the bare event here for chronology; the post-call
+        # event below carries the full picture.
         log_payload_event("proxy", payload=body, model=model,
                            backend=self.backend_url, conversation_id=conversation_id)
 
@@ -1374,9 +1379,24 @@ class Proxy:
                 assistant_content = normalized.content
                 response_latency = response.latency_ms if self.backend_router and response.ok else None
                 await self._log_response(conversation_id, assistant_content, model, cost_usd=cost_usd, latency_ms=response_latency)
+                # Single wire event carrying both sides of the round-trip:
+                # request-side normalizer summary (transforms, target, errors)
+                # + response-side summary (finish_reason, usage, tool_calls).
+                # Subsumes the router-level debug/warning logs that used to
+                # report transforms separately.
+                _resp_meta = normalized.summary({
+                    "model": model,
+                    "backend": backend_name,
+                    "conversation_id": conversation_id,
+                    "latency_ms": round(_stages.get("backend", 0), 1),
+                })
+                _maybe_response = locals().get("response")
+                if _maybe_response is not None and getattr(_maybe_response, "request_summary", None):
+                    _resp_meta["request"] = _maybe_response.request_summary
                 log_payload_event("proxy_response", response=assistant_content, model=model,
                                backend=backend_name, conversation_id=conversation_id,
                         latency_ms=round(_stages.get("backend", 0), 1),
+                        extra_meta=_resp_meta,
                     )
 
         # Response format validation (non-blocking, log-only)

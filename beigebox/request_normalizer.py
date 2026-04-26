@@ -70,6 +70,30 @@ class NormalizedRequest:
     errors: list[str] = field(default_factory=list)
     raw: dict = field(default_factory=dict)
 
+    def summary(self, context: dict | None = None) -> dict:
+        """Compact dict of normalizer-derived metadata, ready for a wire event.
+
+        ``context`` is an optional caller-supplied dict (conversation_id,
+        run_id, model, backend_name, …) that gets merged on top of the
+        normalizer-internal fields. The result is suitable for inclusion in
+        the meta payload of a Tap event so all model-I/O round-trips carry a
+        consistent shape regardless of the call site that emitted them.
+        """
+        msgs = self.body.get("messages") if isinstance(self.body, dict) else None
+        out: dict = {
+            "kind": "model_request_normalized",
+            "target": self.target,
+            "message_count": len(msgs) if isinstance(msgs, list) else 0,
+            "transforms": list(self.transforms),
+            "transform_count": len(self.transforms),
+            "errors": list(self.errors),
+            "has_tools": bool(self.body.get("tools")) if isinstance(self.body, dict) else False,
+            "stream": bool(self.body.get("stream")) if isinstance(self.body, dict) else False,
+        }
+        if context:
+            out.update(context)
+        return out
+
 
 # ---------------------------------------------------------------------------
 # Generic primitives

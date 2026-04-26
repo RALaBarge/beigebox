@@ -94,6 +94,34 @@ class NormalizedResponse:
     raw: dict
     errors: list[str] = field(default_factory=list)
 
+    def summary(self, context: dict | None = None) -> dict:
+        """Compact dict of normalizer-derived metadata, ready for a wire event.
+
+        Mirrors :meth:`NormalizedRequest.summary` so model-I/O round-trips
+        carry a consistent meta shape on both sides. ``context`` (caller
+        supplied: conversation_id, run_id, model, backend, latency_ms, …)
+        is merged on top of the normalizer-internal fields.
+        """
+        out: dict = {
+            "kind": "model_response_normalized",
+            "finish_reason": self.finish_reason,
+            "role": self.role,
+            "content_length": len(self.content),
+            "has_reasoning": bool(self.reasoning),
+            "tool_calls_count": len(self.tool_calls) if self.tool_calls else 0,
+            "errors": list(self.errors),
+            "usage": {
+                "prompt_tokens": self.usage.prompt_tokens,
+                "completion_tokens": self.usage.completion_tokens,
+                "reasoning_tokens": self.usage.reasoning_tokens,
+                "total_tokens": self.usage.total_tokens,
+            },
+            "cost_usd": self.cost_usd,
+        }
+        if context:
+            out.update(context)
+        return out
+
 
 @dataclass
 class NormalizedDelta:

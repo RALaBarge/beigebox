@@ -307,28 +307,23 @@ class MultiBackendRouter:
         return [chosen] + rest
 
     @staticmethod
-    def _normalize_for(body: dict, backend: BaseBackend) -> dict:
+    def _normalize_for(body: dict, backend: BaseBackend):
         """Run the universal request normalizer for the given backend's egress profile.
 
         Every backend gets the canonical OpenAI-compat shape coerced into
         whatever dialect the upstream actually accepts (max_tokens rename
         for o-series, stream_options for OpenRouter, tool-call ID
-        synthesis, prior reasoning strip, etc.). Transforms are logged at
-        debug for visibility.
+        synthesis, prior reasoning strip, etc.).
+
+        Returns the full ``NormalizedRequest`` (not just its body) so the
+        caller can stash ``nr.summary(...)`` on the BackendResponse. The proxy
+        then merges that into its single per-request wire event — which is
+        also why the previous debug/warning logs here were removed: their
+        information now flows through the typed summary instead of stringly
+        formatted log lines.
         """
         profile = getattr(backend, "egress_profile", "openai_compat")
-        nr = normalize_request(body, target=profile)
-        if nr.transforms:
-            logger.debug(
-                "normalize_request[%s/%s]: %s",
-                backend.name, nr.target, ",".join(nr.transforms),
-            )
-        if nr.errors:
-            logger.warning(
-                "normalize_request[%s/%s] errors: %s",
-                backend.name, nr.target, ",".join(nr.errors),
-            )
-        return nr.body
+        return normalize_request(body, target=profile)
 
     async def forward(self, body: dict) -> BackendResponse:
         """
@@ -345,7 +340,10 @@ class MultiBackendRouter:
             backend = self.get_backend(force_name)
             if backend:
                 logger.debug("routing_rules: forcing backend '%s'", force_name)
-                return await backend.forward(self._normalize_for(body, backend))
+                nr = self._normalize_for(body, backend)
+                response = await backend.forward(nr.body)
+                response.request_summary = nr.summary({"backend": backend.name})
+                return response
             logger.warning(
                 "routing_rules: backend '%s' not found — falling back to normal routing",
                 force_name,
@@ -364,7 +362,9 @@ class MultiBackendRouter:
 
         for backend in fast:
             logger.debug("Trying backend '%s' for model '%s'", backend.name, model)
-            response = await backend.forward(self._normalize_for(body, backend))
+            nr = self._normalize_for(body, backend)
+            response = await backend.forward(nr.body)
+            response.request_summary = nr.summary({"backend": backend.name})
             if response.ok:
                 self._tracker.record(backend.name, response.latency_ms)
                 logger.info(
@@ -390,7 +390,9 @@ class MultiBackendRouter:
         # Second pass — degraded backends as last resort
         for backend in degraded:
             logger.warning("Falling back to degraded backend '%s' for model '%s'", backend.name, model)
-            response = await backend.forward(self._normalize_for(body, backend))
+            nr = self._normalize_for(body, backend)
+            response = await backend.forward(nr.body)
+            response.request_summary = nr.summary({"backend": backend.name})
             if response.ok:
                 self._tracker.record(backend.name, response.latency_ms)
                 logger.info("Backend '%s' (degraded) served model '%s' in %.0fms",
@@ -440,7 +442,7 @@ class MultiBackendRouter:
             backend = self.get_backend(force_name)
             if backend:
                 logger.debug("routing_rules: forcing backend '%s' (stream)", force_name)
-                async for line in backend.forward_stream(self._normalize_for(body, backend)):
+                async for line in backend.forward_stream(self._normalize_for(body, backend).body):
                     yield line
                 return
             logger.warning(
@@ -471,7 +473,7 @@ class MultiBackendRouter:
 
             t0 = time.monotonic()
             try:
-                async for line in backend.forward_stream(self._normalize_for(body, backend)):
+                async for line in backend.forward_stream(self._normalize_for(body, backend).body):
                     yield line
                 # Stream completed successfully — record total elapsed time
                 self._tracker.record(backend.name, (time.monotonic() - t0) * 1000)

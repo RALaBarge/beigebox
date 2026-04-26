@@ -22,6 +22,10 @@ class BackendResponse:
     latency_ms: float = 0.0
     cost_usd: float | None = None  # Only populated by API backends
     error: str = ""
+    # Snapshot of the request normalizer's per-backend output, so the proxy
+    # can include normalized-request transforms/errors in its wire event
+    # without re-running normalize_request. Set by MultiBackendRouter.forward.
+    request_summary: dict | None = None
 
     @property
     def content(self) -> str:
