@@ -602,3 +602,167 @@ def log_extraction_attempt(
         source="extraction_detector",
         meta=meta,
     )
+
+
+def log_hook_execution(
+    stage: str,                       # "pre_request" | "post_response"
+    hook_names: list[str],
+    total_latency_ms: float,
+    hook_errors: list[dict] | None = None,
+    conversation_id: str = "",
+):
+    """Log a HookManager batch execution.
+
+    Always emits — even when zero hooks ran — so a missing event in Tap
+    means the wrapper itself didn't run. ``hook_names`` covers successful
+    runs; ``hook_errors`` carries name + truncated message for failures
+    (sum the two for total attempts).
+    """
+    wire = _get_tap_logger()
+    if not wire:
+        return
+
+    errors = hook_errors or []
+    hook_count = len(hook_names)
+    meta = {
+        "stage": stage,
+        "hook_count": hook_count,
+        "hook_names": hook_names,
+        "total_latency_ms": total_latency_ms,
+        "error_count": len(errors),
+        "errors": errors,
+    }
+
+    err_suffix = f" errors={len(errors)}" if errors else ""
+    content = (
+        f"Hooks {stage}: {hook_count} ok ({total_latency_ms:.1f}ms){err_suffix}"
+    )
+
+    wire.log(
+        direction="internal",
+        role="hook",
+        content=content,
+        conversation_id=conversation_id,
+        event_type=f"hook_{stage}",
+        source="hooks",
+        meta=meta,
+    )
+
+
+def log_z_command(
+    status: str,                      # "received" | "executed" | "error" | "noop"
+    directives: str = "",
+    route: str = "",
+    model: str = "",
+    tools: list[str] | None = None,
+    message_len: int = 0,
+    branch: str = "",                 # "help" | "fork" | "tools" | "route" | ""
+    error: str | None = None,
+    conversation_id: str = "",
+):
+    """Log z-command lifecycle (parse, dispatch, error)."""
+    wire = _get_tap_logger()
+    if not wire:
+        return
+
+    meta = {
+        "status": status,
+        "directives": directives,
+        "route": route,
+        "model": model,
+        "tools": tools or [],
+        "message_len": message_len,
+        "branch": branch,
+        "error": error,
+    }
+
+    suffix = f" branch={branch}" if branch else ""
+    if error:
+        suffix += f" error={error[:80]}"
+    content = (
+        f"z-command {status}: directives={directives or '(none)'}{suffix}"
+    )
+
+    wire.log(
+        direction="internal",
+        role="decision",
+        content=content,
+        model="z-command",
+        conversation_id=conversation_id,
+        event_type=f"z_command_{status}",
+        source="z_command",
+        meta=meta,
+    )
+
+
+def log_security_anomaly(
+    detector_type: str,               # "rag_poisoning" | "injection_guard" | ...
+    action: str,                      # "warn" | "quarantine" | "strict" | "block"
+    confidence: float,
+    reason: str,
+    extra: dict | None = None,
+):
+    """Log a security-detector anomaly (poisoned embedding, injection, etc.)."""
+    wire = _get_tap_logger()
+    if not wire:
+        return
+
+    meta = {
+        "detector_type": detector_type,
+        "action": action,
+        "confidence": confidence,
+        "reason": reason,
+    }
+    if extra:
+        meta.update(extra)
+
+    content = (
+        f"Security anomaly [{detector_type}]: {reason} "
+        f"(action={action}, conf={confidence:.2f})"
+    )
+
+    wire.log(
+        direction="inbound",
+        role="security",
+        content=content,
+        event_type="security_anomaly",
+        source=detector_type,
+        meta=meta,
+    )
+
+
+def log_amf_event(
+    event_type: str,                  # "advertise" | "heartbeat" | "unregister" | "error"
+    transport: str,                   # "mdns" | "nats"
+    status: str,                      # "ok" | "skipped" | "error"
+    agent_id: str = "",
+    endpoint: str = "",
+    error: str | None = None,
+    extra: dict | None = None,
+):
+    """Log AMF mesh advertise/heartbeat/unregister."""
+    wire = _get_tap_logger()
+    if not wire:
+        return
+
+    meta = {
+        "transport": transport,
+        "status": status,
+        "agent_id": agent_id,
+        "endpoint": endpoint,
+        "error": error,
+    }
+    if extra:
+        meta.update(extra)
+
+    err_suffix = f" error={error[:80]}" if error else ""
+    content = f"AMF {event_type} via {transport}: {status}{err_suffix}"
+
+    wire.log(
+        direction="outbound",
+        role="mesh",
+        content=content,
+        event_type=f"amf_{event_type}",
+        source="amf_mesh",
+        meta=meta,
+    )

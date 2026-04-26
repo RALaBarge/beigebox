@@ -285,29 +285,96 @@ class CDPTool:
         envelope dict (see beigebox.tools._media); the MCP server unwraps it
         into an `image` content block, while text-only consumers fall back
         through ``_text_fallback``.
+
+        Every dispatch emits exactly one ``cdp_action`` wire event in a
+        try/finally so observability survives unhandled exceptions in
+        downstream methods.
         """
-        try:
-            params = json.loads(input_str.strip())
-        except json.JSONDecodeError:
-            return 'Error: input must be JSON {"tool": "cdp.<method>", "input": "..."}'
+        from beigebox.logging import log_tool_call as _log_tool_call
 
-        tool = params.get("tool", "")
-        inp = params.get("input", "")
-
-        if not tool:
-            return "Error: missing 'tool' field"
-
-        method = tool.removeprefix("cdp.") if tool.startswith("cdp.") else tool
-
-        inp_repr = json.dumps(inp) if not isinstance(inp, str) else inp
-        logger.info("cdp: %s (input=%.80s)", method, inp_repr[:80])
+        _t0 = time.monotonic()
+        method = ""
+        inp: Any = ""
+        result: str | dict = ""
+        status = "error"
+        error_msg: str | None = None
 
         try:
-            future = asyncio.run_coroutine_threadsafe(self._dispatch(method, inp), self._loop)
-            return future.result(timeout=self._timeout + 5)
-        except Exception as exc:
-            logger.error("cdp: unexpected error in %s: %s", method, exc)
-            return f"Error: {exc}"
+            try:
+                params = json.loads(input_str.strip())
+            except json.JSONDecodeError:
+                error_msg = "input not JSON"
+                result = 'Error: input must be JSON {"tool": "cdp.<method>", "input": "..."}'
+                return result
+
+            tool = params.get("tool", "")
+            inp = params.get("input", "")
+
+            if not tool:
+                error_msg = "missing tool field"
+                result = "Error: missing 'tool' field"
+                return result
+
+            method = tool.removeprefix("cdp.") if tool.startswith("cdp.") else tool
+
+            inp_repr = json.dumps(inp) if not isinstance(inp, str) else inp
+            logger.info("cdp: %s (input=%.80s)", method, inp_repr[:80])
+
+            try:
+                future = asyncio.run_coroutine_threadsafe(self._dispatch(method, inp), self._loop)
+                result = future.result(timeout=self._timeout + 5)
+            except Exception as exc:
+                logger.error("cdp: unexpected error in %s: %s", method, exc)
+                error_msg = str(exc)
+                result = f"Error: {exc}"
+                return result
+
+            # Methods report failure two ways:
+            #   1. Plain string starting with "Error:" (most _<action> methods)
+            #   2. MCP image envelope whose _text_fallback starts with
+            #      "Error" / "image refused" (see beigebox.tools._media)
+            # Translate both into a proper wire-event status.
+            if isinstance(result, str) and result.startswith("Error:"):
+                error_msg = result[len("Error:"):].strip()[:200]
+                status = "error"
+            elif isinstance(result, dict):
+                from beigebox.tools._media import TEXT_FALLBACK_KEY as _TFK
+                _fallback = str(result.get(_TFK, ""))
+                if _fallback.startswith(("Error", "image refused")):
+                    error_msg = _fallback[:200]
+                    status = "error"
+                else:
+                    status = "ok"
+            else:
+                status = "ok"
+            return result
+        finally:
+            latency_ms = (time.monotonic() - _t0) * 1000
+            extra: dict = {"action": method or "<unparsed>"}
+            try:
+                if isinstance(inp, str):
+                    extra["input_chars"] = len(inp)
+                else:
+                    extra["input_chars"] = len(json.dumps(inp))
+            except Exception:
+                extra["input_chars"] = 0
+            # Image-envelope dicts carry the original byte-size in their summary
+            # text; for plain strings the char count is the proxy for "size".
+            if isinstance(result, dict):
+                extra["result_kind"] = "image_envelope"
+            elif isinstance(result, str):
+                extra["result_chars"] = len(result)
+            try:
+                _log_tool_call(
+                    tool_name=f"cdp.{method}" if method else "cdp.<unparsed>",
+                    status=status,
+                    latency_ms=latency_ms,
+                    error=error_msg,
+                    source="cdp",
+                    extra_meta=extra,
+                )
+            except Exception:
+                logger.debug("cdp_action wire emit failed", exc_info=True)
 
     # ------------------------------------------------------------------
     # Async dispatch

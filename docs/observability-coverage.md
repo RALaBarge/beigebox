@@ -29,12 +29,12 @@ For *how to query* the events listed here, see [observability.md](observability.
 | MCP `/mcp` tool calls | ✅ Sealed | Per-call `tool_call` wire event from `_tools_call` (try/finally guarantees exactly one emit per call); `source="mcp"` and `extra_meta` carry server label + input_length. |
 | MCP `/pen-mcp` tool calls (security_mcp) | ✅ Sealed | Same dispatch as `/mcp`; tagged `source="pen-mcp"` so events are distinguishable in Tap. |
 | Auth (key validation, ACL, rate limit) | ✅ Sealed | `auth_denied` wire event before every 401/403/429 return; meta carries reason_code, principal, endpoint, client_ip, user_agent. |
-| Hooks (pre/post-request HookManager) | 🔴 Gap | Execution and errors silent. |
-| Z-commands | 🔴 Gap | No events on receipt / parse / execute. |
-| Extraction detector | 🟡 Partial | `log_extraction_attempt()` defined in `logging.py` but **never called**. |
-| Injection guard / RAG poisoning | 🟡 Partial | Detection updates quarantine but emits no wire event. |
-| CDP browser actions (navigate, click, screenshot, …) | 🟡 Partial | stdlib logger only — no wire events. |
-| AMF mesh (advertise / discover / heartbeat) | 🔴 Gap | No observability tier visible. |
+| Hooks (pre/post-request HookManager) | ✅ Sealed | `hook_pre_request` / `hook_post_response` events with hook_names (successful runs), errors (per-hook with name + truncated msg), total_latency_ms. Framework crash captured under `__framework_crash__` sentinel. |
+| Z-commands | ✅ Sealed | `z_command_received` (with branch=help/fork/tools/route/model/noop), `z_command_executed` / `z_command_error` around forced-tool dispatch. |
+| Extraction detector | ✅ Sealed | `extraction_attempt_detected` fires from `_run_request_pipeline` for HIGH/CRITICAL scores; LOW/MEDIUM stay off the bus. |
+| Injection guard / RAG poisoning | ✅ Sealed | All three vector backends (memory/chroma/postgres) emit `security_anomaly` with detector_type, action, confidence, reason, vector_id, backend before the warn/quarantine/strict branch. |
+| CDP browser actions (navigate, click, screenshot, …) | ✅ Sealed | `cdp.run()` wraps every dispatch in try/finally and emits one `tool_call` event with source="cdp", action, latency_ms, status, input_chars, result_chars/result_kind. |
+| AMF mesh (advertise / discover / heartbeat) | ✅ Sealed | `amf_advertise` / `amf_heartbeat` / `amf_unregister` per transport (mdns / nats), with status (ok/skipped/error), agent_id, endpoint, error. |
 
 ---
 
@@ -62,7 +62,11 @@ new code path.
 | `logging.log_tool_call` | `tool_call` | tool, status, latency_ms, error | Tap |
 | `logging.log_harness_turn` | `harness_turn` | run_id, turn, model, tokens, status | Tap |
 | `logging.log_error_event` | `error` | component, severity, message | Tap |
-| `logging.log_extraction_attempt` | `extraction_attempt_detected` | session_id, risk_level, confidence, triggers | Tap *(defined, not called — see gap below)* |
+| `logging.log_extraction_attempt` | `extraction_attempt_detected` | session_id, risk_level, confidence, triggers | Tap *(emitted from `Proxy._run_request_pipeline` for HIGH/CRITICAL)* |
+| `logging.log_hook_execution` | `hook_pre_request`, `hook_post_response` | stage, hook_names (success), errors (failures), total_latency_ms | Tap |
+| `logging.log_z_command` | `z_command_received`, `z_command_executed`, `z_command_error` | status, directives, route, model, tools, branch, error | Tap |
+| `logging.log_security_anomaly` | `security_anomaly` | detector_type, action, confidence, reason, *(per-detector extras)* | Tap |
+| `logging.log_amf_event` | `amf_advertise`, `amf_heartbeat`, `amf_unregister` | transport, status, agent_id, endpoint, error | Tap |
 | `proxy.wire.log` | varies (`cache_hit`, `wasm`, `validation_warn`, `guardrail_block`, …) | model, conversation_id, content, meta | Tap + SQLite |
 | `proxy._log_messages` / `_log_response` | (no event_type) | conversation_id, role, content, model, cost, latency | Tap + SQLite |
 | `operator._wire(event_type, …)` | `operator_*` family | run_id, content, model, tokens, elapsed_ms, meta | Tap + SQLite |
@@ -96,30 +100,29 @@ any rule and **doesn't** emit, add observability before you ship.
 - **Streaming response normalizer summary** — closed in `d29bfd6`. `proxy_stream_response` now carries the same `.summary()` shape as non-streaming.
 - **Auth denial wire events** — closed in `d29bfd6`. `auth_denied` event fires before every 401/403/429 with reason_code + principal + endpoint + client_ip + user_agent.
 - **MCP `/mcp` + `/pen-mcp` per-call events** — closed in `d29bfd6`. `_tools_call` wraps every dispatch with try/finally so every call emits exactly one `tool_call` event tagged with `source="mcp"` or `source="pen-mcp"`.
+- **HookManager execution observability** — closed post-`34954a1`. `run_pre_request_with_meta` / `run_post_response_with_meta` return per-batch metadata; the proxy emits `hook_pre_request` / `hook_post_response` events with hook_count, hook_names, latency, and per-hook errors. Framework crash is also captured via outer try/except.
+- **Z-command receipt + execute events** — closed post-`34954a1`. `_process_z_command` emits `z_command_received` with branch (help/fork/tools/route/model/noop); `_run_forced_tools` emits `z_command_executed` or `z_command_error` after dispatch. Parser-crash path also instrumented.
+- **CDP action events** — closed post-`34954a1`. `CDPTool.run()` wraps every dispatch in try/finally and emits one `tool_call` event with source="cdp", action, status, latency_ms, input_chars, result_chars (or result_kind="image_envelope" for screenshots). Status is derived from `Error:`-prefixed return strings.
+- **RAG poisoning events** — closed post-`34954a1`. All three vector backends (`memory.py`, `chroma.py`, `postgres.py`) emit `security_anomaly` (detector_type=rag_poisoning, action=warn/quarantine/strict, confidence, reason, vector_id, backend) before applying the configured action. Event lands even when `strict` mode raises.
+- **AMF mesh observability** — closed post-`34954a1`. `_emit_event` helper centralises `log_amf_event` calls; `amf_advertise` / `amf_heartbeat` / `amf_unregister` cover both transports (mdns + nats) with status (ok/skipped/error), agent_id, endpoint.
+- **Extraction-attempt wire-up** — closed post-`34954a1`. `Proxy._run_request_pipeline` calls `extraction_detector.check_request()` after the input guardrail and emits `extraction_attempt_detected` (a) for HIGH/CRITICAL always, (b) for MEDIUM during the per-session baseline window only (`baseline_established == False`). Past baseline, MEDIUM stays off the bus to keep noise down.
 
 ## Open gaps (in priority order)
 
-Each is paired with the file:line where the emit should land and the event_type to use. Re-rank as your incident history evolves.
+No P1/P2 observability gaps remain in the surveyed surfaces. Re-audit when a new
+HTTP endpoint, agent loop, or external integration is added (see *Last reviewed*
+trigger list below). The next likely additions to revisit:
 
-1. **Hook execution timing + errors** *(MEDIUM — silent post-processing)*
-   - Wrap `HookManager.run_pre_request()` / `run_post_response()` callsites in proxy.py. Event: `hook_pre_request`, `hook_post_response`. Fields: hook_count, hook_names, total_latency_ms, hook_errors.
-2. **Z-command receipt / execute** *(MEDIUM — forensics, exploit detection)*
-   - Locate Z-command parser. Events: `z_command_received`, `z_command_executed`, `z_command_error`. Fields: command_name, arguments_hash (not raw — security), latency_ms, status.
-3. **CDP action wire events** *(MEDIUM — browser automation debugging)*
-   - `tools/cdp.py` — `_screenshot`, `_navigate`, `_click`, etc. Event: `cdp_action` with action subtype. Fields: action_type, latency_ms, status, error, result_size_kb (screenshot).
-4. **Injection guard / RAG poisoning detection events** *(MEDIUM — security calibration)*
-   - `proxy.py` injection_guard callsites + `storage/backends/memory.py:82`. Event: `security_anomaly`. Fields: detector_type, pattern, input_hash, confidence, action.
-
-### Side findings worth noting
-
-- `log_extraction_attempt()` is defined in `beigebox/logging.py` but never called. Either wire it up or delete it (lest someone assume the detector is observable when it isn't).
-- The Pen/Sec MCP at `/pen-mcp` is the cleanest example of how easy it is to ship endpoints without observability. Rule #10 above exists specifically to prevent that recurrence.
+1. **Per-hook latency** *(LOW — currently only batch latency is captured)*
+   - `HookManager.run_pre_request_with_meta` already times each hook internally but only surfaces batch totals. If a single hook degrades silently, only the batch grows. Promote per-hook timings into the wire event when noise budget allows.
+2. **Streaming wire-event correlation IDs** *(LOW — Grok suggestion deferred from `34954a1`)*
+   - MCP `tool_call` events don't carry a request_id/trace_id, so correlating across the wire still requires conversation_id + timestamp triangulation.
 
 ---
 
 ## Last reviewed
 
-2026-04-25 (post-`8f783d3`). Re-run the audit when:
+2026-04-26 (post-`34954a1` + this commit). Re-run the audit when:
 - A new HTTP endpoint is added
 - A new agent loop / orchestrator is added
 - A new external API integration is added

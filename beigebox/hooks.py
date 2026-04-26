@@ -130,6 +130,21 @@ class HookManager:
         Run all pre_request hooks in order.
         Each hook receives and returns the (possibly modified) body.
         """
+        body, _meta = self.run_pre_request_with_meta(body, context)
+        return body
+
+    def run_pre_request_with_meta(
+        self, body: dict, context: dict
+    ) -> tuple[dict, dict]:
+        """Same as run_pre_request, but also returns execution metadata.
+
+        Returns ``(body, meta)`` where ``meta`` carries the hooks that ran
+        successfully and any errors caught — for observability emission.
+        ``hook_names`` only includes successful runs; failures appear in
+        ``errors`` keyed by hook name. Sum the two for total attempts.
+        """
+        ran: list[str] = []
+        errors: list[dict] = []
         for hook in self.hooks:
             if not hook.enabled or not hook.pre_request:
                 continue
@@ -140,15 +155,35 @@ class HookManager:
                 if result is not None and isinstance(result, dict):
                     body = result
                     logger.debug("Hook '%s' pre_request applied", hook.name)
+                ran.append(hook.name)
             except Exception as e:
                 logger.error("Hook '%s' pre_request failed: %s", hook.name, e)
-        return body
+                errors.append({
+                    "hook": hook.name,
+                    "phase": "pre_request",
+                    "error": str(e)[:200],
+                })
+        meta = {"hook_names": ran, "errors": errors}
+        return body, meta
 
     def run_post_response(self, body: dict, response: dict, context: dict) -> dict:
         """
         Run all post_response hooks in order.
         Each hook receives and returns the (possibly modified) response.
         """
+        response, _meta = self.run_post_response_with_meta(body, response, context)
+        return response
+
+    def run_post_response_with_meta(
+        self, body: dict, response: dict, context: dict
+    ) -> tuple[dict, dict]:
+        """Same as run_post_response, but also returns execution metadata.
+
+        ``hook_names`` only includes successful runs; failures appear in
+        ``errors`` keyed by hook name. Sum the two for total attempts.
+        """
+        ran: list[str] = []
+        errors: list[dict] = []
         for hook in self.hooks:
             if not hook.enabled or not hook.post_response:
                 continue
@@ -157,9 +192,16 @@ class HookManager:
                 if result is not None and isinstance(result, dict):
                     response = result
                     logger.debug("Hook '%s' post_response applied", hook.name)
+                ran.append(hook.name)
             except Exception as e:
                 logger.error("Hook '%s' post_response failed: %s", hook.name, e)
-        return response
+                errors.append({
+                    "hook": hook.name,
+                    "phase": "post_response",
+                    "error": str(e)[:200],
+                })
+        meta = {"hook_names": ran, "errors": errors}
+        return response, meta
 
     def list_hooks(self) -> list[str]:
         """Return names of all loaded hooks."""

@@ -89,9 +89,17 @@ class AmfMeshAdvertiser:
         if not self._enabled:
             return
         await self._publish_nats_event("amf.discovery.agent.heartbeat", {"status": "offline"})
+        had_mdns = self._zeroconf is not None
+        had_nats = self._nc is not None
         self._stop_mdns()
         await self._stop_nats()
         logger.info("AMF mesh: unregistered")
+        # One terminal event per transport that was actually live, so queries
+        # filtered by transport see the unregister too.
+        if had_mdns:
+            self._emit_event("unregister", transport="mdns", status="ok")
+        if had_nats:
+            self._emit_event("unregister", transport="nats", status="ok")
 
     # ------------------------------------------------------------------
     # mDNS
@@ -103,6 +111,10 @@ class AmfMeshAdvertiser:
             from zeroconf.asyncio import AsyncZeroconf
         except ImportError:
             logger.warning("AMF mesh: zeroconf not installed — mDNS advertisement disabled")
+            self._emit_event(
+                "advertise", transport="mdns", status="skipped",
+                error="zeroconf-not-installed",
+            )
             return
 
         tags_csv = ",".join(self._tool_names)
@@ -143,9 +155,16 @@ class AmfMeshAdvertiser:
                 "AMF mesh: mDNS registered %s._amf-agent._tcp.local on %s:%d",
                 self._instance, local_ip, self._port,
             )
+            self._emit_event(
+                "advertise", transport="mdns", status="ok",
+                extra={"instance": self._instance, "ip": local_ip, "port": self._port},
+            )
         except Exception as e:
             logger.warning("AMF mesh: mDNS registration failed: %s", e)
             self._zeroconf = None
+            self._emit_event(
+                "advertise", transport="mdns", status="error", error=str(e),
+            )
 
     def _stop_mdns(self) -> None:
         if self._zeroconf and self._service_info:
@@ -166,11 +185,19 @@ class AmfMeshAdvertiser:
 
     async def _start_nats(self) -> None:
         if not self._nats_url:
+            self._emit_event(
+                "advertise", transport="nats", status="skipped",
+                error="nats-url-empty",
+            )
             return
         try:
             import nats as nats_lib
         except ImportError:
             logger.warning("AMF mesh: nats-py not installed — NATS heartbeat disabled")
+            self._emit_event(
+                "advertise", transport="nats", status="skipped",
+                error="nats-py-not-installed",
+            )
             return
 
         try:
@@ -180,6 +207,10 @@ class AmfMeshAdvertiser:
                 max_reconnect_attempts=3,
             )
             logger.info("AMF mesh: connected to NATS at %s", self._nats_url)
+            self._emit_event(
+                "advertise", transport="nats", status="ok",
+                extra={"nats_url": self._nats_url},
+            )
             await self._publish_nats_event(
                 "amf.discovery.agent.heartbeat",
                 {
@@ -192,6 +223,9 @@ class AmfMeshAdvertiser:
         except Exception as e:
             logger.info("AMF mesh: NATS unavailable (%s) — heartbeat disabled", e)
             self._nc = None
+            self._emit_event(
+                "advertise", transport="nats", status="error", error=str(e),
+            )
 
     async def _stop_nats(self) -> None:
         if self._nc:
@@ -201,6 +235,30 @@ class AmfMeshAdvertiser:
             except Exception:
                 pass
         self._nc = None
+
+    def _emit_event(
+        self,
+        event_type: str,                 # "advertise" | "heartbeat" | "unregister"
+        *,
+        transport: str,                  # "mdns" | "nats"
+        status: str,                     # "ok" | "skipped" | "error"
+        error: str | None = None,
+        extra: dict | None = None,
+    ) -> None:
+        """Best-effort wire emit — never blocks mesh lifecycle on Tap failure."""
+        try:
+            from beigebox.logging import log_amf_event
+            log_amf_event(
+                event_type=event_type,
+                transport=transport,
+                status=status,
+                agent_id=self._agent_id,
+                endpoint=self._mcp_endpoint,
+                error=error,
+                extra=extra,
+            )
+        except Exception:
+            logger.debug("amf wire emit failed", exc_info=True)
 
     async def _publish_nats_event(self, event_type: str, payload: Any) -> None:
         if not self._nc:
@@ -228,5 +286,18 @@ class AmfMeshAdvertiser:
         }
         try:
             await self._nc.publish(event_type, json.dumps(evt).encode())
+            # Map NATS event_type → our wire schema. Heartbeats are by far the
+            # noisiest source, so we tag them distinctly from one-off advertises.
+            wire_event = (
+                "heartbeat" if "heartbeat" in event_type else "advertise"
+            )
+            self._emit_event(
+                wire_event, transport="nats", status="ok",
+                extra={"nats_event_type": event_type},
+            )
         except Exception as e:
             logger.debug("AMF mesh: NATS publish failed: %s", e)
+            self._emit_event(
+                "heartbeat", transport="nats", status="error", error=str(e),
+                extra={"nats_event_type": event_type},
+            )

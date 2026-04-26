@@ -604,6 +604,15 @@ class ExtractionDetector:
             if stale:
                 logger.debug("Cleaned up %d stale extraction detector sessions", len(stale))
 
+    def is_baseline_established(self, session_id: str) -> bool:
+        """Public probe for proxy-side observability decisions.
+
+        Avoids reaching into ``_sessions`` from outside (Grok 2026-04-26).
+        """
+        with self._lock:
+            session = self._sessions.get(session_id)
+            return bool(session and session.baseline_established)
+
     def get_session_stats(self, session_id: str) -> dict:
         """Get current stats for a session."""
         with self._lock:

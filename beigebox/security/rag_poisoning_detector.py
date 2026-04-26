@@ -191,6 +191,31 @@ class RAGPoisoningDetector:
         # Passed all checks
         return (False, 0.0, "")
 
+    def emit_anomaly_event(
+        self,
+        action: str,                  # "warn" | "quarantine" | "strict"
+        confidence: float,
+        reason: str,
+        vector_id: str,
+        backend: str,                 # "memory" | "chroma" | "postgres"
+    ) -> None:
+        """Best-effort wire emit for a poisoning detection.
+
+        Centralised so all three vector backends share one emit path
+        (was duplicated; see Grok review on 2026-04-26).
+        """
+        try:
+            from beigebox.logging import log_security_anomaly
+            log_security_anomaly(
+                detector_type="rag_poisoning",
+                action=action,
+                confidence=float(confidence),
+                reason=str(reason),
+                extra={"vector_id": str(vector_id), "backend": backend},
+            )
+        except Exception:
+            logger.debug("rag_poisoning wire emit failed", exc_info=True)
+
     def get_baseline_stats(self) -> dict:
         """Return current baseline statistics for debugging and calibration."""
         with self._lock:

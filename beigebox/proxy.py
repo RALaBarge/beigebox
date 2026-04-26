@@ -56,6 +56,7 @@ from beigebox.logging import (
     log_routing_decision, log_model_selection, log_token_usage,
     log_latency_stage, log_cache_event, log_request_started,
     log_request_completed, log_payload_event,
+    log_hook_execution, log_z_command, log_extraction_attempt,
 )
 from beigebox.backends.openrouter import _COST_SENTINEL_PREFIX
 from beigebox.cache import SemanticCache, ToolResultCache
@@ -430,6 +431,50 @@ class Proxy:
             "vector_store": self.vector,
         }
 
+    def _run_hooks_with_logging(
+        self,
+        stage: str,                     # "pre_request" | "post_response"
+        body: dict,
+        target: dict,
+        context: dict,
+        conversation_id: str,
+    ) -> tuple[dict, float]:
+        """Invoke the HookManager batch for *stage* and emit one wire event.
+
+        Single source of truth so the (1) framework-crash path,
+        (2) per-batch latency, and (3) wire-event emission stay in lockstep
+        across all callsites. Returns ``(result, latency_ms)`` where
+        ``result`` is the body for pre_request or the response dict for
+        post_response.
+        """
+        _t = time.monotonic()
+        if not self.hook_manager:
+            return target, (time.monotonic() - _t) * 1000
+        try:
+            if stage == "pre_request":
+                result, hook_meta = self.hook_manager.run_pre_request_with_meta(target, context)
+            else:
+                result, hook_meta = self.hook_manager.run_post_response_with_meta(body, target, context)
+        except Exception as exc:
+            logger.error("hook_manager.run_%s crashed: %s", stage, exc)
+            result = target
+            hook_meta = {
+                "hook_names": [],
+                "errors": [{"hook": "__framework_crash__", "phase": stage, "error": str(exc)[:200]}],
+            }
+        latency_ms = (time.monotonic() - _t) * 1000
+        try:
+            log_hook_execution(
+                stage=stage,
+                hook_names=hook_meta.get("hook_names", []),
+                total_latency_ms=latency_ms,
+                hook_errors=hook_meta.get("errors") or None,
+                conversation_id=conversation_id,
+            )
+        except Exception:
+            logger.debug("hook wire emit failed", exc_info=True)
+        return result, latency_ms
+
     async def _run_decision(self, body: dict) -> Decision | None:
         """Run the decision LLM if enabled."""
         if not self.decision_agent or not self.decision_agent.enabled:
@@ -473,19 +518,49 @@ class Proxy:
         Check for z: prefix in the user's message.
         If found, parse it, strip the prefix, and return the command + modified body.
         """
+        conversation_id = self._extract_conversation_id(body)
         user_msg = self._get_latest_user_message(body)
-        zcmd = parse_z_command(user_msg)
+        try:
+            zcmd = parse_z_command(user_msg)
+        except Exception as exc:
+            # Parser is regex+dict lookups so this is paranoia, but a parser
+            # crash should never silently revert routing — emit and re-raise.
+            try:
+                log_z_command(
+                    status="error",
+                    branch="parse",
+                    message_len=len(user_msg or ""),
+                    error=str(exc),
+                    conversation_id=conversation_id,
+                )
+            except Exception:
+                logger.debug("z_command wire emit failed", exc_info=True)
+            raise
         if not zcmd.active:
             return zcmd, body
-        # Log the z-command to wiretap
-        self.wire.log(
-            direction="internal",
-            role="decision",
-            content=f"z-command: {zcmd.raw_directives} → route={zcmd.route or 'none'} "
-                    f"model={zcmd.model or 'none'} tools={zcmd.tools or 'none'}",
-            model="z-command",
-            conversation_id="",
+        # Determine which branch the active command will take so the receipt
+        # event captures intent (help / fork / tools / route).
+        branch = (
+            "help" if zcmd.is_help
+            else "fork" if zcmd.is_fork
+            else "tools" if zcmd.tools
+            else "model" if zcmd.model
+            else "route" if zcmd.route
+            else "noop"
         )
+        try:
+            log_z_command(
+                status="received",
+                directives=zcmd.raw_directives,
+                route=zcmd.route,
+                model=zcmd.model,
+                tools=zcmd.tools,
+                message_len=len(zcmd.message or ""),
+                branch=branch,
+                conversation_id=conversation_id,
+            )
+        except Exception:
+            logger.debug("z_command wire emit failed", exc_info=True)
         # Strip the z: prefix from the actual message sent to the LLM
         if zcmd.message and not zcmd.is_help:
             messages = body.get("messages", [])
@@ -516,11 +591,35 @@ class Proxy:
         if not zcmd.tools or not self.tool_registry:
             return ""
         results = []
+        errors: list[str] = []
         for tool_name in zcmd.tools:
             tool_input = zcmd.tool_input if zcmd.tool_input else user_msg
-            result = self.tool_registry.run_tool(tool_name, tool_input)
+            try:
+                result = self.tool_registry.run_tool(tool_name, tool_input)
+            except Exception as exc:
+                errors.append(f"{tool_name}:{exc}")
+                logger.warning("z-command tool '%s' failed: %s", tool_name, exc)
+                continue
             if result:
                 results.append(f"[{tool_name}]: {result}")
+        try:
+            if errors:
+                log_z_command(
+                    status="error",
+                    directives=zcmd.raw_directives,
+                    tools=zcmd.tools,
+                    branch="tools",
+                    error="; ".join(errors)[:200],
+                )
+            else:
+                log_z_command(
+                    status="executed",
+                    directives=zcmd.raw_directives,
+                    tools=zcmd.tools,
+                    branch="tools",
+                )
+        except Exception:
+            logger.debug("z_command wire emit failed", exc_info=True)
         return "\n".join(results)
 
     def _inject_tool_context(self, body: dict, tool_results: str) -> dict:
@@ -1094,6 +1193,36 @@ class Proxy:
                 )
                 raise ValueError(f"Request blocked by guardrails: {_gr.reason}")
 
+        # Extraction-attack detection (OWASP LLM10) — observe-only by default.
+        # Always emit HIGH/CRITICAL. During the per-session baseline window
+        # (≤20 messages) also emit MEDIUM, so operators see the detector
+        # working before its baseline stabilises (Grok 2026-04-26 review).
+        # Past baseline, MEDIUM stays off the bus to keep noise down.
+        if not is_synthetic and self.extraction_detector:
+            try:
+                _user_msg = self._get_latest_user_message(body) or ""
+                _score = self.extraction_detector.check_request(
+                    session_id=conversation_id or "",
+                    user_id="",
+                    prompt=_user_msg,
+                    model=model,
+                )
+                _level = getattr(_score.risk_level, "value", str(_score.risk_level))
+                _emit = _level in ("high", "critical")
+                if not _emit and _level == "medium":
+                    if not self.extraction_detector.is_baseline_established(conversation_id or ""):
+                        _emit = True
+                if _emit:
+                    log_extraction_attempt(
+                        session_id=conversation_id or "",
+                        risk_level=_level,
+                        confidence=float(_score.confidence),
+                        triggers=list(_score.triggers),
+                        reason=_score.reason,
+                    )
+            except Exception:
+                logger.debug("extraction_detector check failed", exc_info=True)
+
         # Run forced tools from z-command
         if zcmd.active and zcmd.tools:
             tool_results = self._run_forced_tools(zcmd, self._get_latest_user_message(body))
@@ -1215,11 +1344,14 @@ class Proxy:
             }
 
         # Pre-request hooks
-        _t_hooks = _time.monotonic()
-        if self.hook_manager:
-            context = self._build_hook_context(body, conversation_id, model, None)
-            body = self.hook_manager.run_pre_request(body, context)
-        _stages["pre_hooks"] = (_time.monotonic() - _t_hooks) * 1000
+        context = self._build_hook_context(body, conversation_id, model, None)
+        body, _stages["pre_hooks"] = self._run_hooks_with_logging(
+            stage="pre_request",
+            body=body,
+            target=body,
+            context=context,
+            conversation_id=conversation_id,
+        )
 
         # Check for hook-initiated block (e.g. prompt injection detection)
         if "_beigebox_block" in body:
@@ -1417,11 +1549,17 @@ class Proxy:
                 )
 
         # Post-response hooks
-        _t_post = _time.monotonic()
-        if self.hook_manager and not is_synthetic:
+        if not is_synthetic:
             context = self._build_hook_context(body, conversation_id, model, decision)
-            data = self.hook_manager.run_post_response(body, data, context)
-        _stages["post_hooks"] = (_time.monotonic() - _t_post) * 1000
+            data, _stages["post_hooks"] = self._run_hooks_with_logging(
+                stage="post_response",
+                body=body,
+                target=data,
+                context=context,
+                conversation_id=conversation_id,
+            )
+        else:
+            _stages["post_hooks"] = 0.0
 
         # Operator post-hook — fire-and-forget via ensure_future. The hook
         # runs concurrently with the return; it cannot modify the response.
@@ -1501,11 +1639,14 @@ class Proxy:
             return
 
         # Pre-request hooks
-        _t_hooks = _time.monotonic()
-        if self.hook_manager:
-            context = self._build_hook_context(body, conversation_id, model, None)
-            body = self.hook_manager.run_pre_request(body, context)
-        _stages["pre_hooks"] = (_time.monotonic() - _t_hooks) * 1000
+        context = self._build_hook_context(body, conversation_id, model, None)
+        body, _stages["pre_hooks"] = self._run_hooks_with_logging(
+            stage="pre_request",
+            body=body,
+            target=body,
+            context=context,
+            conversation_id=conversation_id,
+        )
 
         # Check for hook-initiated block (e.g. prompt injection detection)
         if "_beigebox_block" in body:

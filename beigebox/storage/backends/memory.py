@@ -84,6 +84,16 @@ class MemoryBackend(VectorBackend):
                 )
                 logger.warning(msg)
 
+                # Emit before applying the action so strict-mode raises
+                # still produce a wire event.
+                self._detector.emit_anomaly_event(
+                    action=self._detection_mode,
+                    confidence=confidence,
+                    reason=reason,
+                    vector_id=vid,
+                    backend="memory",
+                )
+
                 if self._detection_mode == "warn":
                     pass  # fall through to store
                 elif self._detection_mode == "quarantine":

@@ -114,6 +114,14 @@ class ChromaBackend(VectorBackend):
                 )
                 logger.warning(msg)
 
+                self._detector.emit_anomaly_event(
+                    action=self._detection_mode,
+                    confidence=confidence,
+                    reason=reason,
+                    vector_id=vid,
+                    backend="chroma",
+                )
+
                 if self._detection_mode == "warn":
                     # Log and store anyway
                     safe_ids.append(vid)
