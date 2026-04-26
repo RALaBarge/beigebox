@@ -24,6 +24,7 @@ Complete reference for BeigeBox deployment, configuration, and usage.
 ## Operations & Monitoring
 
 - **[Observability](observability.md)** — Tap event log, metrics, debugging
+- **[Observability Coverage](observability-coverage.md)** — definitive map of what's emitted, what's a gap, and the rubric for adding new events
 - **[Security](security.md)** — Supply chain hardening, hash locking, network isolation, Docker hardening, threat model
 
 ---

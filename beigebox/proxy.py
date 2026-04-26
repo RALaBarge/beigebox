@@ -1780,13 +1780,33 @@ class Proxy:
         except Exception:
             pass  # Don't block on logging
 
-        # Log the complete response after streaming finishes (skip synthetic)
+        # Log the complete response after streaming finishes (skip synthetic).
+        # Synthesize a one-choice response shape so we can reuse the same
+        # normalize_response → .summary(...) path the non-streaming code uses;
+        # the assembled text is the only field we have post-stream, but the
+        # wire event still gets the consistent shape (kind, role, finish_reason
+        # if available, content_length, has_reasoning, tool_calls_count, usage).
         if not is_synthetic:
             complete_text = "".join(full_response)
             if complete_text:
+                _stream_meta = normalize_response({
+                    "choices": [{"message": {"role": "assistant", "content": complete_text}}],
+                    "usage": {
+                        "prompt_tokens": prompt_tokens or 0,
+                        "completion_tokens": _estimate_tokens(complete_text),
+                    },
+                }).summary({
+                    "model": model,
+                    "backend": backend_name,
+                    "conversation_id": conversation_id,
+                    "latency_ms": round(_stages.get("backend", 0), 1),
+                    "stream": True,
+                    "cost_usd": stream_cost_usd,
+                })
                 log_payload_event("proxy_stream_response", response=complete_text, model=model,
                                   backend=backend_name, conversation_id=conversation_id,
                     latency_ms=round(_stages.get("backend", 0), 1),
+                    extra_meta=_stream_meta,
                 )
             # WASM transform — runs on assembled text in both modes.
             # In buffer mode the transformed text is re-emitted to the client below.

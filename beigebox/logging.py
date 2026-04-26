@@ -409,29 +409,39 @@ def log_decision_llm_call(
     )
 
 
-def log_tool_call(tool_name: str, status: str, latency_ms: float, error: Optional[str] = None):
-    """Log tool invocation and result."""
+def log_tool_call(tool_name: str, status: str, latency_ms: float,
+                  error: Optional[str] = None, source: str = "tools",
+                  extra_meta: Optional[dict] = None):
+    """Log tool invocation and result.
+
+    ``source`` distinguishes the calling subsystem (e.g. "tools" for the
+    operator's tool registry, "mcp" for /mcp tool calls, "pen-mcp" for the
+    security MCP). ``extra_meta`` is merged into the event meta dict — useful
+    for per-source fields (server label, input length, MCP method).
+    """
     wire = _get_tap_logger()
     if not wire:
         return
-    
+
     meta = {
         "tool": tool_name,
         "status": status,
         "latency_ms": latency_ms,
         "error": error,
     }
-    
+    if extra_meta:
+        meta.update(extra_meta)
+
     content = f"Tool {tool_name}: {status} ({latency_ms:.0f}ms)"
     if error:
         content += f" error={error[:50]}"
-    
+
     wire.log(
         direction="inbound",
         role="tool",
         content=content,
         event_type="tool_call",
-        source="tools",
+        source=source,
         meta=meta,
     )
 

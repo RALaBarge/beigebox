@@ -92,3 +92,7 @@ docker compose logs -f beigebox
 ---
 
 See [API Reference](api-reference.md#observability) for endpoint details.
+
+For the full coverage map (what's emitted today, where the gaps are, and the
+decision rubric for adding new events), see
+[observability-coverage.md](observability-coverage.md).

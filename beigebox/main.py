@@ -337,7 +337,10 @@ async def lifespan(app: FastAPI):
         _sec_registry = _build_sec_registry()
         # Empty set => expose every registered tool (no progressive disclosure).
         # Right call here: small, focused surface — list them all up front.
-        security_mcp_server = McpServer(_sec_registry, resident_tools=set())
+        # server_label="pen-mcp" tags every tool_call wire event so /mcp vs
+        # /pen-mcp are distinguishable in the Tap event log.
+        security_mcp_server = McpServer(_sec_registry, resident_tools=set(),
+                                        server_label="pen-mcp")
         logger.info(
             "Pen/Sec MCP server: enabled (POST /pen-mcp) — %d wrappers loaded",
             len(_sec_registry.list_tools()),
@@ -627,6 +630,33 @@ _AUTH_EXEMPT = frozenset(["/", "/ui", "/beigebox/health", "/api/v1/status"])
 _AUTH_EXEMPT_PREFIXES = ("/web/", "/auth/")
 
 
+def _emit_auth_denied(reason_code: str, principal_name: str, principal_type: str,
+                      endpoint_path: str) -> None:
+    """Emit an `auth_denied` wire event before a 401/403/429 return.
+
+    Per the observability rubric: auth denials must never be silent —
+    they're load-bearing for breach forensics and rate-limit tuning.
+    Best-effort: failure to emit the event MUST NOT block the deny response.
+    """
+    try:
+        if _app_state and _app_state.proxy and _app_state.proxy.wire:
+            _app_state.proxy.wire.log(
+                direction="inbound",
+                role="auth",
+                content=f"deny {reason_code}: {principal_name or '?'} → {endpoint_path}",
+                event_type="auth_denied",
+                source="auth_middleware",
+                meta={
+                    "reason_code": reason_code,
+                    "principal_name": principal_name,
+                    "principal_type": principal_type,
+                    "endpoint": endpoint_path,
+                },
+            )
+    except Exception:
+        pass
+
+
 class ApiKeyMiddleware(BaseHTTPMiddleware):
     """
     Multi-key API guard backed by agentauth keychain storage.
@@ -683,6 +713,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                 )
 
         if meta is None:
+            _emit_auth_denied("invalid_api_key", "unknown", "api_key", path)
             # Don't leak auth methods to unauthenticated users
             return JSONResponse(
                 {
@@ -697,6 +728,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
 
         # Rate limit
         if not _app_state.auth_registry.check_rate_limit(meta):
+            _emit_auth_denied("rate_limit_exceeded", meta.name, "api_key", path)
             return JSONResponse(
                 {
                     "error": {
@@ -710,6 +742,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
 
         # Endpoint ACL
         if not _app_state.auth_registry.check_endpoint(meta, path):
+            _emit_auth_denied("endpoint_not_allowed", meta.name, "api_key", path)
             return JSONResponse(
                 {
                     "error": {

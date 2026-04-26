@@ -219,12 +219,16 @@ class McpServer:
         operator_factory: Callable[[str], Awaitable[str]] | None = None,
         skills: list | None = None,
         resident_tools: set[str] | None = None,
+        server_label: str = "mcp",
     ):
         self._registry = tool_registry
         self._operator_factory = operator_factory
         self._skills = skills or []
         # resident_tools=None → use default set.  resident_tools=set() → expose all.
         self._resident_tools: set[str] | None = resident_tools
+        # server_label distinguishes endpoints (e.g. "mcp" vs "pen-mcp") in
+        # wire events emitted from _tools_call. Defaults to the canonical /mcp.
+        self._server_label = server_label
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -426,6 +430,9 @@ class McpServer:
         }
 
     async def _tools_call(self, params: dict) -> dict:
+        import time as _time
+        from beigebox.logging import log_tool_call as _log_tool_call
+
         name: str = params.get("name", "").strip()
         arguments: dict = params.get("arguments") or {}
 
@@ -445,6 +452,18 @@ class McpServer:
             raise ValueError(f"Input too large ({len(input_text)} chars, limit {_MCP_INPUT_LIMIT})")
 
         logger.info("MCP tools/call: %s (input=%r)", name, input_text[:120])
+        _t0 = _time.monotonic()
+        _emit_meta = {"server": self._server_label, "input_length": len(input_text)}
+
+        def _emit(status: str, error: str | None = None) -> None:
+            _log_tool_call(
+                tool_name=name,
+                status=status,
+                latency_ms=(_time.monotonic() - _t0) * 1000,
+                error=error,
+                source=self._server_label,
+                extra_meta=_emit_meta,
+            )
 
         # discover_tools — search the capability index and return summaries
         if name == "discover_tools":
@@ -463,6 +482,7 @@ class McpServer:
                     risk_marker = " [write]" if c["risk"] == "write" else ""
                     lines.append(f"- **{c['tool']}**{risk_marker}: {c['summary']}")
                 text = "\n".join(lines)
+            _emit("ok")
             return {
                 "content": [{"type": "text", "text": text}],
                 "isError": False,
@@ -471,18 +491,21 @@ class McpServer:
         # operator/run — dispatches to the BeigeBox Operator agent
         if name == "operator/run":
             if self._operator_factory is None:
+                _emit("error", error="operator_disabled")
                 return {
                     "content": [{"type": "text", "text": "operator/run is not available (operator disabled or not configured)."}],
                     "isError": True,
                 }
             try:
                 answer = await self._operator_factory(input_text)
+                _emit("ok")
                 return {
                     "content": [{"type": "text", "text": answer or "(no result)"}],
                     "isError": False,
                 }
             except Exception as e:
                 logger.error("MCP operator/run error: %s", e)
+                _emit("error", error=str(e)[:200])
                 return {
                     "content": [{"type": "text", "text": f"Operator error: {e}"}],
                     "isError": True,
@@ -494,6 +517,7 @@ class McpServer:
             if self._operator_factory is not None:
                 known += ", operator/run"
             known += ", discover_tools"
+            _emit("error", error="tool_not_found")
             return {
                 "content": [{"type": "text", "text": f"Tool '{name}' not found. Available: {known}"}],
                 "isError": True,
@@ -502,6 +526,7 @@ class McpServer:
         result = self._registry.run_tool(name, input_text)
 
         if result is None:
+            _emit("error", error="no_result")
             return {
                 "content": [{"type": "text", "text": f"Tool '{name}' returned no result."}],
                 "isError": True,
@@ -511,11 +536,13 @@ class McpServer:
         # the native content blocks so vision-capable clients receive them as-is.
         from beigebox.tools._media import MCP_CONTENT_KEY
         if isinstance(result, dict) and MCP_CONTENT_KEY in result:
+            _emit("ok")
             return {
                 "content": result[MCP_CONTENT_KEY],
                 "isError": False,
             }
 
+        _emit("ok")
         return {
             "content": [{"type": "text", "text": result}],
             "isError": False,
