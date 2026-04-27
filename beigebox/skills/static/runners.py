@@ -1,8 +1,8 @@
-"""Subprocess wrappers for ruff and semgrep.
+"""Subprocess wrappers for ruff, semgrep, and mypy.
 
-Both runners exec the tool as a subprocess, capture JSON output, parse, and
-return a list of normalized findings plus a stats dict. Tool absence or non-zero
-exit codes that don't carry usable JSON are turned into an error string instead
+Each runner execs the tool as a subprocess, captures output, parses, and
+returns a list of normalized findings plus a stats dict. Tool absence or non-zero
+exit codes that don't carry usable output are turned into an error string instead
 of raising, so the pipeline can still emit a partial result.
 """
 
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shutil
 import time
 from pathlib import Path
@@ -83,6 +84,39 @@ def _classify_semgrep(severity: str, metadata: dict) -> tuple[str, str]:
     else:
         ftype = "other"
     return sev, ftype
+
+
+# mypy error codes that signal "this almost certainly crashes at runtime" —
+# bumped from medium to high so a triage view surfaces them first.
+_MYPY_HIGH_CODES = {
+    "attr-defined",     # accessing a missing attribute
+    "union-attr",       # accessing attribute on Optional that may be None
+    "call-arg",         # missing/extra positional/keyword argument
+    "arg-type",         # passing wrong type to a parameter
+    "return-value",     # returning wrong type from a function
+    "assignment",       # incompatible types in assignment
+    "operator",         # operator on incompatible types
+    "index",            # indexing a non-indexable type
+    "no-redef",         # redefinition of name
+    "valid-type",       # not a valid type
+}
+
+
+def _classify_mypy(level: str, code: str) -> tuple[str, str]:
+    """Map a mypy (level, error-code) tuple to (severity, garlicpress type).
+
+    Notes are informational ("revealed type X" etc.) so they go to low. Errors
+    default to medium/logic_error; a curated set of "would crash at runtime"
+    codes bumps to high.
+    """
+    lvl = (level or "").lower()
+    if lvl == "note":
+        return ("low", "logic_error")
+    if lvl != "error":
+        return ("low", "other")
+    if code in _MYPY_HIGH_CODES:
+        return ("high", "logic_error")
+    return ("medium", "logic_error")
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +271,124 @@ async def run_semgrep(
             "raw_count": len(data.get("results", [])),
             "errors": data.get("errors", []),
         },
+        "error": None,
+    }
+
+
+# mypy line format with the flags we pass:
+#   path/to/file.py:LINE:COL: SEVERITY: MESSAGE  [error-code]
+# COL is optional (always present with --show-column-numbers).
+# error-code is optional (always present with --show-error-codes), but old
+# mypy versions sometimes emit notes without one.
+_MYPY_LINE_RE = re.compile(
+    r"^(?P<file>[^:]+):"
+    r"(?P<line>\d+)"
+    r"(?::(?P<col>\d+))?"
+    r":\s*(?P<level>error|note|warning):\s*"
+    r"(?P<message>.*?)"
+    r"(?:\s+\[(?P<code>[a-zA-Z0-9_-]+)\])?"
+    r"\s*$"
+)
+
+
+def _parse_mypy_output(stdout: str) -> list[dict[str, Any]]:
+    """Parse mypy text output into runner-shape dicts.
+
+    mypy's stable output is a one-line-per-diagnostic format. We use the
+    parseable flags (`--show-column-numbers --show-error-codes --no-pretty
+    --no-error-summary`) to make it regex-friendly. JSON output exists in
+    newer mypy but its schema has shifted across releases — text is more stable.
+    """
+    findings: list[dict[str, Any]] = []
+    for line in stdout.splitlines():
+        line = line.rstrip()
+        if not line:
+            continue
+        m = _MYPY_LINE_RE.match(line)
+        if not m:
+            continue  # summary lines, "Found N errors", etc.
+        level = m.group("level") or ""
+        code = m.group("code") or ""
+        severity, ftype = _classify_mypy(level, code)
+        findings.append({
+            "tool": "mypy",
+            "rule_id": code or level,
+            "severity": severity,
+            "type": ftype,
+            "file": m.group("file") or "",
+            "line": int(m.group("line") or 0),
+            "column": int(m.group("col") or 0),
+            "message": m.group("message") or "",
+            "url": "",
+        })
+    return findings
+
+
+async def run_mypy(
+    repo_path: Path,
+    *,
+    strict: bool = False,
+    follow_imports: str = "silent",
+    extra_args: list[str] | None = None,
+    timeout: float = 300.0,
+) -> dict[str, Any]:
+    """Run ``mypy`` on ``repo_path``.
+
+    Defaults are tuned for "scan an arbitrary repo without an env":
+    ``--ignore-missing-imports`` so missing third-party stubs don't bury
+    real findings, ``--follow-imports=silent`` so untyped deps don't get
+    re-checked, and ``--show-column-numbers --show-error-codes --no-pretty``
+    so output is parseable.
+
+    Returns:
+        {"findings": [...], "stats": {...}, "error": str | None}
+    """
+    if shutil.which("mypy") is None:
+        return _runner_error("mypy", "mypy not on PATH")
+
+    args = [
+        "mypy",
+        "--ignore-missing-imports",
+        f"--follow-imports={follow_imports}",
+        "--show-column-numbers",
+        "--show-error-codes",
+        "--no-pretty",
+        "--no-error-summary",
+        "--no-incremental",  # cleaner subprocess invocation; sacrifices cache
+    ]
+    if strict:
+        args.append("--strict")
+    if extra_args:
+        args.extend(extra_args)
+    args.append(str(repo_path))
+
+    started = time.monotonic()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        return _runner_error("mypy", f"timeout after {timeout}s")
+    except FileNotFoundError:
+        return _runner_error("mypy", "mypy binary not found")
+    elapsed = round(time.monotonic() - started, 2)
+
+    stdout = stdout_b.decode("utf-8", errors="replace")
+    stderr = stderr_b.decode("utf-8", errors="replace")
+
+    findings = _parse_mypy_output(stdout)
+
+    # mypy returns 0 if no errors, 1 if errors, 2 if it crashed itself. A
+    # crash means the parser ate the whole input — surface stderr as the error.
+    if proc.returncode == 2 and not findings:
+        return _runner_error("mypy", f"crashed (rc=2): {stderr[:300]}")
+
+    return {
+        "findings": findings,
+        "stats": {"duration_seconds": elapsed, "raw_count": len(findings)},
         "error": None,
     }
 

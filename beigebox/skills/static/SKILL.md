@@ -1,12 +1,12 @@
 ---
 name: static
-version: 1
-description: Use when the user wants static analysis / SAST / lint-with-teeth on a Python codebase — finding security smells, logic bugs, obvious defects without running the code. Wraps ruff (full ruleset including the bandit-port S rules) plus semgrep (registry-backed pattern + dataflow rules) and emits garlicpress-shape findings so the output merges with fuzz/static pipelines without translation. Two tools, not three: ruff's S ruleset already covers what bandit would.
+version: 2
+description: Use when the user wants static analysis / SAST / type-checking / lint-with-teeth on a Python codebase — finding security smells, logic bugs, type errors, obvious defects without running the code. Wraps ruff (full ruleset including the bandit-port S rules), semgrep (registry-backed pattern + dataflow rules), and mypy (type checking). Emits garlicpress-shape findings so the output merges with fuzz/static pipelines without translation. Three categories, not duplicates: ruff covers AST patterns + bandit; semgrep covers cross-file dataflow; mypy covers types. Skip bandit (ruff -S already covers it).
 ---
 
 # static
 
-`scripts/static.sh` (or `python3 -m beigebox.skills.static`) — run ruff + semgrep against a Python repo and emit a single ranked finding list. Companion to the `fuzz` skill: same garlicpress-shape output, same async pipeline, callable from a Trinity orchestrator alongside fuzz.
+`scripts/static.sh` (or `python3 -m beigebox.skills.static`) — run ruff + semgrep + mypy against a Python repo and emit a single ranked finding list. Companion to the `fuzz` skill: same garlicpress-shape output, same async pipeline, callable from a Trinity orchestrator alongside fuzz.
 
 ## When to invoke
 
@@ -14,13 +14,15 @@ description: Use when the user wants static analysis / SAST / lint-with-teeth on
 - An audit / review needs the static side of a static-plus-fuzz sweep
 - Catching things `fuzz` can't reach: dead code, unused imports, deprecated APIs, type-confused branches that never run with random inputs
 
-## Why these two tools
+## Why these three tools
 
 `ruff` is the bandit successor for Python — its `S` ruleset is a port of bandit (`exec`, `eval`, `pickle`, weak crypto, `subprocess(shell=True)`, etc.) and runs in milliseconds. Adding `bandit` separately would mostly re-find the same things.
 
 `semgrep` covers ground ruff can't: cross-file dataflow, framework-specific patterns (Django, Flask, requests), and a curated registry of security/correctness rule packs. Slower, but reaches deeper.
 
-So the pair is **ruff (fast, AST-pattern, bandit-equivalent)** + **semgrep (slower, dataflow, registry)**. Skip bandit; ruff covers it.
+`mypy` covers a category neither ruff nor semgrep can touch — type checking. Catches arg-type mismatches, missing attributes, `None` flowing into non-Optional parameters. Highest-bug-per-line of any static tool when applied to typed code.
+
+So the trio is **ruff (fast, AST-pattern, bandit-equivalent)** + **semgrep (slower, dataflow, registry)** + **mypy (types)**. Skip bandit; ruff covers it.
 
 ## Usage
 
@@ -65,10 +67,14 @@ result = await run_static(
 | `--ruff-select` | `F,E9,B,S,ASYNC,ARG,RUF,PL,TRY` | Ruff rule selection. Bug-and-security-biased; skips style noise by default. |
 | `--ruff-ignore` | `None` | Ruff rules to ignore. Comma-separated. |
 | `--semgrep-config` | `p/python` | Semgrep config: registry shortcut (`p/python`, `p/security-audit`, `p/owasp-top-ten`), file path, or comma-list. |
+| `--mypy-strict` | `false` | Run mypy in `--strict` mode. Much louder; lots of low-severity findings. |
+| `--mypy-follow-imports` | `silent` | Mypy `--follow-imports` value. `silent` = don't recurse into untyped deps. |
 | `--no-ruff` | `false` | Skip the ruff runner. |
 | `--no-semgrep` | `false` | Skip the semgrep runner. |
+| `--no-mypy` | `false` | Skip the mypy runner. |
 | `--ruff-timeout` | `120` | Seconds. |
 | `--semgrep-timeout` | `600` | Seconds. Semgrep can be slow on the first run while it caches rules. |
+| `--mypy-timeout` | `300` | Seconds. Mypy can be slow on first run; `--no-incremental` disables caching for clean subprocess invocation. |
 | `--format` | `json` | `json` or `summary`. |
 | `--out` | `None` | Write JSON output to this file. |
 
@@ -127,6 +133,14 @@ result = await run_static(
 | `metadata.category: correctness/best-practice` | type=logic_error |
 | `metadata.category: performance` | type=resource_leak |
 
+**Mypy** — by error level + error code:
+
+| Field | Mapping |
+|-------|---------|
+| `level: error`, code in {`attr-defined`, `union-attr`, `call-arg`, `arg-type`, `return-value`, `assignment`, `operator`, `index`, `no-redef`, `valid-type`} | high / logic_error (would crash at runtime) |
+| `level: error` (other codes) | medium / logic_error |
+| `level: note` | low / logic_error (informational; "Revealed type is..." etc.) |
+
 ## Behavior notes
 
 - **Per-runner failure isolation.** If ruff is missing or semgrep hits a network error fetching its rule pack, that runner's `error` field is set and the other runner's findings still come back. Pipeline never raises.
@@ -141,7 +155,8 @@ result = await run_static(
 - `python3` ≥ 3.11
 - `ruff` on PATH (`pip install ruff` or already-bundled in many dev envs)
 - `semgrep` on PATH (`pip install semgrep`)
-- Either tool missing → that runner emits `error`; the skill still runs the other one
+- `mypy` on PATH (`pip install mypy`)
+- Any tool missing → that runner emits `error`; the skill still runs the others
 
 ## Anti-patterns
 

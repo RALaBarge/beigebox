@@ -16,8 +16,11 @@ import pytest
 
 from beigebox.skills.static import run_static
 from beigebox.skills.static.runners import (
+    _classify_mypy,
     _classify_ruff,
     _classify_semgrep,
+    _parse_mypy_output,
+    run_mypy,
     run_ruff,
     run_semgrep,
 )
@@ -69,6 +72,79 @@ def test_classify_semgrep_severity_map():
 
 def test_classify_semgrep_unknown_severity_defaults_low():
     assert _classify_semgrep("WHAT", {}) == ("low", "other")
+
+
+# ---------------------------------------------------------------------------
+# mypy classification + output parsing
+# ---------------------------------------------------------------------------
+
+
+def test_classify_mypy_high_codes():
+    assert _classify_mypy("error", "attr-defined") == ("high", "logic_error")
+    assert _classify_mypy("error", "arg-type") == ("high", "logic_error")
+    assert _classify_mypy("error", "union-attr") == ("high", "logic_error")
+
+
+def test_classify_mypy_default_error_is_medium():
+    assert _classify_mypy("error", "no-untyped-def") == ("medium", "logic_error")
+    assert _classify_mypy("error", "") == ("medium", "logic_error")
+
+
+def test_classify_mypy_note_is_low():
+    assert _classify_mypy("note", "") == ("low", "logic_error")
+
+
+def test_classify_mypy_unknown_level_is_low_other():
+    assert _classify_mypy("???", "") == ("low", "other")
+
+
+def test_parse_mypy_output_typical_lines():
+    out = (
+        "src/foo.py:10:5: error: Argument 1 to \"bar\" has incompatible type \"str\"  [arg-type]\n"
+        "src/foo.py:11:1: error: \"NoneType\" has no attribute \"split\"  [union-attr]\n"
+        "src/foo.py:12: note: Revealed type is \"int\"\n"
+        "Found 2 errors in 1 file (checked 1 source file)\n"
+    )
+    findings = _parse_mypy_output(out)
+    assert len(findings) == 3
+    arg_type = next(f for f in findings if f["rule_id"] == "arg-type")
+    assert arg_type["severity"] == "high"
+    assert arg_type["line"] == 10
+    assert arg_type["column"] == 5
+    assert arg_type["file"] == "src/foo.py"
+    union = next(f for f in findings if f["rule_id"] == "union-attr")
+    assert union["severity"] == "high"
+    note = next(f for f in findings if f["rule_id"] == "note")
+    assert note["severity"] == "low"
+
+
+def test_parse_mypy_output_handles_no_column():
+    out = "src/foo.py:7: error: Something  [misc]\n"
+    findings = _parse_mypy_output(out)
+    assert len(findings) == 1
+    assert findings[0]["line"] == 7
+    assert findings[0]["column"] == 0
+    assert findings[0]["rule_id"] == "misc"
+
+
+def test_parse_mypy_output_handles_no_error_code():
+    # Older mypy or custom configs may not emit error codes
+    out = "src/foo.py:7:1: error: Something\n"
+    findings = _parse_mypy_output(out)
+    assert len(findings) == 1
+    assert findings[0]["rule_id"] == "error"  # falls back to level
+    assert findings[0]["severity"] == "medium"
+
+
+def test_parse_mypy_output_skips_summary_lines():
+    out = (
+        "Success: no issues found in 1 source file\n"
+        "src/foo.py:1:1: error: Real error  [name-defined]\n"
+        "Found 1 error\n"
+    )
+    findings = _parse_mypy_output(out)
+    assert len(findings) == 1
+    assert findings[0]["rule_id"] == "name-defined"
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +288,71 @@ async def test_run_semgrep_missing_binary_returns_error(monkeypatch, repo):
 
 
 # ---------------------------------------------------------------------------
+# run_mypy — subprocess stubbed
+# ---------------------------------------------------------------------------
+
+
+class _FakeProcMypy:
+    def __init__(self, stdout: bytes, stderr: bytes = b"", returncode: int = 0):
+        self._stdout = stdout
+        self._stderr = stderr
+        self.returncode = returncode
+
+    async def communicate(self):
+        return self._stdout, self._stderr
+
+
+def _patch_mypy_subprocess(monkeypatch, stdout: bytes, stderr: bytes = b"", rc: int = 0):
+    async def _fake_create(*args, **kwargs):
+        return _FakeProcMypy(stdout, stderr, rc)
+    monkeypatch.setattr(
+        "beigebox.skills.static.runners.asyncio.create_subprocess_exec",
+        _fake_create,
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_mypy_parses_typical_output(monkeypatch, repo):
+    out = (
+        b"src/foo.py:10:5: error: Argument 1 has incompatible type  [arg-type]\n"
+        b"src/foo.py:20:1: error: Cannot assign  [assignment]\n"
+        b"src/foo.py:30:1: error: Use snake_case  [style]\n"  # not in HIGH set
+    )
+    _patch_mypy_subprocess(monkeypatch, out, rc=1)
+    result = await run_mypy(repo)
+    assert result["error"] is None
+    assert len(result["findings"]) == 3
+    severities = sorted(f["severity"] for f in result["findings"])
+    assert severities == ["high", "high", "medium"]
+
+
+@pytest.mark.asyncio
+async def test_run_mypy_clean_codebase(monkeypatch, repo):
+    """mypy returns 0 and empty output when there are no type errors."""
+    _patch_mypy_subprocess(monkeypatch, b"", rc=0)
+    result = await run_mypy(repo)
+    assert result["error"] is None
+    assert result["findings"] == []
+
+
+@pytest.mark.asyncio
+async def test_run_mypy_internal_crash_returns_error(monkeypatch, repo):
+    """rc=2 with no parseable findings means mypy itself crashed."""
+    _patch_mypy_subprocess(monkeypatch, b"", b"INTERNAL ERROR: traceback...", rc=2)
+    result = await run_mypy(repo)
+    assert result["error"] is not None
+    assert "crashed" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_run_mypy_missing_binary_returns_error(monkeypatch, repo):
+    monkeypatch.setattr("beigebox.skills.static.runners.shutil.which", lambda _: None)
+    result = await run_mypy(repo)
+    assert result["error"] is not None
+    assert "mypy" in result["error"]
+
+
+# ---------------------------------------------------------------------------
 # run_static — full pipeline
 # ---------------------------------------------------------------------------
 
@@ -280,13 +421,18 @@ async def test_run_static_merges_and_sorts(monkeypatch, repo):
             "error": None,
         }
 
+    async def fake_run_mypy(*a, **kw):
+        return {"findings": [], "stats": {"duration_seconds": 0.0, "raw_count": 0}, "error": None}
+
     monkeypatch.setattr("beigebox.skills.static.pipeline.run_ruff", fake_run_ruff)
     monkeypatch.setattr("beigebox.skills.static.pipeline.run_semgrep", fake_run_semgrep)
+    monkeypatch.setattr("beigebox.skills.static.pipeline.run_mypy", fake_run_mypy)
 
     result = await run_static(repo)
     assert result["stats"]["total_findings"] == 3
     assert result["stats"]["ruff_count"] == 2
     assert result["stats"]["semgrep_count"] == 1
+    assert result["stats"]["mypy_count"] == 0
     # First two are 'high', third is 'medium'
     sevs = [f["severity"] for f in result["findings"]]
     assert sevs == ["high", "high", "medium"]
@@ -306,8 +452,12 @@ async def test_run_static_runner_error_does_not_kill_other(monkeypatch, repo):
             "error": None,
         }
 
+    async def fake_mypy(*a, **kw):
+        return {"findings": [], "stats": {"duration_seconds": 0.0, "raw_count": 0}, "error": None}
+
     monkeypatch.setattr("beigebox.skills.static.pipeline.run_ruff", boom)
     monkeypatch.setattr("beigebox.skills.static.pipeline.run_semgrep", fake_semgrep)
+    monkeypatch.setattr("beigebox.skills.static.pipeline.run_mypy", fake_mypy)
 
     result = await run_static(repo)
     assert result["stats"]["ruff_error"] is not None
@@ -331,8 +481,12 @@ async def test_run_static_finding_shape(monkeypatch, repo):
     async def fake_run_semgrep(*a, **kw):
         return {"findings": [], "stats": {"duration_seconds": 0.0, "raw_count": 0}, "error": None}
 
+    async def fake_run_mypy(*a, **kw):
+        return {"findings": [], "stats": {"duration_seconds": 0.0, "raw_count": 0}, "error": None}
+
     monkeypatch.setattr("beigebox.skills.static.pipeline.run_ruff", fake_run_ruff)
     monkeypatch.setattr("beigebox.skills.static.pipeline.run_semgrep", fake_run_semgrep)
+    monkeypatch.setattr("beigebox.skills.static.pipeline.run_mypy", fake_run_mypy)
 
     result = await run_static(repo)
     assert result["findings"][0]["finding_id"].startswith("static_")
@@ -366,8 +520,12 @@ async def test_run_static_dedupe_same_tool_same_rule_same_loc(monkeypatch, repo)
     async def fake_run_semgrep(*a, **kw):
         return {"findings": [], "stats": {"duration_seconds": 0.0, "raw_count": 0}, "error": None}
 
+    async def fake_run_mypy(*a, **kw):
+        return {"findings": [], "stats": {"duration_seconds": 0.0, "raw_count": 0}, "error": None}
+
     monkeypatch.setattr("beigebox.skills.static.pipeline.run_ruff", fake_run_ruff)
     monkeypatch.setattr("beigebox.skills.static.pipeline.run_semgrep", fake_run_semgrep)
+    monkeypatch.setattr("beigebox.skills.static.pipeline.run_mypy", fake_run_mypy)
 
     result = await run_static(repo)
     assert result["stats"]["total_findings"] == 1
@@ -375,6 +533,44 @@ async def test_run_static_dedupe_same_tool_same_rule_same_loc(monkeypatch, repo)
 
 @pytest.mark.asyncio
 async def test_run_static_disabled_runners_returns_empty():
-    result = await run_static("/tmp", enable_ruff=False, enable_semgrep=False)
+    result = await run_static(
+        "/tmp", enable_ruff=False, enable_semgrep=False, enable_mypy=False,
+    )
     assert result["stats"]["total_findings"] == 0
     assert result["raw_results"] == {}
+
+
+@pytest.mark.asyncio
+async def test_run_static_mypy_findings_get_high_when_dangerous(monkeypatch, repo):
+    """Mypy attr-defined / arg-type errors should ride through to high-severity findings."""
+
+    async def fake_run_ruff(*a, **kw):
+        return {"findings": [], "stats": {"duration_seconds": 0.0, "raw_count": 0}, "error": None}
+
+    async def fake_run_semgrep(*a, **kw):
+        return {"findings": [], "stats": {"duration_seconds": 0.0, "raw_count": 0}, "error": None}
+
+    async def fake_run_mypy(*a, **kw):
+        return {
+            "findings": [
+                {"tool": "mypy", "rule_id": "attr-defined", "severity": "high", "type": "logic_error",
+                 "file": str(repo / "a.py"), "line": 12, "column": 5,
+                 "message": "Module has no attribute 'foo'", "url": ""},
+                {"tool": "mypy", "rule_id": "no-untyped-def", "severity": "medium", "type": "logic_error",
+                 "file": str(repo / "a.py"), "line": 15, "column": 1,
+                 "message": "Function is missing type annotation", "url": ""},
+            ],
+            "stats": {"duration_seconds": 1.5, "raw_count": 2},
+            "error": None,
+        }
+
+    monkeypatch.setattr("beigebox.skills.static.pipeline.run_ruff", fake_run_ruff)
+    monkeypatch.setattr("beigebox.skills.static.pipeline.run_semgrep", fake_run_semgrep)
+    monkeypatch.setattr("beigebox.skills.static.pipeline.run_mypy", fake_run_mypy)
+
+    result = await run_static(repo)
+    assert result["stats"]["mypy_count"] == 2
+    assert result["stats"]["total_findings"] == 2
+    high = next(f for f in result["findings"] if f["severity"] == "high")
+    assert high["static_meta"]["tool"] == "mypy"
+    assert high["static_meta"]["rule_id"] == "attr-defined"

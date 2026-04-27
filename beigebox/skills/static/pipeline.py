@@ -1,8 +1,8 @@
 """Static analysis pipeline. Importable from a Trinity run or any other orchestrator.
 
-Runs ``ruff`` and ``semgrep`` concurrently, normalizes their output to
-garlicpress-shape Finding dicts, and returns a single result so static-analysis
-output can be merged with fuzz findings without translation.
+Runs ``ruff``, ``semgrep``, and ``mypy`` concurrently, normalizes their
+output to garlicpress-shape Finding dicts, and returns a single result so
+static-analysis output can be merged with fuzz findings without translation.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
-from .runners import run_ruff, run_semgrep
+from .runners import run_mypy, run_ruff, run_semgrep
 
 
 # Ruff selection bias: emphasize the "looks like a real bug" rules and skip
@@ -32,21 +32,26 @@ async def run_static(
     ruff_select: str | None = DEFAULT_RUFF_SELECT,
     ruff_ignore: str | None = None,
     semgrep_config: str | None = DEFAULT_SEMGREP_CONFIG,
+    mypy_strict: bool = False,
+    mypy_follow_imports: str = "silent",
+    mypy_extra_args: list[str] | None = None,
     enable_ruff: bool = True,
     enable_semgrep: bool = True,
+    enable_mypy: bool = True,
     ruff_timeout: float = 120.0,
     semgrep_timeout: float = 600.0,
+    mypy_timeout: float = 300.0,
     logger: Callable | None = None,
 ) -> dict[str, Any]:
-    """Run ruff + semgrep against ``repo_path``, return garlicpress-shape findings.
+    """Run ruff + semgrep + mypy against ``repo_path``, return garlicpress-shape findings.
 
     Returns:
         {
           "findings": [garlicpress-shape Finding dicts],
-          "stats": {ruff_count, semgrep_count, total_findings,
+          "stats": {ruff_count, semgrep_count, mypy_count, total_findings,
                     ruff_duration_seconds, semgrep_duration_seconds,
-                    ruff_error, semgrep_error},
-          "raw_results": {"ruff": {...}, "semgrep": {...}},
+                    mypy_duration_seconds, ruff_error, semgrep_error, mypy_error},
+          "raw_results": {"ruff": {...}, "semgrep": {...}, "mypy": {...}},
         }
     """
     repo_path = Path(repo_path).resolve()
@@ -65,6 +70,17 @@ async def run_static(
             run_semgrep(repo_path, config=semgrep_config, timeout=semgrep_timeout)
         ))
         task_names.append("semgrep")
+    if enable_mypy:
+        tasks.append(asyncio.create_task(
+            run_mypy(
+                repo_path,
+                strict=mypy_strict,
+                follow_imports=mypy_follow_imports,
+                extra_args=mypy_extra_args,
+                timeout=mypy_timeout,
+            )
+        ))
+        task_names.append("mypy")
 
     if not tasks:
         return _empty_result()
@@ -96,10 +112,13 @@ async def run_static(
         "total_findings": len(findings),
         "ruff_count": len(raw.get("ruff", {}).get("findings", [])),
         "semgrep_count": len(raw.get("semgrep", {}).get("findings", [])),
+        "mypy_count": len(raw.get("mypy", {}).get("findings", [])),
         "ruff_duration_seconds": raw.get("ruff", {}).get("stats", {}).get("duration_seconds", 0.0),
         "semgrep_duration_seconds": raw.get("semgrep", {}).get("stats", {}).get("duration_seconds", 0.0),
+        "mypy_duration_seconds": raw.get("mypy", {}).get("stats", {}).get("duration_seconds", 0.0),
         "ruff_error": raw.get("ruff", {}).get("error"),
         "semgrep_error": raw.get("semgrep", {}).get("error"),
+        "mypy_error": raw.get("mypy", {}).get("error"),
     }
 
     return {"findings": findings, "stats": stats, "raw_results": raw}
@@ -176,10 +195,13 @@ def _empty_result() -> dict[str, Any]:
             "total_findings": 0,
             "ruff_count": 0,
             "semgrep_count": 0,
+            "mypy_count": 0,
             "ruff_duration_seconds": 0.0,
             "semgrep_duration_seconds": 0.0,
+            "mypy_duration_seconds": 0.0,
             "ruff_error": None,
             "semgrep_error": None,
+            "mypy_error": None,
         },
         "raw_results": {},
     }

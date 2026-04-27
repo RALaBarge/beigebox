@@ -41,16 +41,32 @@ def _build_parser() -> argparse.ArgumentParser:
         help=f"Semgrep config (registry shortcut, file, or comma-list). Default: {DEFAULT_SEMGREP_CONFIG}",
     )
     p.add_argument(
+        "--mypy-strict", action="store_true",
+        help="Run mypy in --strict mode (much louder; lots of low-severity findings).",
+    )
+    p.add_argument(
+        "--mypy-follow-imports",
+        choices=("normal", "silent", "skip", "error"),
+        default="silent",
+        help="Mypy --follow-imports value. Default: silent (don't recurse into untyped deps).",
+    )
+    p.add_argument(
         "--no-ruff", action="store_true", help="Disable the ruff runner.",
     )
     p.add_argument(
         "--no-semgrep", action="store_true", help="Disable the semgrep runner.",
     )
     p.add_argument(
+        "--no-mypy", action="store_true", help="Disable the mypy runner.",
+    )
+    p.add_argument(
         "--ruff-timeout", type=float, default=120.0, help="Ruff subprocess timeout (s). Default: 120.",
     )
     p.add_argument(
         "--semgrep-timeout", type=float, default=600.0, help="Semgrep subprocess timeout (s). Default: 600.",
+    )
+    p.add_argument(
+        "--mypy-timeout", type=float, default=300.0, help="Mypy subprocess timeout (s). Default: 300.",
     )
     p.add_argument(
         "--format",
@@ -79,10 +95,14 @@ def main(argv: list[str] | None = None) -> int:
             ruff_select=args.ruff_select,
             ruff_ignore=args.ruff_ignore,
             semgrep_config=args.semgrep_config,
+            mypy_strict=args.mypy_strict,
+            mypy_follow_imports=args.mypy_follow_imports,
             enable_ruff=not args.no_ruff,
             enable_semgrep=not args.no_semgrep,
+            enable_mypy=not args.no_mypy,
             ruff_timeout=args.ruff_timeout,
             semgrep_timeout=args.semgrep_timeout,
+            mypy_timeout=args.mypy_timeout,
         )
     )
 
@@ -96,10 +116,17 @@ def main(argv: list[str] | None = None) -> int:
     else:
         _print_summary(result)
 
-    # Non-zero if either runner errored AND found nothing useful, OR if any
-    # high+ severity finding surfaced.
+    # Non-zero if every enabled runner errored, OR if any high+ severity
+    # finding surfaced.
     stats = result.get("stats", {})
-    if stats.get("ruff_error") and stats.get("semgrep_error"):
+    enabled_errors = []
+    if not args.no_ruff:
+        enabled_errors.append(stats.get("ruff_error"))
+    if not args.no_semgrep:
+        enabled_errors.append(stats.get("semgrep_error"))
+    if not args.no_mypy:
+        enabled_errors.append(stats.get("mypy_error"))
+    if enabled_errors and all(e is not None for e in enabled_errors):
         return 3
     has_high = any(f.get("severity") in ("critical", "high") for f in result.get("findings", []))
     return 1 if has_high else 0
@@ -112,6 +139,7 @@ def _print_summary(result: dict) -> None:
     print("-" * 60)
     print(f"  ruff:    findings={stats.get('ruff_count', 0):<5} duration={stats.get('ruff_duration_seconds', 0):.2f}s  error={stats.get('ruff_error') or '-'}")
     print(f"  semgrep: findings={stats.get('semgrep_count', 0):<5} duration={stats.get('semgrep_duration_seconds', 0):.2f}s  error={stats.get('semgrep_error') or '-'}")
+    print(f"  mypy:    findings={stats.get('mypy_count', 0):<5} duration={stats.get('mypy_duration_seconds', 0):.2f}s  error={stats.get('mypy_error') or '-'}")
     print(f"  total findings (deduped): {stats.get('total_findings', 0)}")
     print()
     if not findings:
