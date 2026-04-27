@@ -318,6 +318,34 @@ def rename_key_rule(old: str, new: str, *, on_conflict: str = "prefer_new") -> R
     return _rule
 
 
+def default_max_tokens_rule(default: int) -> Rule:
+    """Set ``max_tokens=default`` only when the caller supplied neither
+    ``max_tokens`` nor ``max_completion_tokens``.
+
+    Reasoning models burn tokens on internal thinking before emitting any
+    visible output; an unset cap means the upstream's own default fires,
+    which is often as low as 4096 and silently truncates the response.
+    Setting a generous default here gives reasoning models room to finish.
+
+    Explicit caller values are always respected — this rule is a default,
+    not a floor. ``True``/``False`` are treated as not-an-integer.
+    """
+    if default <= 0:
+        raise ValueError("default_max_tokens_rule requires a positive default")
+
+    def _rule(body: dict, transforms: list[str]) -> dict:
+        for key in ("max_tokens", "max_completion_tokens"):
+            v = body.get(key)
+            if isinstance(v, int) and not isinstance(v, bool) and v > 0:
+                return body  # caller was explicit
+        out = {**body, "max_tokens": default}
+        transforms.append(f"defaulted:max_tokens={default}")
+        return out
+
+    _rule.__bb_name__ = f"default_max_tokens:{default}"  # type: ignore[attr-defined]
+    return _rule
+
+
 def set_nested_default_rule(path: tuple[str, ...], value: Any, *, only_if: Callable[[dict], bool] | None = None) -> Rule:
     """Set ``body[path[0]][path[1]]...`` to ``value`` if not already set.
 
@@ -615,6 +643,12 @@ _OPENAI_REASONING_DROP: tuple[str, ...] = (
     "top_logprobs",
 )
 
+# Token budget default for reasoning models when the caller supplied none.
+# Mutable on purpose — a deployment can monkey-patch this to tune the
+# default without touching code. Triggered only when both ``max_tokens``
+# and ``max_completion_tokens`` are absent on the request body.
+DEFAULT_REASONING_MAX_TOKENS: int = 32000
+
 
 def _default_cross_cutting_rules() -> list[Rule]:
     """The rules every profile starts with unless explicitly overridden."""
@@ -638,6 +672,7 @@ def _build_default_profiles() -> dict[str, TargetProfile]:
             rules=[
                 *base(),
                 drop_keys_rule(_OPENAI_REASONING_DROP, reason="o_series"),
+                default_max_tokens_rule(DEFAULT_REASONING_MAX_TOKENS),
                 rename_key_rule("max_tokens", "max_completion_tokens"),
             ],
         ),
@@ -713,6 +748,7 @@ DEFAULT_CAPABILITY_LAYERS: list[tuple[Callable[[str], bool], str, list[Rule]]] =
         "openai_reasoning_caps",
         [
             drop_keys_rule(_OPENAI_REASONING_DROP, reason="o_series"),
+            default_max_tokens_rule(DEFAULT_REASONING_MAX_TOKENS),
             rename_key_rule("max_tokens", "max_completion_tokens"),
         ],
     ),

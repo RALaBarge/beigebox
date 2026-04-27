@@ -8,6 +8,7 @@ import pytest
 
 from beigebox.request_normalizer import (
     DEFAULT_PROFILES,
+    DEFAULT_REASONING_MAX_TOKENS,
     NormalizedRequest,
     TargetProfile,
     canonicalize_tool_choice_rule,
@@ -15,6 +16,7 @@ from beigebox.request_normalizer import (
     canonicalize_tools_rule,
     coerce_messages_rule,
     collapse_system_messages_rule,
+    default_max_tokens_rule,
     drop_keys_rule,
     drop_tools_rule,
     is_reasoning_model,
@@ -202,6 +204,80 @@ def test_rename_key_conflict_skip():
     body = {"max_tokens": 10, "max_completion_tokens": 20}
     out, t = _apply(rename_key_rule("max_tokens", "max_completion_tokens", on_conflict="skip"), body)
     assert out == body
+
+
+# ---------------------------------------------------------------------------
+# default_max_tokens_rule
+# ---------------------------------------------------------------------------
+
+
+def test_default_max_tokens_when_absent():
+    out, t = _apply(default_max_tokens_rule(16000), {"model": "deepseek-r1"})
+    assert out["max_tokens"] == 16000
+    assert "defaulted:max_tokens=16000" in t
+
+
+def test_default_max_tokens_respects_explicit_max_tokens():
+    out, t = _apply(default_max_tokens_rule(16000), {"max_tokens": 4000})
+    assert out == {"max_tokens": 4000}
+    assert t == []
+
+
+def test_default_max_tokens_respects_explicit_max_completion_tokens():
+    out, t = _apply(default_max_tokens_rule(16000), {"max_completion_tokens": 4000})
+    assert out == {"max_completion_tokens": 4000}
+    assert t == []
+
+
+def test_default_max_tokens_ignores_zero_and_bool():
+    # 0 means "caller hasn't really set this" — treat as absent.
+    out, t = _apply(default_max_tokens_rule(16000), {"max_tokens": 0})
+    assert out["max_tokens"] == 16000
+    # True/False are integers in Python but should never count as a budget.
+    out, t = _apply(default_max_tokens_rule(16000), {"max_tokens": True})
+    assert out["max_tokens"] == 16000
+
+
+def test_default_max_tokens_validates_positive_default():
+    with pytest.raises(ValueError):
+        default_max_tokens_rule(0)
+    with pytest.raises(ValueError):
+        default_max_tokens_rule(-1)
+
+
+def test_reasoning_model_through_openrouter_gets_token_default():
+    """The full path: trinity-thinking via openrouter target picks up the
+    reasoning capability layer, defaults max_tokens, and renames to
+    max_completion_tokens for the upstream."""
+    nr = normalize_request(
+        {"model": "arcee-ai/trinity-large-thinking",
+         "messages": [{"role": "user", "content": "hi"}]},
+        target="openrouter",
+    )
+    assert nr.body.get("max_completion_tokens") == DEFAULT_REASONING_MAX_TOKENS
+    assert "max_tokens" not in nr.body
+
+
+def test_reasoning_model_through_openrouter_respects_explicit_cap():
+    nr = normalize_request(
+        {"model": "arcee-ai/trinity-large-thinking",
+         "messages": [{"role": "user", "content": "hi"}],
+         "max_tokens": 2000},
+        target="openrouter",
+    )
+    # Explicit cap survives the rename, no default fires.
+    assert nr.body.get("max_completion_tokens") == 2000
+    assert "max_tokens" not in nr.body
+
+
+def test_non_reasoning_model_not_token_defaulted():
+    nr = normalize_request(
+        {"model": "gpt-4o-mini",
+         "messages": [{"role": "user", "content": "hi"}]},
+        target="openrouter",
+    )
+    assert "max_tokens" not in nr.body
+    assert "max_completion_tokens" not in nr.body
 
 
 def test_set_nested_default_creates_path():
