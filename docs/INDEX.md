@@ -27,6 +27,20 @@ Complete reference for BeigeBox deployment, configuration, and usage.
 - **[Observability Coverage](observability-coverage.md)** — definitive map of what's emitted, what's a gap, and the rubric for adding new events
 - **[Security](security.md)** — Supply chain hardening, hash locking, network isolation, Docker hardening, threat model
 
+## Skills
+
+Importable async pipelines under `beigebox/skills/` — each is a self-contained directory with `pipeline.py`, a CLI, and a `SKILL.md`.
+
+- **`fuzz`** ([SKILL.md](../beigebox/skills/fuzz/SKILL.md)) — pure-Python coverage-blind mutation fuzzer; risk-scored discovery, adaptive time budget, package-aware harness loader, garlicpress-shape findings
+- **`static`** ([SKILL.md](../beigebox/skills/static/SKILL.md)) — ruff + semgrep + mypy, concurrent subprocess runners, per-runner failure isolation, garlicpress-shape findings
+- **`fanout`** ([SKILL.md](../beigebox/skills/fanout/SKILL.md)) — fan a list of items out to N parallel OpenAI-compat calls + optional reduce; solves the "reasoning model blew its budget on a 13-file prompt" failure mode
+- **`host-audit`** ([SKILL.md](../beigebox/skills/host-audit/SKILL.md)) — single-host audit of running containers/VMs and listening services
+- **`services-inventory`** ([SKILL.md](../beigebox/skills/services-inventory/SKILL.md)) — same audit fleet-wide via SSH
+
+### Portfolio
+
+- **[fuzz + static six-repo validation](portfolio/fuzz-static-validation.md)** — methodology, results table, notable findings, what the validation proved
+
 ---
 
 ## By Use Case

@@ -306,6 +306,24 @@ Inspired by [HexStrike AI](https://github.com/0x4m4/hexstrike-ai) (MIT) — re-i
 
 ---
 
+## Skills
+
+BeigeBox ships a `beigebox/skills/` library: importable async pipelines that any orchestrator (Trinity, the CLI, an MCP tool) can call with one line. Each skill is a directory with `pipeline.py`, `cli.py`, a `SKILL.md`, and a wrapper at `scripts/<name>.sh`.
+
+| Skill | Purpose | Entry |
+|---|---|---|
+| **`fuzz`** | Pure-Python coverage-blind mutation fuzzer. Discovers top-level fuzzable functions in a repo, risk-scores them, allocates per-function time budget, runs subprocess harnesses with a package-aware loader, classifies crashes as app vs harness so missing deps don't surface as findings. | `python -m beigebox.skills.fuzz <repo>` |
+| **`static`** | Static analysis: ruff (full ruleset incl. bandit-port `S` rules), semgrep (registry-backed pattern + dataflow), mypy (type checking). Three concurrent subprocess runners; per-runner failure isolation. | `python -m beigebox.skills.static <repo>` |
+| **`fanout`** | List-in → N parallel OpenAI-compat calls → optional reduce. Solves the "reasoning model blew its budget on a 13-file prompt" failure mode by splitting into one call per item. | `python -m beigebox.skills.fanout --items-glob ...` |
+| **`host-audit`** | Cross-platform audit of running containers/VMs and listening services on a single host. | `beigebox/skills/host-audit/scripts/audit.sh` |
+| **`services-inventory`** | Same audit, fleet-wide via SSH (`--host`, `--hosts`, `--all-hosts`). | `beigebox/skills/services-inventory/scripts/inventory.sh` |
+
+`fuzz` and `static` emit the same `garlicpress.Finding`-shape dicts so a Trinity orchestrator can merge static + dynamic results into one ranked report without translation. The contract is documented per-skill in `beigebox/skills/<name>/SKILL.md`.
+
+**Validation**: see [docs/portfolio/fuzz-static-validation.md](docs/portfolio/fuzz-static-validation.md) — six-repo pass (~131M fuzz iterations, 50 high-severity static findings, zero fuzz false positives, two real fuzz findings).
+
+---
+
 ## Documentation
 
 - **[Security](d0cs/security.md)** — Supply chain hardening, read-only root, network segmentation, threat model, defense layers
