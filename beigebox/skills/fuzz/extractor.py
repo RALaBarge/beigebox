@@ -69,7 +69,12 @@ class FunctionExtractor:
         line_end = node.end_lineno or len(lines)
         func_source = "\n".join(lines[line_start:line_end])
 
-        positional = [arg.arg for arg in node.args.args]
+        # Include positional-only args (def foo(a, /, b)) along with regular
+        # ones — both feed the harness identically. Defaults still align right
+        # across the combined list per Python's grammar.
+        positional = [arg.arg for arg in node.args.posonlyargs] + [
+            arg.arg for arg in node.args.args
+        ]
         # Number of positional args that have a default value (defaults align right).
         num_defaults = len(node.args.defaults)
         # Tail-defaults: True if every arg after the first has a default.

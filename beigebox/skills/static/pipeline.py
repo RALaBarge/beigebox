@@ -132,11 +132,15 @@ def _to_finding(raw: dict[str, Any], repo_path: Path) -> dict[str, Any]:
     line = raw.get("line", 0)
     col = raw.get("column", 0)
 
-    # Make the location relative to the repo root if possible — easier on a human reader.
+    # Make the location relative to the repo root if possible — easier on a
+    # human reader. Use ``repo_path / file_path`` rather than a plain
+    # ``Path(file_path).resolve()`` so a tool that emits a path relative to
+    # the repo (rather than absolute) doesn't get joined to the process cwd.
+    # The ``/`` operator preserves an absolute file_path as-is.
     try:
-        rel_path = str(Path(file_path).resolve().relative_to(repo_path))
+        rel_path = str((repo_path / file_path).resolve().relative_to(repo_path))
     except (ValueError, OSError):
-        rel_path = file_path or os.path.basename(file_path)
+        rel_path = file_path or "<unknown>"
 
     seed = f"static:{tool}:{rule_id}:{rel_path}:{line}:{col}:{raw.get('message','')}"
     finding_id = "static_" + hashlib.sha1(seed.encode()).hexdigest()[:12]

@@ -141,6 +141,34 @@ class TestFunctionExtractor:
         funcs = FunctionExtractor().extract_functions(code, "test.py")
         assert funcs and funcs[0]["is_fuzzable"] is True
 
+    def test_positional_only_param_is_recognized(self):
+        """def foo(a, /) — positional-only args live on node.args.posonlyargs.
+
+        Earlier code ignored that list, so functions defined with the
+        positional-only marker were misclassified as no_parameters and
+        silently skipped during fuzz target discovery. Reviewer DeepSeek
+        flagged this on 2026-04-28; regression fixture below.
+        """
+        code = "def encode(data, /):\n    return bytes(data)\n"
+        funcs = FunctionExtractor().extract_functions(code, "test.py")
+        assert funcs, "function should be discovered"
+        assert funcs[0]["parameters"] == ["data"]
+        assert funcs[0]["is_fuzzable"] is True
+
+    def test_mixed_positional_only_and_regular(self):
+        """def foo(a, /, b=1) — combined posonlyargs+args, defaults align right."""
+        code = "def parse(data, /, strict=False):\n    return data\n"
+        funcs = FunctionExtractor().extract_functions(code, "test.py")
+        assert funcs and funcs[0]["parameters"] == ["data", "strict"]
+        assert funcs[0]["is_fuzzable"] is True
+
+    def test_mixed_positional_only_two_required_not_fuzzable(self):
+        """def foo(a, /, b) — two required args, one-arg call would TypeError."""
+        code = "def merge(a, /, b):\n    return [a, b]\n"
+        funcs = FunctionExtractor().extract_functions(code, "test.py")
+        assert funcs and funcs[0]["is_fuzzable"] is False
+        assert funcs[0]["reason"] == "extra_required_args"
+
 
 class TestSeedCorpusExtractor:
     def test_extract_from_docstring(self):

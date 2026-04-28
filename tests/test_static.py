@@ -532,6 +532,46 @@ async def test_run_static_dedupe_same_tool_same_rule_same_loc(monkeypatch, repo)
 
 
 @pytest.mark.asyncio
+async def test_run_static_relative_file_path_doesnt_resolve_to_cwd(monkeypatch, repo, tmp_path):
+    """If a runner emits a path relative to repo root (rather than absolute),
+    _to_finding must join it with repo_path, not the process cwd. Regression
+    flagged by DeepSeek review on 2026-04-28."""
+    # Move cwd somewhere that has no relation to the repo, to expose any
+    # accidental cwd-based resolution.
+    other_dir = tmp_path / "totally_unrelated"
+    other_dir.mkdir()
+    monkeypatch.chdir(other_dir)
+
+    async def fake_run_ruff(*a, **kw):
+        return {
+            "findings": [{
+                "tool": "ruff", "rule_id": "F401", "severity": "medium", "type": "logic_error",
+                "file": "a.py",                # ← relative to repo, not absolute
+                "line": 1, "column": 1, "message": "unused", "url": "",
+            }],
+            "stats": {"duration_seconds": 0.0, "raw_count": 1},
+            "error": None,
+        }
+
+    async def fake_run_semgrep(*a, **kw):
+        return {"findings": [], "stats": {"duration_seconds": 0.0, "raw_count": 0}, "error": None}
+
+    async def fake_run_mypy(*a, **kw):
+        return {"findings": [], "stats": {"duration_seconds": 0.0, "raw_count": 0}, "error": None}
+
+    monkeypatch.setattr("beigebox.skills.static.pipeline.run_ruff", fake_run_ruff)
+    monkeypatch.setattr("beigebox.skills.static.pipeline.run_semgrep", fake_run_semgrep)
+    monkeypatch.setattr("beigebox.skills.static.pipeline.run_mypy", fake_run_mypy)
+
+    result = await run_static(repo)
+    assert len(result["findings"]) == 1
+    f = result["findings"][0]
+    # Relative path should resolve under repo, not under other_dir/cwd.
+    assert f["location"] == "a.py:1"
+    assert f["traceability"]["file"] == "a.py"
+
+
+@pytest.mark.asyncio
 async def test_run_static_disabled_runners_returns_empty():
     result = await run_static(
         "/tmp", enable_ruff=False, enable_semgrep=False, enable_mypy=False,

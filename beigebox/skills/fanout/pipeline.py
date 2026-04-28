@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from typing import Any
 
@@ -25,24 +26,40 @@ DEFAULT_API_KEY = "none"  # BeigeBox proxy accepts any token; upstream auth hand
 DEFAULT_TIMEOUT = 1200.0  # 20 min per call — reasoning models need it.
 
 
+_PLACEHOLDER_RE = re.compile(r"\{(index|item|item\.[A-Za-z_][A-Za-z0-9_-]*)\}")
+
+
 def _render(template: str, item: Any, index: int) -> str:
     """Substitute ``{item}``, ``{item.field}``, and ``{index}`` into ``template``.
 
-    Plain string replacement — does not go through ``str.format``, so format-spec
-    semantics (attribute lookup, alignment) don't apply and ``{item.name}`` on a
-    dict resolves to ``item["name"]`` as expected. Unknown placeholders are left
-    as literal ``{key}`` rather than raising, so a typo doesn't kill the run.
-    For dict items, ``{item}`` itself serializes via JSON.
+    Single-pass regex substitution: each ``{...}`` match is resolved exactly
+    once, so a placeholder that happens to land inside a substituted value
+    is not re-substituted. (An earlier multi-pass implementation could expand
+    ``{item.other_field}`` literally embedded in a dict value, silently
+    corrupting templates.)
+
+    Unknown placeholders are left as literal ``{key}`` rather than raising, so
+    a typo doesn't kill the run. For dict items, ``{item}`` itself serializes
+    via JSON; ``{item.field}`` resolves to ``item["field"]`` (string passes
+    through, non-strings JSON-encode).
     """
-    out = template.replace("{index}", str(index))
-    if isinstance(item, dict):
-        out = out.replace("{item}", json.dumps(item, ensure_ascii=False))
-        for k, v in item.items():
-            v_str = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
-            out = out.replace("{item." + k + "}", v_str)
-    else:
-        out = out.replace("{item}", str(item))
-    return out
+    is_dict = isinstance(item, dict)
+
+    def _resolve(match: "re.Match[str]") -> str:
+        key = match.group(1)
+        if key == "index":
+            return str(index)
+        if key == "item":
+            return json.dumps(item, ensure_ascii=False) if is_dict else str(item)
+        if key.startswith("item."):
+            field = key[len("item."):]
+            if is_dict and field in item:
+                v = item[field]
+                return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+        # Unknown — leave the literal placeholder in place.
+        return match.group(0)
+
+    return _PLACEHOLDER_RE.sub(_resolve, template)
 
 
 def _render_reduce(template: str, joined_responses: str, count: int) -> str:
@@ -180,18 +197,21 @@ async def fan_out(
 
         reduce_result: dict[str, Any] | None = None
         if reduce_prompt and (succeeded and (reduce_on_partial or not failed)):
+            # Number sequentially over succeeded responses only — labelling them by
+            # the original `responses` index would skip numbers when items failed
+            # ("Response 2" with no Response 1 is misleading to the merger model).
             joined = "\n\n---\n\n".join(
-                f"### Response {i + 1}\n{r['content']}"
-                for i, r in enumerate(responses)
-                if r["error"] is None
+                f"### Response {n + 1}\n{r['content']}"
+                for n, r in enumerate(succeeded)
             )
             reduce_rendered = _render_reduce(reduce_prompt, joined, len(succeeded))
+            reduce_model_id = reduce_model or model
             try:
                 reduce_result = await _one_call(
                     client,
                     base_url=base_url,
                     api_key=api_key,
-                    model=reduce_model or model,
+                    model=reduce_model_id,
                     rendered_prompt=reduce_rendered,
                     system=reduce_system,
                     temperature=temperature,
@@ -199,12 +219,15 @@ async def fan_out(
                 )
                 reduce_result["error"] = None
             except Exception as exc:
+                # Mirror the success-path schema (incl. "model") so downstream
+                # callers can read reduce_result["model"] without a KeyError.
                 reduce_result = {
                     "error": f"{type(exc).__name__}: {exc}",
                     "content": "",
                     "finish_reason": None,
                     "tokens": {},
                     "duration_seconds": 0.0,
+                    "model": reduce_model_id,
                 }
 
     total_prompt = sum((r["tokens"].get("prompt_tokens") or 0) for r in responses)

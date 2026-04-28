@@ -46,6 +46,27 @@ def test_render_unknown_placeholder_left_literal():
     assert out == "got x also {missing}"
 
 
+def test_render_no_recursive_substitution():
+    """A placeholder embedded inside a substituted value must not be re-resolved.
+
+    Regression: an earlier multi-pass replacement walked over already-substituted
+    text and would expand ``{item.other}`` literally embedded in a dict value,
+    silently corrupting templates where one field's value mentioned another
+    field's name. See Grok / DeepSeek review of 2026-04-28.
+    """
+    item = {"desc": "see {item.file}", "file": "report.pdf"}
+    # The desc value literally contains "{item.file}" — that text should be
+    # preserved as-is, not expanded into "see report.pdf".
+    out = _render("desc={item.desc}", item, 0)
+    assert out == "desc=see {item.file}"
+
+
+def test_render_index_inside_value_not_re_resolved():
+    """Index placeholder embedded in a dict value must not be expanded again."""
+    out = _render("{item.note}", {"note": "ref [{index}]"}, 5)
+    assert out == "ref [{index}]"
+
+
 # ---------------------------------------------------------------------------
 # fan_out — full pipeline with a mocked transport
 # ---------------------------------------------------------------------------
@@ -300,6 +321,87 @@ async def test_fan_out_reduce_on_partial_runs(patched_client):
     )
     assert result["reduce"] is not None
     assert result["reduce"]["content"] == "MERGED-PARTIAL"
+
+
+@pytest.mark.asyncio
+async def test_fan_out_reduce_responses_numbered_sequentially_when_some_fail(patched_client):
+    """When item[0] fails and item[1] succeeds, the reduce prompt shows
+    'Response 1' (not 'Response 2'). Labelling by the original index would
+    skip numbers and confuse the merger."""
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        user = body["messages"][-1]["content"]
+        if "boom" in user:
+            return httpx.Response(500, json={"error": "x"})
+        if "MERGE_THIS" in user:
+            captured["reduce_prompt"] = user
+            return httpx.Response(
+                200,
+                json={
+                    "model": body["model"],
+                    "choices": [{"message": {"content": "merged"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "model": body["model"],
+                "choices": [{"message": {"content": f"OK-{user}"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            },
+        )
+
+    patched_client["handler"] = _handler
+
+    result = await fan_out(
+        items=["boom", "fine", "alsofine"],  # first item fails
+        prompt_template="{item}",
+        model="m",
+        reduce_prompt="MERGE_THIS {responses}",
+        reduce_on_partial=True,
+    )
+    assert result["reduce"] is not None
+    assert "Response 1" in captured["reduce_prompt"]
+    # No "Response 3" — only two succeeded, so the highest label is Response 2.
+    assert "Response 3" not in captured["reduce_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_fan_out_reduce_error_dict_includes_model_key(patched_client):
+    """Regression: the reduce-error path used to omit "model" while the
+    success path included it, so callers reading reduce_result["model"]
+    would KeyError on failure."""
+    def _handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        user = body["messages"][-1]["content"]
+        if "MERGE" in user:
+            # Reduce call: blow up with a non-200 to exercise the error path.
+            return httpx.Response(500, json={"error": "boom"})
+        return httpx.Response(
+            200,
+            json={
+                "model": body["model"],
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            },
+        )
+
+    patched_client["handler"] = _handler
+
+    result = await fan_out(
+        items=["a", "b"],
+        prompt_template="{item}",
+        model="primary-model",
+        reduce_prompt="MERGE {responses}",
+        reduce_model="reducer-model",
+    )
+    assert result["reduce"] is not None
+    assert result["reduce"]["error"] is not None
+    # Mirrors the success-path schema.
+    assert result["reduce"]["model"] == "reducer-model"
 
 
 @pytest.mark.asyncio
