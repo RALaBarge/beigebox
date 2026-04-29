@@ -168,13 +168,20 @@ class RetryableBackendWrapper:
 
     async def forward_stream(self, body: dict) -> AsyncIterator[str]:
         """
-        Stream with retry on transient errors before any bytes are sent.
+        Stream with retry on transient errors **before any bytes are sent**.
+
+        Once a single chunk has been yielded to the caller, the bytes are in
+        the client's response buffer and we cannot retry without corrupting
+        the stream — a second attempt would replay tokens from the start,
+        producing duplicated content and two `[DONE]` markers. So mid-stream
+        failures (StreamStallError after partial output, connection drop
+        after first chunk, etc.) are re-raised to the router, which propagates
+        the failure to the client cleanly rather than papering over it.
 
         HTTP 4xx errors that are non-retryable (404, 400, 401, 403) are
         re-raised immediately so the MultiBackendRouter can try the next
-        backend.  Retryable errors (429, 5xx) are retried with backoff;
-        after exhaustion the last exception is re-raised so the router
-        can still fall through rather than leaking error text inline.
+        backend. Retryable errors (429, 5xx) before first chunk are retried
+        with backoff; after exhaustion the last exception is re-raised.
         """
         from beigebox.config import get_config as _get_config
         stall_secs: float = _get_config().get("advanced", {}).get(
@@ -186,20 +193,36 @@ class RetryableBackendWrapper:
         retry_after_hint: float | None = None
 
         for attempt in range(self.max_retries + 1):
+            yielded_anything = False
             try:
                 async for line in _stall_guarded(
                     self.backend.forward_stream(body), stall_secs
                 ):
+                    yielded_anything = True
                     yield line
                 return  # stream completed successfully
             except StreamStallError as e:
+                if yielded_anything:
+                    logger.error(
+                        "Backend '%s' stream stall mid-response for '%s' "
+                        "(partial bytes already delivered, no retry): %s",
+                        self.name, model, e,
+                    )
+                    raise
                 last_exc = e
                 retry_after_hint = None
                 logger.warning(
-                    "Backend '%s' stream stall for '%s' (%s), retry %d/%d",
+                    "Backend '%s' pre-stream stall for '%s' (%s), retry %d/%d",
                     self.name, model, e, attempt + 1, self.max_retries,
                 )
             except httpx.HTTPStatusError as e:
+                if yielded_anything:
+                    logger.error(
+                        "Backend '%s' HTTP %d mid-stream for '%s' "
+                        "(partial bytes already delivered, no retry)",
+                        self.name, e.response.status_code, model,
+                    )
+                    raise
                 status = e.response.status_code
                 if not self._is_retryable(status):
                     # Permanent HTTP error — propagate immediately, no retry
@@ -211,7 +234,14 @@ class RetryableBackendWrapper:
                 last_exc = e
                 retry_after_hint = self._retry_after(e.response) if status == 429 else None
             except Exception as e:
-                # Connection error, timeout, etc.
+                if yielded_anything:
+                    logger.error(
+                        "Backend '%s' connection error mid-stream for '%s' "
+                        "(partial bytes already delivered, no retry): %s",
+                        self.name, model, e,
+                    )
+                    raise
+                # Connection error, timeout, etc. — pre-first-chunk only
                 last_exc = e
                 retry_after_hint = None
 
