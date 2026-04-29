@@ -1604,11 +1604,22 @@ class CDPTool:
                         os.rename(str(cdp_cookies_path), str(backup_path))
                         logger.info("Backed up existing CDP cookies to %s", backup_path)
                         self._mimic_symlinks.append(str(backup_path))
+                # If a stale symlink remains from a prior session, drop it.
+                elif cdp_cookies_path.is_symlink():
+                    cdp_cookies_path.unlink()
 
-                # Create symlink: CDP cookies → user's cookies
-                os.symlink(user_cookies, str(cdp_cookies_path))
+                # Copy (do NOT symlink) the user's cookies into the CDP profile.
+                # A symlink lets the CDP-controlled Chrome write back into the
+                # user's real browser state — session cookies poisoned, OAuth
+                # tokens overwritten, deletes propagated. A copy keeps the
+                # blast radius inside the CDP profile.
+                import shutil
+                shutil.copy2(user_cookies, str(cdp_cookies_path))
                 self._mimic_symlinks.append(str(cdp_cookies_path))
-                logger.info("Linked CDP cookies: %s → %s", cdp_cookies_path, user_cookies)
+                logger.info(
+                    "Copied CDP cookies (read-only mimic): %s ← %s",
+                    cdp_cookies_path, user_cookies,
+                )
                 cookies_linked = True
 
             # Inject browser fingerprinting via CDP
@@ -1686,11 +1697,13 @@ class CDPTool:
 
         except Exception as exc:
             logger.error("mimic_activate failed: %s", exc)
-            # Attempt cleanup on error
+            # Attempt cleanup on error. Items are either the cookies copy
+            # (regular file or stale symlink) or a `.bak` of the original
+            # CDP cookies; treat both.
             for path in self._mimic_symlinks:
                 try:
                     p = Path(path)
-                    if p.is_symlink():
+                    if p.is_symlink() or (p.is_file() and p.suffix != ".bak"):
                         p.unlink()
                 except Exception as e:
                     logger.warning("Failed to clean up %s: %s", path, e)
@@ -1709,15 +1722,12 @@ class CDPTool:
         try:
             results = []
 
-            # Remove symlinks
+            # Remove the cookies copy (or stale symlink from older versions)
+            # and restore any `.bak` of the original CDP cookies.
             for path_str in self._mimic_symlinks:
                 try:
                     path = Path(path_str)
-                    if path.is_symlink():
-                        path.unlink()
-                        logger.info("Removed symlink: %s", path)
-                        results.append(f"Removed: {path}")
-                    elif path.suffix == ".bak":
+                    if path.suffix == ".bak":
                         # Restore backed-up cookies
                         original = path.with_suffix("")
                         if original.exists():
@@ -1725,6 +1735,10 @@ class CDPTool:
                         os.rename(str(path), str(original))
                         logger.info("Restored backed-up cookies: %s", original)
                         results.append(f"Restored: {original}")
+                    elif path.is_symlink() or path.is_file():
+                        path.unlink()
+                        logger.info("Removed cookies copy: %s", path)
+                        results.append(f"Removed: {path}")
                 except Exception as e:
                     logger.warning("Failed to clean up %s: %s", path_str, e)
                     results.append(f"Failed to remove {path_str}: {e}")

@@ -674,7 +674,6 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
     Accepts the token via:
       Authorization: Bearer <token>
       api-key: <token>          (OpenAI-style header)
-      ?api_key=<token>          (query param fallback)
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
@@ -685,15 +684,13 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         if path in _AUTH_EXEMPT or any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIXES):
             return await call_next(request)
 
-        # Extract token
+        # Extract token. Querystring (?api_key=...) is intentionally NOT accepted
+        # — it leaks via access logs, browser history, referrers, and proxy logs.
         auth_header = request.headers.get("authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header[7:].strip()
         else:
-            token = (
-                request.headers.get("api-key", "")
-                or request.query_params.get("api_key", "")
-            )
+            token = request.headers.get("api-key", "")
 
         meta = _app_state.auth_registry.validate(token)
 

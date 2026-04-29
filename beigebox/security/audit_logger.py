@@ -219,26 +219,32 @@ class AuditLogger:
         Useful for finding attack patterns.
         """
         conditions = ["decision = 'DENY'"]
+        params: list = []
 
         if severity:
-            conditions.append(f"severity = '{severity}'")
+            conditions.append("severity = ?")
+            params.append(severity)
 
         if tool:
-            conditions.append(f"tool = '{tool}'")
+            conditions.append("tool = ?")
+            params.append(tool)
 
-        # Last N hours
+        # Bound numerics so a caller can't pass weird values (negative, huge).
+        hours = max(0, int(hours))
+        limit = max(0, min(int(limit), 10_000))
+
+        # Last N hours — `hours` is now an int, safe to format into the
+        # datetime() literal (sqlite has no parameter binding for modifiers).
         conditions.append(f"datetime(timestamp) > datetime('now', '-{hours} hours')")
-
         where_clause = " AND ".join(conditions)
 
         with sqlite3.connect(str(self.db_path)) as conn:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(f"""
-                SELECT * FROM audit_log
-                WHERE {where_clause}
-                ORDER BY timestamp DESC
-                LIMIT {limit}
-            """).fetchall()
+            rows = conn.execute(
+                f"SELECT * FROM audit_log WHERE {where_clause} "
+                "ORDER BY timestamp DESC LIMIT ?",
+                (*params, limit),
+            ).fetchall()
 
             return [dict(row) for row in rows]
 

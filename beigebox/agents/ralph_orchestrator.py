@@ -45,6 +45,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -135,10 +136,25 @@ class RalphOrchestrator:
                 "latency_ms": 0,
             }
         t0 = time.monotonic()
+        # test_cmd arrives via the API request body (POST /api/v1/harness/ralph),
+        # so an authenticated key with ralph access could otherwise pass arbitrary
+        # shell. Parse with shlex and exec without a shell — no metacharacter
+        # interpretation, no pipes, no command substitution. Operators who need
+        # shell features must wrap explicitly: `bash -lc 'pytest && lint'`.
+        try:
+            argv = shlex.split(self.test_cmd)
+        except ValueError as exc:
+            return {
+                "exit_code": 2,
+                "passed": False,
+                "stdout": "",
+                "stderr": f"unparseable test_cmd: {exc}",
+                "latency_ms": 0,
+            }
         try:
             result = subprocess.run(
-                self.test_cmd,
-                shell=True,
+                argv,
+                shell=False,
                 cwd=self.working_dir,
                 capture_output=True,
                 text=True,
