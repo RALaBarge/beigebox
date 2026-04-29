@@ -1,8 +1,9 @@
 """Static analysis pipeline. Importable from a Trinity run or any other orchestrator.
 
-Runs ``ruff``, ``semgrep``, and ``mypy`` concurrently, normalizes their
-output to garlicpress-shape Finding dicts, and returns a single result so
-static-analysis output can be merged with fuzz findings without translation.
+Runs ``ruff``, ``semgrep``, ``mypy``, ``pip-audit``, and ``detect-secrets``
+concurrently, normalizes their output to garlicpress-shape Finding dicts,
+and returns a single result so static-analysis output can be merged with
+fuzz findings without translation.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
-from .runners import run_mypy, run_ruff, run_semgrep
+from .runners import run_mypy, run_pip_audit, run_ruff, run_secrets, run_semgrep
 
 
 # Ruff selection bias: emphasize the "looks like a real bug" rules and skip
@@ -38,20 +39,26 @@ async def run_static(
     enable_ruff: bool = True,
     enable_semgrep: bool = True,
     enable_mypy: bool = True,
+    enable_pip_audit: bool = True,
+    enable_secrets: bool = True,
     ruff_timeout: float = 120.0,
     semgrep_timeout: float = 600.0,
     mypy_timeout: float = 300.0,
+    pip_audit_timeout: float = 180.0,
+    secrets_timeout: float = 180.0,
     logger: Callable | None = None,
 ) -> dict[str, Any]:
-    """Run ruff + semgrep + mypy against ``repo_path``, return garlicpress-shape findings.
+    """Run ruff + semgrep + mypy + pip-audit + detect-secrets against ``repo_path``,
+    return garlicpress-shape findings.
 
     Returns:
         {
           "findings": [garlicpress-shape Finding dicts],
-          "stats": {ruff_count, semgrep_count, mypy_count, total_findings,
-                    ruff_duration_seconds, semgrep_duration_seconds,
-                    mypy_duration_seconds, ruff_error, semgrep_error, mypy_error},
-          "raw_results": {"ruff": {...}, "semgrep": {...}, "mypy": {...}},
+          "stats": {<runner>_count, total_findings,
+                    <runner>_duration_seconds, <runner>_error
+                    for each of ruff/semgrep/mypy/pip_audit/secrets},
+          "raw_results": {"ruff": {...}, "semgrep": {...}, "mypy": {...},
+                          "pip_audit": {...}, "secrets": {...}},
         }
     """
     repo_path = Path(repo_path).resolve()
@@ -81,6 +88,16 @@ async def run_static(
             )
         ))
         task_names.append("mypy")
+    if enable_pip_audit:
+        tasks.append(asyncio.create_task(
+            run_pip_audit(repo_path, timeout=pip_audit_timeout)
+        ))
+        task_names.append("pip_audit")
+    if enable_secrets:
+        tasks.append(asyncio.create_task(
+            run_secrets(repo_path, timeout=secrets_timeout)
+        ))
+        task_names.append("secrets")
 
     if not tasks:
         return _empty_result()
@@ -113,12 +130,18 @@ async def run_static(
         "ruff_count": len(raw.get("ruff", {}).get("findings", [])),
         "semgrep_count": len(raw.get("semgrep", {}).get("findings", [])),
         "mypy_count": len(raw.get("mypy", {}).get("findings", [])),
+        "pip_audit_count": len(raw.get("pip_audit", {}).get("findings", [])),
+        "secrets_count": len(raw.get("secrets", {}).get("findings", [])),
         "ruff_duration_seconds": raw.get("ruff", {}).get("stats", {}).get("duration_seconds", 0.0),
         "semgrep_duration_seconds": raw.get("semgrep", {}).get("stats", {}).get("duration_seconds", 0.0),
         "mypy_duration_seconds": raw.get("mypy", {}).get("stats", {}).get("duration_seconds", 0.0),
+        "pip_audit_duration_seconds": raw.get("pip_audit", {}).get("stats", {}).get("duration_seconds", 0.0),
+        "secrets_duration_seconds": raw.get("secrets", {}).get("stats", {}).get("duration_seconds", 0.0),
         "ruff_error": raw.get("ruff", {}).get("error"),
         "semgrep_error": raw.get("semgrep", {}).get("error"),
         "mypy_error": raw.get("mypy", {}).get("error"),
+        "pip_audit_error": raw.get("pip_audit", {}).get("error"),
+        "secrets_error": raw.get("secrets", {}).get("error"),
     }
 
     return {"findings": findings, "stats": stats, "raw_results": raw}
@@ -149,7 +172,23 @@ def _to_finding(raw: dict[str, Any], repo_path: Path) -> dict[str, Any]:
     evidence_parts = [f"{tool} rule {rule_id}" if rule_id else tool]
     if raw.get("url"):
         evidence_parts.append(f"docs: {raw['url']}")
+    extra = raw.get("extra") or {}
+    if extra.get("fix_versions"):
+        evidence_parts.append(f"fix: upgrade to {', '.join(extra['fix_versions'])}")
+    if extra.get("aliases"):
+        evidence_parts.append(f"aliases: {', '.join(extra['aliases'])}")
+    if extra.get("is_verified"):
+        evidence_parts.append("VERIFIED LIVE secret (detect-secrets confirmed)")
     evidence = "\n".join(evidence_parts)
+
+    static_meta: dict[str, Any] = {
+        "tool": tool,
+        "rule_id": rule_id,
+        "column": col,
+        "url": raw.get("url", ""),
+    }
+    if extra:
+        static_meta["extra"] = extra
 
     return {
         "finding_id": finding_id,
@@ -159,12 +198,7 @@ def _to_finding(raw: dict[str, Any], repo_path: Path) -> dict[str, Any]:
         "description": description,
         "evidence": evidence,
         "traceability": {"file": rel_path, "line": line, "git_sha": None},
-        "static_meta": {
-            "tool": tool,
-            "rule_id": rule_id,
-            "column": col,
-            "url": raw.get("url", ""),
-        },
+        "static_meta": static_meta,
     }
 
 
@@ -200,12 +234,18 @@ def _empty_result() -> dict[str, Any]:
             "ruff_count": 0,
             "semgrep_count": 0,
             "mypy_count": 0,
+            "pip_audit_count": 0,
+            "secrets_count": 0,
             "ruff_duration_seconds": 0.0,
             "semgrep_duration_seconds": 0.0,
             "mypy_duration_seconds": 0.0,
+            "pip_audit_duration_seconds": 0.0,
+            "secrets_duration_seconds": 0.0,
             "ruff_error": None,
             "semgrep_error": None,
             "mypy_error": None,
+            "pip_audit_error": None,
+            "secrets_error": None,
         },
         "raw_results": {},
     }

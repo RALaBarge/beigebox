@@ -1,0 +1,52 @@
+PROMPT_VERSION: 1
+
+You are extracting durable operator knowledge from a Claude Code session
+transcript. The agent worked with host: {{HOST}}.
+
+Existing knowledge already captured for this host (do NOT repeat any of it,
+even paraphrased):
+
+<<<EXISTING
+{{EXISTING_NOTES}}
+EXISTING
+
+Emit a JSON array of note objects. Each note must pass ALL THREE filters:
+
+1. NON-OBVIOUS — a fresh operator could not derive it from `man`, `--help`,
+   or one minute of poking. Sudo quirks, container IPs, undocumented ports,
+   "this command silently truncates", "this service expects FOO header" —
+   yes. "ls lists files", "git commit makes a commit" — no.
+
+2. MOVED-THE-TASK-FORWARD — the agent actually used this fact in the
+   transcript to unblock itself or avoid a wrong path. Speculation,
+   "we should probably", or "next time we could" — rejected.
+
+3. NOT-ALREADY-KNOWN — not present verbatim or paraphrased in EXISTING
+   above and not derivable from generic Linux/macOS docs.
+
+Hard rules:
+
+- NEVER include secret values (passwords, tokens, API keys, private IPs that
+  look like leaked credentials). If a fact involves a secret, refer to its
+  LOCATION instead. Example good: "auth password for dssh is in
+  ~/.bash_aliases (alias DSSH_PW)". Example bad: "password is hunter2".
+- If the host you were asked about is forbidden or you cannot determine
+  what host the transcript pertains to, return [].
+- If nothing in the transcript passes all three filters, return [].
+- Output only JSON. No prose, no markdown fences, no apology.
+
+Schema (strict):
+[
+  {
+    "fact": "<= 200 chars",
+    "evidence": "<= 80 char quote from transcript",
+    "confidence": "high" | "medium" | "low"
+  },
+  ...
+]
+
+Transcript follows:
+
+<<<TRANSCRIPT
+{{TRANSCRIPT}}
+TRANSCRIPT

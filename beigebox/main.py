@@ -190,27 +190,15 @@ async def lifespan(app: FastAPI):
     sqlite_path, vector_store_path = get_storage_paths(cfg)
     _integrity_cfg = cfg.get("security", {}).get("memory_integrity", {})
     sqlite_store = SQLiteStore(sqlite_path, integrity_config=_integrity_cfg)
-    _storage_cfg  = cfg["storage"]
     _embed_cfg    = cfg["embedding"]
-    _backend_type = _storage_cfg.get("vector_backend", "postgres")
-    from beigebox.storage.backends import make_backend as _make_backend
+    from beigebox.storage.backends import (
+        make_backend as _make_backend,
+        build_backend_kwargs as _build_backend_kwargs,
+    )
     from beigebox.storage.blob_store import BlobStore
     from beigebox.config import get_primary_backend_url
 
-    # Build backend kwargs based on backend type
-    _backend_kwargs = {}
-    if _backend_type == "postgres":
-        _postgres_cfg = _storage_cfg.get("postgres", {})
-        _backend_kwargs = {
-            "connection_string": _postgres_cfg.get(
-                "connection_string",
-                os.environ.get("DATABASE_URL", "postgresql://localhost/beigebox")
-            ),
-            "pool_size": _postgres_cfg.get("pool_size", 5),
-        }
-    else:
-        # Fallback for other backends (chromadb, etc.)
-        _backend_kwargs = {"path": vector_store_path}
+    _backend_type, _backend_kwargs = _build_backend_kwargs(cfg, vector_store_path)
 
     # RAG poisoning detection initialization
     poisoning_detector = None

@@ -1,5 +1,6 @@
 ---
 name: host-audit
+version: 1
 description: Use when the user wants to audit / profile / fingerprint one or more machines to learn OS, hardware, network interfaces, installed virtualization stacks, running containers/VMs, and listening services. Takes a list of targets — local, SSH alias, user@host, or user:password@host — and works against Linux and macOS regardless of authentication style. Produces a markdown report (default), JSON, or a CLAUDE.md-ready section.
 ---
 

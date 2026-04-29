@@ -12,6 +12,7 @@ Adding a new backend:
     No other changes required.
 """
 
+import os
 import threading
 
 from .base import VectorBackend
@@ -85,4 +86,24 @@ def make_backend(backend_type: str, **kwargs) -> VectorBackend:
     return cls(**kwargs)
 
 
-__all__ = ["VectorBackend", "make_backend"]
+def build_backend_kwargs(cfg: dict, vector_store_path) -> tuple[str, dict]:
+    """Resolve (backend_type, kwargs) for `make_backend` from project config.
+
+    Postgres needs a connection_string; path-based backends (memory, legacy
+    chromadb) need a path. Centralized so CLI and server agree.
+    """
+    storage_cfg = cfg.get("storage", {})
+    backend_type = storage_cfg.get("vector_backend", "postgres")
+    if backend_type == "postgres":
+        pg_cfg = storage_cfg.get("postgres", {})
+        return backend_type, {
+            "connection_string": pg_cfg.get(
+                "connection_string",
+                os.environ.get("DATABASE_URL", "postgresql://localhost/beigebox"),
+            ),
+            "pool_size": pg_cfg.get("pool_size", 5),
+        }
+    return backend_type, {"path": vector_store_path}
+
+
+__all__ = ["VectorBackend", "make_backend", "build_backend_kwargs"]

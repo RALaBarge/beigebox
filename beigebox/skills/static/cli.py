@@ -22,7 +22,7 @@ from .pipeline import (
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="beigebox-static",
-        description="Static analysis (ruff + semgrep) for a Python repository.",
+        description="Static analysis (ruff + semgrep + mypy + pip-audit + detect-secrets) for a Python repository.",
     )
     p.add_argument("repo", type=Path, help="Repository root to scan.")
     p.add_argument(
@@ -60,6 +60,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-mypy", action="store_true", help="Disable the mypy runner.",
     )
     p.add_argument(
+        "--no-pip-audit", action="store_true", help="Disable the pip-audit (dependency CVE) runner.",
+    )
+    p.add_argument(
+        "--no-secrets", action="store_true", help="Disable the detect-secrets runner.",
+    )
+    p.add_argument(
         "--ruff-timeout", type=float, default=120.0, help="Ruff subprocess timeout (s). Default: 120.",
     )
     p.add_argument(
@@ -67,6 +73,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--mypy-timeout", type=float, default=300.0, help="Mypy subprocess timeout (s). Default: 300.",
+    )
+    p.add_argument(
+        "--pip-audit-timeout", type=float, default=180.0,
+        help="pip-audit per-manifest timeout (s). Default: 180.",
+    )
+    p.add_argument(
+        "--secrets-timeout", type=float, default=180.0,
+        help="detect-secrets timeout (s). Default: 180.",
     )
     p.add_argument(
         "--format",
@@ -100,9 +114,13 @@ def main(argv: list[str] | None = None) -> int:
             enable_ruff=not args.no_ruff,
             enable_semgrep=not args.no_semgrep,
             enable_mypy=not args.no_mypy,
+            enable_pip_audit=not args.no_pip_audit,
+            enable_secrets=not args.no_secrets,
             ruff_timeout=args.ruff_timeout,
             semgrep_timeout=args.semgrep_timeout,
             mypy_timeout=args.mypy_timeout,
+            pip_audit_timeout=args.pip_audit_timeout,
+            secrets_timeout=args.secrets_timeout,
         )
     )
 
@@ -126,6 +144,10 @@ def main(argv: list[str] | None = None) -> int:
         enabled_errors.append(stats.get("semgrep_error"))
     if not args.no_mypy:
         enabled_errors.append(stats.get("mypy_error"))
+    if not args.no_pip_audit:
+        enabled_errors.append(stats.get("pip_audit_error"))
+    if not args.no_secrets:
+        enabled_errors.append(stats.get("secrets_error"))
     if enabled_errors and all(e is not None for e in enabled_errors):
         return 3
     has_high = any(f.get("severity") in ("critical", "high") for f in result.get("findings", []))
@@ -137,9 +159,11 @@ def _print_summary(result: dict) -> None:
     findings = result.get("findings", [])
     print("Static analysis summary")
     print("-" * 60)
-    print(f"  ruff:    findings={stats.get('ruff_count', 0):<5} duration={stats.get('ruff_duration_seconds', 0):.2f}s  error={stats.get('ruff_error') or '-'}")
-    print(f"  semgrep: findings={stats.get('semgrep_count', 0):<5} duration={stats.get('semgrep_duration_seconds', 0):.2f}s  error={stats.get('semgrep_error') or '-'}")
-    print(f"  mypy:    findings={stats.get('mypy_count', 0):<5} duration={stats.get('mypy_duration_seconds', 0):.2f}s  error={stats.get('mypy_error') or '-'}")
+    print(f"  ruff:           findings={stats.get('ruff_count', 0):<5} duration={stats.get('ruff_duration_seconds', 0):.2f}s  error={stats.get('ruff_error') or '-'}")
+    print(f"  semgrep:        findings={stats.get('semgrep_count', 0):<5} duration={stats.get('semgrep_duration_seconds', 0):.2f}s  error={stats.get('semgrep_error') or '-'}")
+    print(f"  mypy:           findings={stats.get('mypy_count', 0):<5} duration={stats.get('mypy_duration_seconds', 0):.2f}s  error={stats.get('mypy_error') or '-'}")
+    print(f"  pip-audit:      findings={stats.get('pip_audit_count', 0):<5} duration={stats.get('pip_audit_duration_seconds', 0):.2f}s  error={stats.get('pip_audit_error') or '-'}")
+    print(f"  detect-secrets: findings={stats.get('secrets_count', 0):<5} duration={stats.get('secrets_duration_seconds', 0):.2f}s  error={stats.get('secrets_error') or '-'}")
     print(f"  total findings (deduped): {stats.get('total_findings', 0)}")
     print()
     if not findings:

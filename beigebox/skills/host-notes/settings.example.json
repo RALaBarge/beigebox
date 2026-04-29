@@ -1,0 +1,29 @@
+{
+  "_comment": "Merge the 'hooks' block below into .claude/settings.json (project-shared, not local) to activate host-notes auto-load + auto-reflect. Read SKILL.md before activating. The UserPromptSubmit hook fires on every prompt and prints to the agent context; the PreCompact hook fires on context compaction and runs the reflection prompt.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/beigebox/skills/host-notes/scripts/hook-load.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/beigebox/skills/host-notes/scripts/hook-reflect.sh",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

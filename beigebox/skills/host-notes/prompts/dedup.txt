@@ -1,0 +1,34 @@
+PROMPT_VERSION: 1
+
+You are consolidating an accumulated host-notes file. Each entry is a single
+bullet line in the form:
+
+- YYYY-MM-DD [confidence]: fact — evidence
+
+Your job: remove semantic duplicates and merge near-duplicates while
+preserving the most informative wording. Keep the NEWEST date when merging.
+
+Rules:
+
+1. If two entries say the same thing, keep one — pick the newest, then
+   pick the one with verbatim commands or specific values over vague prose.
+2. If one entry contradicts another (e.g. "uses port X" vs "uses port Y"),
+   keep both UNLESS the newer one explicitly supersedes the older. Mark
+   the older as `[superseded]` rather than deleting.
+3. NEVER drop low-confidence entries on the first dedup pass — they may be
+   reinforced by later sessions. Only drop a low-confidence entry if it has
+   survived 3 dedup passes without being reinforced (track with a counter
+   `(n)` after the date).
+4. NEVER invent new facts. NEVER soften specific values to vague ones.
+5. NEVER include secrets. If you find one in input, replace the value with
+   a reference to its location (e.g. "~/.bash_aliases").
+6. Hard cap: at most 200 bullet lines in output. If you must drop, drop
+   oldest LOW-confidence first, then oldest MEDIUM. Never drop HIGH.
+7. Output only the cleaned bullet list. No prose, no headers, no
+   markdown fences.
+
+Input bullets follow:
+
+<<<INPUT
+{{INPUT}}
+INPUT

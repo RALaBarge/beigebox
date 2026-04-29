@@ -1,0 +1,59 @@
+{
+  "_comment": "Host registry. canonical_key is the directory name under host-notes/. primary_marker is the preferred name to use in prompts and logs. markers are case-insensitive word-boundary regexes used to detect host references in user prompts. forbidden:true blocks the loader, writer, and reflection prompt for that host. version bumps when the schema changes.",
+  "version": 1,
+  "forbidden_global_patterns": [
+    "\\bhssh\\b",
+    "\\bhftp\\b",
+    "\\bwssh\\b",
+    "\\bwftp\\b",
+    "whatbox",
+    "seedbox"
+  ],
+  "hosts": [
+    {
+      "canonical_key": "pop-os",
+      "primary_marker": "pop-os",
+      "ssh_target": null,
+      "markers": [
+        "\\bpop-os\\b",
+        "\\b192\\.168\\.1\\.201\\b",
+        "\\b100\\.103\\.147\\.89\\b",
+        "\\bjinx@\\S+",
+        "\\blocalhost\\b"
+      ],
+      "forbidden": false,
+      "notes": "Local workstation. 'localhost' is a marker but is also extremely noisy — keep load behavior idempotent per session."
+    },
+    {
+      "canonical_key": "debian",
+      "primary_marker": "dssh",
+      "ssh_target": "ryan@192.168.1.235",
+      "markers": [
+        "\\bdssh\\b",
+        "\\bdftp\\b",
+        "\\b192\\.168\\.1\\.235\\b",
+        "\\b192\\.168\\.1\\.212\\b",
+        "\\b100\\.111\\.136\\.81\\b",
+        "\\bryan@",
+        "\\bdebian\\b"
+      ],
+      "forbidden": false,
+      "notes": "Debian 13 LXC host. Sudo requires password — never assume passwordless."
+    },
+    {
+      "canonical_key": "mac",
+      "primary_marker": "assh",
+      "ssh_target": "useruser@192.168.1.214",
+      "markers": [
+        "\\bassh\\b",
+        "\\baftp\\b",
+        "\\b192\\.168\\.1\\.214\\b",
+        "\\buseruser@",
+        "\\bUsers-MacBook-Pro\\b",
+        "\\bmacbook\\b"
+      ],
+      "forbidden": false,
+      "notes": "macOS workstation, Apple Silicon."
+    }
+  ]
+}

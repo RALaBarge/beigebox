@@ -1,4 +1,5 @@
-"""Static analysis skill — ruff + semgrep, garlicpress-shape findings."""
+"""Static analysis skill — ruff + semgrep + mypy + pip-audit + detect-secrets,
+garlicpress-shape findings."""
 
 from .pipeline import run_static
 

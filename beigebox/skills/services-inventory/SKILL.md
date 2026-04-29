@@ -1,5 +1,6 @@
 ---
 name: services-inventory
+version: 1
 description: Use when the user asks what services/containers/VMs are running, how to connect to something (URL, IP, shell), or wants an inventory of endpoints across local and remote hosts. Works on Linux and macOS. Probes Docker, Podman, Incus, LXD, classic LXC, libvirt, systemd-nspawn, OrbStack, Colima, Multipass, VirtualBox, Parallels, VMware Fusion, and Tart. Supports SSH to remote hosts and emits either a human table or JSON.
 ---
 
