@@ -1138,6 +1138,47 @@ async def search_conversations(q: str, n: int = 5, role: str | None = None):
     return JSONResponse({"query": q, "results": results})
 
 
+_MCP_REQUEST_BODY_LIMIT = 1_048_576  # 1 MiB — caps raw bytes BEFORE json.loads
+
+
+async def _read_mcp_body(request: Request) -> tuple[dict | None, JSONResponse | None]:
+    """Size-cap and parse a JSON-RPC request body.
+
+    Returns (parsed_body, None) on success, (None, error_response) otherwise.
+    The cap is enforced on raw bytes before json.loads so a deeply nested or
+    oversized payload can't exhaust CPU/memory in the parser.
+    """
+    too_large = JSONResponse(
+        {"jsonrpc": "2.0", "id": None,
+         "error": {"code": -32600, "message": "Request too large"}},
+        status_code=413,
+    )
+    # Cheap early reject if the client volunteered a Content-Length.
+    cl = request.headers.get("content-length")
+    if cl is not None:
+        try:
+            if int(cl) > _MCP_REQUEST_BODY_LIMIT:
+                return None, too_large
+        except ValueError:
+            pass  # malformed header — fall through to streaming check
+    # Streaming read with early abort. Bounds memory at the cap even if the
+    # client lied about Content-Length or omitted it under chunked transfer.
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > _MCP_REQUEST_BODY_LIMIT:
+            return None, too_large
+    try:
+        return json.loads(bytes(raw)), None
+    except Exception as e:
+        logger.debug("MCP parse error: %s", str(e)[:200])
+        return None, JSONResponse(
+            {"jsonrpc": "2.0", "id": None,
+             "error": {"code": -32700, "message": "Parse error"}},
+            status_code=400,
+        )
+
+
 @app.post("/mcp")
 async def mcp_endpoint(request: Request):
     """
@@ -1153,14 +1194,9 @@ async def mcp_endpoint(request: Request):
             {"jsonrpc": "2.0", "id": None, "error": {"code": -32603, "message": "MCP server not initialised"}},
             status_code=503,
         )
-    try:
-        body = await request.json()
-    except Exception as e:
-        logger.debug("MCP parse error: %s", str(e)[:200])
-        return JSONResponse(
-            {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
-            status_code=400,
-        )
+    body, err = await _read_mcp_body(request)
+    if err is not None:
+        return err
     result = await _st.mcp_server.handle(body)
     if result is None:
         # Notification — no response body
@@ -1187,14 +1223,9 @@ async def pen_mcp_endpoint(request: Request):
                        "message": "Pen/Sec MCP server disabled (set security_mcp.enabled in config)"}},
             status_code=503,
         )
-    try:
-        body = await request.json()
-    except Exception as e:
-        logger.debug("Pen/Sec MCP parse error: %s", str(e)[:200])
-        return JSONResponse(
-            {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
-            status_code=400,
-        )
+    body, err = await _read_mcp_body(request)
+    if err is not None:
+        return err
     result = await _st.security_mcp_server.handle(body)
     if result is None:
         from starlette.responses import Response as _Response
