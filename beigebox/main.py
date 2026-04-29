@@ -658,6 +658,29 @@ def _emit_auth_denied(reason_code: str, principal_name: str, principal_type: str
         logger.warning("auth_denied wire emit failed", exc_info=True)
 
 
+def _require_admin(request: Request) -> JSONResponse | None:
+    """Gate handler: returns a 403 JSONResponse if the calling key is not admin.
+
+    Returns None when the key is admin (handler should proceed).
+
+    Auth-disabled mode (no keys configured) is treated as admin-allowed since
+    the operator running an unauthed proxy is implicitly trusting all callers.
+    """
+    if _app_state is None or _app_state.auth_registry is None or not _app_state.auth_registry.is_enabled():
+        return None
+    meta = getattr(request.state, "auth_key", None)
+    if meta is not None and getattr(meta, "admin", False):
+        return None
+    return JSONResponse(
+        {"error": {
+            "message": "Admin key required for this endpoint.",
+            "type": "permission_denied",
+            "code": "admin_required",
+        }},
+        status_code=403,
+    )
+
+
 class ApiKeyMiddleware(BaseHTTPMiddleware):
     """
     Multi-key API guard backed by agentauth keychain storage.
@@ -2155,12 +2178,17 @@ async def api_config_save(request: Request):
 
 
 @app.post("/api/v1/wasm/reload")
-async def api_wasm_reload():
+async def api_wasm_reload(request: Request):
     """
     Reload WASM modules from disk without restarting BeigeBox.
     Re-reads config.yaml for updated paths and enabled flags.
     Returns the list of successfully loaded module names.
+
+    Admin-only: a malicious caller with file-write access could otherwise
+    swap a module file then trigger reload to execute it.
     """
+    if (denied := _require_admin(request)) is not None:
+        return denied
     _st = get_state()
     if not _st.proxy:
         return JSONResponse({"error": "proxy not initialized"}, status_code=503)
@@ -2382,6 +2410,8 @@ async def api_toolbox_tool_source(name: str):
 
 @app.post("/api/v1/toolbox/tools/{name}/source")
 async def api_toolbox_tool_save(name: str, request: Request):
+    if (denied := _require_admin(request)) is not None:
+        return denied
     if not _toolbox_edits_enabled():
         return JSONResponse(
             {"error": "toolbox edits disabled — set toolbox.edits_enabled: true in config.yaml"},
@@ -2508,6 +2538,8 @@ async def api_toolbox_validate(request: Request):
 
 @app.post("/api/v1/toolbox/skills/source")
 async def api_toolbox_skill_save(request: Request):
+    if (denied := _require_admin(request)) is not None:
+        return denied
     if not _toolbox_edits_enabled():
         return JSONResponse(
             {"error": "toolbox edits disabled — set toolbox.edits_enabled: true in config.yaml"},
@@ -2539,6 +2571,8 @@ async def api_toolbox_skill_save(request: Request):
 @app.post("/api/v1/toolbox/tools/new")
 async def api_toolbox_tool_new(request: Request):
     """Create a new plugin tool stub at plugins/<name>.py."""
+    if (denied := _require_admin(request)) is not None:
+        return denied
     if not _toolbox_edits_enabled():
         return JSONResponse(
             {"error": "toolbox edits disabled — set toolbox.edits_enabled: true in config.yaml"},
@@ -2608,6 +2642,8 @@ async def api_toolbox_tool_new(request: Request):
 @app.post("/api/v1/toolbox/skills/new")
 async def api_toolbox_skill_new(request: Request):
     """Create a new skill at beigebox/skills/<name>/SKILL.md."""
+    if (denied := _require_admin(request)) is not None:
+        return denied
     if not _toolbox_edits_enabled():
         return JSONResponse(
             {"error": "toolbox edits disabled — set toolbox.edits_enabled: true in config.yaml"},

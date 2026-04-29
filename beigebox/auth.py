@@ -41,6 +41,10 @@ class KeyMeta:
     allowed_models: list[str] = field(default_factory=lambda: ["*"])
     allowed_endpoints: list[str] = field(default_factory=lambda: ["*"])
     rate_limit_rpm: int = 0  # 0 = unlimited
+    # Admin keys can hit endpoints that mutate code, reload WASM, or otherwise
+    # affect the running process. Non-admin keys (default) get 403 from those
+    # endpoints even if endpoint ACL would otherwise allow them.
+    admin: bool = False
 
 
 class MultiKeyAuthRegistry:
@@ -55,11 +59,12 @@ class MultiKeyAuthRegistry:
         self._token_map: dict[str, KeyMeta] = {}   # token → meta
         self._rate_windows: dict[str, deque] = {}   # key name → timestamps
 
-        # Legacy single key (backwards compat — always a wildcard key)
+        # Legacy single key (backwards compat — always a wildcard key, and
+        # admin since it's the operator's own key in single-key deployments).
         legacy_key = auth_cfg.get("api_key", "").strip()
         if legacy_key:
-            self._token_map[legacy_key] = KeyMeta(name="default")
-            logger.info("Auth: legacy api_key loaded")
+            self._token_map[legacy_key] = KeyMeta(name="default", admin=True)
+            logger.info("Auth: legacy api_key loaded (admin)")
 
         # Named keys via agentauth
         for key_cfg in auth_cfg.get("keys", []):
@@ -79,11 +84,13 @@ class MultiKeyAuthRegistry:
                 allowed_models=key_cfg.get("allowed_models", ["*"]),
                 allowed_endpoints=key_cfg.get("allowed_endpoints", ["*"]),
                 rate_limit_rpm=int(key_cfg.get("rate_limit_rpm", 0)),
+                admin=bool(key_cfg.get("admin", False)),
             )
             self._token_map[token] = meta
             logger.info(
-                "Auth: key '%s' loaded (models=%s, endpoints=%s, rpm=%s)",
+                "Auth: key '%s' loaded (models=%s, endpoints=%s, rpm=%s, admin=%s)",
                 name, meta.allowed_models, meta.allowed_endpoints, meta.rate_limit_rpm,
+                meta.admin,
             )
 
         if self._token_map:

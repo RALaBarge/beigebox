@@ -159,6 +159,9 @@ def _get_blocked_patterns() -> list[str]:
 
 # ── Allowlist enforcement ─────────────────────────────────────────────────────
 
+_SHELL_METACHARS = ("|", ";", "&", "`", "$", ">", "<", "\n", "\r", "\\")
+
+
 def _is_command_allowed(cmd: str) -> tuple[bool, str]:
     if not cmd or not cmd.strip():
         return False, "empty_command"
@@ -170,10 +173,20 @@ def _is_command_allowed(cmd: str) -> tuple[bool, str]:
     if not allowed:
         return False, "allowlist_empty"
 
-    # Strip shell metacharacters before the allowlist check so "ls | rm -rf"
-    # can't masquerade as "ls" by hiding the dangerous part after a pipe.
-    base_cmd = cmd_stripped.split()[0].split("|")[0].split(";")[0].strip()
+    # The original implementation stripped metacharacters BEFORE the allowlist
+    # check, but the un-stripped string was then passed to /bin/sh -c. That
+    # meant `ls; rm -rf /` validated as "ls" and ran the full chain. Reject
+    # any metacharacter outright so the validated and executed strings match.
+    for ch in _SHELL_METACHARS:
+        if ch in cmd_stripped:
+            return False, f"metachar_rejected: {ch!r}"
 
+    # Reject `$(...)` and process substitution as well (covered by '$' above
+    # but kept explicit for the audit log).
+    if "$(" in cmd_stripped or "<(" in cmd_stripped or ">(" in cmd_stripped:
+        return False, "substitution_rejected"
+
+    base_cmd = cmd_stripped.split()[0]
     if base_cmd not in allowed:
         return False, f"not_in_allowlist: {base_cmd}"
 
