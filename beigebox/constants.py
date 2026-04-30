@@ -42,12 +42,8 @@ DEFAULT_OPERATOR_TEMPERATURE = 0.7
 DEFAULT_DECISION_LLM_TEMPERATURE = 0.2
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Caching & Memory
+# Embeddings (memory/vector subsystem)
 # ─────────────────────────────────────────────────────────────────────────────
-
-SEMANTIC_CACHE_DEFAULT_SIMILARITY = 0.95
-SEMANTIC_CACHE_DEFAULT_MAX_ENTRIES = 10000
-SEMANTIC_CACHE_DEFAULT_TTL_SECONDS = 3600
 
 EMBEDDING_BORDER_THRESHOLD = 0.04  # classifier threshold for borderline cases
 EMBEDDING_BATCH_SIZE = 32

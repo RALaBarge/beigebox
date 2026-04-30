@@ -28,39 +28,6 @@ def _get_tap_logger():
         return None
 
 
-def log_cache_event(
-    event_type: str,  # "hit" | "miss" | "store"
-    cache_type: str,  # "semantic" | "embedding" | "session"
-    key: str,
-    similarity: Optional[float] = None,
-    ttl_remaining: Optional[int] = None,
-):
-    """Log cache hit/miss/store event."""
-    wire = _get_tap_logger()
-    if not wire:
-        return
-    
-    meta = {
-        "cache_type": cache_type,
-        "key_hash": hash(key) % 10000,
-        "similarity": similarity,
-        "ttl_remaining": ttl_remaining,
-    }
-    
-    content = f"Cache {event_type}: {cache_type} (key_hash={meta['key_hash']})"
-    if similarity is not None:
-        content += f" similarity={similarity:.3f}"
-    
-    wire.log(
-        direction="inbound",
-        role="cache",
-        content=content,
-        event_type=f"cache_{event_type}",
-        source="cache",
-        meta=meta,
-    )
-
-
 def log_routing_decision(
     decision: str,  # "tier1_session" | "tier2_classifier" | "tier3_semantic" | "tier4_judge"
     route: str,

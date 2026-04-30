@@ -1649,7 +1649,6 @@ async def api_config():
         # ── Features (Phase 1 refactoring) ────────────────────────────
         "features": {
             "backends":              rt.get("features_backends", cfg.get("features", {}).get("backends", cfg.get("backends_enabled", False))),
-            "semantic_cache":        rt.get("features_semantic_cache", cfg.get("features", {}).get("semantic_cache", cfg.get("semantic_cache", {}).get("enabled", False))),
             "harness":               rt.get("features_harness", cfg.get("features", {}).get("harness", cfg.get("harness", {}).get("enabled", True))),
             "tools":                 rt.get("features_tools", cfg.get("features", {}).get("tools", cfg.get("tools", {}).get("enabled", False))),
             "cost_tracking":         rt.get("features_cost_tracking", cfg.get("features", {}).get("cost_tracking", cfg.get("cost_tracking", {}).get("enabled", False))),
@@ -1758,13 +1757,6 @@ async def api_config():
                 "enabled": rt.get("features_classifier", cfg.get("features", {}).get("classifier", cfg.get("classifier", {}).get("enabled", True))),
                 "centroid_rebuild_interval": rt.get("classifier_rebuild_interval", cfg.get("routing", {}).get("classifier", {}).get("centroid_rebuild_interval", cfg.get("classifier", {}).get("centroid_rebuild_interval", 3600))),
             },
-            # Tier 3: Semantic cache
-            "semantic_cache": {
-                "enabled": rt.get("features_semantic_cache", cfg.get("features", {}).get("semantic_cache", cfg.get("semantic_cache", {}).get("enabled", False))),
-                "similarity_threshold": rt.get("semantic_cache_threshold", cfg.get("routing", {}).get("semantic_cache", {}).get("similarity_threshold", cfg.get("semantic_cache", {}).get("similarity_threshold", 0.92))),
-                "max_entries": rt.get("semantic_cache_max_entries", cfg.get("routing", {}).get("semantic_cache", {}).get("max_entries", cfg.get("semantic_cache", {}).get("max_entries", 500))),
-                "ttl_seconds": rt.get("semantic_cache_ttl", cfg.get("routing", {}).get("semantic_cache", {}).get("ttl_seconds", cfg.get("semantic_cache", {}).get("ttl_seconds", 3600))),
-            },
             "allow_openrouter_for_plain_models": rt.get("allow_openrouter_for_plain_models", cfg.get("routing", {}).get("allow_openrouter_for_plain_models", False)),
         },
         # ── Logging ───────────────────────────────────────────────────
@@ -1865,7 +1857,6 @@ async def api_config_save(request: Request):
         "web_ui_palette":               "web_ui_palette",
         # Features (Phase 1 refactoring)
         "features_backends":            "features_backends",
-        "features_semantic_cache":      "features_semantic_cache",
         "features_harness":             "features_harness",
         "features_tools":               "features_tools",
         "features_cost_tracking":       "features_cost_tracking",
@@ -1927,10 +1918,6 @@ async def api_config_save(request: Request):
         "wasm_default_module":          "wasm_default_module",
         "wasm_enabled":                 "wasm_enabled",
         "wasm_timeout_ms":              "wasm_timeout_ms",
-        # Semantic cache tuning
-        "semantic_cache_threshold":     "semantic_cache_threshold",
-        "semantic_cache_max_entries":   "semantic_cache_max_entries",
-        "semantic_cache_ttl":           "semantic_cache_ttl",
         # Backend selection — affects how backends.router picks a backend for a model
         "allow_openrouter_for_plain_models": "allow_openrouter_for_plain_models",
         # Multi-backend

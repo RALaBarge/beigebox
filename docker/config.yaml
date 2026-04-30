@@ -90,12 +90,6 @@ routing:
     enabled: true
     centroid_rebuild_interval: 3600
 
-  semantic_cache:
-    enabled: true
-    similarity_threshold: 0.95
-    max_entries: 500
-    ttl_seconds: 3600
-
   decision_llm:
     enabled: true
     temperature: 0.2
