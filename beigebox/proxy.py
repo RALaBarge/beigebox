@@ -32,8 +32,7 @@ from beigebox.hooks import HookManager
 from beigebox.wiretap import WireLog
 from beigebox.wasm_runtime import WasmRuntime
 from beigebox.logging import (
-    log_routing_decision, log_model_selection, log_token_usage,
-    log_latency_stage, log_cache_event, log_request_started,
+    log_request_started,
     log_request_completed, log_payload_event,
     log_hook_execution, log_extraction_attempt,
 )
@@ -91,13 +90,10 @@ class Proxy:
         self.wasm_runtime = WasmRuntime(self.cfg)
         if self.wasm_runtime.enabled:
             logger.info("WasmRuntime: %d module(s) loaded: %s", len(self.wasm_runtime.list_modules()), self.wasm_runtime.list_modules())
-        # Session routing cache — sticky model within a conversation
-        # {conversation_id: (model_string, timestamp)}
-        self._session_cache: dict[str, tuple[str, float]] = {}
-        self._session_ttl: int = self.cfg.get("routing", {}).get("session_ttl_seconds", 1800)
-        # Lock serialises all _session_cache reads and writes; prevents
-        # check-then-delete KeyError (H1) and sorted()-then-delete races (H2).
-        self._session_cache_lock = asyncio.Lock()
+        # (Session routing cache removed in v3 — its only writer was the routing
+        # decision layer, which was deleted. Backend selection is now determined
+        # solely by body['model'] passed in by the caller.)
+
         # Semantic response cache + tool result cache
         self.semantic_cache = SemanticCache(self.cfg)
         self.tool_cache = ToolResultCache(
@@ -133,67 +129,6 @@ class Proxy:
         else:
             self.anomaly_detector = None
         self._anomaly_cfg = anom_cfg
-
-    # ------------------------------------------------------------------
-    # Session cache helpers
-    # ------------------------------------------------------------------
-
-    async def _get_session_model(self, conversation_id: str) -> str | None:
-        """Return cached model for this conversation if still fresh.
-
-        Holds _session_cache_lock for the full check-then-possibly-delete
-        sequence so a concurrent coroutine cannot delete the key between the
-        membership test and the value read (H1).
-        """
-        if not conversation_id:
-            return None
-        async with self._session_cache_lock:
-            if conversation_id not in self._session_cache:
-                return None
-            model, ts = self._session_cache[conversation_id]
-            if time.time() - ts > self._session_ttl:
-                del self._session_cache[conversation_id]
-                return None
-            return model
-
-    async def _set_session_model(self, conversation_id: str, model: str):
-        """Cache the routing decision for this conversation.
-
-        Proactive eviction at every ~100 writes keeps memory bounded without
-        paying the TTL sweep cost on every single write. The hard cap (1000 → 800)
-        is a safety net for when sessions expire very slowly.
-
-        Holds _session_cache_lock for the entire write + eviction sequence so
-        the sorted()-then-delete hard-cap path cannot race with another coroutine
-        mutating the dict between the snapshot and the deletions (H2).
-        """
-        if conversation_id and model:
-            async with self._session_cache_lock:
-                self._session_cache[conversation_id] = (model, time.time())
-                # Proactive eviction: sweep stale entries every ~100 writes
-                if len(self._session_cache) % 100 == 0:
-                    self._evict_session_cache_locked()
-                # Hard cap: if still over limit after TTL eviction, drop oldest by timestamp
-                if len(self._session_cache) > 1000:
-                    oldest = sorted(self._session_cache.items(), key=lambda x: x[1][1])
-                    for k, _ in oldest[:len(self._session_cache) - 800]:
-                        del self._session_cache[k]
-                    logger.debug("Session cache hard-capped: trimmed to %d entries", len(self._session_cache))
-
-    def _evict_session_cache_locked(self):
-        """Remove all expired entries from the session cache.
-
-        Must be called with _session_cache_lock already held — the list
-        comprehension snapshot and subsequent deletes are not atomic and would
-        race if called without the lock (H2).
-        """
-        cutoff = time.time() - self._session_ttl
-        stale = [k for k, (_, ts) in self._session_cache.items() if ts < cutoff]
-        for k in stale:
-            del self._session_cache[k]
-        if stale:
-            logger.debug("Session cache evicted %d stale entries", len(stale))
-
     # ------------------------------------------------------------------
     # Request helpers
     # ------------------------------------------------------------------
@@ -203,10 +138,10 @@ class Proxy:
         Try to extract a conversation ID from the request.
         Open WebUI doesn't always send one, so we generate if missing.
 
-        A stable ID is required for session-cache stickiness — without one,
-        every turn would get a fresh UUID and the session cache would never
-        hit. We only generate when messages are present (skip empty bodies
-        from health-check-style callers that don't represent real sessions).
+        A stable ID is required so wiretap rows / vector-store messages /
+        sqlite log entries can be correlated to a single session. We only
+        generate when messages are present (skip empty bodies from
+        health-check-style callers that don't represent real sessions).
         """
         conv_id = body.get("conversation_id") or body.get("session_id") or ""
         if not conv_id:
@@ -621,10 +556,6 @@ class Proxy:
         except Exception as e:
             logger.warning("Failed to evict model '%s': %s", model, e)
 
-    # _run_operator_pre_hook + _run_operator_post_hook removed in v3 — Operator
-    # was deleted. The generic hook system (HookManager / _run_hooks_with_logging)
-    # still runs.
-
     def _inject_system_context(self, body: dict) -> dict:
         """Inject system_context.md content into the request (hot-reloaded)."""
         try:
@@ -733,8 +664,6 @@ class Proxy:
         except Exception as _e:
             logger.debug("aggressive_summarizer skipped: %s", _e)
 
-        # (Operator pre-hook removed in v3 — Operator was deleted.)
-
         # Inject system context, generation params, per-model options, window config
         body = self._inject_system_context(body)
         body = self._inject_generation_params(body)
@@ -829,7 +758,6 @@ class Proxy:
                 "choices": [{"message": {"role": "assistant", "content": str(_gr_err)}}],
                 "model": "beigebox",
             }
-        decision = None  # routing layer is gone; kept as a local for downstream wasm/post-hook checks
 
         # Log incoming user messages (skip synthetic)
         if not is_synthetic:
@@ -909,17 +837,12 @@ class Proxy:
             _insp_entry["latency_ms"] = round(_stages.get("backend", 0), 1)
             _insp_entry["status"] = "complete"
 
-        # WASM transform (non-streaming) — operates on full response dict
-        wasm_mod = decision.wasm_module if decision else ""
-        if not is_synthetic and wasm_mod:
-            data = await self.wasm_runtime.transform_response(wasm_mod, data)
-            self.wire.log(
-                direction="internal",
-                role="wasm",
-                content=f"transform applied: module={wasm_mod}",
-                model=model,
-                conversation_id=conversation_id,
-            )
+        # WASM response transform path — historically driven by decision.wasm_module
+        # from the routing LLM. With routing gone in v3 nothing currently sets a
+        # per-request WASM module, so this is dormant. The runtime is still
+        # initialised; a future branch can wire body["_beigebox_wasm_module"]
+        # (or similar) to re-enable per-request transforms.
+        wasm_mod = ""
 
         # Log assistant response (skip synthetic)
         # assistant_content is set inside the if-block; guard below prevents
@@ -970,7 +893,7 @@ class Proxy:
 
         # Post-response hooks
         if not is_synthetic:
-            context = self._build_hook_context(body, conversation_id, model, decision)
+            context = self._build_hook_context(body, conversation_id, model, None)
             data, _stages["post_hooks"] = self._run_hooks_with_logging(
                 stage="post_response",
                 body=body,
@@ -980,8 +903,6 @@ class Proxy:
             )
         else:
             _stages["post_hooks"] = 0.0
-
-        # (Operator post-hook removed in v3 — Operator was deleted.)
 
         # Emit timing summary to wiretap
         total_ms = (_time.monotonic() - _t0) * 1000
@@ -1119,7 +1040,6 @@ class Proxy:
             yield f"data: {chunk}\n"
             yield "data: [DONE]\n"
             return
-        decision = None  # routing layer is gone; kept as a local for downstream wasm checks
 
         # Emit a routing metadata chunk before the real stream starts. The
         # frontend reads bb_type=="routing" and updates the model badge in the
@@ -1191,11 +1111,13 @@ class Proxy:
         backend_name = "direct"
         _t_backend = _time.monotonic()
         _first_chunk = True  # TTFT sentinel — cleared after the first yielded chunk
-        # WASM buffer mode: withhold all stream chunks from the client until the
-        # full response is assembled, run the transform, then emit in one shot.
-        # Normal (non-WASM) mode passes each chunk through immediately as it arrives.
-        wasm_mod = decision.wasm_module if decision else ""
-        _wasm_buffer_mode = bool(wasm_mod and self.wasm_runtime.enabled)
+        # WASM buffer mode: historically driven by decision.wasm_module from the
+        # routing LLM. Routing was removed in v3, so nothing currently sets a
+        # per-request WASM module — always pass-through. A future branch can wire
+        # body["_beigebox_wasm_module"] (or similar) to re-enable per-request
+        # transforms; the runtime itself is still alive.
+        wasm_mod = ""
+        _wasm_buffer_mode = False
 
         if self.backend_router:
             # Stream via multi-backend router
@@ -1419,8 +1341,6 @@ class Proxy:
                 # Store in semantic cache for future similar queries
                 if not is_synthetic:
                     self.semantic_cache.store(user_message, complete_text, model)
-
-                # (Operator post-hook removed in v3 — Operator was deleted.)
 
         # Emit timing summary to wiretap
         cost_str = f" · ${stream_cost_usd:.6f}" if stream_cost_usd else ""
