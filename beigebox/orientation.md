@@ -102,3 +102,15 @@ Distilled from the Operator class before it was deleted in v3 — agentic loops 
 - **Web UI is integrated graphics.** Even when an external frontend (jcode, Warp, custom client) drives BeigeBox over `/v1` + `/mcp`, the bundled web UI must remain self-sufficient — chat, council, ralph harness, wiretap viewer, config editor, toolbox editor. Multi-LLM features (council, ensemble, wiggam) stay because they're what makes the web UI more capable than a single-model chat.
 - **WASM runtime is the interop bet.** `wasm_runtime.py` looks dormant (the response-transform path lost its only writer when the routing decision LLM was deleted in v3). Keep it. The PDF input transform path (`transform_input("pdf_oxide", raw)` at the upload endpoint) is wired, and the broader bet is that the browser-as-OS future runs WASM modules, so the runtime is part of BeigeBox's interop story regardless of today's usage. The compiled `.wasm` artifacts (e.g. `pdf_oxide.wasm`, `output_normalizer.wasm`) aren't currently shipped in the repo — that's a separate "build and drop the artifact" task, not a runtime-removal signal.
 - **BeigeBox is client-agnostic.** New frontends reach BeigeBox via existing HTTP / CLI / MCP surfaces. Don't add per-frontend connectors inside BeigeBox itself.
+- **Every external interface follows the same generic factory pattern.** When BeigeBox talks to anything outside its own process — a vector store, an LLM backend, an MCP client, an auth provider, a wire-log sink, a cache, etc. — the integration must use the canonical shape:
+    ```
+    beigebox/<concern>/
+      base.py          # Abstract base / Protocol with the contract
+      <impl_a>.py      # Concrete impl A
+      <impl_b>.py      # Concrete impl B
+      __init__.py      # make_<concern>(type, **kwargs) factory
+                       # + lazy _REGISTRY (optional-dep tolerant)
+                       # + build_<concern>_kwargs(cfg, ...) (config → kwargs)
+      plugins/         # (optional) auto-discovered userland impls
+    ```
+  Reference implementations: `storage/backends/` (vector storage) and `backends/` (LLM providers). When something doesn't follow this shape today, it's a known asymmetry — fix it instead of building around it. **Current asymmetries (as of 2026-04-30):** `storage/sqlite_store.py` (conversations/audit/keys are SQLite-only god-object, no factory); `web_auth.py` (providers are loosely Protocol-conforming but no factory); `wiretap.py` (SQLite + JSONL sinks hardcoded, no `WireSink` ABC); `cache.py` (`SemanticCache` and `ToolResultCache` share no base). New work in any of those areas is the time to introduce the pattern, not to tactically extend the monolith.
