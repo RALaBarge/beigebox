@@ -4,7 +4,7 @@ Hand-curated, single source of truth. Edit when something changes; no auto-regen
 
 ## ⚠️ Routing rule
 
-**External model calls go through BeigeBox** at `http://localhost:1337/v1` (OpenAI-compatible). Never hit OpenRouter / Anthropic / OpenAI directly from project code. BeigeBox forwards using the host's `OPENROUTER_API_KEY`. Verify with `python -m beigebox.cli ring`. Tail with `python -m beigebox.cli tap` — and there's a lot more: `sweep` (semantic search over past conversations), `flash` (stats/config), `models` (OpenRouter catalog), `rankings` (top model rankings), `operator` (sandboxed agent), `eval`, `experiment`, `dump`, `bench`, quarantine commands, etc. Run `python -m beigebox.cli --help` for the full list. Exception: Anthropic-model calls placed via Claude Code's `Agent` tool stay on bundled tokens.
+**External model calls go through BeigeBox** at `http://localhost:1337/v1` (OpenAI-compatible). Never hit OpenRouter / Anthropic / OpenAI directly from project code. BeigeBox forwards using the host's `OPENROUTER_API_KEY`. Verify with `python -m beigebox.cli ring`. Tail with `python -m beigebox.cli tap` — and there's a lot more: `sweep` (semantic search over past conversations), `flash` (stats/config), `models` (OpenRouter catalog), `rankings` (top model rankings), `eval`, `experiment`, `dump`, `bench`, quarantine commands, etc. Run `python -m beigebox.cli --help` for the full list. Exception: when running inside Claude Code specifically, Anthropic-model calls placed via Claude Code's `Agent` tool stay on bundled tokens (Claude-Code-specific behaviour, not a BeigeBox feature).
 
 ## ⚠️ Forbidden hosts
 
@@ -82,13 +82,13 @@ Probes Docker / Podman / Incus / LXD / classic LXC / libvirt / nspawn / Colima /
 
 ## Agent workflow patterns
 
-Distilled from the Operator class before it was deleted in v3 — Claude Code is the agent now, hitting `/mcp` for tools. These patterns are independent of any specific agent loop, so they survived. Apply them when working in this repo or driving it from outside.
+Distilled from the Operator class before it was deleted in v3 — agentic loops moved out of the proxy and now run in whatever MCP-speaking client is driving (Claude Code, a custom SDK, a script, a different IDE plugin, etc.). These patterns are independent of any specific agent loop, so they survived. Apply them when working in this repo or driving it from outside.
 
-- **Memory recall before assuming.** Cross-session continuity lives in the vector store. From inside Claude Code, call the `memory` tool over `/mcp`. From the host, run `python -m beigebox.cli sweep <query>`. When the user references prior conversations or facts, check there before guessing — the recall window is multi-month and the index covers conversations + ingested docs.
+- **Memory recall before assuming.** Cross-session continuity lives in the vector store. From an MCP client, call the `memory` tool over `/mcp`. From the host, run `python -m beigebox.cli sweep <query>`. When the user references prior conversations or facts, check there before guessing — the recall window is multi-month and the index covers conversations + ingested docs.
 - **Persistent durable facts go to `workspace/out/operator_notes.md`.** That file survives across sessions. Append observed system quirks, durable preferences, and "I learned this" facts. Read it on session start if it exists. Don't put PII or session-bound state there — it's for things you'd want a future agent to know.
-- **Loop detection: stop after 3 same-input calls.** If you've called the same tool with the same input 3+ times and the result hasn't materially changed, you're stuck. Try a different tool, a different input, or commit to an answer based on what you already have. This rule applies to any agent loop in this codebase, not just historical Operator runs.
+- **Loop detection: stop after 3 same-input calls.** If you've called the same tool with the same input 3+ times and the result hasn't materially changed, you're stuck. Try a different tool, a different input, or commit to an answer based on what you already have. This rule applies to any agent loop, regardless of which client implements it.
 - **Workspace contract.** `/workspace/in/` is read-only (user-supplied). `/workspace/out/` is the only write target. Always tell the user the filename when you write something there. Never write outside `/workspace/out/` from a tool call.
-- **The proxy doesn't inject tools.** A non-Claude model called via `/v1/chat/completions` only gets tools if the *caller* sends them. BeigeBox forwards the body as-is. If you need a non-Claude model to use tools, the caller (Claude Code, your own SDK, a script) is responsible for the tool-use protocol. The proxy's job is normalize + forward + observe.
+- **The proxy doesn't inject tools.** A model called via `/v1/chat/completions` only gets tools if the *caller* sends them. BeigeBox forwards the body as-is. If you need a model to use tools, the caller (whatever agent client, SDK, or script) is responsible for the tool-use protocol. The proxy's job is normalize + forward + observe.
 
 ## Conventions
 

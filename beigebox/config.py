@@ -24,6 +24,10 @@ from beigebox.constants import DEFAULT_MODEL, DEFAULT_EMBEDDING_MODEL
 _vlog = logging.getLogger(__name__)
 
 # ── Known top-level config keys ──────────────────────────────────────────────
+# Note: decision_llm / operator / classifier / zcommands are kept here as
+# *recognised* top-level keys so existing config files don't trigger the
+# "unrecognised key" warning at load time. Their consumers were deleted in v3
+# (tiered routing + Operator); the keys themselves are silently ignored.
 _KNOWN_TOP_LEVEL_KEYS = {
     "server", "backend", "backends", "backends_enabled", "embedding",
     "storage", "logging", "auth", "decision_llm", "operator", "tools",
@@ -41,10 +45,7 @@ _KNOWN_TOP_LEVEL_KEYS = {
 class _FeaturesCfg(BaseModel):
     model_config = ConfigDict(extra="allow")
     backends: bool = True
-    decision_llm: bool = True
-    classifier: bool = True
     semantic_cache: bool = False
-    operator: bool = True
     harness: bool = True
     tools: bool = True
     cost_tracking: bool = True
@@ -77,12 +78,6 @@ class _ModelsCfg(BaseModel):
     profiles: dict = {}
     per_task: dict = {}
     whitelist: dict = {}
-
-class _OperatorCfg(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    enabled: bool = False
-    max_iterations: int = 8
-    timeout: float = 60
 
 class _GenerationCfg(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -144,24 +139,11 @@ class _APIAnomalyCfg(BaseModel):
     ip_instability_threshold: int = 5  # max IPs per conversation
     rules: dict = {}  # per-rule overrides
 
-class _MCPValidatorCfg(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    enabled: bool = False
-    allow_unsafe: bool = False
-    log_violations: bool = True
-    allow_localhost_cdp: bool = False
-    max_code_length: int = 10_000
-    max_query_length: int = 4_000
-    max_network_cidr: int = 24
-    max_ports: int = 100
-    max_network_timeout: float = 30.0
-
 class _SecurityCfg(BaseModel):
     model_config = ConfigDict(extra="allow")
     rag_poisoning: _RAGPoisoningCfg = _RAGPoisoningCfg()
     memory_integrity: _MemoryIntegrityCfg = _MemoryIntegrityCfg()
     api_anomaly: _APIAnomalyCfg = _APIAnomalyCfg()
-    mcp_validator: _MCPValidatorCfg = _MCPValidatorCfg()
 
 class _BeigeBoxConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -170,7 +152,6 @@ class _BeigeBoxConfig(BaseModel):
     server: _ServerCfg = _ServerCfg()
     backend: _BackendCfg = _BackendCfg()
     models: _ModelsCfg = _ModelsCfg()
-    operator: _OperatorCfg = _OperatorCfg()
     generation: _GenerationCfg = _GenerationCfg()
     cost_tracking: _CostTrackingCfg = _CostTrackingCfg()
     auto_summarization: _AutoSumCfg = _AutoSumCfg()

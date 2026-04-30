@@ -6255,16 +6255,10 @@ async function sendToPane(pane, text, forceOp) {
   let _loadHintId = null;
   try {
     if (isOp) {
-      // Route to operator — pass pane history so operator has conversation context
-      const opHistory = (pane.history || []).slice(0, -1); // exclude the just-appended user msg
-      const d = await api('/api/v1/operator', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: typeof userContent === 'string' ? userContent : text, history: opHistory }),
-      });
+      // Operator removed in v3 — agent loops moved to MCP-speaking clients.
       document.getElementById(typingId)?.remove();
       if (_loadHintId) { document.getElementById(_loadHintId)?.remove(); _seenModels.add(_modelKey); _loadHintId = null; }
-      const answer = d.success ? d.answer : `Error: ${d.error}`;
+      const answer = '[Operator was removed in v3. Use a model directly, or drive BeigeBox tools via your MCP-speaking client over /mcp.]';
       const _opTs = Date.now();
       pane.history.push({ role: 'assistant', content: answer, model: 'operator', _ts: _opTs });
       appendMsgToPane(pane.id, 'assistant', answer, 'operator', area, _opTs);
@@ -7938,12 +7932,13 @@ async function runOp() {
     const reqBody = { query, history: _opHistory };
     if (modelId) reqBody.model = modelId;
 
-    const resp = await fetch('/api/v1/operator/stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(window._bbApiKey ? {'Authorization': `Bearer ${window._bbApiKey}`} : {}) },
-      body: JSON.stringify(reqBody),
-      signal: _opAbort.signal,
-    });
+    // /api/v1/operator/stream removed in v3 — Operator class deleted.
+    streamEl.innerHTML = `<div class='op-error'>✗ Operator removed in v3 — drive via an MCP client over /mcp.</div>`;
+    btn.disabled = false; if (stopBtn) stopBtn.style.display = 'none';
+    _opAbort = null;
+    return;
+    // (unreachable — kept so the parser's structural expectations below stay valid)
+    const resp = { ok: false, status: 410, statusText: 'Gone', body: { getReader: () => ({ read: async () => ({ done: true, value: null }) }) }, json: async () => ({error: 'Operator removed in v3.'}) };
 
     // Clear the "thinking…" spinner once the stream starts
     streamEl.innerHTML = '';
@@ -8071,8 +8066,10 @@ async function loadOpRuns() {
   const list = document.getElementById('op-history-list');
   if (!list) return;
   try {
-    const data = await api('/api/v1/operator/runs');
-    const runs = data.runs || [];
+    const data = { runs: [] };
+    const runs = data.runs;
+    list.innerHTML = '<span style="color:var(--fg-muted)">Operator removed in v3 — drive via an MCP client over /mcp.</span>';
+    return;
     if (!runs.length) { list.innerHTML = '<span style="color:var(--fg-muted)">No runs yet.</span>'; return; }
     list.innerHTML = runs.map(r => {
       const ts  = r.created_at ? r.created_at.slice(0, 16).replace('T', ' ') : '';
@@ -8105,9 +8102,8 @@ function toggleOpNotes() {
 
 async function loadOpNotes() {
   try {
-    const d = await api('/api/v1/operator/notes');
     const ta = document.getElementById('op-notes-area');
-    if (ta) ta.value = d.content || '';
+    if (ta) ta.value = '[Operator removed in v3 — drive via an MCP client over /mcp.]';
   } catch(e) {
     // silently fail — notes may not exist yet
   }
@@ -8129,10 +8125,12 @@ function hideOpBgIndicator() {
 // Retrieve a background operator run result
 async function retrieveOpRun(runId) {
   try {
-    const run = await api(`/api/v1/operator/${runId}`);
-    if (!run) {
-      alert(`Run ${runId} not found`);
-      return;
+    alert('Operator removed in v3 — drive via an MCP client over /mcp.');
+    return;
+    if (false) {
+      const run = null;
+      if (!run) {
+        return;
     }
     // Restore history and result
     _opHistory = run.history || [];
@@ -8161,8 +8159,7 @@ async function saveOpNotes() {
   const status = document.getElementById('op-notes-status');
   if (!ta) return;
   try {
-    await api('/api/v1/operator/notes', { method: 'POST', body: { content: ta.value } });
-    if (status) { status.textContent = 'saved'; setTimeout(() => { status.textContent = ''; }, 2000); }
+    if (status) { status.textContent = 'Operator removed in v3 — drive via an MCP client over /mcp.'; }
   } catch(e) {
     if (status) status.textContent = 'error: ' + e.message;
   }
@@ -9023,12 +9020,8 @@ async function harnessAgenticRun() {
     const reqBody = { query: goal, max_turns: maxTurns };
     if (modelOverride) reqBody.model = modelOverride;
 
-    const resp = await fetch(BASE + '/api/v1/harness/autonomous', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(window._bbApiKey ? {'Authorization': `Bearer ${window._bbApiKey}`} : {}) },
-      body: JSON.stringify(reqBody),
-      signal: _agenticAbort.signal,
-    });
+    // /api/v1/harness/autonomous removed in v3.
+    const resp = { ok: false, status: 410, statusText: 'Gone', body: null, json: async () => ({error: 'Operator removed in v3 — drive via an MCP client over /mcp.'}) };
 
     feedEl.innerHTML = '';
 

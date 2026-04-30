@@ -37,7 +37,6 @@ from beigebox.tools.sf_ingest import SfIngestTool
 from beigebox.tools.atlassian import AtlassianTool
 from beigebox.tools.bluetruth import BlueTruthTool
 from beigebox.tools.network_audit import NetworkAuditTool
-from beigebox.tools.mcp_validator_tool import MCPValidatorTool
 from beigebox.tools.api_anomaly_detector_tool import APIAnomalyDetectorTool
 from beigebox.tools.memory_validator_tool import MemoryValidatorTool
 from beigebox.tools.plan_manager import PlanManagerTool
@@ -296,16 +295,8 @@ class ToolRegistry:
             self.tools["memory_validator"] = MemoryValidatorTool(validator=_mv, store=None)
             logger.info("MemoryValidator tool registered (mode=%s, active=%s)", _mv.mode, _mv.is_active)
 
-        # --- MCP Parameter Validator (P1-B security hardening — disabled by default) ---
-        # Multi-tier parameter validation for tool calls: schema, constraint, semantic, isolation.
-        # Can be called directly or used as a pre-execution hook in the Operator.
-        mcp_val_cfg = cfg.get("security", {}).get("mcp_validator", {})
-        if mcp_val_cfg.get("enabled", False):
-            self.tools["mcp_parameter_validator"] = MCPValidatorTool(
-                allow_unsafe=mcp_val_cfg.get("allow_unsafe", False),
-                log_violations=mcp_val_cfg.get("log_violations", True),
-            )
-            logger.info("MCPValidatorTool registered (allow_unsafe=%s)", mcp_val_cfg.get("allow_unsafe", False))
+        # (MCP Parameter Validator tool removed in v3 — its only consumer was
+        # the Operator class, which was deleted.)
 
         # --- Plan Manager (orchestration plan.md management — enabled by default when tools enabled) ---
         pm_cfg = tools_cfg.get("plan_manager", {})

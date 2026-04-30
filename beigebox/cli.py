@@ -413,66 +413,6 @@ def cmd_flash(args):
         pass  # No DB yet or no latency data
 
 
-def cmd_operator(args):
-    """
-    Launch the BeigeBox Operator agent — interactive REPL or single query.
-    """
-    from beigebox.config import get_config, get_storage_paths
-    from beigebox.storage.vector_store import VectorStore
-    from beigebox.storage.backends import make_backend, build_backend_kwargs
-    from beigebox.agents.operator import Operator
-    print(BANNER)
-    print("  Operator online. Type 'exit' or Ctrl-C to disconnect.\n")
-    cfg = get_config()
-    _, vector_path = get_storage_paths(cfg)
-    # Stand up the vector store for semantic search
-    try:
-        _ec = cfg["embedding"]
-        _btype, _bkw = build_backend_kwargs(cfg, vector_path)
-        vector_store = VectorStore(
-            embedding_model=_ec["model"],
-            embedding_url=_ec.get("backend_url") or cfg["backend"]["url"],
-            backend=make_backend(_btype, **_bkw),
-        )
-    except Exception as e:
-        print(f"  ⚠ Vector store unavailable: {e}")
-        vector_store = None
-    try:
-        op = Operator(vector_store=vector_store)
-    except Exception as e:
-        print(f"  ✗ Failed to initialize Operator: {e}")
-        print("    Make sure Ollama is running and a model is configured.")
-        return
-    # Single-shot mode
-    if args.query:
-        question = " ".join(args.query)
-        print(f"  ▶ {question}\\n")
-        answer = op.run(question)
-        print(f"\\n  ◀ {answer}\\n")
-        return
-    # REPL mode
-    print("  Tools available:")
-    for tool in op.tools:
-        print(f"    ⚡ {tool.name}")
-    print()
-    try:
-        while True:
-            try:
-                question = input("  op> ").strip()
-            except EOFError:
-                break
-            if not question:
-                continue
-            if question.lower() in ("exit", "quit", "q", "disconnect"):
-                print("  [line disconnected]")
-                break
-            print()
-            answer = op.run(question)
-            print(f"\\n  ◀ {answer}\\n")
-    except KeyboardInterrupt:
-        print("\\n  [line disconnected]")
-
-
 def cmd_eval(args):
     """Run an eval suite against a running BeigeBox instance."""
     import json as _json
@@ -1318,11 +1258,7 @@ def main():
     _add_command(sub, ["index-docs", "index"],
                  "Index markdown/text docs into ChromaDB for semantic search", cmd_index_docs, setup_index_docs)
 
-    # operator / op
-    def setup_operator(p):
-        p.add_argument("query", nargs="*", help="Question to ask (omit for interactive REPL)")
-    _add_command(sub, ["operator", "op"],
-                 "Launch the Operator agent (web, data, shell)", cmd_operator, setup_operator)
+    # `beigebox operator` subcommand removed in v3 — Operator class deleted.
 
     def setup_discover_models(p):
         p.add_argument("--url", "-u", default=None,

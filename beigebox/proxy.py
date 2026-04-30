@@ -8,9 +8,10 @@ Intercepts OpenAI-compatible requests, logs both sides, forwards to backend.
 Handles streaming (SSE) transparently.
 
 The agentic decision layer (z-commands, hybrid routing, decision LLM,
-embedding classifier, agentic scorer, routing rules) was deleted in v3 —
-Claude Code is the agent now and BeigeBox is back to being a thin
-OpenAI-compatible proxy with memory, observability, and an MCP tool server.
+embedding classifier, agentic scorer, routing rules) was deleted in v3.
+Agent loops moved out of the proxy and now run in whatever MCP client
+is driving — BeigeBox is back to being a thin OpenAI-compatible proxy
+with memory, observability, and an MCP tool server.
 """
 import json
 import logging
@@ -620,90 +621,9 @@ class Proxy:
         except Exception as e:
             logger.warning("Failed to evict model '%s': %s", model, e)
 
-    async def _run_operator_pre_hook(self, body: dict) -> dict:
-        """Run operator as a pre-processing pass — enriches the last user message before it reaches the LLM."""
-        pre_hook_cfg = self.cfg.get("operator", {}).get("pre_hook", {})
-        if not pre_hook_cfg.get("enabled", False):
-            return body
-
-        user_msg = self._get_latest_user_message(body)
-        if not user_msg:
-            return body
-
-        from beigebox.agents.operator import Operator
-        import asyncio
-
-        op = Operator(
-            vector_store=self.vector,
-            blob_store=self.blob_store,
-            model_override=pre_hook_cfg.get("model"),
-            max_iterations_override=pre_hook_cfg.get("max_iterations", 3),
-            pre_hook=True,
-            tool_registry=self.tool_registry,
-        )
-
-        loop = asyncio.get_event_loop()
-        try:
-            enriched = await loop.run_in_executor(None, op.run, user_msg)
-        except Exception as e:
-            logger.warning("operator pre_hook failed: %s", e)
-            return body
-
-        if not enriched or enriched.strip() == user_msg.strip():
-            return body
-
-        # Replace last user message with enriched version
-        messages = list(body.get("messages", []))
-        for i in range(len(messages) - 1, -1, -1):
-            if messages[i].get("role") == "user":
-                messages[i] = {**messages[i], "content": enriched}
-                break
-
-        self.wire.log(
-            direction="internal", role="proxy",
-            content=f"pre_hook enriched: {user_msg[:120]!r} → {enriched[:120]!r}",
-            model=op._model,
-        )
-        return {**body, "messages": messages}
-
-    async def _run_operator_post_hook(self, body: dict, response_text: str) -> None:
-        """Fire-and-forget operator pass that runs after the LLM has responded.
-
-        Receives the completed response so the operator can extract facts,
-        write notes, or trigger side effects.  Never modifies the response.
-        Tool I/O is dumped to workspace/out/.posthook/ — not stored in ChromaDB.
-        """
-        post_hook_cfg = self.cfg.get("operator", {}).get("post_hook", {})
-        if not post_hook_cfg.get("enabled", False):
-            return
-
-        user_msg = self._get_latest_user_message(body)
-        if not user_msg or not response_text.strip():
-            return
-
-        from beigebox.agents.operator import Operator
-        import asyncio
-
-        op = Operator(
-            vector_store=self.vector,
-            blob_store=self.blob_store,
-            model_override=post_hook_cfg.get("model"),
-            max_iterations_override=post_hook_cfg.get("max_iterations", 3),
-            post_hook=True,
-            tool_registry=self.tool_registry,
-        )
-
-        # Compose context: user question + assistant response
-        combined = (
-            f"[USER MESSAGE]\n{user_msg}\n\n"
-            f"[ASSISTANT RESPONSE]\n{response_text}"
-        )
-
-        loop = asyncio.get_event_loop()
-        try:
-            await loop.run_in_executor(None, op.run, combined)
-        except Exception as e:
-            logger.warning("operator post_hook failed: %s", e)
+    # _run_operator_pre_hook + _run_operator_post_hook removed in v3 — Operator
+    # was deleted. The generic hook system (HookManager / _run_hooks_with_logging)
+    # still runs.
 
     def _inject_system_context(self, body: dict) -> dict:
         """Inject system_context.md content into the request (hot-reloaded)."""
@@ -813,11 +733,7 @@ class Proxy:
         except Exception as _e:
             logger.debug("aggressive_summarizer skipped: %s", _e)
 
-        # Operator pre-hook — enrich/modify message before it reaches the LLM.
-        # NOTE: Operator itself is being removed in v3-deprecate-operator. This
-        # call survives this branch because Operator still exists in the
-        # codebase; v3-deprecate-operator will delete this line.
-        body = await self._run_operator_pre_hook(body)
+        # (Operator pre-hook removed in v3 — Operator was deleted.)
 
         # Inject system context, generation params, per-model options, window config
         body = self._inject_system_context(body)
@@ -1065,11 +981,7 @@ class Proxy:
         else:
             _stages["post_hooks"] = 0.0
 
-        # Operator post-hook — fire-and-forget via ensure_future. The hook
-        # runs concurrently with the return; it cannot modify the response.
-        if assistant_content:
-            import asyncio as _asyncio
-            _asyncio.ensure_future(self._run_operator_post_hook(body, assistant_content))
+        # (Operator post-hook removed in v3 — Operator was deleted.)
 
         # Emit timing summary to wiretap
         total_ms = (_time.monotonic() - _t0) * 1000
@@ -1508,11 +1420,7 @@ class Proxy:
                 if not is_synthetic:
                     self.semantic_cache.store(user_message, complete_text, model)
 
-                # Operator post-hook — fire-and-forget. Runs after stream is
-                # fully assembled; uses ensure_future so the generator returns
-                # to the client without waiting for the hook to complete.
-                import asyncio as _asyncio
-                _asyncio.ensure_future(self._run_operator_post_hook(body, complete_text))
+                # (Operator post-hook removed in v3 — Operator was deleted.)
 
         # Emit timing summary to wiretap
         cost_str = f" · ${stream_cost_usd:.6f}" if stream_cost_usd else ""
