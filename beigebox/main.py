@@ -48,8 +48,6 @@ from beigebox.storage.sqlite_store import SQLiteStore
 from beigebox.storage.vector_store import VectorStore
 from beigebox.tools.registry import ToolRegistry
 from beigebox.security.rag_poisoning_detector import RAGPoisoningDetector
-from beigebox.agents.decision import DecisionAgent
-from beigebox.agents.embedding_classifier import get_embedding_classifier
 from beigebox.hooks import HookManager
 from beigebox.backends.router import MultiBackendRouter
 from beigebox.costs import CostTracker
@@ -226,11 +224,6 @@ async def lifespan(app: FastAPI):
     # Tools (pass vector_store for the memory tool)
     tool_registry = ToolRegistry(vector_store=vector_store)
 
-    # Decision Agent
-    decision_agent = DecisionAgent.from_config(
-        available_tools=tool_registry.list_tools()
-    )
-
     # Hooks
     hooks_cfg = cfg.get("hooks", {})
     _hooks_enabled = hooks_cfg.get("enabled", True) if isinstance(hooks_cfg, dict) else True
@@ -239,10 +232,6 @@ async def lifespan(app: FastAPI):
         hooks_dir=hooks_cfg.get("directory", "./hooks") if _hooks_enabled else None,
         hook_configs=_hook_list if isinstance(_hook_list, list) else [],
     )
-
-    # Embedding classifier (fast path for routing)
-    embedding_classifier = get_embedding_classifier()
-    ec_status = "ready" if embedding_classifier.ready else "no centroids — will auto-build at startup"
 
     # Multi-backend router — reads effective config (runtime_config.yaml overrides config.yaml)
     backend_router = None
@@ -394,13 +383,11 @@ async def lifespan(app: FastAPI):
     else:
         logger.debug("Observability egress: no webhooks configured")
 
-    # Proxy (with decision agent, hooks, embedding classifier, tools, router, and extraction detector)
+    # Proxy (with hooks, tools, router, and extraction detector)
     proxy = Proxy(
         sqlite=sqlite_store,
         vector=vector_store,
-        decision_agent=decision_agent,
         hook_manager=hook_manager,
-        embedding_classifier=embedding_classifier,
         tool_registry=tool_registry,
         backend_router=backend_router,
         blob_store=blob_store,
@@ -420,11 +407,9 @@ async def lifespan(app: FastAPI):
         sqlite_store=sqlite_store,
         vector_store=vector_store,
         blob_store=blob_store,
-        decision_agent=decision_agent,
         hook_manager=hook_manager,
         backend_router=backend_router,
         cost_tracker=cost_tracker,
-        embedding_classifier=embedding_classifier,
         auth_registry=auth_registry,
         web_auth=web_auth,
         password_auth=password_auth,
@@ -450,9 +435,6 @@ async def lifespan(app: FastAPI):
     logger.info("Storage: SQLite=%s, Vector=%s", sqlite_path, vector_store_path)
     logger.info("Tools: %s", tool_registry.list_tools())
     logger.info("Hooks: %s", hook_manager.list_hooks())
-    logger.info("Decision LLM: %s", "enabled" if decision_agent.enabled else "disabled")
-    logger.info("Embedding classifier: %s", ec_status)
-    logger.info("Z-commands: enabled (prefix messages with 'z: <directive>')")
     op_enabled = cfg.get("operator", {}).get("enabled", False)
     if op_enabled:
         op_allowed = cfg.get("operator", {}).get("allowed_tools", [])
@@ -489,34 +471,10 @@ async def lifespan(app: FastAPI):
             if idx > 0:
                 await asyncio.sleep(15)
             await _preload_model(_backend_url, model, label)
-        # Also trigger DecisionAgent's own preload (updates its internal state)
-        if decision_agent:
-            await decision_agent.preload()
 
     _preload_tasks.append(asyncio.create_task(_staggered_preloads()))
     # Fire-and-forget: server starts accepting requests immediately while
     # models warm up. Tasks are not awaited here.
-
-    # Auto-build centroids if they don't exist yet. Uses create_task (not
-    # await) so the startup finishes immediately and the server begins
-    # accepting requests while the embedding model warms up in the background.
-    if not embedding_classifier.ready:
-        import asyncio as _asyncio
-
-        async def _auto_build_centroids():
-            logger.info("Embedding centroids not found — auto-building in background…")
-            try:
-                import asyncio as _asyncio2
-                loop = _asyncio2.get_running_loop()
-                success = await loop.run_in_executor(None, embedding_classifier.build_centroids)
-                if success:
-                    logger.info("Embedding centroids auto-built successfully")
-                else:
-                    logger.warning("Auto-build centroids returned False — check Ollama is running with nomic-embed-text")
-            except Exception as _e:
-                logger.warning("Auto-build centroids failed: %s", _e)
-
-        _asyncio.create_task(_auto_build_centroids())
 
     # Auto-ingest staged documents on startup
     def _sync_ingest_staging():
@@ -935,10 +893,7 @@ async def chat_completions(request: Request):
         )
     else:
         data = await _st.proxy.forward_chat_completion(body, client_ip=client_ip, user_agent=user_agent)
-        from beigebox.proxy import _request_route as _rr
-        _route_val = _rr.get("")
-        extra = {"X-BeigeBox-Route": _route_val} if _route_val else {}
-        return JSONResponse(data, headers=extra)
+        return JSONResponse(data)
 
 
 @app.get("/v1/models")
@@ -948,44 +903,8 @@ async def list_models():
     return JSONResponse(data)
 
 
-@app.post("/api/v1/route-check")
-async def api_route_check(request: Request):
-    """
-    Return the routing decision for a prompt without running inference.
-    Used by eval suites to verify classifier accuracy without token cost.
-
-    Body: {"input": "plain text"} or {"messages": [...]}
-    Returns: {"route": "simple|complex|code|creative|...", "model": "...", "confidence": 0.0}
-    """
-    try:
-        body = await request.json()
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
-
-    # Accept "input" shorthand used by eval suites
-    if "input" in body and "messages" not in body:
-        body["messages"] = [{"role": "user", "content": body["input"]}]
-
-    _st = get_state()
-    if not _st.proxy:
-        return JSONResponse({"error": "proxy not available"}, status_code=503)
-
-    from beigebox.agents.zcommand import parse_z_command
-    from beigebox.proxy import _request_route as _rr
-
-    user_msg = body.get("messages", [{}])[-1].get("content", "") if body.get("messages") else ""
-    zcmd = parse_z_command(user_msg)
-
-    # Run only the routing stage — no backend call
-    body_copy = dict(body)
-    body_copy, decision = await _st.proxy._hybrid_route(body_copy, zcmd, "route-check")
-
-    route = _rr.get("default")
-    model = body_copy.get("model", "")
-    result = {"route": route, "model": model}
-    if decision:
-        result["decision_llm"] = True
-    return JSONResponse(result)
+# /api/v1/route-check removed in v3 — the agentic routing layer it exercised
+# (z-commands, hybrid routing, decision LLM, embedding classifier) was deleted.
 
 
 # ---------------------------------------------------------------------------
@@ -1006,11 +925,6 @@ async def stats():
         "vector": vector_stats,
         "tools": tools,
         "hooks": hooks,
-        "decision_llm": {
-            "enabled": _st.decision_agent.enabled if _st.decision_agent else False,
-            "model": _st.decision_agent.model if _st.decision_agent else "",
-            **(_st.decision_agent.fallback_stats() if _st.decision_agent else {}),
-        },
     })
 
 
@@ -1256,40 +1170,7 @@ async def pen_mcp_endpoint(request: Request):
     return JSONResponse(result)
 
 
-@app.get("/api/v1/zcommands")
-async def api_zcommands():
-    """Return all available z-commands — hardcoded + any custom ones from config."""
-    from beigebox.agents.zcommand import ROUTE_ALIASES, TOOL_DIRECTIVES
-    cfg = get_config()
-    zcfg = cfg.get("zcommands", {})
-
-    # Collapse aliases into display groups: target → [aliases]
-    route_groups: dict[str, list[str]] = {}
-    for alias, target in ROUTE_ALIASES.items():
-        route_groups.setdefault(target, []).append(alias)
-
-    tool_groups: dict[str, list[str]] = {}
-    for alias, target in TOOL_DIRECTIVES.items():
-        tool_groups.setdefault(target, []).append(alias)
-
-    # Custom commands from config zcommands.commands (if any)
-    custom = [
-        {"name": c["name"], "description": c.get("description", ""), "route_to": c.get("route_to", "")}
-        for c in zcfg.get("commands", [])
-        if c.get("name") not in {**ROUTE_ALIASES, **TOOL_DIRECTIVES, "help": 1, "fork": 1}
-    ]
-
-    return JSONResponse({
-        "prefix": zcfg.get("prefix", "z:"),
-        "enabled": zcfg.get("enabled", True),
-        "routing": [{"aliases": aliases, "target": target} for target, aliases in route_groups.items()],
-        "tools":   [{"aliases": aliases, "target": target} for target, aliases in tool_groups.items()],
-        "special": [
-            {"name": "help",  "description": "list available z-commands"},
-            {"name": "fork",  "description": "fork conversation into a new branch"},
-        ],
-        "custom": custom,
-    })
+# /api/v1/zcommands removed in v3 — z-command parsing was deleted.
 
 
 @app.get("/api/v1/search")
@@ -1343,7 +1224,6 @@ async def health():
     return JSONResponse({
         "status": "ok",
         "version": _BB_VERSION,
-        "decision_llm": _st.decision_agent.enabled if _st.decision_agent else False,
         "backend_url": cfg.get("backend", {}).get("url", "http://localhost:11434").rstrip("/"),
         "rag_poisoning_detection": "enabled" if _st.poisoning_detector else "disabled",
     })
@@ -1768,9 +1648,6 @@ async def api_info():
             "default_model": get_runtime_config().get("default_model") or cfg.get("models", {}).get("default", ""),
         },
         "features": {
-            "routing": True,
-            "decision_llm": _st.decision_agent.enabled if _st.decision_agent else False,
-            "embedding_classifier": _st.embedding_classifier.ready if _st.embedding_classifier else False,
             "storage": _st.sqlite_store is not None and _st.vector_store is not None,
             "tools": _st.tool_registry is not None and cfg.get("tools", {}).get("enabled", False),
             "hooks": _st.hook_manager is not None,
@@ -1795,8 +1672,6 @@ async def api_config():
         # ── Features (Phase 1 refactoring) ────────────────────────────
         "features": {
             "backends":              rt.get("features_backends", cfg.get("features", {}).get("backends", cfg.get("backends_enabled", False))),
-            "decision_llm":          rt.get("features_decision_llm", cfg.get("features", {}).get("decision_llm", cfg.get("decision_llm", {}).get("enabled", True))),
-            "classifier":            rt.get("features_classifier", cfg.get("features", {}).get("classifier", cfg.get("classifier", {}).get("enabled", True))),
             "semantic_cache":        rt.get("features_semantic_cache", cfg.get("features", {}).get("semantic_cache", cfg.get("semantic_cache", {}).get("enabled", False))),
             "operator":              rt.get("features_operator", cfg.get("features", {}).get("operator", cfg.get("operator", {}).get("enabled", True))),
             "harness":               rt.get("features_harness", cfg.get("features", {}).get("harness", cfg.get("harness", {}).get("enabled", True))),
@@ -1852,13 +1727,6 @@ async def api_config():
             "system_info":  cfg.get("tools", {}).get("system_info", {}),
             "memory":       cfg.get("tools", {}).get("memory", {}),
             "browserbox":   cfg.get("tools", {}).get("browserbox", {}),
-        },
-        # ── Decision LLM ─────────────────────────────────────────────
-        "decision_llm": {
-            "enabled":     rt.get("decision_llm_enabled", get_state().decision_agent.enabled if get_state().decision_agent else False),
-            "model":       get_state().decision_agent.model if get_state().decision_agent else cfg.get("decision_llm", {}).get("model", ""),
-            "timeout":     rt.get("decision_llm_timeout") or cfg.get("decision_llm", {}).get("timeout", 5),
-            "max_tokens":  cfg.get("decision_llm", {}).get("max_tokens", 256),
         },
         # ── Operator ─────────────────────────────────────────────────
         "operator": {
@@ -1932,16 +1800,6 @@ async def api_config():
                 "max_entries": rt.get("semantic_cache_max_entries", cfg.get("routing", {}).get("semantic_cache", {}).get("max_entries", cfg.get("semantic_cache", {}).get("max_entries", 500))),
                 "ttl_seconds": rt.get("semantic_cache_ttl", cfg.get("routing", {}).get("semantic_cache", {}).get("ttl_seconds", cfg.get("semantic_cache", {}).get("ttl_seconds", 3600))),
             },
-            # Tier 4: Decision LLM (judge)
-            "decision_llm": {
-                "enabled": rt.get("features_decision_llm", cfg.get("features", {}).get("decision_llm", cfg.get("decision_llm", {}).get("enabled", True))),
-                "temperature": rt.get("decision_llm_temperature", cfg.get("routing", {}).get("decision_llm", {}).get("temperature", cfg.get("decision_llm", {}).get("temperature", 0.2))),
-            },
-            # Routing control
-            "force_route":         rt.get("force_route", ""),
-            "force_decision":      rt.get("force_decision", False),
-            "border_threshold":    rt.get("border_threshold"),
-            "agentic_threshold":   rt.get("agentic_threshold"),
             "allow_openrouter_for_plain_models": rt.get("allow_openrouter_for_plain_models", cfg.get("routing", {}).get("allow_openrouter_for_plain_models", False)),
         },
         # ── Logging ───────────────────────────────────────────────────
@@ -2042,8 +1900,6 @@ async def api_config_save(request: Request):
         "web_ui_palette":               "web_ui_palette",
         # Features (Phase 1 refactoring)
         "features_backends":            "features_backends",
-        "features_decision_llm":        "features_decision_llm",
-        "features_classifier":          "features_classifier",
         "features_semantic_cache":      "features_semantic_cache",
         "features_operator":            "features_operator",
         "features_harness":             "features_harness",
@@ -2063,13 +1919,10 @@ async def api_config_save(request: Request):
         "models_routing":               "models_routing",
         "models_agentic":               "models_agentic",
         "models_summary":               "models_summary",
-        # Routing
+        # Default model (no longer routed by tiers — backend.router still picks
+        # which provider serves a named model)
         "default_model":                "default_model",
-        "force_route":                  "force_route",
-        "border_threshold":             "border_threshold",
-        "agentic_threshold":            "agentic_threshold",
         # Features (keep old keys for backwards compat)
-        "decision_llm_enabled":         "decision_llm_enabled",
         "tools_enabled":                "tools_enabled",
         "log_conversations":            "log_conversations",
         "log_level":                    "log_level",
@@ -2116,17 +1969,11 @@ async def api_config_save(request: Request):
         "wasm_default_module":          "wasm_default_module",
         "wasm_enabled":                 "wasm_enabled",
         "wasm_timeout_ms":              "wasm_timeout_ms",
-        # Decision LLM tuning
-        "decision_llm_timeout":         "decision_llm_timeout",
-        # Routing — tier params (these override config.yaml values at runtime)
-        "tier1_ttl":                    "tier1_ttl",
-        "classifier_rebuild_interval":  "classifier_rebuild_interval",
+        # Semantic cache tuning
         "semantic_cache_threshold":     "semantic_cache_threshold",
         "semantic_cache_max_entries":   "semantic_cache_max_entries",
         "semantic_cache_ttl":           "semantic_cache_ttl",
-        "decision_llm_temperature":     "decision_llm_temperature",
-        # Routing — control
-        "force_decision":               "force_decision",
+        # Backend selection — affects how backends.router picks a backend for a model
         "allow_openrouter_for_plain_models": "allow_openrouter_for_plain_models",
         # Multi-backend
         "backends_enabled":             "backends_enabled",
@@ -2152,9 +1999,6 @@ async def api_config_save(request: Request):
     # Apply live changes that don't need restart
     rt = get_runtime_config()
     _st = get_state()
-
-    if "decision_llm_enabled" in updated and _st.decision_agent:
-        _st.decision_agent.enabled = rt.get("decision_llm_enabled", _st.decision_agent.enabled)
 
     if "default_model" in updated and _st.proxy:
         _st.proxy.default_model = rt.get("default_model", _st.proxy.default_model)
@@ -2739,15 +2583,6 @@ async def api_status():
             "sqlite": _st.sqlite_store is not None,
             "vector": _st.vector_store is not None,
             "stats": _st.sqlite_store.get_stats() if _st.sqlite_store else {},
-        },
-        "routing": {
-            "decision_llm": {
-                "enabled": _st.decision_agent.enabled if _st.decision_agent else False,
-                "model": _st.decision_agent.model if _st.decision_agent else "",
-            },
-            "embedding_classifier": {
-                "ready": _st.embedding_classifier.ready if _st.embedding_classifier else False,
-            },
         },
         "tools": {
             "enabled": cfg.get("tools", {}).get("enabled", False),
@@ -5145,28 +4980,8 @@ async def api_probe(request: Request):
         return JSONResponse({"error": str(e), "latency_ms": int((_time.monotonic() - t0) * 1000)})
 
 
-# ---------------------------------------------------------------------------
+# /api/v1/build-centroids removed in v3 — embedding classifier was deleted.
 
-@app.post("/api/v1/build-centroids")
-async def api_build_centroids():
-    """
-    Rebuild embedding classifier centroids from seed prompts.
-    Equivalent to `beigebox build-centroids` CLI command.
-    Runs synchronously — may take 10-30s depending on embedding model speed.
-    """
-    _st = get_state()
-    if not _st.embedding_classifier:
-        return JSONResponse({"success": False, "error": "Embedding classifier not initialized"}, status_code=503)
-    try:
-        import asyncio as _asyncio
-        loop = _asyncio.get_running_loop()
-        success = await loop.run_in_executor(None, _st.embedding_classifier.build_centroids)
-        if success:
-            return JSONResponse({"success": True, "message": "Centroids built successfully"})
-        else:
-            return JSONResponse({"success": False, "error": "build_centroids() returned False — check Ollama is running"}, status_code=500)
-    except Exception as e:
-        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 @app.get("/api/v1/workspace")
 async def api_workspace():
@@ -5956,8 +5771,13 @@ async def eval_run(request: Request):
     base_url = body.get("base_url", "http://localhost:1337")
 
     cfg = get_config()
-    judge_model = cfg.get("decision_llm", {}).get("model", "")
-    judge_backend = cfg.get("decision_llm", {}).get("backend_url", base_url)
+    # Eval suite judge — falls back to the agentic profile, then to the global default.
+    _models_cfg = cfg.get("models", {})
+    judge_model = (
+        _models_cfg.get("profiles", {}).get("agentic")
+        or _models_cfg.get("default", "")
+    )
+    judge_backend = base_url
 
     async def event_stream():
         loop = asyncio.get_event_loop()

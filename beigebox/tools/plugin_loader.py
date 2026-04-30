@@ -144,22 +144,8 @@ def load_plugins(plugins_dir: str | Path, tools_cfg: dict) -> dict[str, object]:
             logger.error("Plugin: failed to instantiate %s from %s: %s", cls.__name__, py_file.name, e)
             continue
 
-        # Auto-register z-command aliases so `z: <plugin_name>` works out of the box.
-        # Plugins can override with PLUGIN_Z_ALIASES = {"alias": "tool_name", ...}.
-        # Set PLUGIN_Z_ALIASES = {} to suppress auto-registration.
-        # TOOL_DIRECTIVES is a live module-level dict; mutating it here is safe
-        # because plugin loading runs once at startup before any requests arrive.
-        try:
-            from beigebox.agents.zcommand import TOOL_DIRECTIVES
-            z_aliases: dict[str, str] = getattr(
-                module, "PLUGIN_Z_ALIASES", {plugin_name: plugin_name}
-            )
-            for alias, tool in z_aliases.items():
-                if alias not in TOOL_DIRECTIVES:
-                    TOOL_DIRECTIVES[alias] = tool
-                    logger.debug("Plugin z-alias: 'z: %s' → %s", alias, tool)
-        except Exception:
-            pass
+        # (Z-command alias auto-registration removed in v3 — z-commands are gone.
+        # Plugins can still set PLUGIN_Z_ALIASES; the attribute is just ignored.)
 
     if registered:
         logger.info("Plugin loader: registered %d plugin(s): %s", len(registered), list(registered.keys()))

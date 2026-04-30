@@ -3404,44 +3404,12 @@ async function launchCDP() {
   }
 }
 
-// ── Z-command help tooltip ───────────────────────────────────────────────────
+// Z-command tooltip removed in v3 — the agentic routing layer (z-commands +
+// hybrid routing) was deleted. The element is hidden if it still exists in
+// the DOM; the function is kept as a no-op so legacy onload calls don't error.
 async function loadZHelp() {
   const tip = document.getElementById('z-help-tip');
-  if (!tip) return;
-  try {
-    const d = await api('/api/v1/zcommands');
-    const pfx = d.prefix || 'z:';
-    let html = '';
-
-    if (d.routing?.length) {
-      html += `<span class="zh-head">ROUTING</span>\n`;
-      for (const r of d.routing) {
-        html += `  <span class="zh-cmd">${pfx} ${r.aliases.join('/')}</span><span class="zh-sep"> → </span>${r.target}\n`;
-      }
-    }
-    if (d.tools?.length) {
-      html += `\n<span class="zh-head">TOOLS</span>\n`;
-      for (const t of d.tools) {
-        html += `  <span class="zh-cmd">${pfx} ${t.aliases.join('/')}</span><span class="zh-sep"> → </span>${t.target}\n`;
-      }
-    }
-    if (d.special?.length) {
-      html += `\n<span class="zh-head">SPECIAL</span>\n`;
-      for (const s of d.special) {
-        html += `  <span class="zh-cmd">${pfx} ${s.name}</span><span class="zh-sep"> → </span>${s.description}\n`;
-      }
-    }
-    if (d.custom?.length) {
-      html += `\n<span class="zh-head">CUSTOM</span>\n`;
-      for (const c of d.custom) {
-        html += `  <span class="zh-cmd">${pfx} ${c.name}</span><span class="zh-sep"> → </span>${c.description || c.route_to}\n`;
-      }
-    }
-    html += `\n<span class="zh-sep">chain: </span><span class="zh-cmd">${pfx} complex,search</span>  combine directives`;
-    tip.innerHTML = html.trimEnd();
-  } catch(e) {
-    tip.textContent = 'z-commands unavailable';
-  }
+  if (tip) tip.style.display = 'none';
 }
 
 // ── Clock ───────────────────────────────────────────────────────────────────

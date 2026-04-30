@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from beigebox.storage.sqlite_store import SQLiteStore
     from beigebox.storage.vector_store import VectorStore
     from beigebox.tools.registry import ToolRegistry
-    from beigebox.agents.decision import DecisionAgent
     from beigebox.hooks import HookManager
     from beigebox.backends.router import MultiBackendRouter
     from beigebox.costs import CostTracker
@@ -41,11 +40,9 @@ class AppState:
     sqlite_store: SQLiteStore | None = None
     vector_store: VectorStore | None = None
     blob_store: Any = None
-    decision_agent: DecisionAgent | None = None
     hook_manager: HookManager | None = None
     backend_router: MultiBackendRouter | None = None
     cost_tracker: CostTracker | None = None
-    embedding_classifier: Any = None
     auth_registry: MultiKeyAuthRegistry | None = None
     web_auth: WebAuthManager | None = None
     password_auth: SimplePasswordAuth | None = None

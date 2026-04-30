@@ -132,6 +132,10 @@ class ConversationReplayer:
             return {}
 
         content = best.get("content", "")
+        # The agentic decision layer was deleted in v3. Historical wire events
+        # (z-command, embedding_classifier, decision_llm, agentic_scorer) still
+        # appear in old captures, so keep recognising them when replaying old
+        # data — but new events won't include these tags.
         method = "unknown"
         confidence = None
 
@@ -139,11 +143,10 @@ class ConversationReplayer:
             method = "session_cache"
             confidence = 1.0
         elif "z-command" in content:
-            method = "z_command"
+            method = "legacy_z_command"
             confidence = 1.0
         elif "embedding:" in content:
-            method = "embedding_classifier"
-            # Try to extract confidence
+            method = "legacy_embedding_classifier"
             for part in content.split():
                 if part.startswith("confidence="):
                     try:
@@ -151,9 +154,9 @@ class ConversationReplayer:
                     except (ValueError, IndexError):
                         pass
         elif "route=" in content:
-            method = "decision_llm"
+            method = "legacy_decision_llm"
         elif "agentic_scorer" in content:
-            method = "agentic_scorer"
+            method = "legacy_agentic_scorer"
 
         return {
             "method": method,

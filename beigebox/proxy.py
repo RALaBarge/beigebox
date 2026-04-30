@@ -6,18 +6,12 @@ See LICENSE.md and COMMERCIAL_LICENSE.md for details.
 
 Intercepts OpenAI-compatible requests, logs both sides, forwards to backend.
 Handles streaming (SSE) transparently.
-Now with:
-  - Decision LLM routing (pick the right model per request)
-  - Pre/post hooks (extensible processing pipeline)
-  - Synthetic request filtering (skip Open WebUI's internal requests)
-  - Token tracking (approximate token counts for stats)
-  - Session-aware routing (sticky model within a conversation)
-  - Multi-backend routing with fallback (v0.6)
-  - Cost tracking for API backends (v0.6)
-  - Streaming latency tracking — wall-clock duration stored as latency_ms (v0.8)
-  - Streaming cost capture via OpenRouter sentinel (v0.8)
+
+The agentic decision layer (z-commands, hybrid routing, decision LLM,
+embedding classifier, agentic scorer, routing rules) was deleted in v3 —
+Claude Code is the agent now and BeigeBox is back to being a thin
+OpenAI-compatible proxy with memory, observability, and an MCP tool server.
 """
-import contextvars
 import json
 import logging
 import asyncio
@@ -28,35 +22,19 @@ from collections import deque
 from datetime import datetime, timezone
 from uuid import uuid4
 
-# Per-request routing decision — set by _hybrid_route(), read by main.py to
-# populate the X-BeigeBox-Route response header and /api/v1/route-check.
-_request_route: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "_request_route", default=""
-)
 import httpx
 from beigebox.config import get_config, get_runtime_config
 from beigebox.storage.models import Message
 from beigebox.storage.sqlite_store import SQLiteStore
 from beigebox.storage.vector_store import VectorStore
-from beigebox.agents.decision import DecisionAgent, Decision
-from beigebox.agents.zcommand import parse_z_command, ZCommand, HELP_TEXT
-from beigebox.agents.embedding_classifier import EmbeddingClassifier, EmbeddingDecision
 from beigebox.hooks import HookManager
 from beigebox.wiretap import WireLog
 from beigebox.wasm_runtime import WasmRuntime
-from beigebox.agents.agentic_scorer import score_agentic_intent
-from beigebox.agents.routing_rules import (
-    evaluate_routing_rules,
-    BB_FORCE_BACKEND,
-    BB_SKIP_SEMANTIC_CACHE,
-    BB_RULE_TAG,
-    BB_FORCED_TOOLS,
-)
 from beigebox.logging import (
     log_routing_decision, log_model_selection, log_token_usage,
     log_latency_stage, log_cache_event, log_request_started,
     log_request_completed, log_payload_event,
-    log_hook_execution, log_z_command, log_extraction_attempt,
+    log_hook_execution, log_extraction_attempt,
 )
 from beigebox.backends.openrouter import _COST_SENTINEL_PREFIX
 from beigebox.cache import SemanticCache, ToolResultCache
@@ -77,9 +55,7 @@ class Proxy:
         self,
         sqlite: SQLiteStore,
         vector: VectorStore,
-        decision_agent: DecisionAgent | None = None,
         hook_manager: HookManager | None = None,
-        embedding_classifier: EmbeddingClassifier | None = None,
         tool_registry=None,
         backend_router=None,
         blob_store=None,
@@ -89,9 +65,7 @@ class Proxy:
         self.sqlite = sqlite
         self.vector = vector
         self.blob_store = blob_store
-        self.decision_agent = decision_agent
         self.hook_manager = hook_manager
-        self.embedding_classifier = embedding_classifier
         self.tool_registry = tool_registry
         self.backend_router = backend_router  # MultiBackendRouter or None
         self.extraction_detector = extraction_detector  # ExtractionDetector or None
@@ -102,9 +76,6 @@ class Proxy:
         self.log_enabled = self.cfg["storage"].get("log_conversations", True)
         # Cost tracking config
         self._cost_tracking = self.cfg.get("cost_tracking", {}).get("enabled", False)
-        # Route config for z-command model resolution
-        d_cfg = self.cfg.get("decision_llm", {})
-        self.routes = d_cfg.get("routes", {})
         # Wire log — structured tap of everything on the line
         wire_cfg = self.cfg.get("wiretap", {})
         wire_path = wire_cfg.get("path", "./data/wire.jsonl")
@@ -419,9 +390,14 @@ class Proxy:
         body: dict,
         conversation_id: str,
         model: str,
-        decision: Decision | None = None,
+        decision: object | None = None,  # historical, always None now
     ) -> dict:
-        """Build the context dict passed to hooks."""
+        """Build the context dict passed to hooks.
+
+        The ``decision`` arg used to carry a routing-LLM Decision; that layer
+        was deleted in v3. Hook callers may still pass ``None`` positionally,
+        which is preserved for compatibility.
+        """
         return {
             "conversation_id": conversation_id,
             "model": model,
@@ -474,415 +450,6 @@ class Proxy:
         except Exception:
             logger.debug("hook wire emit failed", exc_info=True)
         return result, latency_ms
-
-    async def _run_decision(self, body: dict) -> Decision | None:
-        """Run the decision LLM if enabled."""
-        if not self.decision_agent or not self.decision_agent.enabled:
-            return None
-        user_msg = self._get_latest_user_message(body)
-        if not user_msg:
-            return None
-        rt = get_runtime_config()
-        timeout_override = rt.get("decision_llm_timeout")
-        decision = await self.decision_agent.decide(user_msg, timeout=timeout_override)
-        # Log the decision to wiretap
-        if not decision.fallback:
-            self.wire.log(
-                direction="internal",
-                role="decision",
-                content=f"route={decision.model} search={decision.needs_search} "
-                        f"rag={decision.needs_rag} tools={decision.tools} — {decision.reasoning}",
-                model=self.decision_agent.model,
-                conversation_id="",
-                event_type="decision_result",
-                source="classifier",
-                meta={
-                    "tier": "decision_llm",
-                    "model_chosen": decision.model,
-                    "needs_search": decision.needs_search,
-                    "needs_rag": decision.needs_rag,
-                    "tools": decision.tools or [],
-                    "reasoning": decision.reasoning,
-                },
-            )
-        return decision
-
-    def _resolve_route_to_model(self, route_name: str) -> str:
-        """Resolve a route name to an actual model string."""
-        if route_name in self.routes:
-            return self.routes[route_name].get("model", self.default_model)
-        return self.default_model
-
-    def _process_z_command(self, body: dict) -> tuple[ZCommand, dict]:
-        """
-        Check for z: prefix in the user's message.
-        If found, parse it, strip the prefix, and return the command + modified body.
-        """
-        conversation_id = self._extract_conversation_id(body)
-        user_msg = self._get_latest_user_message(body)
-        try:
-            zcmd = parse_z_command(user_msg)
-        except Exception as exc:
-            # Parser is regex+dict lookups so this is paranoia, but a parser
-            # crash should never silently revert routing — emit and re-raise.
-            try:
-                log_z_command(
-                    status="error",
-                    branch="parse",
-                    message_len=len(user_msg or ""),
-                    error=str(exc),
-                    conversation_id=conversation_id,
-                )
-            except Exception:
-                logger.debug("z_command wire emit failed", exc_info=True)
-            raise
-        if not zcmd.active:
-            return zcmd, body
-        # Determine which branch the active command will take so the receipt
-        # event captures intent (help / fork / tools / route).
-        branch = (
-            "help" if zcmd.is_help
-            else "fork" if zcmd.is_fork
-            else "tools" if zcmd.tools
-            else "model" if zcmd.model
-            else "route" if zcmd.route
-            else "noop"
-        )
-        try:
-            log_z_command(
-                status="received",
-                directives=zcmd.raw_directives,
-                route=zcmd.route,
-                model=zcmd.model,
-                tools=zcmd.tools,
-                message_len=len(zcmd.message or ""),
-                branch=branch,
-                conversation_id=conversation_id,
-            )
-        except Exception:
-            logger.debug("z_command wire emit failed", exc_info=True)
-        # Strip the z: prefix from the actual message sent to the LLM
-        if zcmd.message and not zcmd.is_help:
-            messages = body.get("messages", [])
-            for msg in reversed(messages):
-                if msg.get("role") == "user":
-                    msg["content"] = zcmd.message
-                    break
-        return zcmd, body
-
-    def _apply_z_command(self, body: dict, zcmd: ZCommand) -> dict:
-        """Apply z-command routing overrides to the request body."""
-        if not zcmd.active:
-            return body
-        # Help — return immediately (handled in forward methods)
-        if zcmd.is_help:
-            return body
-        # Specific model override (e.g. z: llama3:8b)
-        if zcmd.model:
-            body["model"] = zcmd.model
-            return body
-        # Route alias override (e.g. z: complex → large route)
-        if zcmd.route:
-            body["model"] = self._resolve_route_to_model(zcmd.route)
-        return body
-
-    def _run_forced_tools(self, zcmd: ZCommand, user_msg: str) -> str:
-        """Run tools forced by z-command and return results as context."""
-        if not zcmd.tools or not self.tool_registry:
-            return ""
-        results = []
-        errors: list[str] = []
-        for tool_name in zcmd.tools:
-            tool_input = zcmd.tool_input if zcmd.tool_input else user_msg
-            try:
-                result = self.tool_registry.run_tool(tool_name, tool_input)
-            except Exception as exc:
-                errors.append(f"{tool_name}:{exc}")
-                logger.warning("z-command tool '%s' failed: %s", tool_name, exc)
-                continue
-            if result:
-                results.append(f"[{tool_name}]: {result}")
-        try:
-            if errors:
-                log_z_command(
-                    status="error",
-                    directives=zcmd.raw_directives,
-                    tools=zcmd.tools,
-                    branch="tools",
-                    error="; ".join(errors)[:200],
-                )
-            else:
-                log_z_command(
-                    status="executed",
-                    directives=zcmd.raw_directives,
-                    tools=zcmd.tools,
-                    branch="tools",
-                )
-        except Exception:
-            logger.debug("z_command wire emit failed", exc_info=True)
-        return "\n".join(results)
-
-    def _inject_tool_context(self, body: dict, tool_results: str) -> dict:
-        """Inject tool results as a system message into the request."""
-        if not tool_results:
-            return body
-        messages = body.get("messages", [])
-        # Insert at position -1 (just before the last user message) so the LLM
-        # sees the tool results immediately before the question it needs to answer.
-        # Appending to the end would place results after the user message, which
-        # confuses some instruction-tuned models that expect user-message-last.
-        tool_msg = {
-            "role": "system",
-            "content": f"The following tool results are available:\n\n{tool_results}",
-        }
-        if messages:
-            messages.insert(-1, tool_msg)
-        body["messages"] = messages
-        return body
-
-    # ------------------------------------------------------------------
-    # Routing pipeline
-    # ------------------------------------------------------------------
-
-    async def _hybrid_route(self, body: dict, zcmd: ZCommand, conversation_id: str) -> tuple[dict, Decision | None]:
-        """
-        Hybrid routing pipeline:
-          0. Session cache — if we've routed this conversation before, stay sticky
-          1. z-command (user override) — highest priority, skips everything
-          2. Agentic pre-filter — near-zero cost keyword scorer
-          3. Embedding classifier (fast path) — ~50ms, handles clear cases
-          4. Decision LLM (slow path) — only for borderline cases
-        Returns (modified body, decision or None).
-        """
-        rt = get_runtime_config()
-        force_decision = rt.get("force_decision", False)
-
-        # 0. Session cache — sticky model within a conversation (skipped when force_decision)
-        # Only applies when the request model is the default (no explicit user selection).
-        # If the user explicitly picked a different model, respect their choice and update
-        # the cache so the new selection sticks going forward.
-        if not force_decision:
-            requested_model = body.get("model", "")
-            cached_model = await self._get_session_model(conversation_id)
-            if cached_model:
-                if not requested_model or requested_model == self.default_model:
-                    # No explicit selection — apply sticky routing
-                    body["model"] = cached_model
-                    _request_route.set("session_cache")
-                    self.wire.log(
-                        direction="internal",
-                        role="decision",
-                        content=f"session cache hit: model={cached_model}",
-                        model="session-cache",
-                        conversation_id=conversation_id,
-                        event_type="session_hit",
-                        source="proxy",
-                        meta={"model": cached_model},
-                    )
-                    return body, None
-                elif requested_model != cached_model:
-                    # User switched models — update cache and let the request through
-                    await self._set_session_model(conversation_id, requested_model)
-                    _request_route.set("session_cache")
-                    self.wire.log(
-                        direction="internal",
-                        role="decision",
-                        content=f"session model updated: {cached_model} → {requested_model}",
-                        model="session-cache",
-                        conversation_id=conversation_id,
-                    )
-                    return body, None
-
-        # 1. Z-command takes absolute priority
-        if zcmd.active and (zcmd.route or zcmd.model):
-            body = self._apply_z_command(body, zcmd)
-            _request_route.set(zcmd.route or "zcommand")
-            # Z-command overrides are not cached — user is being explicit
-            return body, None
-
-        # 1.75. Routing rules — hot-reloaded from runtime_config.routing_rules
-        #       Evaluated after z-commands (user intent takes priority) and before
-        #       the ML stack.  A matching rule with pass_through=false skips the
-        #       classifier and decision LLM entirely.
-        rules = rt.get("routing_rules", [])
-        if rules:
-            body, matched_rules, skip_sc, pass_through = evaluate_routing_rules(
-                rules, body, routes=self.routes,
-            )
-            if matched_rules:
-                rule_tag = body.pop(BB_RULE_TAG, None)
-                _forced_backend = body.get(BB_FORCE_BACKEND, "")
-                self.wire.log(
-                    direction="internal",
-                    role="decision",
-                    content=(
-                        f"routing_rules: matched {matched_rules} → "
-                        f"model={body.get('model', self.default_model)}"
-                        + (f" backend={_forced_backend}" if _forced_backend else "")
-                        + (f" tag={rule_tag}" if rule_tag else "")
-                        + (" [pass_through]" if pass_through else "")
-                    ),
-                    model="routing-rules",
-                    conversation_id=conversation_id,
-                    event_type="routing_decision",
-                    source="router",
-                    meta={
-                        "tier": "rules",
-                        "matched_rules": matched_rules,
-                        "model_chosen": body.get("model", self.default_model),
-                        "forced_backend": _forced_backend or None,
-                        "pass_through": pass_through,
-                    },
-                )
-                if rule_tag:
-                    body[BB_RULE_TAG] = rule_tag  # restore for wiretap downstream
-                if not pass_through:
-                    _request_route.set("rules")
-                    if not skip_sc:
-                        await self._set_session_model(conversation_id, body.get("model", self.default_model))
-                    return body, None
-
-        # 1.8. Explicit model selection — if the user picked a specific model that
-        #       differs from the default, honour their choice and skip the ML
-        #       routing stack (classifier + decision LLM).  This prevents
-        #       OpenRouter models from being overridden to local models, and
-        #       lets users pin any model without the classifier second-guessing.
-        _explicit_model = body.get("model", "")
-        if _explicit_model and _explicit_model != self.default_model:
-            _request_route.set("explicit_model")
-            await self._set_session_model(conversation_id, _explicit_model)
-            self.wire.log(
-                direction="internal",
-                role="decision",
-                content=f"explicit model selection: {_explicit_model} — skipping classifier/decision LLM",
-                model="routing",
-                conversation_id=conversation_id,
-                event_type="routing_decision",
-                source="router",
-                meta={"tier": "explicit", "model_chosen": _explicit_model},
-            )
-            return body, None
-
-        # 1.5. Agentic pre-filter — near-zero cost, runs before embedding classifier
-        #      High agentic score means the user wants tool use — log it and let
-        #      the embedding classifier / decision LLM decide the route, but the
-        #      score is available for future forced-tool logic.
-        user_msg_for_scoring = self._get_latest_user_message(body)
-        if user_msg_for_scoring:
-            agentic = score_agentic_intent(user_msg_for_scoring)
-            if agentic.is_agentic:
-                self.wire.log(
-                    direction="internal",
-                    role="decision",
-                    content=f"agentic_scorer: score={agentic.score:.2f} matched={agentic.matched}",
-                    model="agentic-scorer",
-                    conversation_id=conversation_id,
-                    event_type="classify_result",
-                    source="classifier",
-                    meta={"tier": "agentic", "score": round(agentic.score, 4), "matched": agentic.matched},
-                )
-
-        # 2. Try embedding classifier first (fast path) — skipped when force_decision
-        if not force_decision and self.embedding_classifier and self.embedding_classifier.ready:
-            user_msg = self._get_latest_user_message(body)
-            if user_msg:
-                # Call async classifier directly (no threadpool needed)
-                emb_result = await self.embedding_classifier.classify(user_msg)
-                self.wire.log(
-                    direction="internal",
-                    role="decision",
-                    content=f"embedding: tier={emb_result.tier} "
-                            f"confidence={emb_result.confidence:.4f} "
-                            f"borderline={emb_result.borderline} ({emb_result.latency_ms}ms)",
-                    model="embedding-classifier",
-                    conversation_id=conversation_id,
-                    event_type="classify_result",
-                    source="classifier",
-                    meta={
-                        "tier": emb_result.tier,
-                        "confidence": round(emb_result.confidence, 4),
-                        "borderline": emb_result.borderline,
-                        "model_chosen": emb_result.model or None,
-                        "latency_ms": emb_result.latency_ms,
-                    },
-                )
-                if not emb_result.borderline:
-                    # Clear classification — use it, skip decision LLM
-                    if emb_result.model:
-                        body["model"] = emb_result.model
-                    _request_route.set(emb_result.route or emb_result.tier)
-                    await self._set_session_model(conversation_id, body.get("model", self.default_model))
-                    return body, None
-                # Borderline — fall through to decision LLM
-                logger.debug(
-                    "Embedding borderline (confidence=%.4f), escalating to decision LLM",
-                    emb_result.confidence,
-                )
-
-        # 3. Decision LLM (slow path for borderline cases)
-        decision = await self._run_decision(body)
-        if decision and not decision.fallback:
-            body = await self._apply_decision(body, decision)
-            _request_route.set("decision_llm")
-        else:
-            _request_route.set("default")
-
-        # Cache whatever model we landed on
-        final_model = body.get("model", self.default_model)
-        await self._set_session_model(conversation_id, final_model)
-
-        return body, decision
-
-    async def _apply_decision(self, body: dict, decision: Decision) -> dict:
-        """Apply the decision LLM's routing to the request."""
-        if decision.fallback:
-            return body
-
-        # Route to the decided model
-        if decision.model:
-            body["model"] = decision.model
-
-        # Run requested tools and inject results
-        if decision.tools and self.tool_registry:
-            tool_results = []
-            for tool_name in decision.tools:
-                result = self.tool_registry.run_tool(tool_name, self._get_latest_user_message(body))
-                if result:
-                    tool_results.append(f"[{tool_name}]: {result}")
-            if tool_results:
-                body = self._inject_tool_context(body, "\n".join(tool_results))
-
-        # Web search augmentation
-        if decision.needs_search and self.tool_registry:
-            user_msg = self._get_latest_user_message(body)
-            if user_msg:
-                search_results = self.tool_registry.run_tool("web_search", user_msg)
-                if search_results:
-                    body = self._inject_tool_context(body, f"[web_search]: {search_results}")
-                    self.wire.log(
-                        direction="internal",
-                        role="tool",
-                        content=f"web_search injected ({len(search_results)} chars)",
-                        model="",
-                        conversation_id="",
-                    )
-
-        # RAG context injection
-        if decision.needs_rag and self.tool_registry:
-            user_msg = self._get_latest_user_message(body)
-            if user_msg:
-                rag_results = self.tool_registry.run_tool("memory", user_msg)
-                if rag_results:
-                    body = self._inject_tool_context(body, f"[memory]: {rag_results}")
-                    self.wire.log(
-                        direction="internal",
-                        role="tool",
-                        content=f"memory/RAG injected ({len(rag_results)} chars)",
-                        model="",
-                        conversation_id="",
-                    )
-
-        return body
 
     def _inject_generation_params(self, body: dict) -> dict:
         """
@@ -1154,27 +721,26 @@ class Proxy:
     async def _run_request_pipeline(
         self,
         body: dict,
-        zcmd,
         conversation_id: str,
         model: str,
         stages: dict,
-    ) -> tuple[dict, object, bool, str]:
+    ) -> tuple[dict, bool, str]:
         """
         Shared pipeline for both streaming and non-streaming paths.
 
         Runs from synthetic-check through window-config application:
-          z-command tools → hybrid routing → rule tools → key stripping →
-          auto-summarize → operator pre-hook → system context → generation
-          params → model options → window config
+          guardrails → extraction-detection → key-stripping → summarization →
+          operator pre-hook → system context → generation params → model options →
+          window config
 
-        Returns (body, decision, is_synthetic, model).
-        Caller is responsible for timing stages before this call.
+        Returns (body, is_synthetic, model). Caller is responsible for timing
+        stages before this call. (The agentic decision layer — z-commands,
+        hybrid routing, decision LLM, embedding classifier, routing rules —
+        was deleted in v3.)
         """
-        import time as _time
-
         is_synthetic = self._is_synthetic(body)
 
-        # Guardrail — input check (runs before routing; bypassed for synthetic requests)
+        # Guardrail — input check (bypassed for synthetic requests)
         if not is_synthetic:
             _gr = self.guardrails.check_input(body.get("messages", []))
             if not _gr.allowed:
@@ -1223,43 +789,15 @@ class Proxy:
             except Exception:
                 logger.debug("extraction_detector check failed", exc_info=True)
 
-        # Run forced tools from z-command
-        if zcmd.active and zcmd.tools:
-            tool_results = self._run_forced_tools(zcmd, self._get_latest_user_message(body))
-            if tool_results:
-                body = self._inject_tool_context(body, tool_results)
-
-        # Hybrid routing: session cache → z-command → routing rules → embedding classifier → decision LLM
-        # _beigebox_direct=true skips routing entirely (used by Studio tab for direct model access)
-        _t_route = _time.monotonic()
-        if body.pop("_beigebox_direct", False):
-            decision = None
-            logger.debug("Direct mode: skipping hybrid routing")
-        else:
-            body, decision = await self._hybrid_route(body, zcmd, conversation_id)
+        # The model already comes from body["model"] (caller resolved it).
         model = body.get("model", model)
-        stages["routing"] = (_time.monotonic() - _t_route) * 1000
-
-        # Run tools forced by routing rules
-        _rule_tools = body.pop(BB_FORCED_TOOLS, None)
-        if _rule_tools and self.tool_registry:
-            _user_msg = self._get_latest_user_message(body)
-            _rule_tool_results = []
-            for _tool_name in _rule_tools:
-                try:
-                    _result = self.tool_registry.run_tool(_tool_name, _user_msg)
-                    if _result:
-                        _rule_tool_results.append(f"[{_tool_name}]: {_result}")
-                except Exception as _te:
-                    logger.warning("Routing rule tool '%s' failed: %s", _tool_name, _te)
-            if _rule_tool_results:
-                body = self._inject_tool_context(body, "\n".join(_rule_tool_results))
+        stages["routing"] = 0.0  # kept for backward-compat with stage timers
 
         # Strip internal metadata keys — must not reach backends
-        body.pop(BB_SKIP_SEMANTIC_CACHE, None)
         body.pop("_bb_auth_key", None)
         body.pop("_beigebox_synthetic", None)
         body.pop("_bb_injection_flag", None)
+        body.pop("_beigebox_direct", None)  # historical override; now a no-op
 
         # Auto-summarize if conversation exceeds token budget
         try:
@@ -1275,7 +813,10 @@ class Proxy:
         except Exception as _e:
             logger.debug("aggressive_summarizer skipped: %s", _e)
 
-        # Operator pre-hook — enrich/modify message before it reaches the LLM
+        # Operator pre-hook — enrich/modify message before it reaches the LLM.
+        # NOTE: Operator itself is being removed in v3-deprecate-operator. This
+        # call survives this branch because Operator still exists in the
+        # codebase; v3-deprecate-operator will delete this line.
         body = await self._run_operator_pre_hook(body)
 
         # Inject system context, generation params, per-model options, window config
@@ -1286,7 +827,7 @@ class Proxy:
         if _force_reload:
             await self._evict_model(body.get("model", ""))
 
-        return body, decision, is_synthetic, model
+        return body, is_synthetic, model
 
     # ------------------------------------------------------------------
     # ------------------------------------------------------------------
@@ -1304,44 +845,6 @@ class Proxy:
 
         # Drop consecutive duplicate messages from a buggy/replaying client
         body = self._dedupe_consecutive_messages(body)
-
-        # Z-command parsing
-        zcmd, body = self._process_z_command(body)
-        _stages["z_command"] = (_time.monotonic() - _t0) * 1000
-
-        # Handle z: help — return help text directly without calling LLM
-        if zcmd.is_help:
-            return {
-                "choices": [{"message": {"role": "assistant", "content": HELP_TEXT}}],
-                "model": "beigebox",
-            }
-
-        # Handle z: fork — branch this conversation into a new ID
-        if zcmd.is_fork:
-            from uuid import uuid4 as _uuid4
-            new_id = _uuid4().hex
-            try:
-                n = self.sqlite.fork_conversation(conversation_id, new_id)
-                fork_msg = (
-                    f"🔀 **Forked.** Copied {n} message(s) into new conversation `{new_id[:12]}…`\n\n"
-                    f"Open a new chat and set the conversation ID to `{new_id}` to continue on the branch, "
-                    f"or use the Conversations tab to find it.\n\n"
-                    f"This conversation continues unchanged."
-                )
-            except Exception as _e:
-                logger.error("z: fork failed: %s", _e)
-                fork_msg = f"❌ Fork failed: {_e}"
-            self.wire.log(
-                direction="internal",
-                role="system",
-                content=f"z: fork → new_id={new_id} source={conversation_id}",
-                model="beigebox",
-                conversation_id=conversation_id,
-            )
-            return {
-                "choices": [{"message": {"role": "assistant", "content": fork_msg}}],
-                "model": "beigebox",
-            }
 
         # Pre-request hooks
         context = self._build_hook_context(body, conversation_id, model, None)
@@ -1401,8 +904,8 @@ class Proxy:
         _stages["anomaly_check"] = (_time.monotonic() - _t_anom) * 1000
 
         try:
-            body, decision, is_synthetic, model = await self._run_request_pipeline(
-                body, zcmd, conversation_id, model, _stages
+            body, is_synthetic, model = await self._run_request_pipeline(
+                body, conversation_id, model, _stages
             )
         except ValueError as _gr_err:
             # Guardrail block — surface as a normal assistant response
@@ -1410,6 +913,7 @@ class Proxy:
                 "choices": [{"message": {"role": "assistant", "content": str(_gr_err)}}],
                 "model": "beigebox",
             }
+        decision = None  # routing layer is gone; kept as a local for downstream wasm/post-hook checks
 
         # Log incoming user messages (skip synthetic)
         if not is_synthetic:
@@ -1624,20 +1128,6 @@ class Proxy:
         except Exception:
             pass  # Don't block on logging
 
-        # Z-command parsing
-        zcmd, body = self._process_z_command(body)
-        _stages["z_command"] = (_time.monotonic() - _t0) * 1000
-
-        # Handle z: help — return as a single SSE chunk
-        if zcmd.is_help:
-            chunk = json.dumps({
-                "choices": [{"delta": {"content": HELP_TEXT}, "index": 0}],
-                "model": "beigebox",
-            })
-            yield f"data: {chunk}\n"
-            yield "data: [DONE]\n"
-            return
-
         # Pre-request hooks
         context = self._build_hook_context(body, conversation_id, model, None)
         body, _stages["pre_hooks"] = self._run_hooks_with_logging(
@@ -1705,8 +1195,8 @@ class Proxy:
         _stages["anomaly_check"] = (_time.monotonic() - _t_anom) * 1000
 
         try:
-            body, decision, is_synthetic, model = await self._run_request_pipeline(
-                body, zcmd, conversation_id, model, _stages
+            body, is_synthetic, model = await self._run_request_pipeline(
+                body, conversation_id, model, _stages
             )
         except ValueError as _gr_err:
             # Guardrail block — yield as a single streamed assistant chunk
@@ -1717,21 +1207,18 @@ class Proxy:
             yield f"data: {chunk}\n"
             yield "data: [DONE]\n"
             return
+        decision = None  # routing layer is gone; kept as a local for downstream wasm checks
 
         # Emit a routing metadata chunk before the real stream starts. The
         # frontend reads bb_type=="routing" and updates the model badge in the
         # pane header immediately — before any tokens arrive. Not sent for
         # synthetic requests because synthetic clients don't have a UI.
         if not is_synthetic:
-            routing_meta = {"bb_type": "routing", "model": model}
-            if zcmd.active and zcmd.route:
-                routing_meta["via"] = zcmd.route  # e.g. "operator"
-            yield f"data: {json.dumps(routing_meta)}\n\n"
+            yield f"data: {json.dumps({'bb_type': 'routing', 'model': model})}\n\n"
 
         # Semantic cache lookup (before logging or backend call)
         user_message = self._get_latest_user_message(body)
-        _skip_sem_cache = body.pop(BB_SKIP_SEMANTIC_CACHE, False)
-        if not is_synthetic and not _skip_sem_cache:
+        if not is_synthetic:
             cache_hit = await self.semantic_cache.lookup(user_message)
             if cache_hit is not None:
                 cached_text, cached_model = cache_hit

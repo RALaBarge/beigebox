@@ -78,13 +78,6 @@ class _ModelsCfg(BaseModel):
     per_task: dict = {}
     whitelist: dict = {}
 
-class _DecisionLLMCfg(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    enabled: bool = False
-    temperature: float = 0.2
-    timeout: float = 5
-    max_tokens: int = 256
-
 class _OperatorCfg(BaseModel):
     model_config = ConfigDict(extra="allow")
     enabled: bool = False
@@ -177,7 +170,6 @@ class _BeigeBoxConfig(BaseModel):
     server: _ServerCfg = _ServerCfg()
     backend: _BackendCfg = _BackendCfg()
     models: _ModelsCfg = _ModelsCfg()
-    decision_llm: _DecisionLLMCfg = _DecisionLLMCfg()
     operator: _OperatorCfg = _OperatorCfg()
     generation: _GenerationCfg = _GenerationCfg()
     cost_tracking: _CostTrackingCfg = _CostTrackingCfg()

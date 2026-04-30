@@ -677,25 +677,6 @@ def cmd_tone(args):
     print(BANNER)
 
 
-def cmd_build_centroids(args):
-    """Build embedding classifier centroids from seed prompts."""
-    from beigebox.agents.embedding_classifier import EmbeddingClassifier
-
-    print(BANNER)
-    print("  Building embedding classifier centroids...")
-    print()
-
-    classifier = EmbeddingClassifier()
-    success = classifier.build_centroids()
-
-    if success:
-        print("  ✓  Centroids built successfully")
-        print("     The embedding classifier is now ready for fast routing.")
-    else:
-        print("  ✗  Failed to build centroids")
-        print("     Make sure Ollama is running with the embedding model loaded.")
-
-
 def cmd_index_docs(args):
     """Index markdown/text files into ChromaDB for semantic search."""
     import os
@@ -1329,10 +1310,6 @@ def main():
     # tone / banner
     _add_command(sub, ["tone", "banner"],
                  "Print the BeigeBox banner", cmd_tone)
-
-    # build-centroids
-    _add_command(sub, ["build-centroids", "centroids"],
-                 "Build embedding classifier centroids from seed prompts", cmd_build_centroids)
 
     # index-docs / index
     def setup_index_docs(p):
