@@ -37,7 +37,7 @@ from beigebox.logging import (
     log_hook_execution, log_extraction_attempt,
 )
 from beigebox.backends.openrouter import _COST_SENTINEL_PREFIX
-from beigebox.cache import SemanticCache, ToolResultCache
+from beigebox.cache import ToolResultCache
 from beigebox.aliases import AliasResolver
 from beigebox.guardrails import Guardrails
 from beigebox.response_normalizer import (
@@ -94,10 +94,9 @@ class Proxy:
         # decision layer, which was deleted. Backend selection is now determined
         # solely by body['model'] passed in by the caller.)
 
-        # Semantic response cache + tool result cache
-        self.semantic_cache = SemanticCache(self.cfg)
+        # Tool result cache (deterministic tools only; see beigebox/cache.py)
         self.tool_cache = ToolResultCache(
-            ttl=self.cfg.get("semantic_cache", {}).get("tool_ttl_seconds", 300.0),
+            ttl=self.cfg.get("tool_cache", {}).get("ttl_seconds", 300.0),
         )
         # Model alias resolver — virtual names like "fast", "smart" → real model IDs
         self.alias_resolver = AliasResolver(self.cfg)
@@ -1048,27 +1047,7 @@ class Proxy:
         if not is_synthetic:
             yield f"data: {json.dumps({'bb_type': 'routing', 'model': model})}\n\n"
 
-        # Semantic cache lookup (before logging or backend call)
         user_message = self._get_latest_user_message(body)
-        if not is_synthetic:
-            cache_hit = await self.semantic_cache.lookup(user_message)
-            if cache_hit is not None:
-                cached_text, cached_model = cache_hit
-                self.wire.log(
-                    direction="internal", role="system",
-                    content=f"semantic cache hit — serving cached response (model={cached_model})",
-                    model=cached_model, conversation_id=conversation_id,
-                    event_type="cache_hit",
-                    source="cache",
-                    meta={"model": cached_model, "chars": len(cached_text)},
-                )
-                chunk = json.dumps({
-                    "choices": [{"delta": {"content": cached_text}, "finish_reason": "stop", "index": 0}],
-                    "model": cached_model,
-                })
-                yield f"data: {chunk}\n"
-                yield "data: [DONE]\n"
-                return
 
         # Log incoming user messages (skip synthetic)
         if not is_synthetic:
@@ -1338,9 +1317,6 @@ class Proxy:
                     latency_ms=round(_stages["backend"], 1),
                     ttft_ms=round(_stages["ttft_ms"], 1) if "ttft_ms" in _stages else None,
                 )
-                # Store in semantic cache for future similar queries
-                if not is_synthetic:
-                    self.semantic_cache.store(user_message, complete_text, model)
 
         # Emit timing summary to wiretap
         cost_str = f" · ${stream_cost_usd:.6f}" if stream_cost_usd else ""

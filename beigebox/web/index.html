@@ -4682,7 +4682,6 @@ const TOOLTIPS = {
   features_backends:           'Enable/disable multi-backend routing. When off, all requests go directly to the primary backend.',
   features_decision_llm:       'Enable a lightweight LLM to classify requests and drive routing decisions.',
   features_classifier:         'Enable the embedding classifier — fast tier 2 routing via cosine similarity.',
-  features_semantic_cache:     'Enable semantic cache — deduplicate near-identical requests without hitting the backend.',
   features_operator:           'Enable LLM-driven tool use and multi-turn agentic reasoning.',
   features_harness:            'Enable the Harness goal-directed multi-agent orchestrator.',
   features_tools:              'Master switch for all tool integrations (web search, calculator, memory, etc.).',
@@ -4728,9 +4727,6 @@ const TOOLTIPS = {
   // Routing (Phase 3)
   tier1_ttl:                   'Tier 1: Keep user sticky to their chosen model for this many seconds.',
   classifier_rebuild_interval: 'Tier 2: Rebuild classifier centroids every N seconds.',
-  semantic_cache_threshold:    'Tier 3: Serve from cache if embedding similarity exceeds this (0–1). Higher = stricter matching.',
-  semantic_cache_max_entries:  'Tier 3: Evict oldest cache entry when count exceeds this.',
-  semantic_cache_ttl:          'Tier 3: Expire cache entries older than this many seconds.',
   decision_llm_temperature:    'Tier 4: Temperature for the judge LLM (0.0=deterministic, 2.0=random). Lower = more confident routing.',
   // Routing control
   force_route:                 'Pin every session to a specific routing bucket, overriding the decision LLM.',
@@ -9203,7 +9199,6 @@ async function loadConfig() {
     html += cfgToggle('features_backends', 'Multi-backend routing', c.features?.backends ?? true);
     html += cfgToggle('features_decision_llm', 'Decision LLM (judge)', c.features?.decision_llm ?? true);
     html += cfgToggle('features_classifier', 'Embedding classifier', c.features?.classifier ?? true);
-    html += cfgToggle('features_semantic_cache', 'Semantic cache', c.features?.semantic_cache ?? false);
     html += cfgToggle('features_operator', 'Operator (LLM-driven tools)', c.features?.operator ?? true);
     html += `<div id="sub-features_operator" style="display:${c.features?.operator ? 'block' : 'none'};padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
     html += cfgInput('operator_model', 'Operator model (blank = default)', c.operator?.model || '', 'text');
@@ -9279,15 +9274,6 @@ async function loadConfig() {
     html += `<div style="margin:8px 0"><strong style="font-size:12px">Tier 2: Embedding Classifier</strong> (fast cosine routing)</div>`;
     html += `<div style="font-size:11px;color:var(--fg-dim);margin-bottom:4px">Toggle: <em>Embedding classifier</em> in Features above</div>`;
     html += cfgInput('classifier_rebuild_interval', 'Centroid rebuild (seconds)', c.routing?.classifier?.centroid_rebuild_interval ?? 3600, 'number');
-
-    html += `<hr style="border:none;border-top:1px solid var(--bg-border);margin:8px 0">`;
-    html += `<div style="margin:8px 0"><strong style="font-size:12px">Tier 3: Semantic Cache</strong> (deduplication)</div>`;
-    html += `<div style="font-size:11px;color:var(--fg-dim);margin-bottom:4px">Toggle: <em>Semantic cache</em> in Features above</div>`;
-    html += `<div style="padding:4px 0 4px 24px;border-left:2px solid var(--bg-border);margin:2px 0 6px">`;
-    html += cfgInput('semantic_cache_threshold', 'Similarity threshold', c.routing?.semantic_cache?.similarity_threshold ?? 0.92, 'number');
-    html += cfgInput('semantic_cache_max_entries', 'Max cached entries', c.routing?.semantic_cache?.max_entries ?? 500, 'number');
-    html += cfgInput('semantic_cache_ttl', 'Entry TTL (seconds)', c.routing?.semantic_cache?.ttl_seconds ?? 3600, 'number');
-    html += '</div>';
 
     html += `<hr style="border:none;border-top:1px solid var(--bg-border);margin:8px 0">`;
     html += `<div style="margin:8px 0"><strong style="font-size:12px">Tier 4: Decision LLM</strong> (judge/classifier)</div>`;
@@ -9455,7 +9441,7 @@ async function saveConfig() {
   const payload = {};
   const bools = [
     // Features (normalized naming)
-    'features_backends','features_decision_llm','features_classifier','features_semantic_cache',
+    'features_backends','features_decision_llm','features_classifier',
     'features_operator','features_harness','features_tools','features_cost_tracking',
     'features_conversation_replay','features_auto_summarization','features_aggressive_summarization','features_system_context',
     'features_wiretap','features_payload_log','features_wasm','features_guardrails',
@@ -9481,7 +9467,6 @@ async function saveConfig() {
     'border_threshold','agentic_threshold','browserbox_timeout',
     // Routing tier params — previously missing, caused silent save failures
     'tier1_ttl','classifier_rebuild_interval',
-    'semantic_cache_threshold','semantic_cache_max_entries','semantic_cache_ttl',
     'decision_llm_temperature',
   ];
   const jsonArrays = [

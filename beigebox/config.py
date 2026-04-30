@@ -33,7 +33,7 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "storage", "logging", "auth", "decision_llm", "operator", "tools",
     "routing", "cost_tracking", "harness", "conversation_replay",
     "auto_summarization", "aggressive_summarization", "system_context", "generation", "models",
-    "wasm", "web_ui", "voice", "wiretap", "semantic_cache", "classifier",
+    "wasm", "web_ui", "voice", "wiretap", "classifier",
     "model_advertising", "zcommands", "advanced", "runtime", "skills",
     "workspace", "hooks", "connections", "amf_mesh", "security", "toolbox",
 }
@@ -45,7 +45,6 @@ _KNOWN_TOP_LEVEL_KEYS = {
 class _FeaturesCfg(BaseModel):
     model_config = ConfigDict(extra="allow")
     backends: bool = True
-    semantic_cache: bool = False
     harness: bool = True
     tools: bool = True
     cost_tracking: bool = True
