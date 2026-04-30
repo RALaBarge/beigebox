@@ -96,3 +96,9 @@ Distilled from the Operator class before it was deleted in v3 — agentic loops 
 - Notes accumulated retrospectively per-host live at `beigebox/host-notes/<canonical_key>/notes.md` (gitignored).
 - Sudo on debian is **not** passwordless; never assume it is.
 - Passwords for SSH aliases live in `~/.bash_aliases` as auto-clipboard helpers; for non-interactive use, `sshpass` is installed locally.
+
+## Architecture stances (don't propose deleting these)
+
+- **Web UI is integrated graphics.** Even when an external frontend (jcode, Warp, custom client) drives BeigeBox over `/v1` + `/mcp`, the bundled web UI must remain self-sufficient — chat, council, ralph harness, wiretap viewer, config editor, toolbox editor. Multi-LLM features (council, ensemble, wiggam) stay because they're what makes the web UI more capable than a single-model chat.
+- **WASM runtime is the interop bet.** `wasm_runtime.py` looks dormant (the response-transform path lost its only writer when the routing decision LLM was deleted in v3). Keep it. The PDF input transform path (`transform_input("pdf_oxide", raw)` at the upload endpoint) is wired, and the broader bet is that the browser-as-OS future runs WASM modules, so the runtime is part of BeigeBox's interop story regardless of today's usage. The compiled `.wasm` artifacts (e.g. `pdf_oxide.wasm`, `output_normalizer.wasm`) aren't currently shipped in the repo — that's a separate "build and drop the artifact" task, not a runtime-removal signal.
+- **BeigeBox is client-agnostic.** New frontends reach BeigeBox via existing HTTP / CLI / MCP surfaces. Don't add per-frontend connectors inside BeigeBox itself.

@@ -1891,7 +1891,7 @@
   <div class="panel" id="panel-chat">
     <div class="subnav">
       <button id="chat-sub-direct-btn" class="subnav-active" onclick="switchChatSub('direct')">Direct</button>
-      <button id="chat-sub-agent-btn" onclick="switchChatSub('agent')">Agent</button>
+      <button id="chat-sub-agent-btn" onclick="switchChatSub('agent')">Council</button>
       <button id="chat-sub-voice-btn" onclick="switchChatSub('voice')">Voice</button>
     </div>
 
@@ -1926,83 +1926,27 @@
       </div>
     </div><!-- /chat-sub-direct -->
 
-    <!-- Agent sub-view (was panel-operator) -->
+    <!-- Council sub-view (multi-model proposer/voter; was the Agent panel pre-v3) -->
     <div id="chat-sub-agent" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden">
       <div class="toolbar">
-        <!-- Mode toggle -->
-        <div style="display:flex;gap:0;border:1px solid var(--bg-border);border-radius:2px;overflow:hidden;flex-shrink:0">
-          <button id="op-mode-agent"   onclick="setOpMode('agent')"
-            style="border-radius:0;border:none;padding:2px 12px;font-size:11px;background:var(--lavender);color:#000">Agent</button>
-          <button id="op-mode-council" onclick="setOpMode('council')"
-            style="border-radius:0;border:none;padding:2px 12px;font-size:11px;background:var(--bg-input);color:var(--fg-dim)">⚖ Council</button>
-        </div>
-        <!-- Agent controls -->
-        <span id="op-agent-controls" style="display:flex;gap:6px;align-items:center">
-          <span class="toolbar-label">Model:</span>
-          <select id="op-target" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
-            <option value="operator">operator (default)</option>
-          </select>
-          <span style="margin-left:6px;padding-left:6px;border-left:1px solid var(--bg-border);display:flex;gap:4px;align-items:center" title="Enable temporal reflection — async insight injected next turn">
-            <input type="checkbox" id="op-reflect" style="margin:0">
-            <span class="toolbar-label">Reflect</span>
-          </span>
-          <span style="margin-left:6px;padding-left:6px;border-left:1px solid var(--bg-border);display:flex;gap:4px;align-items:center" title="Shadow: counterfactual parallel run on turn 0 (requires server-side flag)">
-            <input type="checkbox" id="op-shadow" style="margin:0">
-            <span class="toolbar-label">Shadow</span>
-          </span>
-        </span>
-        <!-- Council controls -->
-        <span id="op-council-controls" style="display:none;gap:6px;align-items:center">
-          <span class="toolbar-label" style="color:var(--lavender)">Proposer:</span>
-          <select id="council-op-model" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
-            <option value="">— operator default —</option>
-          </select>
-        </span>
+        <span class="toolbar-label" style="color:var(--lavender)">⚖ Council · Proposer:</span>
+        <select id="council-op-model" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
+          <option value="">— default —</option>
+        </select>
         <span class="toolbar-spacer"></span>
-        <span id="op-bg-indicator" style="font-size:11px;color:var(--fg-dim);padding:0 8px;display:none;align-items:center" title="Background operator run in progress">
-          ⟳ <span id="op-bg-status">running</span>
-        </span>
-        <button id="op-history-toggle" onclick="toggleOpHistory()" title="View past operator runs">📋 History</button>
-        <button id="op-notes-toggle" onclick="toggleOpNotes()" title="Persistent operator notes">📝 Notes</button>
         <button onclick="opClear()">✕ Clear</button>
       </div>
 
-      <!-- Operator notes panel -->
-      <div id="op-notes-panel" style="display:none;padding:8px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border);flex-shrink:0">
-        <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
-          <span style="font-size:11px;color:var(--fg-muted);flex:1">Persistent notes — injected at the start of every operator session</span>
-          <button onclick="saveOpNotes()" style="font-size:11px;padding:1px 8px">Save</button>
-          <span id="op-notes-status" style="font-size:10px;color:var(--fg-dim)"></span>
-        </div>
-        <textarea id="op-notes-area" style="width:100%;height:80px;font-size:11px;font-family:inherit;resize:vertical;background:var(--bg-input);border:1px solid var(--bg-border);color:var(--fg);padding:4px 6px;border-radius:2px;line-height:1.4" placeholder="e.g. User prefers concise answers. Project is BeigeBox. Stack: Python/FastAPI/Ollama."></textarea>
-      </div>
-
-      <!-- Operator run history panel -->
-      <div id="op-history-panel" style="display:none;padding:8px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border);flex-shrink:0;max-height:180px;overflow-y:auto">
-        <div id="op-history-list" style="font-size:11px;color:var(--fg-muted)">Loading…</div>
-      </div>
-
       <!-- Council: allowed model pool -->
-      <div id="council-model-pool" style="display:none;padding:6px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border)">
+      <div id="council-model-pool" style="padding:6px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border)">
         <div style="font-size:11px;color:var(--fg-muted);margin-bottom:4px">Models the council may use <span style="color:var(--fg-dim)">(leave all unchecked to allow any)</span>:</div>
         <div id="council-model-list" style="display:flex;flex-wrap:wrap;gap:6px;max-height:70px;overflow-y:auto">
           <span style="color:var(--fg-muted);font-size:11px">Loading models…</span>
         </div>
       </div>
 
-      <!-- Agent mode -->
-      <div id="op-agent-area" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
-        <div id="op-log" role="log" aria-live="polite" aria-label="Operator log"></div>
-        <div id="op-input-area">
-          <input id="op-input" placeholder="Ask the operator anything…"
-            onkeydown="if(event.key==='Enter'&&!_opAbort)runOp()">
-          <button class="primary" onclick="runOp()" id="op-btn">Run</button>
-          <button onclick="stopOp()" id="op-stop-btn" style="display:none;background:var(--red,#c0392b);color:#fff" title="Stop current run">■ Stop</button>
-        </div>
-      </div>
-
       <!-- Council mode -->
-      <div id="op-council-area" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+      <div id="op-council-area" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
         <div id="council-proposal-area"></div>
         <div id="council-input-area">
           <input id="council-input" placeholder="Describe what you need the council to think about…"
@@ -2179,27 +2123,12 @@
     <div class="toolbar">
       <span class="toolbar-label">Mode:</span>
       <div style="display:flex;gap:0;border:1px solid var(--bg-border);border-radius:2px;overflow:hidden;flex-shrink:0">
-        <button id="harness-mode-orchestrated" onclick="setHarnessMode('orchestrated')"
-          style="border-radius:0;border:none;padding:2px 10px;font-size:11px;background:var(--cyan);color:#000">Orchestrated</button>
         <button id="harness-mode-ensemble" onclick="setHarnessMode('ensemble')"
           style="border-radius:0;border:none;padding:2px 10px;font-size:11px;background:var(--bg-input);color:var(--fg-dim)">Ensemble</button>
         <button id="harness-mode-ralph" onclick="setHarnessMode('ralph')"
           style="border-radius:0;border:none;padding:2px 10px;font-size:11px;background:var(--bg-input);color:var(--fg-dim)">⚡ Ralph</button>
-        <button id="harness-mode-agentic" onclick="setHarnessMode('agentic')"
-          style="border-radius:0;border:none;padding:2px 10px;font-size:11px;background:var(--bg-input);color:var(--fg-dim)">⬡ Agentic</button>
       </div>
       <span class="toolbar-spacer"></span>
-      <span id="harness-orch-controls" style="display:flex;gap:6px;align-items:center">
-        <span class="toolbar-label" style="color:var(--cyan)">Master model:</span>
-        <select id="harness-orch-model" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
-          <option value="">— use operator default —</option>
-        </select>
-        <span class="toolbar-label" style="color:var(--fg-muted)">max rounds:</span>
-        <input id="harness-orch-rounds" type="number" value="8" min="1" max="20"
-          style="width:44px;height:26px;font-size:12px;padding:2px 4px;background:var(--bg-input);border:1px solid var(--bg-border);color:var(--fg);border-radius:2px">
-        <button onclick="harnessOrchRun()" class="primary" id="harness-orch-run-btn">▶ Run</button>
-        <button onclick="harnessOrchClear()">✕ Clear</button>
-      </span>
       <span id="harness-ensemble-controls" style="display:none;gap:6px;align-items:center">
         <span class="toolbar-label" style="color:var(--yellow)">Judge:</span>
         <select id="harness-ensemble-judge" style="height:26px;font-size:12px;padding:2px 6px;min-width:160px">
@@ -2220,18 +2149,6 @@
         <button onclick="harnessRalphRun()" class="primary" id="harness-ralph-run-btn" style="background:var(--green);color:#000">⚡ Run</button>
         <button onclick="harnessRalphStop()" id="harness-ralph-stop-btn" style="display:none">◼ Stop</button>
         <button onclick="harnessRalphClear()">✕ Clear</button>
-      </span>
-      <span id="harness-agentic-controls" style="display:none;gap:6px;align-items:center">
-        <span class="toolbar-label" style="color:var(--lavender)">Model:</span>
-        <select id="harness-agentic-model" style="height:26px;font-size:12px;padding:2px 6px;min-width:140px">
-          <option value="">— operator default —</option>
-        </select>
-        <span class="toolbar-label" style="color:var(--fg-muted)">max turns:</span>
-        <input id="harness-agentic-turns" type="number" value="5" min="1" max="20"
-          style="width:44px;height:26px;font-size:12px;padding:2px 4px;background:var(--bg-input);border:1px solid var(--bg-border);color:var(--fg);border-radius:2px">
-        <button onclick="harnessAgenticRun()" class="primary" id="harness-agentic-run-btn" style="background:var(--lavender);color:#000">▶ Run</button>
-        <button onclick="harnessAgenticStop()" id="harness-agentic-stop-btn" style="display:none">◼ Stop</button>
-        <button onclick="harnessAgenticClear()">✕ Clear</button>
       </span>
     </div>
 
@@ -2322,7 +2239,7 @@
     <div id="harness-prompt-area" style="padding:6px 12px;background:var(--bg-panel);border-bottom:1px solid var(--bg-border);display:flex;gap:8px;flex-shrink:0">
       <textarea id="harness-prompt" rows="2"
         style="flex:1;resize:none;font-size:12px;padding:4px 8px"
-        onkeydown="if(event.ctrlKey&&event.key==='Enter'){harnessMode==='orchestrated'?harnessOrchRun():harnessMode==='ensemble'?harnessEnsembleRun():harnessMode==='agentic'?harnessAgenticRun():harnessRalphRun()}"
+        onkeydown="if(event.ctrlKey&&event.key==='Enter'){harnessMode==='ensemble'?harnessEnsembleRun():harnessRalphRun()}"
         placeholder="Enter goal or prompt… (Ctrl+Enter to run)"></textarea>
     </div>
 
@@ -3517,7 +3434,6 @@ function switchChatSub(sub) {
   document.getElementById('chat-sub-direct-btn').classList.toggle('subnav-active', isDirect);
   document.getElementById('chat-sub-agent-btn').classList.toggle('subnav-active',  isAgent);
   document.getElementById('chat-sub-voice-btn').classList.toggle('subnav-active',  isVoice);
-  if (isAgent) { loadOpTargets(); hideOpBgIndicator(); }
   if (isVoice) { _voiceTabOpened(); }
 }
 
@@ -4036,7 +3952,6 @@ function switchTab(name) {
 
   // Show background operator indicator if leaving operator tab while a run is in progress
   if (name !== 'operator' && _lastOpRunId) {
-    showOpBgIndicator();
   }
 }
 
@@ -5814,7 +5729,6 @@ async function loadModelsForPanes() {
   });
 
   // Also populate operator target dropdown
-  const opSel = document.getElementById('op-target');
   if (opSel) {
     const curOp = opSel.value;
     const baseOpts = opSel.innerHTML.split('<option').filter(o => o.includes('operator')).map(o => '<option' + o).join('');
@@ -5902,7 +5816,7 @@ async function loadModelsForPanes() {
   // Refresh ensemble checklist if it's currently visible
   if (harnessMode === 'ensemble') harnessEnsemblePopulateModels();
   // Refresh council model pool if council mode is active
-  if (_opMode === 'council') councilPopulateModels();
+  councilPopulateModels();  // formerly gated on _opMode
 }
 
 // Track which pane drawers are open across re-renders
@@ -6194,7 +6108,10 @@ async function sendChat() {
 }
 
 async function sendToPane(pane, text, forceOp) {
-  const isOp = forceOp || pane.target === '@op';
+  // forceOp / target === '@op' was the route-to-Operator path. Operator was
+  // deleted in v3, so this is permanently false now. Kept as a parameter for
+  // backwards-compat with any stored pane state that still references it.
+  const isOp = false;
   const area = document.getElementById(`pane-msgs-${pane.id}`);
   if (!area) return;
 
@@ -6254,16 +6171,9 @@ async function sendToPane(pane, text, forceOp) {
 
   let _loadHintId = null;
   try {
-    if (isOp) {
-      // Operator removed in v3 — agent loops moved to MCP-speaking clients.
-      document.getElementById(typingId)?.remove();
-      if (_loadHintId) { document.getElementById(_loadHintId)?.remove(); _seenModels.add(_modelKey); _loadHintId = null; }
-      const answer = '[Operator was removed in v3. Use a model directly, or drive BeigeBox tools via your MCP-speaking client over /mcp.]';
-      const _opTs = Date.now();
-      pane.history.push({ role: 'assistant', content: answer, model: 'operator', _ts: _opTs });
-      appendMsgToPane(pane.id, 'assistant', answer, 'operator', area, _opTs);
-    } else {
-      // Stream to model
+    {
+      // Stream to model. (The historical isOp / route-to-Operator branch
+      // was removed in v3 — Operator is gone.)
       const model = pane.target || '';
       const wc = pane.config || _defaultPaneConfig();
 
@@ -7776,44 +7686,7 @@ function toggleInspectorLive() {
   }
 }
 
-// ── 6. Operator ───────────────────────────────────────────────────────────────
-function loadOpTargets() {
-  // Models are loaded by loadModelsForPanes when chat tab inits,
-  // but if operator tab visited first, load them now.
-  loadModelsForPanes();
-  // Refresh default option label to show the current configured model name
-  api('/api/v1/config').then(cfg => {
-    const sel = document.getElementById('op-target');
-    if (!sel) return;
-    const def = sel.querySelector('option[value="operator"]');
-    const model = cfg && cfg.operator && cfg.operator.model;
-    if (def && model) def.textContent = `operator default (${model})`;
-  }).catch(() => {});
-}
-
-// Operator conversation history — maintained across messages, cleared with Clear button
-let _opHistory = [];
-let _lastOpRunId = null;
-let _opAbort = null;
-
-// Load history from localStorage on page load
-function loadOpHistory() {
-  try {
-    const saved = localStorage.getItem('_opHistory');
-    if (saved) _opHistory = JSON.parse(saved);
-  } catch(e) {
-    // silently fail
-  }
-}
-
-// Save history to localStorage after each run
-function saveOpHistory() {
-  try {
-    localStorage.setItem('_opHistory', JSON.stringify(_opHistory));
-  } catch(e) {
-    // silently fail (quota exceeded, etc)
-  }
-}
+// ── 6. Output formatting (used by Council, Chat, Harness) ────────────────────
 
 function _formatOutput(text) {
   /**
@@ -7896,307 +7769,8 @@ function _formatOutput(text) {
   return html || esc(text);
 }
 
-async function runOp() {
-  if (_opAbort) return; // already running
-  const input = document.getElementById('op-input');
-  const query = input.value.trim();
-  if (!query) return;
-  input.value = '';
+function opClear() { councilClear(); }
 
-  const log = document.getElementById('op-log');
-  const btn     = document.getElementById('op-btn');
-  const stopBtn = document.getElementById('op-stop-btn');
-  btn.disabled = true;
-  if (stopBtn) stopBtn.style.display = '';
-
-  _opAbort = new AbortController();
-
-  const targetSel = document.getElementById('op-target');
-  const target = targetSel ? targetSel.value : 'operator';
-  const isModel = target.startsWith('model:');
-  const targetLabel = isModel ? target.slice(6) : 'operator';
-
-  // Container for this turn's streamed output
-  const streamId = 'op-stream-' + Date.now();
-  log.insertAdjacentHTML('beforeend',
-    `<div class="op-query">▶ [${esc(targetLabel)}] ${esc(query)}</div>` +
-    `<div id="${streamId}"><div class="op-pending">⟳ thinking…</div></div>`);
-  log.scrollTop = log.scrollHeight;
-
-  const streamEl = document.getElementById(streamId);
-  let finalAnswer = null;
-  let lastToolCallId = null;
-
-  try {
-    const modelId = isModel ? target.slice(6) : null;
-    const reqBody = { query, history: _opHistory };
-    if (modelId) reqBody.model = modelId;
-
-    // /api/v1/operator/stream removed in v3 — Operator class deleted.
-    streamEl.innerHTML = `<div class='op-error'>✗ Operator removed in v3 — drive via an MCP client over /mcp.</div>`;
-    btn.disabled = false; if (stopBtn) stopBtn.style.display = 'none';
-    _opAbort = null;
-    return;
-    // (unreachable — kept so the parser's structural expectations below stay valid)
-    const resp = { ok: false, status: 410, statusText: 'Gone', body: { getReader: () => ({ read: async () => ({ done: true, value: null }) }) }, json: async () => ({error: 'Operator removed in v3.'}) };
-
-    // Clear the "thinking…" spinner once the stream starts
-    streamEl.innerHTML = '';
-
-    if (!resp.ok) {
-      const d = await resp.json().catch(() => ({}));
-      rafAppend(streamEl,
-        `<div class="op-error">✗ ${esc(d.error || resp.statusText)}</div>`);
-    } else {
-      const reader = resp.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          let evt;
-          try { evt = JSON.parse(line.slice(6)); } catch { continue; }
-
-          // Capture run_id from the start event
-          if (evt.type === 'start') {
-            _lastOpRunId = evt.run_id;
-            localStorage.setItem('_lastOpRunId', _lastOpRunId);
-            continue;
-          }
-
-          if (evt.type === 'turn_start') {
-            rafAppend(streamEl,
-              `<div class="op-turn-sep">── Turn ${evt.turn} / ${evt.total} ──</div>`);
-          } else if (evt.type === 'info') {
-            rafAppend(streamEl,
-              `<div class="op-info">ℹ ${esc(evt.message)}</div>`);
-          } else if (evt.type === 'tool_call') {
-            const tid = 'op-tc-' + Math.random().toString(36).slice(2);
-            lastToolCallId = tid;
-            const inputSnippet = evt.input.length > 120 ? evt.input.slice(0, 120) + '…' : evt.input;
-            streamEl.insertAdjacentHTML('beforeend',
-              `<div class="op-tool-call" id="${tid}">⟳ <strong>${esc(evt.tool)}</strong>: ${esc(inputSnippet)}</div>`);
-          } else if (evt.type === 'tool_result') {
-            if (lastToolCallId) {
-              const el = document.getElementById(lastToolCallId);
-              if (el) {
-                el.className = 'op-tool-result';
-                el.innerHTML = `✓ <strong>${esc(evt.tool)}</strong><br>${_formatOutput(evt.result)}`;
-              }
-              lastToolCallId = null;
-            }
-          } else if (evt.type === 'answer') {
-            finalAnswer = evt.content;
-            rafAppend(streamEl,
-              `<div class="op-answer">${_formatOutput(evt.content)}</div>`);
-            speakText(evt.content);
-          } else if (evt.type === 'run_score') {
-            const flags = evt.flags && evt.flags.length ? ` <span class="op-score-flags">[${evt.flags.join(', ')}]</span>` : '';
-            rafAppend(streamEl,
-              `<div class="op-score">Score <strong>${evt.score}</strong>/10 &nbsp;·&nbsp; Flow ${evt.flow} · Eff ${evt.efficiency} · Quality ${evt.quality} · Intent ${evt.intent} &nbsp;·&nbsp; ${evt.turns_used}t/${evt.tool_calls}calls${flags}</div>`);
-          } else if (evt.type === 'alternative_plan') {
-            rafAppend(streamEl,
-              `<details class="op-alt-plan"><summary>↕ Alternative approach (shadow)</summary><div class="op-alt-plan-body">${esc(evt.content)}</div></details>`);
-          } else if (evt.type === 'error') {
-            rafAppend(streamEl,
-              `<div class="op-error">✗ ${esc(evt.message)}</div>`);
-          }
-        }
-      }
-    }
-  } catch(e) {
-    if (e.name === 'AbortError') {
-      rafAppend(streamEl, `<div class="op-info">ℹ Run stopped.</div>`);
-    } else {
-      streamEl.innerHTML = '';
-      rafAppend(streamEl,
-        `<div class="op-error">✗ ${esc(e.message)}</div>`);
-    }
-  } finally {
-    _opAbort = null;
-    btn.disabled = false;
-    if (stopBtn) stopBtn.style.display = 'none';
-  }
-
-  rafAppend(streamEl, `<div class="op-sep"></div>`);
-
-  // Update conversation history for context on the next message
-  if (finalAnswer !== null) {
-    _opHistory.push({role: 'user', content: query});
-    _opHistory.push({role: 'assistant', content: finalAnswer});
-    // Cap at 20 messages (10 turns) to stay within context limits
-    if (_opHistory.length > 20) _opHistory = _opHistory.slice(-20);
-    saveOpHistory();
-  }
-
-  log.scrollTop = log.scrollHeight;
-  input.focus();
-}
-
-function stopOp() {
-  if (_opAbort) _opAbort.abort();
-}
-
-function clearOp() {
-  document.getElementById('op-log').innerHTML = '';
-  _opHistory = [];
-  localStorage.removeItem('_opHistory');
-  localStorage.removeItem('_lastOpRunId');
-  _lastOpRunId = null;
-}
-
-// ── Operator history panel ─────────────────────────────────────────────────
-let _opHistoryOpen = false;
-
-function toggleOpHistory() {
-  _opHistoryOpen = !_opHistoryOpen;
-  const panel = document.getElementById('op-history-panel');
-  if (!panel) return;
-  panel.style.display = _opHistoryOpen ? '' : 'none';
-  if (_opHistoryOpen) loadOpRuns();
-}
-
-async function loadOpRuns() {
-  const list = document.getElementById('op-history-list');
-  if (!list) return;
-  try {
-    const data = { runs: [] };
-    const runs = data.runs;
-    list.innerHTML = '<span style="color:var(--fg-muted)">Operator removed in v3 — drive via an MCP client over /mcp.</span>';
-    return;
-    if (!runs.length) { list.innerHTML = '<span style="color:var(--fg-muted)">No runs yet.</span>'; return; }
-    list.innerHTML = runs.map(r => {
-      const ts  = r.created_at ? r.created_at.slice(0, 16).replace('T', ' ') : '';
-      const st  = r.status === 'completed' ? '✓' : r.status === 'error' ? '✗' : '⟳';
-      const col = r.status === 'completed' ? 'var(--green)' : r.status === 'error' ? 'var(--red)' : 'var(--yellow)';
-      const q   = (r.query || '').slice(0, 80);
-      return `<div style="display:flex;gap:8px;align-items:baseline;padding:2px 0;cursor:pointer;border-bottom:1px solid var(--bg-border)" onclick="retrieveOpRun('${esc(r.id)}');toggleOpHistory()">
-        <span style="color:${col};flex-shrink:0">${st}</span>
-        <span style="color:var(--fg-dim);flex-shrink:0;font-size:10px">${esc(ts)}</span>
-        <span style="color:var(--fg-muted);flex-shrink:0;font-size:10px">${esc(r.model||'')}</span>
-        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(q)}</span>
-      </div>`;
-    }).join('');
-  } catch(e) {
-    list.innerHTML = `<span style="color:var(--red)">Error: ${esc(e.message)}</span>`;
-  }
-}
-
-// ── Operator notes ────────────────────────────────────────────────────────────
-let _opNotesOpen = false;
-
-function toggleOpNotes() {
-  _opNotesOpen = !_opNotesOpen;
-  const panel = document.getElementById('op-notes-panel');
-  const btn   = document.getElementById('op-notes-toggle');
-  if (panel) panel.style.display = _opNotesOpen ? '' : 'none';
-  if (btn)   btn.style.color = _opNotesOpen ? 'var(--lavender)' : '';
-  if (_opNotesOpen) loadOpNotes();
-}
-
-async function loadOpNotes() {
-  try {
-    const ta = document.getElementById('op-notes-area');
-    if (ta) ta.value = '[Operator removed in v3 — drive via an MCP client over /mcp.]';
-  } catch(e) {
-    // silently fail — notes may not exist yet
-  }
-}
-
-// Show background run indicator when navigating away
-function showOpBgIndicator() {
-  const ind = document.getElementById('op-bg-indicator');
-  if (ind && _lastOpRunId) {
-    ind.style.display = 'flex';
-  }
-}
-
-function hideOpBgIndicator() {
-  const ind = document.getElementById('op-bg-indicator');
-  if (ind) ind.style.display = 'none';
-}
-
-// Retrieve a background operator run result
-async function retrieveOpRun(runId) {
-  try {
-    alert('Operator removed in v3 — drive via an MCP client over /mcp.');
-    return;
-    if (false) {
-      const run = null;
-      if (!run) {
-        return;
-    }
-    // Restore history and result
-    _opHistory = run.history || [];
-    saveOpHistory();
-    // Display result
-    const log = document.getElementById('op-log');
-    if (log) {
-      log.insertAdjacentHTML('beforeend', `
-        <div class="op-sep"></div>
-        <div class="op-info">ℹ Retrieved background run ${runId.slice(0, 4)}…</div>
-        <div class="op-answer">${esc(run.result || '(no result)')}</div>
-        <div class="op-sep"></div>
-      `);
-      log.scrollTop = log.scrollHeight;
-    }
-    hideOpBgIndicator();
-    _lastOpRunId = null;
-    localStorage.removeItem('_lastOpRunId');
-  } catch(e) {
-    alert(`Failed to retrieve run: ${e.message}`);
-  }
-}
-
-async function saveOpNotes() {
-  const ta     = document.getElementById('op-notes-area');
-  const status = document.getElementById('op-notes-status');
-  if (!ta) return;
-  try {
-    if (status) { status.textContent = 'Operator removed in v3 — drive via an MCP client over /mcp.'; }
-  } catch(e) {
-    if (status) status.textContent = 'error: ' + e.message;
-  }
-}
-
-function opClear() {
-  document.getElementById('op-log').innerHTML = '';
-  _opHistory = [];
-  councilClear();
-}
-
-// ── Operator mode toggle ──────────────────────────────────────────────────────
-let _opMode = 'agent';
-
-function setOpMode(mode) {
-  _opMode = mode;
-  const isAgent   = mode === 'agent';
-  const isCouncil = mode === 'council';
-
-  const agentBtn   = document.getElementById('op-mode-agent');
-  const councilBtn = document.getElementById('op-mode-council');
-  agentBtn.style.background   = isAgent   ? 'var(--lavender)' : 'var(--bg-input)';
-  agentBtn.style.color        = isAgent   ? '#000'            : 'var(--fg-dim)';
-  councilBtn.style.background = isCouncil ? 'var(--lavender)' : 'var(--bg-input)';
-  councilBtn.style.color      = isCouncil ? '#000'            : 'var(--fg-dim)';
-
-  document.getElementById('op-agent-controls').style.display   = isAgent   ? 'flex' : 'none';
-  document.getElementById('op-council-controls').style.display = isCouncil ? 'flex' : 'none';
-  document.getElementById('op-agent-area').style.display       = isAgent   ? 'flex' : 'none';
-  document.getElementById('op-council-area').style.display     = isCouncil ? 'flex' : 'none';
-  const poolEl = document.getElementById('council-model-pool');
-  if (poolEl) poolEl.style.display = isCouncil ? '' : 'none';
-  if (isCouncil) councilPopulateModels();
-  // Remove focus so the clicked button doesn't retain a browser focus ring
-  // that makes it look permanently highlighted.
-  document.activeElement?.blur();
-}
 
 // ── Council mode ──────────────────────────────────────────────────────────────
 let _councilRunId      = null;
@@ -8550,75 +8124,33 @@ function endRalphSplitterDrag(event) {
 }
 
 // ── Harness mode switching ────────────────────────────────────────────────────
-let harnessMode = 'orchestrated';
+let harnessMode = "ensemble";
 let harnessOrchTargets = []; // targets the master can use: [{id, key, label}]
 let harnessOrchTargetSeq = 0;
 
 function setHarnessMode(mode) {
+  // Orchestrated + Agentic modes removed in v3 (their endpoints are gone).
+  // Coerce any historical 'orchestrated' / 'agentic' state to 'ensemble'.
+  if (mode === 'orchestrated' || mode === 'agentic') mode = 'ensemble';
   harnessMode = mode;
-  const isOrch    = mode === 'orchestrated';
-  const isEns     = mode === 'ensemble';
-  const isRalph   = mode === 'ralph';
-  const isAgentic = mode === 'agentic';
 
-  // ── Mode button styles ──
-  const orchBtn    = document.getElementById('harness-mode-orchestrated');
-  const ensBtn     = document.getElementById('harness-mode-ensemble');
-  const ralphBtn   = document.getElementById('harness-mode-ralph');
-  const agenticBtn = document.getElementById('harness-mode-agentic');
-  if (orchBtn)    { orchBtn.style.background    = isOrch    ? 'var(--cyan)'     : 'var(--bg-input)'; orchBtn.style.color    = isOrch    ? '#000' : 'var(--fg-dim)'; }
-  if (ensBtn)     { ensBtn.style.background     = isEns     ? 'var(--yellow)'   : 'var(--bg-input)'; ensBtn.style.color     = isEns     ? '#000' : 'var(--fg-dim)'; }
-  if (ralphBtn)   { ralphBtn.style.background   = isRalph   ? 'var(--green)'    : 'var(--bg-input)'; ralphBtn.style.color   = isRalph   ? '#000' : 'var(--fg-dim)'; }
-  if (agenticBtn) { agenticBtn.style.background = isAgentic ? 'var(--lavender)' : 'var(--bg-input)'; agenticBtn.style.color = isAgentic ? '#000' : 'var(--fg-dim)'; }
-
-  // ── Toolbar control bars ──
-  const orchControls    = document.getElementById('harness-orch-controls');
-  const ensControls     = document.getElementById('harness-ensemble-controls');
-  const ralphControls   = document.getElementById('harness-ralph-controls');
-  const agenticControls = document.getElementById('harness-agentic-controls');
-  if (orchControls)    orchControls.style.display    = isOrch    ? 'flex' : 'none';
-  if (ensControls)     ensControls.style.display     = isEns     ? 'flex' : 'none';
-  if (ralphControls)   ralphControls.style.display   = isRalph   ? 'flex' : 'none';
-  if (agenticControls) agenticControls.style.display = isAgentic ? 'flex' : 'none';
-
-  // ── Sub-areas ──
-  const orchTargetArea  = document.getElementById('harness-orch-target-area');
-  const ensModelArea    = document.getElementById('harness-ensemble-model-area');
-  const ralphConfig     = document.getElementById('harness-ralph-config');
-  const ralphSpecArea   = document.getElementById('harness-ralph-spec-area');
-  const promptArea      = document.getElementById('harness-prompt-area');
-  if (orchTargetArea) orchTargetArea.style.display = isOrch  ? 'flex' : 'none';
-  if (ensModelArea)   ensModelArea.style.display   = isEns   ? ''     : 'none';
-  // Hide question bank when leaving ensemble mode
-  if (!isEns) { const qba = document.getElementById('harness-qbank-area'); if (qba) qba.style.display = 'none'; _qbankOpen = false; }
-  if (ralphConfig)    ralphConfig.style.display    = isRalph ? 'flex' : 'none';
-  if (ralphSpecArea)  ralphSpecArea.style.display  = isRalph ? 'flex' : 'none';
-  if (promptArea)     promptArea.style.display     = isRalph ? 'none' : 'flex';
-
-  // ── Result layouts ──
-  const orchLayout    = document.getElementById('harness-orch-layout');
-  const ensGrid       = document.getElementById('harness-ensemble-grid');
-  const ralphLayout   = document.getElementById('harness-ralph-layout');
-  const agenticLayout = document.getElementById('harness-agentic-layout');
-  if (orchLayout)    orchLayout.style.display    = isOrch    ? 'flex' : 'none';
-  if (ensGrid)       ensGrid.style.display       = isEns     ? 'flex' : 'none';
-  if (ralphLayout)   ralphLayout.style.display   = isRalph   ? 'flex' : 'none';
-  if (agenticLayout) agenticLayout.style.display = isAgentic ? 'flex' : 'none';
-
-  // ── Prompt placeholder ──
-  const ta = document.getElementById('harness-prompt');
-  if (ta) ta.placeholder =
-    isOrch    ? 'Describe the goal… the orchestrator will plan, delegate, and iterate. (Ctrl+Enter to run)' :
-    isAgentic ? 'Describe a multi-step task… the operator will plan and execute it turn by turn. (Ctrl+Enter to run)' :
-    isRalph   ? '' :
-                'Prompt to compare across all selected models… (Ctrl+Enter to run)';
-
-  // ── Populate model selects on first switch ──
-  if (isEns)   harnessEnsemblePopulateModels();
-  if (isRalph) harnessRalphPopulateModel();
+  const ensBtn   = document.getElementById('harness-mode-ensemble');
+  const ralphBtn = document.getElementById('harness-mode-ralph');
+  for (const [btn, active] of [[ensBtn, mode === 'ensemble'],
+                                [ralphBtn, mode === 'ralph']]) {
+    if (!btn) continue;
+    btn.style.background = active ? 'var(--lavender)' : 'var(--bg-input)';
+    btn.style.color      = active ? '#000'            : 'var(--fg-dim)';
+  }
+  const ensCtl   = document.getElementById('harness-ensemble-controls');
+  const ralphCtl = document.getElementById('harness-ralph-controls');
+  if (ensCtl)   ensCtl.style.display   = mode === 'ensemble' ? 'flex' : 'none';
+  if (ralphCtl) ralphCtl.style.display = mode === 'ralph'    ? 'flex' : 'none';
+  const ralphCfg = document.getElementById('harness-ralph-config');
+  if (ralphCfg) ralphCfg.style.display = mode === 'ralph' ? 'flex' : 'none';
+  if (mode === 'ensemble') harnessEnsemblePopulateModels();
   document.activeElement?.blur();
 }
-
 // ── Orchestrated target pool ──────────────────────────────────────────────────
 
 function harnessOrchAddTarget() {
@@ -8704,245 +8236,9 @@ function buildOrchMd(goal, events) {
   return lines.join('\n');
 }
 
-function harnessOrchClear() {
-  if (_orchAbort) { _orchAbort.abort(); _orchAbort = null; }
-  const master = document.getElementById('harness-master-body');
-  if (master) master.innerHTML = '<span style="color:var(--fg-muted)">Waiting for goal…</span>';
-  const grid = document.getElementById('harness-orch-grid');
-  if (grid) grid.innerHTML = '<div class="empty">Worker results will appear here.</div>';
-  const btn = document.getElementById('harness-orch-run-btn');
-  if (btn) { btn.disabled = false; btn.textContent = '▶ Run'; }
-}
-
 function toggleRoundGroup(round) {
   const g = document.getElementById(`round-group-${round}`);
   if (g) g.classList.toggle('collapsed');
-}
-
-async function harnessOrchRun() {
-  const goal = document.getElementById('harness-prompt').value.trim();
-  if (!goal) return;
-
-  const btn = document.getElementById('harness-orch-run-btn');
-  const masterBody = document.getElementById('harness-master-body');
-  const orchGrid = document.getElementById('harness-orch-grid');
-
-  btn.disabled = true;
-  btn.textContent = '⟳ Running…';
-  masterBody.innerHTML = `<div style="color:var(--cyan);font-size:11px">Goal: ${esc(goal)}</div><div class="empty" style="margin-top:8px"><span class="spinner"></span> Planning…</div>`;
-  orchGrid.innerHTML = '';
-
-  // Show injection input
-  let _orchRunId = null;
-  const injectBar = document.createElement('div');
-  injectBar.id = 'orch-inject-bar';
-  injectBar.style.cssText = 'display:flex;gap:6px;margin-top:8px;padding:6px;background:var(--bg-deep);border:1px solid var(--bg-border);border-radius:4px';
-  injectBar.innerHTML = `<input id="orch-inject-input" type="text" placeholder="Steer the orchestrator… (sent before next round)" style="flex:1;background:var(--bg);color:var(--fg);border:1px solid var(--bg-border);border-radius:3px;padding:4px 8px;font-size:12px">
-    <button class="action-btn" onclick="orchInject()">↗ Inject</button>`;
-  masterBody.parentElement.insertBefore(injectBar, masterBody.nextSibling);
-
-  window.orchInject = async function() {
-    const msg = document.getElementById('orch-inject-input')?.value?.trim();
-    if (!msg || !_orchRunId) return;
-    try {
-      await api(`/api/v1/harness/${_orchRunId}/inject`, { method: 'POST', body: JSON.stringify({ message: msg }) });
-      document.getElementById('orch-inject-input').value = '';
-      appendMaster(`<div style="margin-top:4px;padding:3px 8px;border-left:2px solid var(--cyan);font-size:11px;color:var(--cyan)">↗ Injected: ${esc(msg)}</div>`);
-    } catch(e) {
-      appendMaster(`<div class="error-box" style="font-size:11px">Inject failed: ${esc(e.message)}</div>`);
-    }
-  };
-
-  _orchAbort = new AbortController();
-
-  const targets = harnessOrchTargets.length > 0
-    ? harnessOrchTargets.map(t => t.key)
-    : ['operator'];
-  const modelOverride = document.getElementById('harness-orch-model')?.value || null;
-  const maxRounds = parseInt(document.getElementById('harness-orch-rounds')?.value || '8');
-
-  // Track worker panes by task_id (unique per task, even if same target+round)
-  const workerPanes = {};
-  // Track round group containers by round number
-  const roundGroups = {};
-
-  function getOrCreateRoundGroup(round) {
-    if (roundGroups[round]) return roundGroups[round];
-    const group = document.createElement('div');
-    group.className = 'round-group';
-    group.id = `round-group-${round}`;
-    group.innerHTML = `
-      <div class="round-group-header" onclick="toggleRoundGroup(${round})">
-        <span class="round-group-toggle"></span>
-        <span class="round-group-label">ROUND ${round}</span>
-        <span class="round-group-count" id="round-group-count-${round}">0 tasks</span>
-      </div>
-      <div class="round-group-panes" id="round-group-panes-${round}"></div>`;
-    orchGrid.appendChild(group);
-    roundGroups[round] = group;
-    return group;
-  }
-
-  function getOrCreateWorkerPane(taskId, round, target, prompt) {
-    if (workerPanes[taskId]) return workerPanes[taskId];
-    const safeId = taskId.replace(/[^a-z0-9]/gi, '_');
-    // Ensure the round group exists
-    getOrCreateRoundGroup(round);
-    const panesContainer = document.getElementById(`round-group-panes-${round}`);
-    // Update task count
-    const countEl = document.getElementById(`round-group-count-${round}`);
-    if (countEl) {
-      const n = panesContainer.children.length + 1;
-      countEl.textContent = `${n} task${n !== 1 ? 's' : ''}`;
-    }
-    const el = document.createElement('div');
-    el.className = 'harness-pane';
-    el.id = `orch-pane-${safeId}`;
-    el.style.minWidth = '240px';
-    el.style.flex = '1 1 240px';
-    el.innerHTML = `
-      <div class="harness-pane-header">
-        <span class="target-label">${esc(target)}</span>
-        <span class="harness-status pending" id="orch-status-${safeId}">⟳ running…</span>
-      </div>
-      <div style="font-size:10px;color:var(--fg-muted);padding:2px 0 6px;border-bottom:1px solid var(--bg-border);margin-bottom:4px">${esc(prompt.slice(0,120))}${prompt.length>120?'…':''}</div>
-      <div class="harness-pane-output thinking" id="orch-output-${safeId}">waiting…</div>`;
-    panesContainer.appendChild(el);
-    workerPanes[taskId] = el;
-    return el;
-  }
-
-  function updateWorkerPane(taskId, content, status) {
-    const safeId = taskId.replace(/[^a-z0-9]/gi, '_');
-    const outputEl = document.getElementById(`orch-output-${safeId}`);
-    const statusEl = document.getElementById(`orch-status-${safeId}`);
-    if (outputEl) {
-      outputEl.className = `harness-pane-output${status === 'pending' ? ' thinking' : ''}`;
-      outputEl.innerHTML = _formatOutput(content);
-    }
-    if (statusEl) {
-      statusEl.className = `harness-status ${status}`;
-      statusEl.textContent = status === 'pending' ? '⟳ running…' : status;
-    }
-  }
-
-  // Master pane rendering helpers
-  let masterLog = [`<div style="color:var(--cyan);font-size:11px;margin-bottom:8px">Goal: ${esc(goal)}</div>`];
-  function appendMaster(html) {
-    masterLog.push(html);
-    masterBody.innerHTML = masterLog.join('');
-    masterBody.scrollTop = masterBody.scrollHeight;
-  }
-
-  const _runEvents = [];  // collected for MD export
-
-  try {
-    const resp = await fetch(BASE + '/api/v1/harness/orchestrate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: goal, targets, model: modelOverride, max_rounds: maxRounds }),
-      signal: _orchAbort.signal,
-    });
-
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      appendMaster(`<div class="error-box">Error: ${esc(err.error || resp.statusText)}</div>`);
-      btn.disabled = false; btn.textContent = '▶ Run';
-      return;
-    }
-
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop(); // keep incomplete line
-
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const raw = line.slice(6).trim();
-        if (raw === '[DONE]') break;
-
-        let ev;
-        try { ev = JSON.parse(raw); } catch { continue; }
-        _runEvents.push(ev);
-
-        switch (ev.type) {
-          case 'start':
-            _orchRunId = ev.run_id;
-            appendMaster(`<div style="color:var(--fg-muted);font-size:11px">Model: ${esc(ev.model)} · Targets: ${ev.targets.map(esc).join(', ')}</div>`);
-            break;
-
-          case 'injected':
-            appendMaster(`<div style="padding:2px 8px;border-left:2px solid var(--cyan);font-size:11px;color:var(--cyan);margin-top:4px">↗ Steering applied: ${esc(ev.message)}</div>`);
-            break;
-
-          case 'plan': {
-            const taskList = (ev.tasks || []).map(t =>
-              `<div style="padding:2px 0 2px 8px;border-left:2px solid var(--lavender)">
-                <span style="color:var(--lavender)">${esc(t.target)}</span>
-                <span style="color:var(--fg-muted);font-size:10px;margin-left:6px">${esc(t.rationale||'')}</span><br>
-                <span style="font-size:11px">${esc(t.prompt.slice(0,150))}${t.prompt.length>150?'…':''}</span>
-              </div>`).join('');
-            appendMaster(`
-              <div style="margin-top:8px;border-top:1px solid var(--bg-border);padding-top:8px">
-                <span style="color:var(--yellow);font-size:10px">ROUND ${ev.round} — PLAN</span>
-                <div style="font-size:11px;color:var(--fg-dim);margin:4px 0">${esc(ev.reasoning||'')}</div>
-                ${taskList}
-              </div>`);
-            // Pre-create worker panes
-            (ev.tasks || []).forEach(t => getOrCreateWorkerPane(t.task_id || `r${ev.round}-${t.target}`, ev.round, t.target, t.prompt));
-            break;
-          }
-
-          case 'result': {
-            const statusClass = ev.status === 'done' ? 'done' : ev.status === 'error' ? 'error' : 'pending';
-            updateWorkerPane(ev.task_id, ev.content, statusClass);
-            break;
-          }
-
-          case 'evaluate':
-            appendMaster(`
-              <div style="margin-top:6px;padding:4px 8px;background:var(--bg-deep);border-left:2px solid ${ev.action==='finish'?'var(--green)':'var(--yellow)'}">
-                <span style="font-size:10px;color:${ev.action==='finish'?'var(--green)':'var(--yellow)'}">${ev.action === 'finish' ? '✓ SUFFICIENT' : '↻ NEEDS MORE'}</span>
-                <div style="font-size:11px;color:var(--fg-dim);margin-top:2px">${esc(ev.assessment||'')}</div>
-              </div>`);
-            break;
-
-          case 'finish': {
-            const mdBlob = buildOrchMd(goal, _runEvents);
-            const mdUrl = URL.createObjectURL(new Blob([mdBlob], {type:'text/markdown'}));
-            const fname = `harness-run-${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.md`;
-            appendMaster(`
-              <div style="margin-top:12px;border-top:2px solid var(--green);padding-top:10px">
-                <span style="color:var(--green);font-size:11px">✓ DONE${ev.capped?' (round cap)':''} · ${ev.rounds} round${ev.rounds!==1?'s':''}</span>
-                <div style="margin-top:8px;font-size:12px;line-height:1.6;white-space:pre-wrap">${esc(ev.answer||'')}</div>
-                <div style="margin-top:8px"><a href="${mdUrl}" download="${fname}" class="action-btn" style="text-decoration:none">⬇ Download Report (.md)</a></div>
-              </div>`);
-            document.getElementById('orch-inject-bar')?.remove();
-            btn.disabled = false; btn.textContent = '▶ Run';
-            break;
-          }
-
-          case 'error':
-            appendMaster(`<div class="error-box" style="margin-top:8px">${esc(ev.message||'Unknown error')}</div>`);
-            document.getElementById('orch-inject-bar')?.remove();
-            btn.disabled = false; btn.textContent = '▶ Run';
-            break;
-        }
-      }
-    }
-  } catch(e) {
-    if (e.name !== 'AbortError') {
-      appendMaster(`<div class="error-box">${esc(e.message)}</div>`);
-    }
-    document.getElementById('orch-inject-bar')?.remove();
-    btn.disabled = false; btn.textContent = '▶ Run';
-  }
 }
 
 // ── 7c. Ralph — autonomous spec-driven loop ───────────────────────────────────
@@ -8984,121 +8280,6 @@ function harnessRalphStop() {
 // ── Agentic mode — sequential multi-turn operator run ─────────────────────────
 
 let _agenticAbort = null;
-
-async function harnessAgenticRun() {
-  const goal = document.getElementById('harness-prompt').value.trim();
-  if (!goal) return;
-
-  const btn     = document.getElementById('harness-agentic-run-btn');
-  const stopBtn = document.getElementById('harness-agentic-stop-btn');
-  const layout  = document.getElementById('harness-agentic-layout');
-
-  btn.disabled = true;
-  if (stopBtn) stopBtn.style.display = '';
-
-  const modelOverride = document.getElementById('harness-agentic-model')?.value || null;
-  const maxTurns = parseInt(document.getElementById('harness-agentic-turns')?.value || '5', 10) || 5;
-
-  // Build a run container
-  layout.innerHTML = '';
-  const runEl = document.createElement('div');
-  runEl.style.cssText = 'background:var(--bg-deep);border:1px solid var(--lavender-dim);border-radius:4px;padding:10px 14px;flex-shrink:0';
-  runEl.innerHTML =
-    `<div style="font-size:10px;color:var(--lavender);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">` +
-    `⬡ Agentic — Goal: ${esc(goal)}</div>`;
-  layout.appendChild(runEl);
-
-  const feedEl = document.createElement('div');
-  feedEl.style.cssText = 'font-size:12px;line-height:1.6';
-  runEl.appendChild(feedEl);
-  feedEl.insertAdjacentHTML('beforeend', '<div class="op-pending">⟳ starting…</div>');
-
-  _agenticAbort = new AbortController();
-  let lastToolCallId = null;
-
-  try {
-    const reqBody = { query: goal, max_turns: maxTurns };
-    if (modelOverride) reqBody.model = modelOverride;
-
-    // /api/v1/harness/autonomous removed in v3.
-    const resp = { ok: false, status: 410, statusText: 'Gone', body: null, json: async () => ({error: 'Operator removed in v3 — drive via an MCP client over /mcp.'}) };
-
-    feedEl.innerHTML = '';
-
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      feedEl.insertAdjacentHTML('beforeend', `<div class="op-error">✗ ${esc(err.error || resp.statusText)}</div>`);
-    } else {
-      const reader = resp.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop();
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          let evt;
-          try { evt = JSON.parse(line.slice(6)); } catch { continue; }
-
-          if (evt.type === 'start') continue;
-          if (evt.type === 'turn_start') {
-            feedEl.insertAdjacentHTML('beforeend',
-              `<div class="op-turn-sep">── Turn ${evt.turn} / ${evt.total} ──</div>`);
-          } else if (evt.type === 'tool_call') {
-            const tid = 'ag-tc-' + Math.random().toString(36).slice(2);
-            lastToolCallId = tid;
-            const snippet = evt.input.length > 120 ? evt.input.slice(0, 120) + '…' : evt.input;
-            feedEl.insertAdjacentHTML('beforeend',
-              `<div class="op-tool-call" id="${tid}">⟳ <strong>${esc(evt.tool)}</strong>: ${esc(snippet)}</div>`);
-          } else if (evt.type === 'tool_result') {
-            if (lastToolCallId) {
-              const el = document.getElementById(lastToolCallId);
-              if (el) {
-                el.className = 'op-tool-result';
-                el.innerHTML = `✓ <strong>${esc(evt.tool)}</strong><br>${_formatOutput(evt.result)}`;
-              }
-              lastToolCallId = null;
-            }
-          } else if (evt.type === 'answer') {
-            feedEl.insertAdjacentHTML('beforeend',
-              `<div class="op-answer">${_formatOutput(evt.content)}</div>`);
-          } else if (evt.type === 'info') {
-            feedEl.insertAdjacentHTML('beforeend',
-              `<div class="op-info">ℹ ${esc(evt.message)}</div>`);
-          } else if (evt.type === 'error') {
-            feedEl.insertAdjacentHTML('beforeend',
-              `<div class="op-error">✗ ${esc(evt.message)}</div>`);
-          }
-          layout.scrollTop = layout.scrollHeight;
-        }
-      }
-    }
-  } catch(e) {
-    if (e.name === 'AbortError') {
-      feedEl.insertAdjacentHTML('beforeend', `<div class="op-info">ℹ Run stopped.</div>`);
-    } else {
-      feedEl.insertAdjacentHTML('beforeend', `<div class="op-error">✗ ${esc(e.message)}</div>`);
-    }
-  } finally {
-    _agenticAbort = null;
-    btn.disabled = false;
-    if (stopBtn) stopBtn.style.display = 'none';
-  }
-}
-
-function harnessAgenticStop() {
-  if (_agenticAbort) { _agenticAbort.abort(); _agenticAbort = null; }
-}
-
-function harnessAgenticClear() {
-  const layout = document.getElementById('harness-agentic-layout');
-  if (layout) layout.innerHTML = '<div class="empty">Enter a goal above and run — the operator executes it step by step across multiple turns.</div>';
-}
 
 async function harnessRalphRun() {
   const specPath   = (document.getElementById('harness-ralph-spec-path')?.value || '').trim();
@@ -11163,7 +10344,6 @@ async function deleteWorkspaceOut(filename) {
 
 loadDashboard();
 loadModels();
-loadOpHistory();  // Restore operator history from previous sessions
 
 // Restore tap filters from localStorage
 try {
