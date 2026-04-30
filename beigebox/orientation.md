@@ -80,6 +80,16 @@ beigebox/skills/services-inventory/scripts/inventory.sh [--host <alias>] [--all-
 
 Probes Docker / Podman / Incus / LXD / classic LXC / libvirt / nspawn / Colima / Multipass / VirtualBox / Tart / OrbStack / Parallels / VMware Fusion. Trust this output over this doc when they disagree.
 
+## Agent workflow patterns
+
+Distilled from the Operator class before it was deleted in v3 — Claude Code is the agent now, hitting `/mcp` for tools. These patterns are independent of any specific agent loop, so they survived. Apply them when working in this repo or driving it from outside.
+
+- **Memory recall before assuming.** Cross-session continuity lives in the vector store. From inside Claude Code, call the `memory` tool over `/mcp`. From the host, run `python -m beigebox.cli sweep <query>`. When the user references prior conversations or facts, check there before guessing — the recall window is multi-month and the index covers conversations + ingested docs.
+- **Persistent durable facts go to `workspace/out/operator_notes.md`.** That file survives across sessions. Append observed system quirks, durable preferences, and "I learned this" facts. Read it on session start if it exists. Don't put PII or session-bound state there — it's for things you'd want a future agent to know.
+- **Loop detection: stop after 3 same-input calls.** If you've called the same tool with the same input 3+ times and the result hasn't materially changed, you're stuck. Try a different tool, a different input, or commit to an answer based on what you already have. This rule applies to any agent loop in this codebase, not just historical Operator runs.
+- **Workspace contract.** `/workspace/in/` is read-only (user-supplied). `/workspace/out/` is the only write target. Always tell the user the filename when you write something there. Never write outside `/workspace/out/` from a tool call.
+- **The proxy doesn't inject tools.** A non-Claude model called via `/v1/chat/completions` only gets tools if the *caller* sends them. BeigeBox forwards the body as-is. If you need a non-Claude model to use tools, the caller (Claude Code, your own SDK, a script) is responsible for the tool-use protocol. The proxy's job is normalize + forward + observe.
+
 ## Conventions
 
 - BeigeBox tools live at `beigebox/tools/*.py`. Skills live at `beigebox/skills/<name>/`. Skill dirs with hyphens are shell-only; skills with Python use underscore dirs.
