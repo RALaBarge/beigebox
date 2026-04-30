@@ -141,24 +141,31 @@ Streams SSE events:
 
 Each result includes: `avg_tokens_per_sec`, `median_tokens_per_sec`, `avg_ttft_ms`, per-run breakdown.
 
-### Operator & Harness
+### Harness
+
+The Operator endpoints (`POST /api/v1/operator`, `POST /api/v1/operator/stream`,
+`GET /api/v1/operator/runs`, `GET/POST /api/v1/operator/notes`,
+`GET /api/v1/operator/{run_id}`) and the agentic harness endpoints
+(`POST /api/v1/harness/autonomous`, `POST /api/v1/harness/orchestrate`) were
+removed in v3. Agent loops moved out of the proxy and now run in whatever
+MCP-speaking client is driving — drive BeigeBox tools via `POST /mcp` instead.
+
+What survives on the harness API:
 
 ```
-POST /api/v1/operator/execute
-
-{
-  "task": "string describing what to do",
-  "context": {...}
-}
+POST /api/v1/harness/wiggam        # multi-agent planning consensus (streaming)
+POST /api/v1/harness/ralph         # test-driven self-improvement loop (streaming, gated on harness.ralph_enabled)
+POST /api/v1/harness/{run_id}/inject   # inject a steering message into an active run
+GET  /api/v1/harness/{run_id}      # retrieve a stored harness run by ID
+GET  /api/v1/harness               # list recent harness runs
 ```
 
-Queues an operator task. Returns immediately with a `run_id`.
+Council multi-LLM features:
 
 ```
-GET /api/v1/operator/{run_id}
+POST /api/v1/council/propose       # proposer + voter pattern (streaming)
+POST /api/v1/council/{run_id}/execute
 ```
-
-Poll for status/output.
 
 ### Tap Observability
 

@@ -11,14 +11,14 @@ Complete reference for BeigeBox deployment, configuration, and usage.
 ## Configuration & Customization
 
 - **[Configuration](configuration.md)** — `config.yaml`, `runtime_config.yaml`, feature flags, per-model options
-- **[Routing & Backends](routing.md)** — Backend selection, latency-aware routing, A/B splitting, custom rules
-- **[CLI & Z-Commands](cli.md)** — Command-line tools and inline command prefixes
-- **[Authentication](authentication.md)** — API keys, multi-key setup, ACLs
+- **[Routing & Backends](routing.md)** — Per-model provider selection, latency-aware ordering, retry-with-backoff
+- **[CLI](cli.md)** — Command-line tools (`bb sweep`, `bb tap`, `bb ring`, etc.)
+- **[Authentication](authentication.md)** — API keys, multi-key setup, admin gate, ACLs
 
 ## Development & Integration
 
 - **[API Reference](api-reference.md)** — HTTP endpoints, request/response formats, examples
-- **[Agents & Tools](agents.md)** — Operator, orchestration, multi-turn, group chat, RAG
+- **[Agents & Tools](agents.md)** — How external MCP clients drive BeigeBox tools; Council / Ensemble / Wiggam / Ralph features
 - **[Tools & Integrations](tools.md)** — Chrome DevTools Protocol (CDP), plugins, MCP server, document search
 
 ## Operations & Monitoring
@@ -82,7 +82,7 @@ Importable async pipelines under `beigebox/skills/` — each is a self-contained
 - `runtime_config.yaml` — Hot-reload config (defaults, toggles)
 - `docker/docker-compose.yaml` — Docker deployment
 - `docker/.env` — Environment variables (GPU, ports, API keys)
-- `docker/MS_APM_beigebox.yaml` — Operator agent config / Microsoft APM manifest (if using operator features)
+- `docker/MS_APM_beigebox.yaml` — Microsoft APM manifest (legacy; Operator was deleted in v3)
 
 ### Deployment
 
@@ -100,8 +100,8 @@ Importable async pipelines under `beigebox/skills/` — each is a self-contained
 - `beigebox/backends/router.py` — Multi-backend routing engine
 - `beigebox/cache.py` — Semantic + embedding caching
 - `beigebox/web/index.html` — Web UI (no build step)
-- `beigebox/agents/` — Routing agents (classifier, decision LLM, etc.)
-- `beigebox/storage/` — SQLite + ChromaDB storage
+- `beigebox/agents/` — Multi-LLM features (council, ensemble_voter, wiggam_planner, ralph_orchestrator, skill_loader)
+- `beigebox/storage/` — SQLite + Postgres+pgvector storage (`storage/backends/{base,postgres,memory}.py` factory)
 - `CLAUDE.md` — Development guidelines
 
 ### Observability & Tools
@@ -175,16 +175,17 @@ See [Security: CVE Scanning](security.md#python-dependencies--hash-locked).
 
 | Term | Definition |
 |---|---|
-| **Z-command** | Inline routing override: `z: use_openrouter` |
-| **Backend** | Inference provider (Ollama, OpenRouter, vLLM, etc.) |
+| **Backend** | Inference provider (Ollama, OpenRouter, OpenAI-compat, etc.) |
+| **MultiBackendRouter** | Picks a backend for the request's `model` field; latency-aware |
+| **Normalizer seam** | Request + response normalizers translate any backend to OpenAI shape |
+| **MCP** | Model Context Protocol — how external agent clients drive BeigeBox tools (`/mcp`, `/pen-mcp`) |
+| **Council / Ensemble / Wiggam / Ralph** | The four multi-LLM features that survive in v3 (see [Agents](agents.md)) |
 | **Semantic cache** | Cache keyed by embedding similarity (not exact text match) |
-| **Session** | Multi-turn conversation linked by session_id |
-| **Tap** | Unified event logging system (all request phases) |
+| **Tap / Wiretap** | Unified event log (dual-write SQLite + JSONL); query via `bb tap` |
 | **Window config** | Per-pane request overrides (`_window_config` in request body) |
-| **Operator** | Agentic tool for browser automation, RAG, multi-turn orchestration |
 | **Plugin** | Auto-loaded Python tool (drop in `plugins/`) |
-| **Hook** | Event-driven custom code (shell or Python) |
-| **MCP** | Model Context Protocol — tool/resource bridge to external systems |
+| **Hook** | Event-driven custom code (shell or Python) — `HookManager` runs them |
+| **Memory** | Postgres+pgvector vector store, exposed via `bb sweep` and the `memory` MCP tool |
 
 ## Defense-in-depth (Security strategy)
 

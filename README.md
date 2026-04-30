@@ -101,7 +101,7 @@ docker compose up -d                    # core only
 docker compose --profile cdp up -d      # + browser automation
 ```
 
-See [Deployment](d0cs/deployment.md#quick-start) for all profiles and production setup.
+See [Deployment](docs/deployment.md#quick-start) for all profiles and production setup.
 
 ### macOS Setup (Apple Silicon / Intel)
 
@@ -133,15 +133,16 @@ See [MACOS_QUICK_REFERENCE.md](MACOS_QUICK_REFERENCE.md) for troubleshooting and
 
 | Feature | What it does |
 |---|---|
-| **Routing** | Smart backend selection: Z-commands → embedding classifier → decision LLM → multi-backend router with latency awareness and A/B splitting |
-| **Caching** | Session + semantic caching; context window auto-summarization |
-| **Observability** | Tap unified logging (18+ event types); Grafana dashboards; per-request tracing |
-| **Orchestration** | Harness multi-turn harness; ensemble parallel execution; multi-agent coordination |
-| **Storage** | SQLite (conversations, metrics) + ChromaDB (embeddings); hot-reload config |
-| **Tools** | Chrome DevTools Protocol (with vision-content screenshots + `wait_for_selector`); operator agentic tools; RAG via document search; primary MCP server + custom plugins |
-| **Pen/Sec MCP** | Optional second MCP endpoint at `/pen-mcp` exposing 53 offensive-security tool wrappers (nmap, nuclei, sqlmap, ffuf, amass, impacket, hydra, …). Off by default. See [security_mcp/README.md](beigebox/security_mcp/README.md) |
-| **Browser automation** | Built-in CDP tool + project-level Playwright MCP (`.mcp.json`) for headless Chromium driving with vision feedback to Claude Code/Desktop |
-| **Post-processing** | WASM module support; output normalization; streaming transforms |
+| **Backend routing** | Per-model provider selection (OpenRouter / Ollama / OpenAI-compat / local) with latency-aware ordering, retry-with-backoff, and streaming-safe failure handling (no replay after the first chunk has shipped). |
+| **Normalizer seam** | Request + response normalizers translate any backend's quirks to OpenAI-compatible shape, with a transform-log emitted on the wiretap so you can diff what the backend actually got vs what the client sent. |
+| **MCP tool server** | `/mcp` (general tools) and `/pen-mcp` (offensive-security wrappers, 53 tools). Any MCP-speaking client (Claude Code, custom SDK, IDE plugin) drives BeigeBox tools through these. 1 MiB request-body cap with streaming-size early-reject. |
+| **Caching** | Semantic-similarity response cache; per-tool result cache; auto-summarization for long contexts. |
+| **Observability** | Dual-write wiretap (SQLite + JSONL), per-request tracing, anomaly + extraction-attack detection, RAG-poisoning detection. |
+| **Multi-LLM features** | Council (proposer + voter pattern) and Ensemble (parallel models + judge) in the built-in web UI. Wiggam multi-agent planning + Ralph test-driven loop on the harness API. |
+| **Storage** | SQLite (conversations, metrics, audit) + Postgres+pgvector (embeddings via the `bb sweep` memory MCP tool). Hot-reload runtime config. |
+| **Browser automation** | `cdp` tool + project-level Playwright MCP (`.mcp.json`) for headless Chromium driving with vision feedback. |
+| **WASM transforms** | `wasm_runtime` for response/text/input transforms. PDF input transform + output normalizer modules wired; runtime is the bet on the browser-as-OS interop story. |
+| **Pen/Sec MCP** | Off by default. See [security_mcp/README.md](beigebox/security_mcp/README.md). |
 
 ---
 
@@ -222,7 +223,7 @@ Integrated security scanners run via a single command:
 
 See [amf/stack/EXTRACTED_SOURCES.md](amf/stack/EXTRACTED_SOURCES.md) for detailed extraction log and maintenance notes.
 
-See [Security Policy](SECURITY_POLICY.md), [Deployment Checklist](DEPLOYMENT_SECURITY_CHECKLIST.md), and [d0cs/security.md](d0cs/security.md) for threat model, defense strategy, hardening details, and known limitations.
+See [Security Policy](SECURITY_POLICY.md), [Deployment Checklist](DEPLOYMENT_SECURITY_CHECKLIST.md), and [d0cs/security.md](docs/security.md) for threat model, defense strategy, hardening details, and known limitations.
 
 ---
 
@@ -326,17 +327,17 @@ BeigeBox ships a `beigebox/skills/` library: importable async pipelines that any
 
 ## Documentation
 
-- **[Security](d0cs/security.md)** — Supply chain hardening, read-only root, network segmentation, threat model, defense layers
-- **[Configuration](d0cs/configuration.md)** — config.yaml, runtime_config.yaml, feature flags, per-model options
-- **[Routing & Backends](d0cs/routing.md)** — Routing tiers, latency-aware selection, A/B splitting, custom rules
-- **[Authentication](d0cs/authentication.md)** — API keys, multi-key setup, ACLs, agentauth keychain
-- **[CLI & Z-Commands](d0cs/cli.md)** — Command-line tools and inline command prefixes
-- **[Observability](d0cs/observability.md)** — Tap event types, metrics, debugging
-- **[Agents & Tools](d0cs/agents.md)** — Operator, orchestration, multi-turn, group chat, RAG
-- **[Tools & Integrations](d0cs/tools.md)** — CDP, plugins, MCP server, document search
+- **[Architecture](docs/architecture.md)** — Pipeline, subsystem map, what survives v3
+- **[Security](docs/security.md)** — Supply chain hardening, read-only root, network segmentation, threat model, defense layers
+- **[Configuration](docs/configuration.md)** — config.yaml, runtime_config.yaml, feature flags, per-model options
+- **[Routing & Backends](docs/routing.md)** — Per-model provider selection, latency-aware ordering, retry-with-backoff
+- **[Authentication](docs/authentication.md)** — API keys, multi-key setup, admin gate, ACLs, agentauth keychain
+- **[CLI](docs/cli.md)** — Command-line tools (`bb sweep`, `bb tap`, `bb ring`, `bb flash`, etc.)
+- **[Observability](docs/observability.md)** — Wiretap event types, metrics, debugging
+- **[Tools & Integrations](docs/tools.md)** — MCP server, CDP, plugins, document search
 - **[Pen/Sec MCP](beigebox/security_mcp/README.md)** — Offensive-security tool wrappers via the optional `/pen-mcp` endpoint
-- **[Deployment](d0cs/deployment.md)** — Docker Compose, Kubernetes, Systemd, production setup
-- **[API Reference](d0cs/api-reference.md)** — Endpoints, request/response formats, examples
+- **[Deployment](docs/deployment.md)** — Docker Compose, Kubernetes, Systemd, production setup
+- **[API Reference](docs/api-reference.md)** — Endpoints, request/response formats, examples
 
 ---
 
@@ -364,17 +365,18 @@ See [homebrew-beigebox/README.md](homebrew-beigebox/README.md) for Homebrew tap 
 
 ## Architecture
 
-BeigeBox's architecture is **transparent** — every request flows through a deterministic pipeline:
+BeigeBox is a thin OpenAI-compatible proxy. Every request flows through a deterministic, observable pipeline:
 
-1. **Z-command parsing** — user `z: <cmd>` overrides
-2. **Hybrid routing** — session cache → embedding classifier → decision LLM → backend router
-3. **Auto-summarization** — context window management
-4. **System injection** — hot-loaded context, model options, window config
-5. **Semantic cache lookup** — token savings via embedding-based deduplication
-6. **Stream to backend** — buffered if WASM active
-7. **Post-stream transforms** — WASM normalization → cache store
+1. **Auth** — multi-key registry with admin gate, rate limits, and per-key endpoint/model ACLs.
+2. **Anomaly + extraction-attack detection** — pre-routing security checks, observe-only by default.
+3. **Pre-request hooks** — generic hook system (HookManager) for prompt-injection guards, custom transforms.
+4. **Pipeline** — guardrail input check → key-strip → auto-summarize → system-context injection → generation-params injection → per-model options → window config.
+5. **Backend dispatch** — `MultiBackendRouter` picks a provider (OpenRouter / Ollama / OpenAI-compat) by model name, applies retry-with-backoff, never replays a stream after the first chunk has shipped.
+6. **Normalizer seam** — request + response normalizers translate to/from OpenAI shape, with a transform-log on the wiretap.
+7. **Post-response** — guardrail output check, response-format validation, semantic-cache store, conversation log.
+8. **Wiretap** — every transition is logged to both SQLite (queryable) and JSONL (tail-able).
 
-See [Architecture](d0cs/architecture.md) for the full pipeline and subsystem map.
+The agentic decision layer (z-commands, hybrid routing, decision LLM, embedding classifier) was deleted in v3 — agent loops moved out of the proxy and now run in whatever MCP-speaking client is driving (Claude Code, custom SDK, IDE plugin). See [Architecture](docs/architecture.md) for the full pipeline and subsystem map.
 
 ---
 
@@ -420,7 +422,7 @@ See [LICENSE.md](LICENSE.md) and [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md).
 
 - **Issues**: [GitHub Issues](https://github.com/ralabarge/beigebox/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/ralabarge/beigebox/discussions)
-- **Skills & Tools**: BeigeBox includes a built-in [MCP server](d0cs/tools.md#mcp-server) for tool discovery and extensibility. Write custom skills as MCP tools instead of external skill libraries for better portability and IDE integration.
+- **Skills & Tools**: BeigeBox includes a built-in [MCP server](docs/tools.md#mcp-server) for tool discovery and extensibility. Write custom skills as MCP tools instead of external skill libraries for better portability and IDE integration.
 
 ---
 

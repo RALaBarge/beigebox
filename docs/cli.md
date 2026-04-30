@@ -1,15 +1,26 @@
-# CLI & Z-Commands
+# CLI
 
 ## CLI Commands
 
-All commands start with `beigebox`:
+All commands start with `beigebox` (or `python -m beigebox.cli`):
 
 ### Server Control
 
 ```bash
 beigebox dial                          # Production mode (FastAPI + Uvicorn)
 beigebox setup                         # Pull required models into Ollama
-beigebox build-centroids               # Train embedding classifier (rebuild centroids)
+```
+
+### Memory + observability
+
+```bash
+beigebox sweep <query>                 # Semantic search over stored conversations
+beigebox tap                           # Tail the wiretap event stream
+beigebox ring                          # Verify proxy → backends connectivity
+beigebox flash                         # Stats / config snapshot
+beigebox models                        # OpenRouter model catalog
+beigebox rankings                      # Top-model rankings
+beigebox dump                          # Dump stored conversations
 ```
 
 ### Benchmarking
@@ -28,50 +39,13 @@ Runs speed benchmark directly against Ollama (bypasses proxy). Reports:
 
 ```bash
 beigebox serve-static <path>           # Serve a directory over HTTP (for file inspection)
+beigebox quarantine list               # List quarantined embeddings (RAG-poisoning)
+beigebox eval <suite>                  # Run an eval suite
 ```
 
-See `beigebox --help` for full command list.
+See `beigebox --help` for the full command list.
 
----
-
-## Z-Commands
-
-Z-commands let you override routing decisions inline. Prefix a message with `z: <command>`:
-
-```
-z: use_openrouter
-Please write a Python function...
-```
-
-The message body (after the newline) is sent to the backend; the `z:` directive is parsed and removed.
-
-### Reference
-
-| Command | Effect | Example |
-|---|---|---|
-| `use_<model>` | Force specific model | `z: use_qwen2.5:7b` |
-| `use_<backend>` | Force specific backend | `z: use_openrouter` |
-| `temp_<value>` | Set temperature | `z: temp_0.2` |
-| `top_p_<value>` | Set top_p | `z: top_p_0.95` |
-| `max_<tokens>` | Set max_tokens | `z: max_100` |
-| `ctx_<id>` | Resume session | `z: ctx_abc123def` |
-| `chat` | Standard chat (no override) | `z: chat` |
-| `reload` | Force model reload (keep_alive: 0) | `z: reload` |
-
-### Examples
-
-```
-z: use_llama3.1:8b
-Write me a haiku about cats.
-
-z: temp_0.1 use_qwen2.5:7b
-What is 2 + 2?
-
-z: ctx_session-1
-Summarize what we discussed earlier.
-```
-
-The Z-command is tier 1 in the routing pipeline — it bypasses all other routing logic.
+> The `z:` inline command prefixes (e.g. `z: use_openrouter`, `z: temp_0.2`) and `beigebox build-centroids` were removed in v3 along with the tiered routing layer. Backends are selected per-model by `MultiBackendRouter` based on `routing.model_routes` in `config.yaml`. To force a specific model from any client, just send `model: <name>` in the request body — no inline-prefix gymnastics needed.
 
 ---
 

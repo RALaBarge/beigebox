@@ -120,15 +120,15 @@ BeigeBox is an OpenAI-compatible LLM proxy that sits between your applications a
 ### What BeigeBox Does NOT Defend Against (Out-of-Scope)
 
 #### T2: Indirect Prompt Injection via Tool Outputs
-**Status:** Gap. Operator agent reads workspace files and tool outputs without content validation.  
+**Status:** Gap. The MCP tools surface (`/mcp`, `/pen-mcp`) reads workspace files and external tool output without content validation.  
 **Roadmap:** Scanning tool added in Phase 2 (Q2 2026).  
-**Mitigation Today:** Disable Operator for untrusted tool sources; manually review high-risk tool outputs.
+**Mitigation Today:** Have the calling agent client review tool outputs for injection patterns; treat any tool result as untrusted input. (The in-proxy Operator agent that historically owned this risk surface was deleted in v3 — agent loops live in the calling client now.)
 
 #### T3: Jailbreaking and Safety Bypass
 **Status:** Partial. Pattern detection catches common variants; zero-day techniques bypass.  
 **Maturity:** Jailbreak research moves faster than production defenses (new techniques discovered monthly).  
 **Roadmap:** LlamaFirewall integration (Phase 2).  
-**Mitigation Today:** Use trusted models with strong training-time alignment (Claude, GPT-4); enable decision LLM for borderline requests.
+**Mitigation Today:** Use trusted models with strong training-time alignment (Claude, GPT-4); use input/output guardrails (`beigebox/guardrails.py`) to block known jailbreak patterns at the proxy layer.
 
 #### T5: Model Extraction via Systematic Probing
 **Status:** Partial detection; not prevention.  
@@ -248,7 +248,7 @@ See [DEPLOYMENT_SECURITY_CHECKLIST.md](DEPLOYMENT_SECURITY_CHECKLIST.md) for det
 
 3. **Semantic scanning is probabilistic.** Embedding-based anomaly detection has inherent false positives and negatives; it is not a guarantee.
 
-4. **Operator agent has broad access.** If you enable the Operator agent, it can call tools, read workspace files, and execute code. Compromising the Operator compromises the entire system.
+4. **MCP tools have broad access.** Tools exposed via `/mcp` and `/pen-mcp` can read workspace files, hit external services, and (with admin keys) execute code. The agent client driving them owns the loop — compromising the calling client compromises the access pattern. Use `KeyMeta.admin: true` only on keys you trust, and gate destructive `/pen-mcp` tools on the explicit `"authorization": true` field. (The in-proxy Operator that previously owned this surface was deleted in v3.)
 
 5. **Compliance is your responsibility.** BeigeBox provides technical controls; you are responsible for policies, audit trails, and incident response.
 

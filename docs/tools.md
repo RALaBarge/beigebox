@@ -52,11 +52,14 @@ class CalcTool:
 
 Auto-registers at startup. No config needed.
 
-Usage:
+Usage from any MCP client:
 ```
-z: use_calc
-What is 2 ** 8?
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"my_calc","arguments":{"input":"2 ** 8"}}}
 ```
+
+Or — since this is a `*Tool` class with a string-in / string-out `run` method —
+the calling client's agent loop can pick it directly off the `tools/list` surface
+served at `POST /mcp`.
 
 ## MCP Server
 

@@ -15,9 +15,9 @@ For *how to query* the events listed here, see [observability.md](observability.
 | Model I/O — request/response normalizers + payload logging | ✅ Sealed | Request and response normalizers expose `.summary(context)`; `log_payload_event(extra_meta=...)` carries it onto Tap. |
 | Proxy request lifecycle (non-streaming) | ✅ Sealed | Auth → routing → normalize → backend → response all emit. |
 | Proxy request lifecycle (streaming) | ✅ Sealed | `proxy_stream_response` carries the same `NormalizedResponse.summary()` shape as non-streaming — finish_reason defaults to `"stop"` since stream completion is the only success path here. |
-| Operator agentic loop | ✅ Sealed | `operator_start`, `operator_thought`, `operator_tool_call`, `operator_tool_result`, `operator_iteration_end`, `operator_nudge`, `operator_finish`. |
-| Decision agent routing tier | ✅ Sealed | `decision_llm_result` (prompt_len, decision, confidence, latency). |
-| Embedding classifier | ✅ Sealed | `classifier_result`, `embedding_decision`. |
+| Operator agentic loop | 🚮 Removed in v3 | The `operator_*` event family (`operator_start`, `_thought`, `_tool_call`, `_tool_result`, `_iteration_end`, `_nudge`, `_finish`) is no longer emitted — Operator was deleted. Old wirelog rows still classify via `replay.py` with a `legacy_*` prefix. |
+| Decision agent routing tier | 🚮 Removed in v3 | `decision_llm_result` no longer emitted — decision LLM deleted. |
+| Embedding classifier | 🚮 Removed in v3 | `classifier_result` / `embedding_decision` no longer emitted — classifier deleted. |
 | Cache (hit/miss/store) | ✅ Sealed | `cache_hit`, `cache_miss`, `cache_store` with similarity + TTL. |
 | Cost tracking | ✅ Sealed (non-stream) | `cost_tracking` per inference; streaming gap blocks attribution there. |
 | Backend selection / failover | ✅ Sealed | `backend_selection` with reason; degraded fallback logged. |

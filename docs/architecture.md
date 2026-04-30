@@ -1,124 +1,97 @@
 # Architecture
 
-BeigeBox is a **transparent, modular LLM middleware** — every request flows through a deterministic pipeline with clear separation of concerns.
+BeigeBox is a **thin, observable, OpenAI-compatible proxy** with a built-in MCP tool server, conversation memory, and a self-contained web UI. The agentic decision layer (z-commands, embedding classifier, decision LLM, hybrid routing, routing rules, Operator) was deleted in v3 — agent loops moved out of the proxy and now run in whatever MCP-speaking client is driving (Claude Code, custom SDK, IDE plugin, etc.).
 
 ## Request Pipeline
 
 Every `/v1/chat/completions` request flows through:
 
 ```
-1. Z-command parsing
-2. Pre-request hooks
-3. Hybrid routing (session cache → classifier → judge → router)
-4. Auto-summarization
-5. System context injection
-6. Generation param overrides
-7. Model option injection
-8. Window config application
-9. Semantic cache lookup
-10. Stream to backend
-11. Post-stream transform (WASM)
-12. Semantic cache store
+1. Auth middleware       (multi-key registry, admin gate, rate limits)
+2. Anomaly detection     (request-rate / error-rate / model-switch heuristics)
+3. Pre-request hooks     (HookManager: prompt-injection guards, custom scripts)
+4. Guardrail input       (allow/deny rules on the user message)
+5. Extraction-attack     (OWASP LLM10 detection, observe-only by default)
+6. Pipeline injections   (key-strip → summarize → system-context → gen-params → model-options → window)
+7. Backend dispatch      (MultiBackendRouter picks provider; RetryableBackendWrapper retries pre-stream)
+8. Normalizer seam       (request normalizer in; response normalizer out; transform-log on the wiretap)
+9. Response logging      (assistant_content → conversation log + vector store)
+10. Post-response hooks  (HookManager: format validation, etc.)
+11. Semantic cache store
 ```
+
+The streaming path follows the same shape but yields chunks back through the response normalizer and never replays after the first chunk has been delivered.
 
 ### In detail
 
-**1. Z-command parsing** (`beigebox/agents/zcommand.py`)
-- User prefix: `z: use_openrouter`
-- Parsed and removed from message
-- Can set model, temperature, backend
+**1. Auth middleware** (`beigebox/auth.py`, `main.py:ApiKeyMiddleware`)
+- Multi-key registry. Per-key `allowed_endpoints`, `allowed_models`, `rate_limit_rpm`, `admin: bool`.
+- Querystring auth was removed in v3 (`?api_key=...` no longer accepted — it leaks to logs/referrers).
+- Admin endpoints (`/api/v1/wasm/reload`, toolbox edits) gate on `KeyMeta.admin`.
 
-**2. Pre-request hooks** (`beigebox/hooks.py`)
-- Custom Python/shell scripts run before routing
-- Can inspect or modify request
+**2. Anomaly + extraction-attack detection** (`beigebox/security/{anomaly_detector,extraction_detector}.py`)
+- Pre-routing checks. Default mode is "warn" — emit to wiretap, don't block.
+- Anomaly: rolling per-IP window of request rate / error rate / payload size / latency z-score.
+- Extraction: per-session prompt-pattern scoring for OWASP LLM10.
 
-**3. Hybrid routing — Tier 1: Z-commands**
-- If user specified `z: llama3.1:8b`, use that backend directly
+**3. Pre-request hooks** (`beigebox/hooks.py`, `HookManager`)
+- Generic, configurable. Each hook runs in priority order, can mutate the body or set `_beigebox_block` to short-circuit.
+- The deleted Operator pre/post hooks were one specific consumer of this system; the system itself survives.
 
-**3b. Tier 2: Session cache**
-- If session has previous context, resume on same model/backend
+**4-6. Pipeline injections** (`beigebox/proxy.py:_run_request_pipeline`)
+- Guardrails check the user message first.
+- Auto-summarize (if enabled) compresses long conversation history before forwarding.
+- `_inject_system_context` prepends `system_context.md` content (hot-reloaded each request).
+- `_inject_generation_params` applies runtime defaults for `temperature` / `top_p` / etc., never overrides explicit client values.
+- `_inject_model_options` applies per-model defaults from `config.yaml`.
+- `_apply_window_config` reads `_window_config` from the request (highest priority), can set keep_alive / num_predict.
+- Internal `_bb_*` keys are stripped before the body leaves BeigeBox.
 
-**3c. Tier 3: Embedding classifier** (`beigebox/agents/embedding_classifier.py`)
-- Embed user message
-- Cosine similarity against trained classifier centroids
-- Outputs: (model, confidence)
-- Used if confidence > threshold
+**7. Backend dispatch** (`beigebox/backends/router.py:MultiBackendRouter`)
+- Picks a provider for the request's `model` field. Walks priority-ordered backends, matches on each one's `allowed_models` glob patterns.
+- Latency-aware: rolling P95 window per backend; demotes slow backends one tier.
+- Wrapped in `RetryableBackendWrapper` for exponential backoff on 429/5xx.
+- **Streaming-safe rule**: never replay a stream after the first chunk has been yielded — replay would produce duplicated content + two `[DONE]` markers.
 
-**3d. Tier 4: Decision LLM** (`beigebox/agents/decision.py`)
-- Small LLM judges borderline requests
-- "Should this use llama3.1 or qwen2.5?"
-- Runs only if classifier confidence is low
+**8. Normalizer seam** (`beigebox/{request,response}_normalizer.py`)
+- Translates between OpenAI shape and any backend's native shape.
+- Emits a `transforms` audit on the wiretap so you can diff what the upstream actually got vs what the client sent.
 
-**3e. Tier 5: Multi-backend router** (`beigebox/backends/router.py`)
-- Maintains rolling P95 latency window per backend
-- Backends exceeding threshold deprioritized
-- Weighted random selection for A/B splitting
-- Fails over on error
+**9-10. Logging + post-hooks**
+- Conversation messages logged to SQLite (`storage/sqlite_store.py`).
+- Assistant content embedded + indexed in Postgres+pgvector (`storage/vector_store.py`) for cross-session memory recall.
+- Post-response hooks run for format validation, metrics, etc.
 
-**4. Auto-summarization** (`beigebox/proxy.py:_auto_summarize()`)
-- If context window is 80%+ full, summarize earlier turns
-- Keeps recent context, compresses history
-- Transparent to client
-
-**5. System context injection**
-- Loads `system_context.md` (hot-reloaded every request)
-- Prepended to system message
-- Can include prompting, examples, rules
-
-**6. Generation param overrides** (`_inject_generation_params()`)
-- Reads from `runtime_config.yaml` (mtime-checked, no reload needed)
-- Applies global defaults: temperature, top_p, repeat_penalty
-- Can be overridden per-request
-
-**7. Model option injection** (`_inject_model_options()`)
-- Reads per-model options from `config.yaml` `models:` section
-- E.g., llama3.1 always uses GPU layers 30/40
-- Applied if model is in the config
-
-**8. Window config application** (`_apply_window_config()`)
-- Reads `_window_config` from request body (highest priority)
-- Overrides system + per-model options
-- Can set temperature, keep_alive, num_predict per-pane
-
-**9. Semantic cache lookup** (`beigebox/cache.py:SemanticCache`)
-- Embeds the user message
-- Searches ChromaDB for similar past requests
-- If hit (cosine sim > 0.95), returns cached response
-- Saves tokens + latency
-
-**10. Stream to backend**
-- HTTP POST to Ollama/OpenRouter/etc.
-- If WASM module active, response is buffered
-- Otherwise streamed directly to client
-
-**11. Post-stream WASM transform** (`beigebox/wasm_runtime.py`)
-- If `wasm.enabled: true` in config, module processes response
-- E.g., removes markdown wrapper, normalizes format
-- Streams transformed output to client
-
-**12. Semantic cache store**
-- After stream completes, store (request, response) in ChromaDB
-- Future similar requests hit the cache
+**11. Semantic cache** (`beigebox/cache.py:SemanticCache`)
+- Stores (user-message-embedding, response) tuples. On future requests, similar messages can hit the cache and skip the backend call entirely.
 
 ## Subsystems
 
 | Module | Purpose |
 |---|---|
-| `beigebox/main.py` | FastAPI app, lifespan, all endpoints |
-| `beigebox/proxy.py` | `Proxy.forward_chat_completion_stream()` — core pipeline |
+| `beigebox/main.py` | FastAPI app, lifespan, all HTTP endpoints |
+| `beigebox/proxy.py` | `Proxy.forward_chat_completion{,_stream}` — the core pipeline |
+| `beigebox/auth.py` | `KeyMeta`, `MultiKeyAuthRegistry`, admin gate |
 | `beigebox/app_state.py` | `AppState` dataclass — all subsystem references |
 | `beigebox/config.py` | Config loader: static (`config.yaml`) + hot-reload (`runtime_config.yaml`) |
+| `beigebox/hooks.py` | Generic hook registry + execution |
 | `beigebox/cache.py` | `SemanticCache`, `EmbeddingCache`, `ToolResultCache` |
-| `beigebox/backends/router.py` | `MultiBackendRouter` — latency tracking, A/B split, failover |
-| `beigebox/agents/zcommand.py` | Z-command parser (tier 1 routing) |
-| `beigebox/agents/embedding_classifier.py` | Cosine similarity classifier (tier 3) |
-| `beigebox/agents/decision.py` | Small LLM judge (tier 4) |
-| `beigebox/storage/sqlite_store.py` | Conversations, metrics, latency percentiles |
-| `beigebox/storage/vector_store.py` | ChromaDB wrapper for embeddings |
-| `beigebox/wasm_runtime.py` | WASM/WASI sandbox for transforms |
+| `beigebox/guardrails.py` | Input/output content allow/deny rules |
+| `beigebox/backends/router.py` | `MultiBackendRouter` — per-model provider selection, latency tracking |
+| `beigebox/backends/retry_wrapper.py` | `RetryableBackendWrapper` — backoff + streaming-safe failure |
+| `beigebox/backends/{openrouter,openai_compat,ollama}.py` | Concrete backends |
+| `beigebox/request_normalizer.py`, `response_normalizer.py` | OpenAI-shape canonicalization with transform log |
+| `beigebox/wiretap.py` | `WireLog` — dual-write SQLite + JSONL |
+| `beigebox/storage/sqlite_store.py` | Conversations, metrics, audit, wire events |
+| `beigebox/storage/vector_store.py` | Postgres+pgvector wrapper; cross-session memory |
+| `beigebox/storage/backends/{base,postgres,memory}.py` | Pluggable vector backends via `make_backend` factory |
+| `beigebox/wasm_runtime.py` | WASM/WASI sandbox for response/text/input transforms |
+| `beigebox/security/{anomaly_detector,extraction_detector,audit_logger,enhanced_injection_guard,rag_content_scanner,rag_poisoning_detector,honeypots}.py` | Security telemetry + active defenses |
+| `beigebox/mcp_server.py` | MCP server for `/mcp` and `/pen-mcp` tool surfaces |
+| `beigebox/tools/registry.py` | `ToolRegistry` — single source of truth for which tools exist |
+| `beigebox/tools/plugin_loader.py` | Auto-discover plugin tools at startup |
 | `beigebox/web/index.html` | Single-file web UI (no build step) |
-| `beigebox/hooks.py` | Hook registry + execution |
-| `beigebox/tools/plugin_loader.py` | Auto-discover `*Tool` classes in `plugins/` |
+| `beigebox/agents/{council.py,ensemble_voter.py,wiggam_planner.py,ralph_orchestrator.py,skill_loader.py}` | Multi-LLM features that survive: Council, Ensemble, Wiggam, Ralph |
 
 ## Application State
 
@@ -145,31 +118,37 @@ Two files, two loading strategies:
 ### `config.yaml` — Static, startup only
 
 Loaded once via `get_config()`. Controls:
-- Backends (Ollama, OpenRouter, vLLM, etc.)
-- Storage paths
-- Model names and per-model options
-- Security policies (API key, auth ACLs)
-- Feature flags (all disabled by default)
+- Backends (Ollama, OpenRouter, OpenAI-compat, etc.) with per-backend `allowed_models` patterns
+- Storage paths (SQLite + Postgres connection string)
+- Model registry (`models.profiles`, `models.default`)
+- Security policies (auth keys with admin/non-admin distinction, ACLs)
+- Feature flags
 
 Example:
 ```yaml
 backends:
-  ollama:
-    url: http://host.docker.internal:11434
-  openrouter:
+  - provider: ollama
+    name: ollama-local
+    url: http://ollama:11434
+    priority: 1
+    allowed_models: ["llama3.2:*", "qwen3:*", "nomic-embed-text*"]
+
+  - provider: openrouter
+    name: openrouter
     url: https://openrouter.ai/api/v1
     api_key: ${OPENROUTER_API_KEY}
+    priority: 2
+    allowed_models: ["x-ai/*", "qwen/*", "anthropic/*"]
 
 models:
-  llama3.1:8b:
-    backend: ollama
-    gpu_layers: 30
+  default: x-ai/grok-4-fast
+  profiles:
+    agentic: x-ai/grok-4-fast
+    summary: qwen3:4b
 
-feature_flags:
-  semantic_cache:
-    enabled: false
-  decision_llm:
-    enabled: false
+features:
+  semantic_cache: false
+  hooks: true
 ```
 
 ### `runtime_config.yaml` — Hot-reload, every request
@@ -193,29 +172,12 @@ Carried in the request body (`_window_config`), highest priority. Stripped befor
 
 ## Multi-backend Routing
 
-`MultiBackendRouter` in `backends/router.py`:
+See [Routing & Backends](routing.md) for the full picture. Quick recap: `MultiBackendRouter` in `backends/router.py`:
 
-- Maintains rolling P95 latency window (100 samples per backend)
-- Backends exceeding `latency_p95_threshold_ms` deprioritized to fallback list
-- Weighted random selection when `traffic_split` weights are configured
-- Falls back through priority-ordered backends on error
-- Tracks error counts, not just latency
-
-Example:
-```yaml
-backends:
-  ollama:
-    url: http://host.docker.internal:11434
-    priority: 1
-    latency_p95_threshold_ms: 2000
-
-  openrouter:
-    url: https://openrouter.ai/api/v1
-    priority: 2
-    traffic_split:
-      ollama: 70        # 70% to ollama
-      openrouter: 30    # 30% to openrouter
-```
+- Picks a provider for the request's `model` field by walking priority-ordered backends and matching `allowed_models` patterns.
+- Maintains rolling P95 latency window per backend; demotes slow backends one tier.
+- Wrapped in `RetryableBackendWrapper` for exponential backoff on 429/5xx.
+- Streaming-safe: never replays after the first chunk has been yielded.
 
 ## Web UI
 
@@ -277,12 +239,15 @@ Stores:
 
 Schema includes `misc1`, `misc2` TEXT spares for extensibility.
 
-### ChromaDB
+### Postgres + pgvector
 
 Stores embeddings for:
 - Semantic cache (request/response pairs)
+- Cross-session memory (the `memory` MCP tool / `bb sweep` CLI)
 - RAG document index
-- Classifier training data
+
+(Migrated from ChromaDB in v3 work — `storage/backends/postgres.py` is the live
+backend; `chromadb` backend remains for ephemeral/in-memory tests.)
 
 ## Observability
 
