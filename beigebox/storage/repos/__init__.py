@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from beigebox.storage.db.base import BaseDB
 
 from beigebox.storage.repos.api_keys import ApiKeyRepo
+from beigebox.storage.repos.conversations import ConversationRepo
 from beigebox.storage.repos.quarantine import QuarantineRepo
 from beigebox.storage.repos.users import UserRepo
 from beigebox.storage.repos.wire_events import WireEventRepo
@@ -53,9 +54,25 @@ def make_wire_event_repo(db: "BaseDB") -> WireEventRepo:
     return WireEventRepo(db)
 
 
+def make_conversation_repo(
+    db: "BaseDB",
+    integrity_config: dict | None = None,
+) -> ConversationRepo:
+    """Create a ConversationRepo backed by the given BaseDB.
+
+    The caller owns the db lifecycle. The repo owns the conversations +
+    messages schema (including v1.4 capture columns); call
+    repo.create_tables() before first use. ``integrity_config`` enables
+    HMAC signing of stored messages — see ConversationRepo._init_integrity.
+    """
+    return ConversationRepo(db, integrity_config=integrity_config)
+
+
 __all__ = [
     "ApiKeyRepo",
     "make_api_key_repo",
+    "ConversationRepo",
+    "make_conversation_repo",
     "QuarantineRepo",
     "make_quarantine_repo",
     "UserRepo",
