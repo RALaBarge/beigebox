@@ -392,6 +392,19 @@ async def lifespan(app: FastAPI):
         wire_events=wire_events,
     )
 
+    # CaptureFanout — single chokepoint for request/response telemetry.
+    # Wires conversations (sqlite messages writer), wire (the WireLog the
+    # proxy already constructed inside __init__), and vector embedding.
+    # Must be assigned AFTER Proxy construction since it references
+    # proxy.wire (built inside __init__).
+    from beigebox.capture import CaptureFanout
+    proxy.capture = CaptureFanout(
+        conversations=sqlite_store,
+        wire=proxy.wire,
+        vector=vector_store,
+    )
+    logger.info("CaptureFanout wired: messages → sqlite + wire_events + vector")
+
     # Late-bind the anomaly detector to the tool (proxy must exist first)
     _aad_tool = tool_registry.get("api_anomaly_detector")
     if _aad_tool and proxy.anomaly_detector:

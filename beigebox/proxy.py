@@ -269,6 +269,92 @@ class Proxy:
             stream=bool(body.get("stream")) if isinstance(body, dict) else False,
         )
 
+    def _capture_stream_response(
+        self,
+        ctx: CaptureContext,
+        body: dict,
+        full_response: list[str],
+        stages: dict[str, float],
+        backend_name: str,
+        cost_usd: float | None,
+        prompt_tokens: int,
+        *,
+        outcome: str,
+        error: BaseException | None,
+        req_already_captured: bool,
+    ) -> None:
+        """Emit the streaming response capture (success or failure path).
+
+        On normal completion, synthesizes a NormalizedResponse from the
+        accumulated text + token estimates so the row carries the same
+        fields the non-streaming path produces. On failure outcomes
+        (stream_aborted / client_disconnect), uses ``from_partial`` so
+        partial content is preserved with the right outcome marker.
+        """
+        if self.capture is None:
+            return
+        ttft_ms = stages.get("ttft_ms")
+        ctx_after = attach_response_timing(ctx, ttft_ms=ttft_ms)
+        # Make sure backend got populated in ctx_after; carry the resolved
+        # name through if the caller already knows it.
+        if backend_name and ctx_after.backend != backend_name:
+            ctx_after = CaptureContext(
+                conv_id=ctx_after.conv_id,
+                turn_id=ctx_after.turn_id,
+                model=ctx_after.model,
+                backend=backend_name,
+                started_at=ctx_after.started_at,
+                run_id=ctx_after.run_id,
+                request_id=ctx_after.request_id,
+                ended_at=ctx_after.ended_at,
+                ttft_ms=ctx_after.ttft_ms,
+                latency_ms=ctx_after.latency_ms,
+                user_id=ctx_after.user_id,
+            )
+
+        # Belt-and-suspenders: emit a request envelope if the chunk loop
+        # never reached its first chunk (upstream errored before any
+        # output arrived).
+        if not req_already_captured:
+            try:
+                self.capture.capture_request(
+                    self._build_captured_request(ctx, body, None)
+                )
+            except Exception as _exc:
+                logger.warning("stream capture_request fallback failed: %s", _exc)
+
+        complete_text = "".join(full_response)
+        try:
+            if outcome == "ok":
+                synth = normalize_response({
+                    "choices": [{
+                        "message": {"role": "assistant", "content": complete_text},
+                        "finish_reason": "stop",
+                    }],
+                    "usage": {
+                        "prompt_tokens": prompt_tokens or 0,
+                        "completion_tokens": _estimate_tokens(complete_text),
+                    },
+                })
+                # OpenRouter cost arrives via the cost sentinel (not the
+                # synthesized data dict) — slot it onto the normalized
+                # response so the captured row's cost_usd is populated.
+                synth.cost_usd = cost_usd
+                self.capture.capture_response(
+                    CapturedResponse.from_normalized(synth, ctx_after, "ok")
+                )
+            else:
+                self.capture.capture_response(
+                    CapturedResponse.from_partial(
+                        ctx=ctx_after,
+                        outcome=outcome,
+                        content=complete_text,
+                        error=error,
+                    )
+                )
+        except Exception as _exc:
+            logger.warning("stream capture_response failed: %s", _exc)
+
     async def _log_messages(self, conversation_id: str, messages: list[dict], model: str):
         """Store the user messages from the request."""
         if not self.log_enabled:
@@ -1139,6 +1225,21 @@ class Proxy:
         model = self._get_model(body)
         conversation_id = self._extract_conversation_id(body)
 
+        # Capture pipeline state for streaming. The streaming router doesn't
+        # surface NormalizedRequest (forward_stream is an async generator
+        # with no return value), so the request envelope is best-effort —
+        # transforms/errors come back as empty lists. Response capture is
+        # full-fidelity (synthesized via normalize_response on assembled
+        # text). Error/disconnect outcomes captured in the try/except below.
+        _capture_ctx = self._build_capture_context(
+            conversation_id, model,
+            user_id=body.get("_bb_user_id"),
+        ) if self.capture is not None else None
+        _stream_req_captured = False
+        _stream_resp_captured = False
+        _stream_outcome = "ok"
+        _stream_error: BaseException | None = None
+
         # Drop consecutive duplicate messages from a buggy/replaying client
         body = self._dedupe_consecutive_messages(body)
 
@@ -1238,8 +1339,10 @@ class Proxy:
 
         user_message = self._get_latest_user_message(body)
 
-        # Log incoming user messages (skip synthetic)
-        if not is_synthetic:
+        # Log incoming user messages (skip synthetic).
+        # Capture pipeline: defer until after first chunk arrives so we
+        # know upstream is alive. Legacy path (no capture) writes here.
+        if not is_synthetic and self.capture is None:
             await self._log_messages(conversation_id, body.get("messages", []), model)
 
         if not is_synthetic:
@@ -1288,36 +1391,77 @@ class Proxy:
         _wasm_buffer_mode = False
 
         if self.backend_router:
-            # Stream via multi-backend router
-            async for line in self.backend_router.forward_stream(body):
-                if not line:
-                    continue
-                # Intercept cost sentinel — never forward to client
-                if line.startswith(_COST_SENTINEL_PREFIX):
-                    try:
-                        stream_cost_usd = float(line[len(_COST_SENTINEL_PREFIX):])
-                        logger.debug("Stream cost captured: $%.6f", stream_cost_usd)
-                    except (ValueError, TypeError):
-                        pass
-                    continue
-                if _first_chunk:
-                    _stages["ttft_ms"] = (_time.monotonic() - _t_backend) * 1000
-                    _first_chunk = False
-                # In WASM buffer mode, collect but don't yield to client yet
-                if not _wasm_buffer_mode:
-                    yield line + "\n"
-                # Parse to buffer content
-                if line.startswith("data: "):
-                    data_str = line[6:]
-                    if data_str.strip() == "[DONE]":
+            # Stream via multi-backend router. The try/except tracks the
+            # outcome (ok / client_disconnect / stream_aborted) so the
+            # post-loop capture path can emit the right CapturedResponse.
+            try:
+                async for line in self.backend_router.forward_stream(body):
+                    if not line:
                         continue
-                    try:
-                        chunk = json.loads(data_str)
-                        nd = normalize_stream_delta(chunk)
-                        if nd.content_delta:
-                            full_response.append(nd.content_delta)
-                    except (json.JSONDecodeError, IndexError):
-                        pass
+                    # Intercept cost sentinel — never forward to client
+                    if line.startswith(_COST_SENTINEL_PREFIX):
+                        try:
+                            stream_cost_usd = float(line[len(_COST_SENTINEL_PREFIX):])
+                            logger.debug("Stream cost captured: $%.6f", stream_cost_usd)
+                        except (ValueError, TypeError):
+                            pass
+                        continue
+                    if _first_chunk:
+                        _stages["ttft_ms"] = (_time.monotonic() - _t_backend) * 1000
+                        _first_chunk = False
+                        # First chunk arrived → upstream is alive. Capture
+                        # the request envelope now (best-effort: NR not
+                        # surfaced through forward_stream).
+                        if self.capture is not None and not is_synthetic and not _stream_req_captured:
+                            try:
+                                self.capture.capture_request(
+                                    self._build_captured_request(_capture_ctx, body, None)
+                                )
+                            except Exception as _exc:
+                                logger.warning("stream capture_request failed: %s", _exc)
+                            _stream_req_captured = True
+                    # In WASM buffer mode, collect but don't yield to client yet
+                    if not _wasm_buffer_mode:
+                        yield line + "\n"
+                    # Parse to buffer content
+                    if line.startswith("data: "):
+                        data_str = line[6:]
+                        if data_str.strip() == "[DONE]":
+                            continue
+                        try:
+                            chunk = json.loads(data_str)
+                            nd = normalize_stream_delta(chunk)
+                            if nd.content_delta:
+                                full_response.append(nd.content_delta)
+                        except (json.JSONDecodeError, IndexError):
+                            pass
+            except (asyncio.CancelledError, GeneratorExit):
+                # Client closed the connection (or task was cancelled).
+                # Capture whatever we assembled and re-raise so the runtime
+                # can clean up. asyncio.CancelledError must propagate;
+                # GeneratorExit must NOT be suppressed.
+                _stream_outcome = "client_disconnect"
+                if self.capture is not None and not is_synthetic and not _stream_resp_captured:
+                    self._capture_stream_response(
+                        _capture_ctx, body, full_response, _stages,
+                        backend_name, stream_cost_usd, prompt_tokens,
+                        outcome="client_disconnect", error=None,
+                        req_already_captured=_stream_req_captured,
+                    )
+                    _stream_resp_captured = True
+                raise
+            except Exception as exc:
+                _stream_outcome = "stream_aborted"
+                _stream_error = exc
+                if self.capture is not None and not is_synthetic and not _stream_resp_captured:
+                    self._capture_stream_response(
+                        _capture_ctx, body, full_response, _stages,
+                        backend_name, stream_cost_usd, prompt_tokens,
+                        outcome="stream_aborted", error=exc,
+                        req_already_captured=_stream_req_captured,
+                    )
+                    _stream_resp_captured = True
+                raise
         else:
             # Direct backend (legacy single-backend path)
             try:
@@ -1498,14 +1642,27 @@ class Proxy:
                 yield f"data: {emit_chunk}\n"
                 yield "data: [DONE]\n"
             if complete_text:
-                await self._log_response(
-                    conversation_id,
-                    complete_text,
-                    model,
-                    cost_usd=stream_cost_usd,
-                    latency_ms=round(_stages["backend"], 1),
-                    ttft_ms=round(_stages["ttft_ms"], 1) if "ttft_ms" in _stages else None,
-                )
+                if self.capture is not None and not _stream_resp_captured:
+                    # New capture pipeline: synthesize a NormalizedResponse
+                    # from assembled text + token estimates so the row
+                    # carries the v1.4 fields (tokens, finish_reason, etc.)
+                    self._capture_stream_response(
+                        _capture_ctx, body, full_response, _stages,
+                        backend_name, stream_cost_usd, prompt_tokens,
+                        outcome="ok", error=None,
+                        req_already_captured=_stream_req_captured,
+                    )
+                    _stream_resp_captured = True
+                else:
+                    # Legacy path (no fanout wired) — keep existing behaviour.
+                    await self._log_response(
+                        conversation_id,
+                        complete_text,
+                        model,
+                        cost_usd=stream_cost_usd,
+                        latency_ms=round(_stages["backend"], 1),
+                        ttft_ms=round(_stages["ttft_ms"], 1) if "ttft_ms" in _stages else None,
+                    )
 
         # Emit timing summary to wiretap
         cost_str = f" · ${stream_cost_usd:.6f}" if stream_cost_usd else ""
