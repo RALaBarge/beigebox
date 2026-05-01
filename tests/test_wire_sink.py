@@ -83,14 +83,14 @@ def test_jsonl_sink_is_wire_sink(tmp_path):
     assert isinstance(sink, WireSink)
 
 
-def test_sqlite_sink_delegates_to_store():
+def test_sqlite_sink_delegates_to_repo():
     calls = []
 
-    class FakeStore:
-        def log_wire_event(self, **kwargs):
+    class FakeRepo:
+        def log(self, **kwargs):
             calls.append(kwargs)
 
-    sink = SqliteWireSink(FakeStore())
+    sink = SqliteWireSink(FakeRepo())
     sink.write({
         "event_type": "message",
         "source": "proxy",
@@ -110,12 +110,12 @@ def test_sqlite_sink_delegates_to_store():
     assert calls[0]["conv_id"] == "abc123"
 
 
-def test_sqlite_sink_swallows_store_error():
-    class BrokenStore:
-        def log_wire_event(self, **kwargs):
+def test_sqlite_sink_swallows_repo_error():
+    class BrokenRepo:
+        def log(self, **kwargs):
             raise RuntimeError("db gone")
 
-    sink = SqliteWireSink(BrokenStore())
+    sink = SqliteWireSink(BrokenRepo())
     sink.write({"event_type": "message", "source": "proxy"})  # must not raise
 
 
@@ -132,16 +132,26 @@ def test_make_sink_jsonl(tmp_path):
 
 
 def test_make_sink_sqlite():
-    class FakeStore:
-        def log_wire_event(self, **kwargs):
+    class FakeRepo:
+        def log(self, **kwargs):
             pass
 
-    sink = make_sink("sqlite", store=FakeStore())
+    sink = make_sink("sqlite", repo=FakeRepo())
     assert isinstance(sink, SqliteWireSink)
 
 
-def test_make_sink_sqlite_requires_store():
-    with pytest.raises(ValueError, match="store"):
+def test_make_sink_sqlite_legacy_store_kwarg():
+    """Backward-compat: store= kwarg still accepted (alias for repo=)."""
+    class FakeRepo:
+        def log(self, **kwargs):
+            pass
+
+    sink = make_sink("sqlite", store=FakeRepo())
+    assert isinstance(sink, SqliteWireSink)
+
+
+def test_make_sink_sqlite_requires_repo():
+    with pytest.raises(ValueError, match="repo"):
         make_sink("sqlite")
 
 

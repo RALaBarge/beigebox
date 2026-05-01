@@ -106,7 +106,7 @@ class WireLog:
     def __init__(
         self,
         log_path: str,
-        sqlite_store=None,
+        wire_events=None,
         egress_hooks=None,
         max_lines: int = 100_000,
         rotation_enabled: bool = True,
@@ -122,10 +122,11 @@ class WireLog:
             rotation_enabled=rotation_enabled,
         )
 
-        # Optional extra sinks (SQLite dual-write + any caller-supplied sinks)
+        # Optional extra sinks (SQLite dual-write via the wire_events repo
+        # plus any caller-supplied sinks).
         self._extra_sinks: list[WireSink] = list(sinks or [])
-        if sqlite_store is not None:
-            self._extra_sinks.append(SqliteWireSink(sqlite_store))
+        if wire_events is not None:
+            self._extra_sinks.append(SqliteWireSink(wire_events))
 
     def log(
         self,

@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 from beigebox.storage.repos.api_keys import ApiKeyRepo
 from beigebox.storage.repos.quarantine import QuarantineRepo
 from beigebox.storage.repos.users import UserRepo
+from beigebox.storage.repos.wire_events import WireEventRepo
 
 
 def make_api_key_repo(db: "BaseDB") -> ApiKeyRepo:
@@ -43,6 +44,15 @@ def make_user_repo(db: "BaseDB") -> UserRepo:
     return UserRepo(db)
 
 
+def make_wire_event_repo(db: "BaseDB") -> WireEventRepo:
+    """Create a WireEventRepo backed by the given BaseDB.
+
+    The caller owns the db lifecycle. The repo owns the wire_events
+    schema; call repo.create_tables() before first use.
+    """
+    return WireEventRepo(db)
+
+
 __all__ = [
     "ApiKeyRepo",
     "make_api_key_repo",
@@ -50,4 +60,6 @@ __all__ = [
     "make_quarantine_repo",
     "UserRepo",
     "make_user_repo",
+    "WireEventRepo",
+    "make_wire_event_repo",
 ]

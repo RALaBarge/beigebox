@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from beigebox.storage.repos.api_keys import ApiKeyRepo
     from beigebox.storage.repos.quarantine import QuarantineRepo
     from beigebox.storage.repos.users import UserRepo
+    from beigebox.storage.repos.wire_events import WireEventRepo
     from beigebox.storage.vector_store import VectorStore
     from beigebox.tools.registry import ToolRegistry
     from beigebox.hooks import HookManager
@@ -45,6 +46,7 @@ class AppState:
     api_keys: ApiKeyRepo | None = None
     quarantine: QuarantineRepo | None = None
     users: UserRepo | None = None
+    wire_events: WireEventRepo | None = None
     vector_store: VectorStore | None = None
     blob_store: Any = None
     hook_manager: HookManager | None = None

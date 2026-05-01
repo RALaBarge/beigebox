@@ -61,6 +61,7 @@ class Proxy:
         blob_store=None,
         egress_hooks=None,
         extraction_detector=None,
+        wire_events=None,
     ):
         self.sqlite = sqlite
         self.vector = vector
@@ -81,7 +82,7 @@ class Proxy:
         wire_path = wire_cfg.get("path", "./data/wire.jsonl")
         self.wire = WireLog(
             wire_path,
-            sqlite_store=sqlite,
+            wire_events=wire_events,
             egress_hooks=egress_hooks or [],
             max_lines=int(wire_cfg.get("max_lines", 100_000)),
             rotation_enabled=bool(wire_cfg.get("rotation_enabled", True)),

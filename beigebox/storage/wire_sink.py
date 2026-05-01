@@ -79,14 +79,14 @@ class JsonlWireSink(WireSink):
 
 
 class SqliteWireSink(WireSink):
-    """Writes wire events to the wire_events SQLite table via a SQLiteStore."""
+    """Writes wire events to the wire_events SQLite table via a WireEventRepo."""
 
-    def __init__(self, store):
-        self._store = store
+    def __init__(self, repo):
+        self._repo = repo
 
     def write(self, event: dict) -> None:
         try:
-            self._store.log_wire_event(
+            self._repo.log(
                 event_type=event.get("event_type", "message"),
                 source=event.get("source", "proxy"),
                 content=event.get("content", ""),
@@ -108,15 +108,15 @@ def make_sink(type: str, **kwargs) -> WireSink:
     Types:
         "null"  — NullWireSink, no kwargs needed
         "jsonl" — JsonlWireSink; requires path=, optional max_lines=, rotation_enabled=
-        "sqlite"— SqliteWireSink; requires store=<SQLiteStore instance>
+        "sqlite"— SqliteWireSink; requires repo=<WireEventRepo instance>
     """
     if type == "null":
         return NullWireSink()
     if type == "jsonl":
         return JsonlWireSink(**kwargs)
     if type == "sqlite":
-        store = kwargs.get("store")
-        if store is None:
-            raise ValueError("make_sink('sqlite') requires store=<SQLiteStore>")
-        return SqliteWireSink(store)
+        repo = kwargs.get("repo") or kwargs.get("store")
+        if repo is None:
+            raise ValueError("make_sink('sqlite') requires repo=<WireEventRepo>")
+        return SqliteWireSink(repo)
     raise ValueError(f"Unknown sink type: {type!r}")

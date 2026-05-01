@@ -197,6 +197,7 @@ async def lifespan(app: FastAPI):
         make_api_key_repo,
         make_quarantine_repo,
         make_user_repo,
+        make_wire_event_repo,
     )
     _db_type, _db_kwargs = build_db_kwargs(cfg, default_sqlite_path=sqlite_path)
     db = make_db(_db_type, **_db_kwargs)
@@ -206,6 +207,8 @@ async def lifespan(app: FastAPI):
     quarantine.create_tables()
     users = make_user_repo(db)
     users.create_tables()
+    wire_events = make_wire_event_repo(db)
+    wire_events.create_tables()
 
     _embed_cfg    = cfg["embedding"]
     from beigebox.storage.backends import (
@@ -386,6 +389,7 @@ async def lifespan(app: FastAPI):
         blob_store=blob_store,
         egress_hooks=egress_hooks,
         extraction_detector=extraction_detector,
+        wire_events=wire_events,
     )
 
     # Late-bind the anomaly detector to the tool (proxy must exist first)
@@ -402,6 +406,7 @@ async def lifespan(app: FastAPI):
         api_keys=api_keys,
         quarantine=quarantine,
         users=users,
+        wire_events=wire_events,
         vector_store=vector_store,
         blob_store=blob_store,
         hook_manager=hook_manager,
@@ -3036,12 +3041,12 @@ async def api_tap(
     from pathlib import Path as _P
 
     n = min(max(1, n), 500)
-    st = get_state().sqlite_store
+    repo = get_state().wire_events
 
     # Primary path: query SQLite wire_events table
-    if st is not None:
+    if repo is not None:
         try:
-            rows = st.get_wire_events(
+            rows = repo.query(
                 n=n,
                 event_type=event_type or None,
                 source=source or None,
@@ -3051,7 +3056,7 @@ async def api_tap(
             )
             return JSONResponse({"entries": rows, "total": len(rows), "filtered": len(rows)})
         except Exception as e:
-            logger.warning("api_tap SQLite query failed, falling back to JSONL: %s", e)
+            logger.warning("api_tap wire_events query failed, falling back to JSONL: %s", e)
 
     # Fallback: parse JSONL (old behaviour, cold-start before any events written)
     cfg = get_config()
