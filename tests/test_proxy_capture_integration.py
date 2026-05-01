@@ -1,0 +1,250 @@
+"""End-to-end integration tests for proxy ↔ CaptureFanout (non-streaming).
+
+These spin up a Proxy with a real SQLiteStore, real WireLog, real
+CaptureFanout, and a fake backend_router that returns canned
+BackendResponse + NormalizedRequest. The point is to verify the rewire:
+that every request/response actually produces the expected v1.4 rows
+in the messages table and the expected wire events.
+"""
+from __future__ import annotations
+
+import asyncio
+import sqlite3
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from beigebox.backends.base import BackendResponse
+from beigebox.capture import CaptureFanout
+from beigebox.proxy import Proxy
+from beigebox.request_normalizer import NormalizedRequest
+from beigebox.storage.sqlite_store import SQLiteStore
+from beigebox.storage.vector_store import VectorStore
+
+
+class FakeRouter:
+    """Minimal backend_router stand-in. Returns whatever was queued."""
+
+    def __init__(self) -> None:
+        self._queue: list[BackendResponse | Exception] = []
+
+    def queue(self, item) -> None:
+        self._queue.append(item)
+
+    async def forward(self, body: dict) -> BackendResponse:
+        item = self._queue.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+class FakeVector:
+    """Vector store stand-in. Records embed calls but doesn't actually embed."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def store_message_async(self, **kwargs) -> None:
+        self.calls.append(kwargs)
+
+
+@pytest.fixture
+def proxy_setup():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        wire_path = Path(tmp) / "wire.jsonl"
+
+        sqlite = SQLiteStore(str(db_path))
+        vector = FakeVector()
+        router = FakeRouter()
+
+        # Patch wiretap path via config so WireLog writes to tmp
+        with patch("beigebox.proxy.get_config") as mock_cfg:
+            mock_cfg.return_value = {
+                "backend": {"url": "http://127.0.0.1:9999", "timeout": 30, "default_model": "test"},
+                "storage": {"log_conversations": True},
+                "wiretap": {"path": str(wire_path), "max_lines": 1000, "rotation_enabled": False},
+                "cost_tracking": {"enabled": False},
+                "tool_cache": {"ttl_seconds": 60.0},
+                "aliases": {},
+                "guardrails": {},
+                "validation": {},
+                "security": {"api_anomaly": {"enabled": False}},
+                "wasm": {},
+            }
+            with patch("beigebox.proxy.get_runtime_config", return_value={}):
+                proxy = Proxy(
+                    sqlite=sqlite,
+                    vector=vector,
+                    backend_router=router,
+                )
+
+        # Wire the fanout AFTER the proxy is constructed (it uses
+        # proxy.wire which is built inside __init__).
+        fanout = CaptureFanout(
+            conversations=sqlite,
+            wire=proxy.wire,
+            vector=vector,
+        )
+        proxy.capture = fanout
+        yield proxy, sqlite, router, vector, wire_path
+
+
+def _all_messages(store: SQLiteStore) -> list[dict]:
+    conn = sqlite3.connect(str(store.db_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute("SELECT * FROM messages ORDER BY timestamp").fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+class TestNonStreamingCapture:
+    @pytest.mark.asyncio
+    async def test_successful_request_produces_request_and_response_rows(
+        self, proxy_setup,
+    ):
+        proxy, sqlite, router, vector, _wire_path = proxy_setup
+
+        nr = NormalizedRequest(
+            body={"messages": [{"role": "user", "content": "hi"}], "model": "test"},
+            target="openrouter",
+            transforms=["renamed_max_tokens"],
+            errors=[],
+        )
+        response = BackendResponse(
+            ok=True,
+            backend_name="openrouter",
+            latency_ms=120.0,
+            cost_usd=0.0001,
+            data={
+                "choices": [{"message": {"role": "assistant", "content": "hello back"},
+                             "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8,
+                          "cost": 0.0001},
+            },
+        )
+        response.normalized_request = nr
+        response.request_summary = nr.summary({"backend": "openrouter"})
+        router.queue(response)
+
+        body = {
+            "model": "test",
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        result = await proxy.forward_chat_completion(body)
+
+        assert result["choices"][0]["message"]["content"] == "hello back"
+
+        rows = _all_messages(sqlite)
+        # 1 user request row + 1 assistant response row
+        assert len(rows) == 2
+
+        user_row = next(r for r in rows if r["role"] == "user")
+        assert user_row["content"] == "hi"
+        assert user_row["request_transforms_json"] == '["renamed_max_tokens"]'
+        assert user_row["capture_outcome"] == "ok"
+
+        asst_row = next(r for r in rows if r["role"] == "assistant")
+        assert asst_row["content"] == "hello back"
+        assert asst_row["finish_reason"] == "stop"
+        assert asst_row["prompt_tokens"] == 5
+        assert asst_row["completion_tokens"] == 3
+        assert asst_row["cost_usd"] == 0.0001
+        assert asst_row["capture_outcome"] == "ok"
+
+    @pytest.mark.asyncio
+    async def test_upstream_error_still_produces_rows(self, proxy_setup):
+        proxy, sqlite, router, vector, _wire_path = proxy_setup
+
+        nr = NormalizedRequest(
+            body={"messages": [{"role": "user", "content": "hi"}]},
+            target="openrouter",
+            transforms=[],
+            errors=[],
+        )
+        response = BackendResponse(
+            ok=False,
+            backend_name="openrouter",
+            latency_ms=50.0,
+            error="upstream returned 502",
+            data={},
+        )
+        response.normalized_request = nr
+        response.request_summary = nr.summary({"backend": "openrouter"})
+        router.queue(response)
+
+        body = {"model": "test", "messages": [{"role": "user", "content": "hi"}]}
+        result = await proxy.forward_chat_completion(body)
+
+        # The proxy returns a synthetic error response to the client
+        assert "Backend error" in result["choices"][0]["message"]["content"]
+
+        rows = _all_messages(sqlite)
+        assert len(rows) == 2
+
+        user_row = next(r for r in rows if r["role"] == "user")
+        assert user_row["capture_outcome"] == "ok"   # request itself was fine
+
+        asst_row = next(r for r in rows if r["role"] == "assistant")
+        assert asst_row["capture_outcome"] == "upstream_error"
+        assert asst_row["error_kind"] == "upstream_error"
+        assert "502" in (asst_row["error_message"] or "")
+        assert asst_row["finish_reason"] == "error"
+
+    @pytest.mark.asyncio
+    async def test_router_raises_captures_failure_row(self, proxy_setup):
+        proxy, sqlite, router, vector, _wire_path = proxy_setup
+
+        router.queue(RuntimeError("router exploded"))
+
+        body = {"model": "test", "messages": [{"role": "user", "content": "hi"}]}
+        with pytest.raises(RuntimeError, match="router exploded"):
+            await proxy.forward_chat_completion(body)
+
+        rows = _all_messages(sqlite)
+        # Request envelope + failure response envelope
+        assert len(rows) == 2
+        asst_row = next(r for r in rows if r["role"] == "assistant")
+        assert asst_row["capture_outcome"] == "upstream_error"
+        assert "router exploded" in (asst_row["error_message"] or "")
+
+    @pytest.mark.asyncio
+    async def test_response_with_reasoning_and_tool_calls(self, proxy_setup):
+        proxy, sqlite, router, vector, _wire_path = proxy_setup
+
+        nr = NormalizedRequest(body={}, target="openrouter", transforms=[], errors=[])
+        response = BackendResponse(
+            ok=True,
+            backend_name="openrouter",
+            latency_ms=200.0,
+            data={
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "the answer",
+                        "reasoning": "step 1\nstep 2",
+                        "tool_calls": [{"id": "tc1", "function": {"name": "search", "arguments": "{}"}}],
+                    },
+                    "finish_reason": "tool_calls",
+                }],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5,
+                          "completion_tokens_details": {"reasoning_tokens": 7}, "total_tokens": 22},
+            },
+        )
+        response.normalized_request = nr
+        response.request_summary = nr.summary({"backend": "openrouter"})
+        router.queue(response)
+
+        body = {"model": "test", "messages": [{"role": "user", "content": "do something"}]}
+        await proxy.forward_chat_completion(body)
+
+        rows = _all_messages(sqlite)
+        asst_row = next(r for r in rows if r["role"] == "assistant")
+        assert asst_row["reasoning_text"] == "step 1\nstep 2"
+        assert "tc1" in (asst_row["tool_calls_json"] or "")
+        assert asst_row["finish_reason"] == "tool_calls"
+        assert asst_row["reasoning_tokens"] == 7

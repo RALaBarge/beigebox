@@ -45,6 +45,12 @@ from beigebox.response_normalizer import (
     normalize_response,
     normalize_stream_delta,
 )
+from beigebox.capture import (
+    CaptureContext,
+    CapturedRequest,
+    CapturedResponse,
+    attach_response_timing,
+)
 from beigebox.validation.format import ResponseValidator
 from beigebox.security.anomaly_detector import APIAnomalyDetector
 
@@ -62,9 +68,16 @@ class Proxy:
         egress_hooks=None,
         extraction_detector=None,
         wire_events=None,
+        capture=None,
     ):
         self.sqlite = sqlite
         self.vector = vector
+        # CaptureFanout — single chokepoint for request/response telemetry.
+        # When provided (production), the proxy emits CapturedRequest /
+        # CapturedResponse envelopes here instead of calling _log_messages /
+        # _log_response directly. When None (legacy tests), the proxy falls
+        # back to the old per-call paths.
+        self.capture = capture
         self.blob_store = blob_store
         self.hook_manager = hook_manager
         self.tool_registry = tool_registry
@@ -201,6 +214,60 @@ class Proxy:
         if len(cleaned) != len(messages):
             body["messages"] = cleaned
         return body
+
+    # ------------------------------------------------------------------
+    # Capture pipeline helpers (v1.4)
+    # ------------------------------------------------------------------
+    # These build the CapturedRequest / CapturedResponse envelopes for the
+    # CaptureFanout. The fanout is only wired in production (main.py
+    # lifespan); tests that instantiate Proxy without it fall through to
+    # the legacy _log_messages / _log_response paths below.
+
+    def _build_capture_context(
+        self,
+        conversation_id: str,
+        model: str,
+        backend: str = "",
+        run_id: str | None = None,
+        user_id: str | None = None,
+    ) -> CaptureContext:
+        return CaptureContext(
+            conv_id=conversation_id,
+            turn_id=uuid4().hex,
+            model=model,
+            backend=backend,
+            started_at=datetime.now(timezone.utc),
+            run_id=run_id,
+            user_id=user_id,
+        )
+
+    def _build_captured_request(
+        self,
+        ctx: CaptureContext,
+        body: dict,
+        response,
+    ) -> CapturedRequest:
+        """Construct a CapturedRequest from the body + (optional) NormalizedRequest.
+
+        When ``response`` is the BackendResponse from the router, prefer the
+        NR it stashed (full transforms/errors/target). When unavailable
+        (direct httpx fallback or upstream error before router returned),
+        fall back to a best-effort envelope built from the request body
+        alone.
+        """
+        nr = getattr(response, "normalized_request", None) if response is not None else None
+        messages = body.get("messages", []) if isinstance(body, dict) else []
+        if nr is not None:
+            return CapturedRequest.from_normalized(nr, ctx, messages)
+        return CapturedRequest(
+            ctx=ctx,
+            target="(unavailable)",
+            transforms=[],
+            errors=[],
+            messages=list(messages),
+            has_tools=bool(body.get("tools")) if isinstance(body, dict) else False,
+            stream=bool(body.get("stream")) if isinstance(body, dict) else False,
+        )
 
     async def _log_messages(self, conversation_id: str, messages: list[dict], model: str):
         """Store the user messages from the request."""
@@ -688,6 +755,17 @@ class Proxy:
         model = self._get_model(body)
         conversation_id = self._extract_conversation_id(body)
 
+        # Build a CaptureContext at request entry. ``backend`` and
+        # ``request_id`` are populated post-router (see below). The fanout
+        # only fires when self.capture is wired; legacy tests with
+        # capture=None fall through to the old _log_messages path.
+        _capture_ctx = self._build_capture_context(
+            conversation_id, model,
+            user_id=body.get("_bb_user_id"),
+        ) if self.capture is not None else None
+        _req_captured = False
+        _resp_captured = False
+
         # Drop consecutive duplicate messages from a buggy/replaying client
         body = self._dedupe_consecutive_messages(body)
 
@@ -759,8 +837,10 @@ class Proxy:
                 "model": "beigebox",
             }
 
-        # Log incoming user messages (skip synthetic)
-        if not is_synthetic:
+        # Log incoming user messages (skip synthetic).
+        # Capture pipeline: defer the request envelope until after router
+        # returns so it carries the NormalizedRequest. Legacy path runs here.
+        if not is_synthetic and self.capture is None:
             await self._log_messages(conversation_id, body.get("messages", []), model)
 
         # The request-side wire event will be enriched with normalizer
@@ -806,13 +886,59 @@ class Proxy:
         _t_backend = _time.monotonic()
 
         if self.backend_router:
-            response = await self.backend_router.forward(body)
+            try:
+                response = await self.backend_router.forward(body)
+            except Exception as _exc:
+                # Router itself raised (rare — most failures land in
+                # response.ok=False below). Capture the failure and re-raise.
+                if self.capture is not None and not is_synthetic:
+                    if not _req_captured:
+                        self.capture.capture_request(
+                            self._build_captured_request(_capture_ctx, body, None)
+                        )
+                        _req_captured = True
+                    if not _resp_captured:
+                        ctx_after = attach_response_timing(_capture_ctx)
+                        self.capture.capture_response(
+                            CapturedResponse.from_partial(
+                                ctx=ctx_after, outcome="upstream_error", error=_exc,
+                            )
+                        )
+                        _resp_captured = True
+                raise
             _stages["backend"] = (_time.monotonic() - _t_backend) * 1000
             if not response.ok:
                 # Inspector — finalize error
                 if _insp_entry is not None:
                     _insp_entry["latency_ms"] = round(_stages.get("backend", 0), 1)
                     _insp_entry["status"] = "error"
+                # Capture the failed request + response when fanout is wired.
+                # Soft failures (response.ok=False) don't raise — the proxy
+                # returns a synthetic error reply — but we still want a row.
+                if self.capture is not None and not is_synthetic:
+                    _capture_ctx_err = CaptureContext(
+                        conv_id=_capture_ctx.conv_id,
+                        turn_id=_capture_ctx.turn_id,
+                        model=_capture_ctx.model,
+                        backend=response.backend_name or "(unknown)",
+                        started_at=_capture_ctx.started_at,
+                        run_id=_capture_ctx.run_id,
+                        user_id=_capture_ctx.user_id,
+                    )
+                    if not _req_captured:
+                        self.capture.capture_request(
+                            self._build_captured_request(_capture_ctx_err, body, response)
+                        )
+                        _req_captured = True
+                    ctx_after = attach_response_timing(_capture_ctx_err)
+                    self.capture.capture_response(
+                        CapturedResponse.from_partial(
+                            ctx=ctx_after,
+                            outcome="upstream_error",
+                            error=RuntimeError(response.error or "backend error"),
+                        )
+                    )
+                    _resp_captured = True
                 # Return error as a chat response so clients handle it gracefully
                 return {
                     "choices": [{"message": {"role": "assistant",
@@ -822,6 +948,18 @@ class Proxy:
             data = response.data
             cost_usd = response.cost_usd
             backend_name = response.backend_name
+            # Backend resolved → enrich the capture context with backend name
+            # before building the request envelope.
+            if _capture_ctx is not None:
+                _capture_ctx = CaptureContext(
+                    conv_id=_capture_ctx.conv_id,
+                    turn_id=_capture_ctx.turn_id,
+                    model=_capture_ctx.model,
+                    backend=backend_name,
+                    started_at=_capture_ctx.started_at,
+                    run_id=_capture_ctx.run_id,
+                    user_id=_capture_ctx.user_id,
+                )
         else:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 resp = await client.post(
@@ -831,6 +969,19 @@ class Proxy:
                 resp.raise_for_status()
                 data = resp.json()
             _stages["backend"] = (_time.monotonic() - _t_backend) * 1000
+
+        # Capture pipeline: request envelope (post-router so transforms/errors
+        # from the NormalizedRequest are available). Best-effort: if the
+        # direct httpx path was taken, NR is unavailable and the envelope is
+        # built from the body alone.
+        if self.capture is not None and not is_synthetic and not _req_captured:
+            try:
+                self.capture.capture_request(
+                    self._build_captured_request(_capture_ctx, body, response)
+                )
+            except Exception as _exc:
+                logger.warning("capture_request failed: %s", _exc)
+            _req_captured = True
 
         # Inspector — finalize latency
         if _insp_entry is not None:
@@ -848,28 +999,62 @@ class Proxy:
         # assistant_content is set inside the if-block; guard below prevents
         # NameError on the post-hook line when is_synthetic=True or choices=[].
         assistant_content = ""
+        normalized = None
         if not is_synthetic:
-            normalized = normalize_response(
-                data,
-                fix_bpe_artifacts=getattr(response, "fix_bpe_artifacts", False),
-            )
+            try:
+                normalized = normalize_response(
+                    data,
+                    fix_bpe_artifacts=getattr(response, "fix_bpe_artifacts", False),
+                )
+            except Exception as _exc:
+                # normalize_response is total by contract, but defend in depth:
+                # any unexpected failure here gets a partial capture so we
+                # don't lose the response row.
+                logger.warning("normalize_response failed: %s", _exc)
+                if self.capture is not None and not _resp_captured:
+                    ctx_after = attach_response_timing(_capture_ctx)
+                    self.capture.capture_response(
+                        CapturedResponse.from_partial(
+                            ctx=ctx_after, outcome="upstream_error", error=_exc,
+                        )
+                    )
+                    _resp_captured = True
+                raise
+
             if normalized.content or normalized.tool_calls:
                 assistant_content = normalized.content
                 response_latency = response.latency_ms if self.backend_router and response.ok else None
-                await self._log_response(conversation_id, assistant_content, model, cost_usd=cost_usd, latency_ms=response_latency)
-                # Single wire event carrying both sides of the round-trip:
-                # request-side normalizer summary (transforms, target, errors)
-                # + response-side summary (finish_reason, usage, tool_calls).
-                # Subsumes the router-level debug/warning logs that used to
-                # report transforms separately.
+
+                if self.capture is not None and not _resp_captured:
+                    # New capture pipeline: full canonical fields land in
+                    # messages + wire_events + vector embedding via the fanout.
+                    ctx_after = attach_response_timing(
+                        _capture_ctx,
+                        ttft_ms=None,  # non-streaming path has no separate TTFT
+                    )
+                    captured_resp = CapturedResponse.from_normalized(
+                        normalized, ctx_after, "ok",
+                    )
+                    try:
+                        self.capture.capture_response(captured_resp)
+                    except Exception as _exc:
+                        logger.warning("capture_response failed: %s", _exc)
+                    _resp_captured = True
+                else:
+                    # Legacy path (no fanout wired) — keep existing behaviour.
+                    await self._log_response(
+                        conversation_id, assistant_content, model,
+                        cost_usd=cost_usd, latency_ms=response_latency,
+                    )
+
+                # Side-channel payload log — separate subsystem, opt-in via
+                # payload_log_enabled. Stays even when capture is wired.
                 _resp_meta = normalized.summary({
                     "model": model,
                     "backend": backend_name,
                     "conversation_id": conversation_id,
                     "latency_ms": round(_stages.get("backend", 0), 1),
                 })
-                # response is initialized to None at the top of this function
-                # (line ~1323), so a plain attr access is safe — no locals() trick.
                 if response is not None and response.request_summary:
                     _resp_meta["request"] = response.request_summary
                 log_payload_event("proxy_response", response=assistant_content, model=model,

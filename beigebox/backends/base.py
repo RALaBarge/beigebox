@@ -26,6 +26,11 @@ class BackendResponse:
     # can include normalized-request transforms/errors in its wire event
     # without re-running normalize_request. Set by MultiBackendRouter.forward.
     request_summary: dict | None = None
+    # Full NormalizedRequest object (not just its summary) so the capture
+    # pipeline can build a CapturedRequest envelope with transforms/errors/
+    # body without re-running normalize_request. Set by
+    # MultiBackendRouter.forward alongside request_summary.
+    normalized_request: object | None = None
     # When True, proxy passes fix_bpe_artifacts=True to normalize_response.
     # Set by MlxBackend to clean up the broken Mistral tokenizer regex artifacts
     # (Ġ/Ċ spam) produced by mlx-lm without fix_mistral_regex=True.

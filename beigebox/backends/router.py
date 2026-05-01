@@ -357,6 +357,7 @@ class MultiBackendRouter:
                 nr = self._normalize_for(body, backend)
                 response = await backend.forward(nr.body)
                 response.request_summary = nr.summary({"backend": backend.name})
+                response.normalized_request = nr
                 return response
             logger.warning(
                 "routing_rules: backend '%s' not found — falling back to normal routing",
@@ -379,6 +380,7 @@ class MultiBackendRouter:
             nr = self._normalize_for(body, backend)
             response = await backend.forward(nr.body)
             response.request_summary = nr.summary({"backend": backend.name})
+            response.normalized_request = nr
             if response.ok:
                 self._tracker.record(backend.name, response.latency_ms)
                 logger.info(
@@ -407,6 +409,7 @@ class MultiBackendRouter:
             nr = self._normalize_for(body, backend)
             response = await backend.forward(nr.body)
             response.request_summary = nr.summary({"backend": backend.name})
+            response.normalized_request = nr
             if response.ok:
                 self._tracker.record(backend.name, response.latency_ms)
                 logger.info("Backend '%s' (degraded) served model '%s' in %.0fms",
