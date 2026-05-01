@@ -67,7 +67,7 @@ Listing internals on debian needs `sudo lxc-ls -f` (password-prompted; password 
 |---------|----------|-------|
 | BeigeBox app | `localhost:1337` (via SSH tunnel) | Docker (Colima VM), same image as pop-os |
 | Ollama | `127.0.0.1:11434` | Model store path is in env (`ssh assh 'echo $OLLAMA_MODELS'`) — don't assume `~/.ollama`. |
-| (Python app) | `*:8080` | unidentified user app |
+| mlx-lm server | `*:8080` | Devstral / Qwen / Gemma on Apple Silicon. Launch with `--prompt-cache-size 1` to bound KV cache growth — without it, mlx-lm crashes mid-session under cumulative request pressure (seen 2026-05-01). Models cached at `~/mlx/`. |
 | Apple ControlCenter | `*:5000`, `*:7000` | AirPlay receiver — ignore |
 
 ## Live lookup

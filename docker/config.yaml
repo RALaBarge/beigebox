@@ -381,20 +381,6 @@ wasm:
       description: "Redact PII (emails, phone numbers, SSNs) from text"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Timeouts — Centralized (all in one place)
-# ─────────────────────────────────────────────────────────────────────────────
-timeouts:
-  backend_seconds: 900             # LLM inference timeout
-  decision_llm_seconds: 15         # Routing judge timeout
-  operator_seconds: 300            # Single operator iteration timeout
-  operator_run_seconds: 600        # Full operator run timeout
-  harness_task_seconds: 120        # Harness task timeout
-  harness_operator_seconds: 180    # Harness operator step timeout
-  embedding_seconds: 5.0           # Embedding API call timeout
-  request_seconds: 900             # Global request timeout
-  stream_stall_seconds: 300        # Stream stall detection timeout
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Logging & Observability
 # ─────────────────────────────────────────────────────────────────────────────
 logging:
@@ -410,11 +396,6 @@ wiretap:
   max_lines: 100000
   rotation_enabled: true
   description: "Structured log of all messages through the proxy (for conversation tracing)"
-
-payload:
-  enabled: false
-  path: "./data/payload.jsonl"
-  description: "Full LLM request/response payloads (for debugging backend issues)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Advanced
