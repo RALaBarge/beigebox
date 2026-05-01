@@ -193,13 +193,19 @@ async def lifespan(app: FastAPI):
     # Same sqlite file as SQLiteStore; both schemas use IF NOT EXISTS so they
     # coexist during the gradual migration off sqlite_store.py.
     from beigebox.storage.db import make_db, build_db_kwargs
-    from beigebox.storage.repos import make_api_key_repo, make_quarantine_repo
+    from beigebox.storage.repos import (
+        make_api_key_repo,
+        make_quarantine_repo,
+        make_user_repo,
+    )
     _db_type, _db_kwargs = build_db_kwargs(cfg, default_sqlite_path=sqlite_path)
     db = make_db(_db_type, **_db_kwargs)
     api_keys = make_api_key_repo(db)
     api_keys.create_tables()
     quarantine = make_quarantine_repo(db)
     quarantine.create_tables()
+    users = make_user_repo(db)
+    users.create_tables()
 
     _embed_cfg    = cfg["embedding"]
     from beigebox.storage.backends import (
@@ -278,7 +284,7 @@ async def lifespan(app: FastAPI):
     password_auth = None
     if cfg.get("auth", {}).get("mode") == "password":
         from beigebox.web_auth import SimplePasswordAuth
-        password_auth = SimplePasswordAuth(sqlite_store) if sqlite_store else None
+        password_auth = SimplePasswordAuth(users) if users else None
 
     # MCP server — expose operator/run if operator is enabled
     # Operator-via-MCP factory removed in v3 — Operator class deleted.
@@ -395,6 +401,7 @@ async def lifespan(app: FastAPI):
         db=db,
         api_keys=api_keys,
         quarantine=quarantine,
+        users=users,
         vector_store=vector_store,
         blob_store=blob_store,
         hook_manager=hook_manager,
@@ -1274,8 +1281,8 @@ async def oauth_callback(
         return JSONResponse({"error": "OAuth exchange failed"}, status_code=500)
 
     # Persist / update user row
-    if st.sqlite_store:
-        user_id = st.sqlite_store.upsert_user(
+    if st.users:
+        user_id = st.users.upsert(
             provider=user_info.provider,
             sub=user_info.sub,
             email=user_info.email,

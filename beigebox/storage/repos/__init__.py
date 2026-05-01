@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 from beigebox.storage.repos.api_keys import ApiKeyRepo
 from beigebox.storage.repos.quarantine import QuarantineRepo
+from beigebox.storage.repos.users import UserRepo
 
 
 def make_api_key_repo(db: "BaseDB") -> ApiKeyRepo:
@@ -33,9 +34,20 @@ def make_quarantine_repo(db: "BaseDB") -> QuarantineRepo:
     return QuarantineRepo(db)
 
 
+def make_user_repo(db: "BaseDB") -> UserRepo:
+    """Create a UserRepo backed by the given BaseDB.
+
+    The caller owns the db lifecycle. The repo owns the users schema;
+    call repo.create_tables() before first use.
+    """
+    return UserRepo(db)
+
+
 __all__ = [
     "ApiKeyRepo",
     "make_api_key_repo",
     "QuarantineRepo",
     "make_quarantine_repo",
+    "UserRepo",
+    "make_user_repo",
 ]

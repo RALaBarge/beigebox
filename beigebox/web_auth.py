@@ -315,9 +315,9 @@ class GoogleProvider(AuthProvider):
 class SimplePasswordAuth:
     """Minimal password-based auth: username is 'admin', customer sets password on first login."""
 
-    def __init__(self, store):
-        """Initialize with SQLite store for user credentials."""
-        self.store = store
+    def __init__(self, users):
+        """Initialize with a UserRepo for storing credentials."""
+        self.users = users
         self._signer = URLSafeTimedSerializer(
             secrets.token_hex(32),
             salt="bb-password-session"
@@ -327,19 +327,13 @@ class SimplePasswordAuth:
 
     def _ensure_admin_user(self):
         """Create admin user if doesn't exist."""
-        import uuid
-        existing = self.store.get_user("admin")
-        if not existing:
-            # Create with placeholder password (will be set on first login)
-            import bcrypt
-            placeholder_hash = bcrypt.hashpw(b"admin", bcrypt.gensalt(rounds=12)).decode()
-            # Store directly in users table (hack: use provider="password", sub="admin")
-            self.store.upsert_user(
+        if not self.users.get("admin"):
+            self.users.upsert(
                 provider="password",
                 sub="admin",
                 email="admin@localhost",
                 name="Admin",
-                picture=""
+                picture="",
             )
 
     def login(self, password: str) -> tuple[str, bool]:
@@ -364,9 +358,9 @@ class SimplePasswordAuth:
 
         # Otherwise, try to check against stored hash in database
         try:
-            user = self.store.get_user("admin")
-            if user and hasattr(user, 'password_hash') and user.password_hash:
-                if bcrypt.checkpw(password.encode(), user.password_hash.encode()):
+            user = self.users.get("admin")
+            if user and user.get("password_hash"):
+                if bcrypt.checkpw(password.encode(), user["password_hash"].encode()):
                     token = self._signer.dumps({"user_id": "admin", "username": "admin"})
                     return token, False
         except (ValueError, TypeError, AttributeError):
@@ -389,7 +383,7 @@ class SimplePasswordAuth:
         # Store in database
         try:
             # Update user's password hash in database
-            self.store.update_user_password("admin", new_password_hash)
+            self.users.update_password("admin", new_password_hash)
             # Also update env var as fallback
             os.environ["BB_INITIAL_PASSWORD"] = new_password
             return True

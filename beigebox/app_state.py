@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from beigebox.storage.db.base import BaseDB
     from beigebox.storage.repos.api_keys import ApiKeyRepo
     from beigebox.storage.repos.quarantine import QuarantineRepo
+    from beigebox.storage.repos.users import UserRepo
     from beigebox.storage.vector_store import VectorStore
     from beigebox.tools.registry import ToolRegistry
     from beigebox.hooks import HookManager
@@ -43,6 +44,7 @@ class AppState:
     db: BaseDB | None = None  # BaseDB shim shared by per-entity repos
     api_keys: ApiKeyRepo | None = None
     quarantine: QuarantineRepo | None = None
+    users: UserRepo | None = None
     vector_store: VectorStore | None = None
     blob_store: Any = None
     hook_manager: HookManager | None = None

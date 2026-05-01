@@ -277,54 +277,6 @@ class SQLiteStore:
                 (conversation_id, created_at, user_id),
             )
 
-    # ------------------------------------------------------------------
-    # User management (web auth)
-    # ------------------------------------------------------------------
-
-    def upsert_user(self, provider: str, sub: str, email: str, name: str, picture: str) -> str:
-        """Insert or update a user row; return the stable user_id UUID."""
-        import uuid
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT id FROM users WHERE provider=? AND sub=?",
-                (provider, sub),
-            ).fetchone()
-            if row:
-                user_id = row["id"]
-                conn.execute(
-                    "UPDATE users SET email=?, name=?, picture=?, last_seen=? WHERE id=?",
-                    (email, name, picture, now, user_id),
-                )
-            else:
-                user_id = str(uuid.uuid4())
-                conn.execute(
-                    "INSERT INTO users (id, provider, sub, email, name, picture, created_at, last_seen) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (user_id, provider, sub, email, name, picture, now, now),
-                )
-        return user_id
-
-    def get_user(self, user_id: str) -> dict | None:
-        with self._connect() as conn:
-            row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-            return dict(row) if row else None
-
-    def update_user_password(self, user_id: str, password_hash: str) -> bool:
-        """Update user's password hash. Returns True if successful."""
-        try:
-            with self._connect() as conn:
-                conn.execute(
-                    "UPDATE users SET password_hash = ? WHERE id = ?",
-                    (password_hash, user_id)
-                )
-                conn.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Failed to update password for {user_id}: {e}")
-            return False
-
     def store_message(self, msg: Message, cost_usd: float | None = None, latency_ms: float | None = None, ttft_ms: float | None = None, user_id: str | None = None):
         """
         Store a single message. Creates conversation if needed.
