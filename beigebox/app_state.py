@@ -59,6 +59,3 @@ class AppState:
     injection_guard: EnhancedInjectionGuard | None = None
     rag_scanner: RAGContentScanner | None = None
     egress_hooks: list[Any] = field(default_factory=list)  # list[EgressHook]
-    # Runtime registry: run_id → asyncio.Queue for harness steering injection.
-    # Registered by active harness/ralph runs, consumed by /inject endpoint.
-    harness_injection_queues: dict[str, asyncio.Queue] = field(default_factory=dict)

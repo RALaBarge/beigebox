@@ -22,7 +22,6 @@ from beigebox.tools.datetime_tool import DateTimeTool
 from beigebox.tools.system_info import SystemInfoTool
 from beigebox.tools.memory import MemoryTool
 from beigebox.tools.document_search import DocumentSearchTool
-from beigebox.tools.ensemble import EnsembleTool
 from beigebox.tools.notifier import ToolNotifier
 from beigebox.tools.pdf_reader import PdfReaderTool
 from beigebox.tools.browserbox import BrowserboxTool
@@ -161,17 +160,6 @@ class ToolRegistry:
             app_root = _pdf_path(__file__).parent.parent.parent
             ws_in = app_root / cfg.get("workspace", {}).get("path", "./workspace") / "in"
             self.tools["pdf_reader"] = PdfReaderTool(workspace_in=ws_in)
-
-        # --- Ensemble (multi-model voting — disabled by default) ---
-        ens_cfg = tools_cfg.get("ensemble", {})
-        if ens_cfg.get("enabled", False):
-            from beigebox.config import get_config as _gc
-            op_cfg = _gc().get("operator", {})
-            default_judge = op_cfg.get("model") or _gc().get("models", {}).get("default")
-            self.tools["ensemble"] = EnsembleTool(
-                judge_model=ens_cfg.get("judge_model") or default_judge,
-                max_models=ens_cfg.get("max_models", 6),
-            )
 
         # --- BrowserBox (browser API relay — disabled by default) ---
         bb_cfg = tools_cfg.get("browserbox", {})
