@@ -3134,43 +3134,6 @@ async def api_inspector(n: int = 5):
 
 
 # ---------------------------------------------------------------------------
-# Orchestrator (v0.6)
-# ---------------------------------------------------------------------------
-
-@app.post("/api/v1/orchestrator")
-async def api_orchestrator(request: Request):
-    """
-    Run parallel LLM tasks.
-    Body: {"plan": [{"model": "code", "prompt": "..."}, ...]}
-    """
-    cfg = get_config()
-    orch_cfg = cfg.get("orchestrator", {})
-    if not orch_cfg.get("enabled", False):
-        return JSONResponse({
-            "enabled": False,
-            "message": "Orchestrator is disabled. Set orchestrator.enabled: true in config.",
-        })
-
-    try:
-        body = await request.json()
-        plan = body.get("plan", [])
-        if not plan:
-            return JSONResponse({"error": "plan required (array of tasks)"}, status_code=400)
-
-        from beigebox.orchestrator import ParallelOrchestrator
-        orchestrator = ParallelOrchestrator(
-            max_parallel_tasks=orch_cfg.get("max_parallel_tasks", 5),
-            task_timeout_seconds=orch_cfg.get("task_timeout_seconds", 120),
-            total_timeout_seconds=orch_cfg.get("total_timeout_seconds", 300),
-        )
-        result = await orchestrator.run(plan)
-        return JSONResponse(result)
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-
-# ---------------------------------------------------------------------------
 # Operator + autonomous + harness/orchestrate endpoints removed in v3.
 # Operator class deleted; agent loops moved out of the proxy and now run in
 # whatever MCP-speaking client is driving (Claude Code, custom SDK, etc.).
