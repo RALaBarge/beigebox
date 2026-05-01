@@ -35,7 +35,7 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "auto_summarization", "aggressive_summarization", "system_context", "generation", "models",
     "wasm", "web_ui", "voice", "wiretap", "classifier",
     "model_advertising", "zcommands", "advanced", "runtime", "skills",
-    "workspace", "hooks", "connections", "amf_mesh", "security", "toolbox",
+    "workspace", "hooks", "connections", "security", "toolbox",
 }
 
 # ── Pydantic models for key sections ─────────────────────────────────────────
@@ -56,7 +56,6 @@ class _FeaturesCfg(BaseModel):
     payload_log: bool = False
     wasm: bool = False
     guardrails: bool = False
-    amf_mesh: bool = False
     voice: bool = False
     hooks: bool = False
 

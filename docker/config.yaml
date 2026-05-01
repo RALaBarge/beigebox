@@ -381,17 +381,6 @@ wasm:
       description: "Redact PII (emails, phone numbers, SSNs) from text"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AMF Mesh (disabled in Docker — no mDNS across container boundaries)
-# ─────────────────────────────────────────────────────────────────────────────
-amf_mesh:
-  enabled: false
-  instance_name: "beigebox"
-  host: "localhost"
-  port: null
-  trust_domain: "local"
-  nats_url: ""
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Timeouts — Centralized (all in one place)
 # ─────────────────────────────────────────────────────────────────────────────
 timeouts:

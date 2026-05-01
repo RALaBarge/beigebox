@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from beigebox.costs import CostTracker
     from beigebox.auth import MultiKeyAuthRegistry
     from beigebox.mcp_server import McpServer
-    from beigebox.amf_mesh import AmfMeshAdvertiser
     from beigebox.observability.egress import EgressHook
     from beigebox.web_auth import WebAuthManager, SimplePasswordAuth
     from beigebox.security.rag_poisoning_detector import RAGPoisoningDetector
@@ -50,7 +49,6 @@ class AppState:
     # Pen/sec MCP — separate registry of offensive-security tool wrappers,
     # mounted at POST /pen-mcp. None when disabled.
     security_mcp_server: McpServer | None = None
-    amf_advertiser: AmfMeshAdvertiser | None = None
     poisoning_detector: RAGPoisoningDetector | None = None
     extraction_detector: ExtractionDetector | None = None
     # Security audit & detection modules

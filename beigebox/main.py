@@ -61,7 +61,6 @@ except ImportError:
 
 _COOKIE_VERIFIER = "bb_oauth_cv"  # PKCE code_verifier (short-lived)
 from beigebox.mcp_server import McpServer
-from beigebox.amf_mesh import AmfMeshAdvertiser
 from beigebox.app_state import AppState
 from beigebox.observability.egress import build_egress_hooks, start_egress_hooks, stop_egress_hooks
 from beigebox.metrics import collect_system_metrics_async
@@ -302,10 +301,6 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Pen/Sec MCP server: disabled (set security_mcp.enabled: true to enable)")
 
-    # AMF mesh advertisement (mDNS + NATS heartbeat)
-    amf_advertiser = AmfMeshAdvertiser(cfg, tool_names=tool_registry.list_tools())
-    await amf_advertiser.start()
-
     # Model Extraction Attack Detection (OWASP LLM10:2025)
     from beigebox.security.extraction_detector import ExtractionDetector
     extraction_cfg = cfg.get("security", {}).get("extraction_detection", {})
@@ -392,7 +387,6 @@ async def lifespan(app: FastAPI):
         password_auth=password_auth,
         mcp_server=mcp_server,
         security_mcp_server=security_mcp_server,
-        amf_advertiser=amf_advertiser,
         poisoning_detector=poisoning_detector,
         extraction_detector=extraction_detector,
         audit_logger=audit_logger,
@@ -533,8 +527,6 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("BeigeBox shutting down")
-    if _app_state and _app_state.amf_advertiser:
-        await _app_state.amf_advertiser.stop()
     if _app_state and _app_state.egress_hooks:
         await stop_egress_hooks(_app_state.egress_hooks)
     if _app_state and _app_state.proxy and _app_state.proxy.wire:
@@ -1184,12 +1176,6 @@ async def agent_card():
         "skills": skills,
         "defaultInputModes": ["application/json"],
         "defaultOutputModes": ["application/json", "text/event-stream"],
-        "x-amf": {
-            "agent_id": _st.amf_advertiser._agent_id if _st.amf_advertiser else "spiffe://local/beigebox/unknown",
-            "trust_domain": cfg.get("amf_mesh", {}).get("trust_domain", "local"),
-            "protocols": ["MCP/2024-11-05"],
-            "mcp_endpoint": f"{endpoint}/mcp",
-        },
     })
 
 
@@ -1660,7 +1646,6 @@ async def api_config():
             "payload_log":           rt.get("payload_log_enabled", False),
             "wasm":                  rt.get("features_wasm", cfg.get("features", {}).get("wasm", cfg.get("wasm", {}).get("enabled", False))),
             "guardrails":            rt.get("features_guardrails", cfg.get("features", {}).get("guardrails", cfg.get("guardrails", {}).get("enabled", False))),
-            "amf_mesh":              rt.get("features_amf_mesh", cfg.get("features", {}).get("amf_mesh", cfg.get("amf_mesh", {}).get("enabled", False))),
             "hooks":                 rt.get("features_hooks", cfg.get("features", {}).get("hooks", cfg.get("hooks", {}).get("enabled", False))),
         },
         # ── Backend ──────────────────────────────────────────────────
@@ -1867,7 +1852,6 @@ async def api_config_save(request: Request):
         # "features_payload_log" removed — was a no-op; use payload_log_enabled instead
         "features_wasm":                "features_wasm",
         "features_guardrails":          "features_guardrails",
-        "features_amf_mesh":            "features_amf_mesh",
         "features_hooks":               "features_hooks",
         # Models Registry (Phase 2 refactoring)
         "models_default":               "models_default",
