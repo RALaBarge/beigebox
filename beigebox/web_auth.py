@@ -27,6 +27,7 @@ import hashlib
 import logging
 import os
 import secrets
+from abc import ABC, abstractmethod
 from base64 import urlsafe_b64encode
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
@@ -78,11 +79,53 @@ class OAuthProvider(Protocol):
     async def exchange_code(self, code: str, redirect_uri: str, code_verifier: str = "") -> OAuthUserInfo: ...
 
 
+class AuthProvider(ABC):
+    """ABC for OAuth2/OIDC providers. Extend this to add a new provider."""
+
+    name: str
+
+    @abstractmethod
+    def get_authorization_url(self, redirect_uri: str, state: str) -> tuple[str, str]:
+        """Return (authorization_url, code_verifier). code_verifier is PKCE S256."""
+
+    @abstractmethod
+    async def exchange_code(self, code: str, redirect_uri: str, code_verifier: str = "") -> OAuthUserInfo:
+        """Exchange authorization code for user identity."""
+
+
+class NullAuthProvider(AuthProvider):
+    """Always-allow stub — accepts any code and returns a fixed anonymous identity."""
+
+    name = "none"
+
+    def get_authorization_url(self, redirect_uri: str, state: str) -> tuple[str, str]:
+        return ("#", "")
+
+    async def exchange_code(self, code: str, redirect_uri: str, code_verifier: str = "") -> OAuthUserInfo:
+        return OAuthUserInfo(sub="null", email="null@localhost", name="Null User", provider="none")
+
+
+def make_auth(type: str, **kwargs) -> AuthProvider:
+    """Factory: return an AuthProvider instance for the given provider type.
+
+    Types: "github", "google", "none".
+    kwargs are forwarded to the provider constructor (not used for "none").
+    """
+    t = type.lower()
+    if t == "none":
+        return NullAuthProvider()
+    if t == "github":
+        return GitHubProvider(**kwargs)
+    if t == "google":
+        return GoogleProvider(**kwargs)
+    raise ValueError(f"Unknown auth provider type: {type!r}. Expected one of: github, google, none")
+
+
 # ---------------------------------------------------------------------------
 # GitHub (OAuth2)
 # ---------------------------------------------------------------------------
 
-class GitHubProvider:
+class GitHubProvider(AuthProvider):
     name = "github"
 
     _AUTH_URL     = "https://github.com/login/oauth/authorize"
@@ -192,7 +235,7 @@ class GitHubProvider:
 # Google (OpenID Connect)
 # ---------------------------------------------------------------------------
 
-class GoogleProvider:
+class GoogleProvider(AuthProvider):
     name = "google"
 
     _AUTH_URL     = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -403,7 +446,8 @@ class WebAuthManager:
                         "Set BB_GITHUB_CLIENT_SECRET or run: agentauth add github"
                     )
                     continue
-                self._providers["github"] = GitHubProvider(
+                self._providers["github"] = make_auth(
+                    "github",
                     client_id=client_id,
                     client_secret=client_secret,
                     allowed_orgs=prov_cfg.get("allowed_orgs", []),
@@ -421,7 +465,8 @@ class WebAuthManager:
                         "Set BB_GOOGLE_CLIENT_SECRET or run: agentauth add google"
                     )
                     continue
-                self._providers["google"] = GoogleProvider(
+                self._providers["google"] = make_auth(
+                    "google",
                     client_id=client_id,
                     client_secret=client_secret,
                     allowed_emails=prov_cfg.get("allowed_emails", []),
