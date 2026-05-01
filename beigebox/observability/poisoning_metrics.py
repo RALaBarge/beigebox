@@ -18,14 +18,13 @@ logger = logging.getLogger(__name__)
 class PoisoningMetrics:
     """Metrics for RAG poisoning detection."""
 
-    def __init__(self, sqlite_store):
-        """
-        Initialize metrics tracker.
+    def __init__(self, quarantine):
+        """Initialize metrics tracker.
 
         Args:
-            sqlite_store: SQLiteStore instance for querying quarantine data
+            quarantine: QuarantineRepo instance for querying quarantine data
         """
-        self.sqlite_store = sqlite_store
+        self.quarantine = quarantine
         self._last_update = None
         self._cached_metrics = {}
 
@@ -45,11 +44,11 @@ class PoisoningMetrics:
                 "quarantine_reason_top5": {reason: count},
             }
         """
-        if not self.sqlite_store:
+        if not self.quarantine:
             return {}
 
         try:
-            stats = self.sqlite_store.get_quarantine_stats()
+            stats = self.quarantine.get_stats()
 
             total = stats.get("total", 0)
             high = stats.get("high_confidence", 0)

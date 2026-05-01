@@ -42,12 +42,12 @@ class VectorStore:
         # Legacy convenience: accept chroma_path and build the default backend
         chroma_path: str | None = None,
         poisoning_detector: RAGPoisoningDetector | None = None,
-        sqlite_store = None,  # Optional SQLiteStore for quarantine logging
+        quarantine = None,  # Optional QuarantineRepo for poisoning quarantine logging
     ):
         self.embedding_model = embedding_model
         self.embedding_url = embedding_url.rstrip("/")
         self.poisoning_detector = poisoning_detector
-        self.sqlite_store = sqlite_store  # For quarantine logging
+        self.quarantine = quarantine
 
         if backend is not None:
             self._backend = backend
@@ -63,7 +63,7 @@ class VectorStore:
             "VectorStore initialised (backend=%s, model=%s, quarantine=%s)",
             type(self._backend).__name__,
             self.embedding_model,
-            "enabled" if sqlite_store else "disabled",
+            "enabled" if quarantine else "disabled",
         )
 
     # ------------------------------------------------------------------
@@ -154,9 +154,8 @@ class VectorStore:
                 is_poisoned, confidence, reason = self.poisoning_detector.is_poisoned(embedding)
                 if is_poisoned and confidence > 0.8:
                     logger.warning("POISONED embedding detected [%s]: %s (confidence=%.2f)", message_id, reason, confidence)
-                    # Log to quarantine database
-                    if self.sqlite_store:
-                        self.sqlite_store.log_quarantine(
+                    if self.quarantine:
+                        self.quarantine.log(
                             document_id=message_id,
                             embedding=embedding,
                             confidence=confidence,
@@ -166,9 +165,8 @@ class VectorStore:
                     return  # silently reject
                 elif is_poisoned and confidence > 0.5:
                     logger.warning("SUSPICIOUS embedding [%s]: %s (confidence=%.2f)", message_id, reason, confidence)
-                    # Log suspicious embeddings to quarantine (warn mode)
-                    if self.sqlite_store:
-                        self.sqlite_store.log_quarantine(
+                    if self.quarantine:
+                        self.quarantine.log(
                             document_id=message_id,
                             embedding=embedding,
                             confidence=confidence,
@@ -210,9 +208,8 @@ class VectorStore:
                 is_poisoned, confidence, reason = self.poisoning_detector.is_poisoned(embedding)
                 if is_poisoned and confidence > 0.8:
                     logger.warning("POISONED embedding detected [%s]: %s (confidence=%.2f)", message_id, reason, confidence)
-                    # Log to quarantine database
-                    if self.sqlite_store:
-                        self.sqlite_store.log_quarantine(
+                    if self.quarantine:
+                        self.quarantine.log(
                             document_id=message_id,
                             embedding=embedding,
                             confidence=confidence,
@@ -222,9 +219,8 @@ class VectorStore:
                     return  # silently reject
                 elif is_poisoned and confidence > 0.5:
                     logger.warning("SUSPICIOUS embedding [%s]: %s (confidence=%.2f)", message_id, reason, confidence)
-                    # Log suspicious embeddings to quarantine (warn mode)
-                    if self.sqlite_store:
-                        self.sqlite_store.log_quarantine(
+                    if self.quarantine:
+                        self.quarantine.log(
                             document_id=message_id,
                             embedding=embedding,
                             confidence=confidence,

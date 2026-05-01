@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from beigebox.storage.db.base import BaseDB
 
 from beigebox.storage.repos.api_keys import ApiKeyRepo
+from beigebox.storage.repos.quarantine import QuarantineRepo
 
 
 def make_api_key_repo(db: "BaseDB") -> ApiKeyRepo:
@@ -23,4 +24,18 @@ def make_api_key_repo(db: "BaseDB") -> ApiKeyRepo:
     return ApiKeyRepo(db)
 
 
-__all__ = ["ApiKeyRepo", "make_api_key_repo"]
+def make_quarantine_repo(db: "BaseDB") -> QuarantineRepo:
+    """Create a QuarantineRepo backed by the given BaseDB.
+
+    The caller owns the db lifecycle. The repo owns the
+    quarantined_embeddings schema; call repo.create_tables() before first use.
+    """
+    return QuarantineRepo(db)
+
+
+__all__ = [
+    "ApiKeyRepo",
+    "make_api_key_repo",
+    "QuarantineRepo",
+    "make_quarantine_repo",
+]

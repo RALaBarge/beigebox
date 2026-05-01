@@ -413,19 +413,30 @@ def cmd_flash(args):
         pass  # No DB yet or no latency data
 
 
-def cmd_quarantine_list(args):
-    """List quarantined embeddings."""
+def _open_quarantine_repo():
+    """Open a QuarantineRepo for CLI use. Caller is responsible for db.close()."""
     from beigebox.config import get_config, get_storage_paths
-    from beigebox.storage.sqlite_store import SQLiteStore
+    from beigebox.storage.db import build_db_kwargs, make_db
+    from beigebox.storage.repos import make_quarantine_repo
 
     cfg = get_config()
     sqlite_path, _ = get_storage_paths(cfg)
-    store = SQLiteStore(sqlite_path)
+    db_type, db_kwargs = build_db_kwargs(cfg, default_sqlite_path=sqlite_path)
+    db = make_db(db_type, **db_kwargs)
+    repo = make_quarantine_repo(db)
+    repo.create_tables()
+    return db, repo
 
-    filters = args.filter or "all"
-    limit = args.limit or 100
 
-    records = store.search_quarantined(filters=filters, limit=limit)
+def cmd_quarantine_list(args):
+    """List quarantined embeddings."""
+    db, repo = _open_quarantine_repo()
+    try:
+        filters = args.filter or "all"
+        limit = args.limit or 100
+        records = repo.search(filters=filters, limit=limit)
+    finally:
+        db.close()
 
     if not records:
         print(f"  No quarantined embeddings ({filters}).")
@@ -450,27 +461,16 @@ def cmd_quarantine_list(args):
 
 def cmd_quarantine_review(args):
     """Show full details for a quarantine record."""
-    import json
-    from beigebox.config import get_config, get_storage_paths
-    from beigebox.storage.sqlite_store import SQLiteStore
+    db, repo = _open_quarantine_repo()
+    try:
+        rec = repo.get_by_id(args.id)
+    finally:
+        db.close()
 
-    cfg = get_config()
-    sqlite_path, _ = get_storage_paths(cfg)
-    store = SQLiteStore(sqlite_path)
-
-    record_id = args.id
-
-    with store._connect() as conn:
-        row = conn.execute(
-            "SELECT * FROM quarantined_embeddings WHERE id = ?",
-            (record_id,),
-        ).fetchone()
-
-    if not row:
-        print(f"  ✗  No quarantine record with ID {record_id}")
+    if not rec:
+        print(f"  ✗  No quarantine record with ID {args.id}")
         return
 
-    rec = dict(row)
     print(f"\n  Quarantine Record #{rec['id']}\n")
     print(f"  Timestamp:      {rec['timestamp']}")
     print(f"  Document ID:    {rec['document_id']}")
@@ -483,14 +483,11 @@ def cmd_quarantine_review(args):
 
 def cmd_quarantine_stats(args):
     """Show quarantine statistics."""
-    from beigebox.config import get_config, get_storage_paths
-    from beigebox.storage.sqlite_store import SQLiteStore
-
-    cfg = get_config()
-    sqlite_path, _ = get_storage_paths(cfg)
-    store = SQLiteStore(sqlite_path)
-
-    stats = store.get_quarantine_stats()
+    db, repo = _open_quarantine_repo()
+    try:
+        stats = repo.get_stats()
+    finally:
+        db.close()
 
     print(f"\n  Quarantine Statistics\n")
     print(f"  Total quarantined:     {stats['total']}")
@@ -523,17 +520,14 @@ def cmd_quarantine_stats(args):
 
 def cmd_quarantine_purge(args):
     """Purge old quarantine records."""
-    from beigebox.config import get_config, get_storage_paths
-    from beigebox.storage.sqlite_store import SQLiteStore
-
-    cfg = get_config()
-    sqlite_path, _ = get_storage_paths(cfg)
-    store = SQLiteStore(sqlite_path)
-
     days = args.days or 30
     dry_run = args.dry_run or False
 
-    count = store.purge_quarantine(days=days, dry_run=dry_run)
+    db, repo = _open_quarantine_repo()
+    try:
+        count = repo.purge(days=days, dry_run=dry_run)
+    finally:
+        db.close()
 
     if dry_run:
         print(f"\n  [DRY RUN] Would delete {count} quarantine records older than {days} days")

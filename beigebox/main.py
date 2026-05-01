@@ -193,11 +193,13 @@ async def lifespan(app: FastAPI):
     # Same sqlite file as SQLiteStore; both schemas use IF NOT EXISTS so they
     # coexist during the gradual migration off sqlite_store.py.
     from beigebox.storage.db import make_db, build_db_kwargs
-    from beigebox.storage.repos import make_api_key_repo
+    from beigebox.storage.repos import make_api_key_repo, make_quarantine_repo
     _db_type, _db_kwargs = build_db_kwargs(cfg, default_sqlite_path=sqlite_path)
     db = make_db(_db_type, **_db_kwargs)
     api_keys = make_api_key_repo(db)
     api_keys.create_tables()
+    quarantine = make_quarantine_repo(db)
+    quarantine.create_tables()
 
     _embed_cfg    = cfg["embedding"]
     from beigebox.storage.backends import (
@@ -229,6 +231,7 @@ async def lifespan(app: FastAPI):
         embedding_url=_embed_cfg.get("backend_url") or get_primary_backend_url(cfg),
         backend=_make_backend(_backend_type, **_backend_kwargs),
         poisoning_detector=poisoning_detector,
+        quarantine=quarantine,
     )
     blob_store = BlobStore(Path(vector_store_path) / "blobs")
 
@@ -391,6 +394,7 @@ async def lifespan(app: FastAPI):
         sqlite_store=sqlite_store,
         db=db,
         api_keys=api_keys,
+        quarantine=quarantine,
         vector_store=vector_store,
         blob_store=blob_store,
         hook_manager=hook_manager,
@@ -917,10 +921,10 @@ async def metrics_quarantine(format: str = "json"):
     from beigebox.observability.poisoning_metrics import PoisoningMetrics
     _st = get_state()
 
-    if not _st.sqlite_store:
-        return JSONResponse({"error": "SQLite store not initialized"}, status_code=503)
+    if not _st.quarantine:
+        return JSONResponse({"error": "Quarantine repo not initialized"}, status_code=503)
 
-    metrics = PoisoningMetrics(_st.sqlite_store)
+    metrics = PoisoningMetrics(_st.quarantine)
 
     if format == "prometheus":
         return Response(
