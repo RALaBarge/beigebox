@@ -249,21 +249,22 @@ def cmd_sweep(args):
 def cmd_dump(args):
     """Export conversations to JSON."""
     import json
-    from beigebox.config import get_config
-    from beigebox.storage.sqlite_store import SQLiteStore
+    from beigebox.config import get_config, get_storage_paths
 
     cfg = get_config()
-    from beigebox.config import get_storage_paths
     sqlite_path, _ = get_storage_paths(cfg)
-    store = SQLiteStore(sqlite_path)
-    stats = store.get_stats()
 
-    print(f"  📼 Database: {sqlite_path}")
-    print(f"  💬 Conversations: {stats['conversations']} | Messages: {stats['messages']}")
+    db, repo = _open_conversation_repo()
+    try:
+        stats = repo.get_stats()
+        print(f"  📼 Database: {sqlite_path}")
+        print(f"  💬 Conversations: {stats['conversations']} | Messages: {stats['messages']}")
 
-    data = store.export_all_json()
+        data = repo.export_all_json()
+    finally:
+        db.close()
+
     indent = 2 if args.pretty else None
-
     with open(args.output, "w") as f:
         json.dump(data, f, indent=indent, ensure_ascii=False)
 
@@ -273,7 +274,6 @@ def cmd_dump(args):
 def cmd_flash(args):
     """Show stats at a glance."""
     from beigebox.config import get_config, get_storage_paths
-    from beigebox.storage.sqlite_store import SQLiteStore
 
     cfg = get_config()
     sqlite_path, vector_path = get_storage_paths(cfg)
@@ -287,9 +287,10 @@ def cmd_flash(args):
     print(f"  ├─ ChromaDB:  {vector_path}")
     print(f"  └─ Logging:   {cfg['storage'].get('log_conversations', True)}")
 
+    _flash_db = None
     try:
-        store = SQLiteStore(sqlite_path)
-        stats = store.get_stats()
+        _flash_db, repo = _open_conversation_repo()
+        stats = repo.get_stats()
         tokens = stats.get("tokens", {})
         models = stats.get("models", {})
 
@@ -317,6 +318,12 @@ def cmd_flash(args):
 
     except Exception:
         print("\n  Storage: (no database yet — run 'beigebox dial' first)")
+    finally:
+        if _flash_db is not None:
+            try:
+                _flash_db.close()
+            except Exception:
+                pass
 
     tools_cfg = cfg.get("tools", {})
     enabled = []
@@ -348,10 +355,13 @@ def cmd_flash(args):
     # getattr guards against commands that share cmd_flash but don't add --days.
     # Falls back silently if the DB doesn't exist or cost_tracking is disabled.
     days = getattr(args, "days", 30)
+    _cost_db = None
     try:
         from beigebox.costs import CostTracker
-        cost_store = SQLiteStore(sqlite_path)
-        tracker = CostTracker(cost_store)
+        from beigebox.storage.db import build_db_kwargs, make_db
+        _db_type, _db_kwargs = build_db_kwargs(cfg, default_sqlite_path=sqlite_path)
+        _cost_db = make_db(_db_type, **_db_kwargs)
+        tracker = CostTracker(_cost_db)
         costs = tracker.get_stats(days=days)
         total = costs.get("total", 0)
         by_model = costs.get("by_model", {})
@@ -376,11 +386,18 @@ def cmd_flash(args):
             print("  └─ No API costs recorded (local models are $0.00)")
     except Exception:
         pass  # No DB yet, or cost_tracking not enabled in config
+    finally:
+        if _cost_db is not None:
+            try:
+                _cost_db.close()
+            except Exception:
+                pass
 
     # Model performance — latency percentiles per model (v0.8+)
+    _perf_db = None
     try:
-        perf_store = SQLiteStore(sqlite_path)
-        perf = perf_store.get_model_performance(days=days)
+        _perf_db, perf_repo = _open_conversation_repo()
+        perf = perf_repo.get_model_performance(days=days)
         by_model_perf = perf.get("by_model", {})
         if by_model_perf:
             print()
@@ -411,6 +428,12 @@ def cmd_flash(args):
                 )
     except Exception:
         pass  # No DB yet or no latency data
+    finally:
+        if _perf_db is not None:
+            try:
+                _perf_db.close()
+            except Exception:
+                pass
 
 
 def _open_quarantine_repo():
@@ -424,6 +447,21 @@ def _open_quarantine_repo():
     db_type, db_kwargs = build_db_kwargs(cfg, default_sqlite_path=sqlite_path)
     db = make_db(db_type, **db_kwargs)
     repo = make_quarantine_repo(db)
+    repo.create_tables()
+    return db, repo
+
+
+def _open_conversation_repo():
+    """Open a ConversationRepo for CLI use. Caller is responsible for db.close()."""
+    from beigebox.config import get_config, get_storage_paths
+    from beigebox.storage.db import build_db_kwargs, make_db
+    from beigebox.storage.repos import make_conversation_repo
+
+    cfg = get_config()
+    sqlite_path, _ = get_storage_paths(cfg)
+    db_type, db_kwargs = build_db_kwargs(cfg, default_sqlite_path=sqlite_path)
+    db = make_db(db_type, **db_kwargs)
+    repo = make_conversation_repo(db)
     repo.create_tables()
     return db, repo
 

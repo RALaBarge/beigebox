@@ -58,7 +58,9 @@ class MemoryValidatorTool:
         """
         Args:
             validator: MemoryValidator instance
-            store: SQLiteStore instance (needed for DB access)
+            store: ConversationRepo instance (needed for DB access — exposes
+                ``get_conversation`` and the underlying BaseDB via ``store._db``
+                for the direct UPDATEs the patch paths perform).
         """
         self.validator = validator
         self.store = store
@@ -273,10 +275,12 @@ class MemoryValidatorTool:
         if not self.store:
             return
         try:
-            with self.store._connect() as conn:
+            db = self.store._db
+            ph = db._placeholder()
+            with db.transaction() as tx:
                 for msg_id in message_ids:
-                    conn.execute(
-                        "UPDATE messages SET tamper_detected = 1 WHERE id = ?",
+                    tx.execute(
+                        f"UPDATE messages SET tamper_detected = 1 WHERE id = {ph}",
                         (msg_id,),
                     )
             logger.info("Quarantined %d messages", len(message_ids))
@@ -288,10 +292,13 @@ class MemoryValidatorTool:
         if not self.store:
             return
         try:
-            with self.store._connect() as conn:
+            db = self.store._db
+            ph = db._placeholder()
+            with db.transaction() as tx:
                 for msg_id, new_sig in sigs:
-                    conn.execute(
-                        "UPDATE messages SET message_hmac = ?, tamper_detected = 0 WHERE id = ?",
+                    tx.execute(
+                        f"UPDATE messages SET message_hmac = {ph}, "
+                        f"tamper_detected = 0 WHERE id = {ph}",
                         (new_sig, msg_id),
                     )
             logger.info("Updated %d message signatures", len(sigs))
@@ -305,10 +312,11 @@ class MemoryValidatorTool:
         try:
             from datetime import datetime, timezone
             now = datetime.now(timezone.utc).isoformat()
-            with self.store._connect() as conn:
-                conn.execute(
-                    "UPDATE conversations SET integrity_checked_at = ? WHERE id = ?",
-                    (now, conversation_id),
-                )
+            db = self.store._db
+            ph = db._placeholder()
+            db.execute(
+                f"UPDATE conversations SET integrity_checked_at = {ph} WHERE id = {ph}",
+                (now, conversation_id),
+            )
         except Exception as e:
             logger.warning("integrity_checked_at update failed: %s", e)

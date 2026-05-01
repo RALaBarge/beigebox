@@ -9,7 +9,6 @@ in the messages table and the expected wire events.
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -20,7 +19,8 @@ from beigebox.backends.base import BackendResponse
 from beigebox.capture import CaptureFanout
 from beigebox.proxy import Proxy
 from beigebox.request_normalizer import NormalizedRequest
-from beigebox.storage.sqlite_store import SQLiteStore
+from beigebox.storage.db import make_db
+from beigebox.storage.repos import make_conversation_repo
 from beigebox.storage.vector_store import VectorStore
 
 
@@ -56,7 +56,9 @@ def proxy_setup():
         db_path = Path(tmp) / "test.db"
         wire_path = Path(tmp) / "wire.jsonl"
 
-        sqlite = SQLiteStore(str(db_path))
+        db = make_db("sqlite", path=str(db_path))
+        repo = make_conversation_repo(db)
+        repo.create_tables()
         vector = FakeVector()
         router = FakeRouter()
 
@@ -76,7 +78,7 @@ def proxy_setup():
             }
             with patch("beigebox.proxy.get_runtime_config", return_value={}):
                 proxy = Proxy(
-                    sqlite=sqlite,
+                    conversations=repo,
                     vector=vector,
                     backend_router=router,
                 )
@@ -84,22 +86,16 @@ def proxy_setup():
         # Wire the fanout AFTER the proxy is constructed (it uses
         # proxy.wire which is built inside __init__).
         fanout = CaptureFanout(
-            conversations=sqlite,
+            conversations=repo,
             wire=proxy.wire,
             vector=vector,
         )
         proxy.capture = fanout
-        yield proxy, sqlite, router, vector, wire_path
+        yield proxy, repo, router, vector, wire_path
 
 
-def _all_messages(store: SQLiteStore) -> list[dict]:
-    conn = sqlite3.connect(str(store.db_path))
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = conn.execute("SELECT * FROM messages ORDER BY timestamp").fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
+def _all_messages(repo) -> list[dict]:
+    return repo._db.fetchall("SELECT * FROM messages ORDER BY timestamp")
 
 
 class TestNonStreamingCapture:
@@ -107,7 +103,7 @@ class TestNonStreamingCapture:
     async def test_successful_request_produces_request_and_response_rows(
         self, proxy_setup,
     ):
-        proxy, sqlite, router, vector, _wire_path = proxy_setup
+        proxy, repo, router, vector, _wire_path = proxy_setup
 
         nr = NormalizedRequest(
             body={"messages": [{"role": "user", "content": "hi"}], "model": "test"},
@@ -139,7 +135,7 @@ class TestNonStreamingCapture:
 
         assert result["choices"][0]["message"]["content"] == "hello back"
 
-        rows = _all_messages(sqlite)
+        rows = _all_messages(repo)
         # 1 user request row + 1 assistant response row
         assert len(rows) == 2
 
@@ -158,7 +154,7 @@ class TestNonStreamingCapture:
 
     @pytest.mark.asyncio
     async def test_upstream_error_still_produces_rows(self, proxy_setup):
-        proxy, sqlite, router, vector, _wire_path = proxy_setup
+        proxy, repo, router, vector, _wire_path = proxy_setup
 
         nr = NormalizedRequest(
             body={"messages": [{"role": "user", "content": "hi"}]},
@@ -183,7 +179,7 @@ class TestNonStreamingCapture:
         # The proxy returns a synthetic error response to the client
         assert "Backend error" in result["choices"][0]["message"]["content"]
 
-        rows = _all_messages(sqlite)
+        rows = _all_messages(repo)
         assert len(rows) == 2
 
         user_row = next(r for r in rows if r["role"] == "user")
@@ -197,7 +193,7 @@ class TestNonStreamingCapture:
 
     @pytest.mark.asyncio
     async def test_router_raises_captures_failure_row(self, proxy_setup):
-        proxy, sqlite, router, vector, _wire_path = proxy_setup
+        proxy, repo, router, vector, _wire_path = proxy_setup
 
         router.queue(RuntimeError("router exploded"))
 
@@ -205,7 +201,7 @@ class TestNonStreamingCapture:
         with pytest.raises(RuntimeError, match="router exploded"):
             await proxy.forward_chat_completion(body)
 
-        rows = _all_messages(sqlite)
+        rows = _all_messages(repo)
         # Request envelope + failure response envelope
         assert len(rows) == 2
         asst_row = next(r for r in rows if r["role"] == "assistant")
@@ -223,7 +219,7 @@ class TestNonStreamingCapture:
 
     @pytest.mark.asyncio
     async def test_response_with_reasoning_and_tool_calls(self, proxy_setup):
-        proxy, sqlite, router, vector, _wire_path = proxy_setup
+        proxy, repo, router, vector, _wire_path = proxy_setup
 
         nr = NormalizedRequest(body={}, target="openrouter", transforms=[], errors=[])
         response = BackendResponse(
@@ -251,7 +247,7 @@ class TestNonStreamingCapture:
         body = {"model": "test", "messages": [{"role": "user", "content": "do something"}]}
         await proxy.forward_chat_completion(body)
 
-        rows = _all_messages(sqlite)
+        rows = _all_messages(repo)
         asst_row = next(r for r in rows if r["role"] == "assistant")
         assert asst_row["reasoning_text"] == "step 1\nstep 2"
         assert "tc1" in (asst_row["tool_calls_json"] or "")
@@ -300,7 +296,9 @@ def stream_proxy_setup():
         db_path = Path(tmp) / "test.db"
         wire_path = Path(tmp) / "wire.jsonl"
 
-        sqlite = SQLiteStore(str(db_path))
+        db = make_db("sqlite", path=str(db_path))
+        repo = make_conversation_repo(db)
+        repo.create_tables()
         vector = FakeVector()
         router = FakeStreamingRouter()
 
@@ -319,18 +317,18 @@ def stream_proxy_setup():
             }
             with patch("beigebox.proxy.get_runtime_config", return_value={}):
                 proxy = Proxy(
-                    sqlite=sqlite,
+                    conversations=repo,
                     vector=vector,
                     backend_router=router,
                 )
 
         fanout = CaptureFanout(
-            conversations=sqlite,
+            conversations=repo,
             wire=proxy.wire,
             vector=vector,
         )
         proxy.capture = fanout
-        yield proxy, sqlite, router, vector
+        yield proxy, repo, router, vector
 
 
 class TestStreamingCapture:
@@ -338,7 +336,7 @@ class TestStreamingCapture:
     async def test_successful_stream_produces_request_and_response_rows(
         self, stream_proxy_setup,
     ):
-        proxy, sqlite, router, _vector = stream_proxy_setup
+        proxy, repo, router, _vector = stream_proxy_setup
 
         router.queue_chunks([
             'data: {"choices":[{"delta":{"content":"hello "},"index":0}]}',
@@ -351,7 +349,7 @@ class TestStreamingCapture:
         async for _line in proxy.forward_chat_completion_stream(body):
             pass
 
-        rows = _all_messages(sqlite)
+        rows = _all_messages(repo)
         assert len(rows) == 2
 
         user_row = next(r for r in rows if r["role"] == "user")
@@ -365,7 +363,7 @@ class TestStreamingCapture:
 
     @pytest.mark.asyncio
     async def test_mid_stream_error_captures_partial(self, stream_proxy_setup):
-        proxy, sqlite, router, _vector = stream_proxy_setup
+        proxy, repo, router, _vector = stream_proxy_setup
 
         router.queue_chunks([
             'data: {"choices":[{"delta":{"content":"partial "},"index":0}]}',
@@ -378,7 +376,7 @@ class TestStreamingCapture:
             async for _line in proxy.forward_chat_completion_stream(body):
                 pass
 
-        rows = _all_messages(sqlite)
+        rows = _all_messages(repo)
         asst_row = next(r for r in rows if r["role"] == "assistant")
         assert asst_row["capture_outcome"] == "stream_aborted"
         assert "partial" in asst_row["content"]
@@ -386,7 +384,7 @@ class TestStreamingCapture:
 
     @pytest.mark.asyncio
     async def test_client_disconnect_captures_partial(self, stream_proxy_setup):
-        proxy, sqlite, router, _vector = stream_proxy_setup
+        proxy, repo, router, _vector = stream_proxy_setup
 
         router.queue_chunks([
             'data: {"choices":[{"delta":{"content":"some "},"index":0}]}',
@@ -399,7 +397,7 @@ class TestStreamingCapture:
             async for _line in proxy.forward_chat_completion_stream(body):
                 pass
 
-        rows = _all_messages(sqlite)
+        rows = _all_messages(repo)
         asst_row = next(r for r in rows if r["role"] == "assistant")
         assert asst_row["capture_outcome"] == "client_disconnect"
         assert asst_row["finish_reason"] == "aborted"
@@ -407,7 +405,7 @@ class TestStreamingCapture:
 
     @pytest.mark.asyncio
     async def test_error_before_first_chunk_still_captures(self, stream_proxy_setup):
-        proxy, sqlite, router, _vector = stream_proxy_setup
+        proxy, repo, router, _vector = stream_proxy_setup
 
         # No chunks queued; raise on first iteration
         router.queue_chunks([])
@@ -418,7 +416,7 @@ class TestStreamingCapture:
             async for _line in proxy.forward_chat_completion_stream(body):
                 pass
 
-        rows = _all_messages(sqlite)
+        rows = _all_messages(repo)
         # Belt-and-suspenders: request is captured even if no chunks arrived
         assert len(rows) == 2
         asst_row = next(r for r in rows if r["role"] == "assistant")

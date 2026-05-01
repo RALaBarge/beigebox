@@ -44,7 +44,6 @@ from beigebox.config import (
     get_primary_backend_url,
 )
 from beigebox.proxy import Proxy
-from beigebox.storage.sqlite_store import SQLiteStore
 from beigebox.storage.vector_store import VectorStore
 from beigebox.tools.registry import ToolRegistry
 from beigebox.security.rag_poisoning_detector import RAGPoisoningDetector
@@ -186,15 +185,15 @@ async def lifespan(app: FastAPI):
     # Storage
     sqlite_path, vector_store_path = get_storage_paths(cfg)
     _integrity_cfg = cfg.get("security", {}).get("memory_integrity", {})
-    sqlite_store = SQLiteStore(sqlite_path, integrity_config=_integrity_cfg)
 
-    # BaseDB shim — shared by per-entity repos.  First production caller is
-    # ApiKeyRepo (replaces sqlite_store.{create,verify,get,revoke}_api_key).
-    # Same sqlite file as SQLiteStore; both schemas use IF NOT EXISTS so they
-    # coexist during the gradual migration off sqlite_store.py.
+    # BaseDB shim — shared by every per-entity repo (api_keys, conversations,
+    # quarantine, users, wire_events). The SQLiteStore god-object is gone in
+    # batch B; ConversationRepo owns the conversations + messages tables and
+    # all integrity-validation state previously held inside SQLiteStore.
     from beigebox.storage.db import make_db, build_db_kwargs
     from beigebox.storage.repos import (
         make_api_key_repo,
+        make_conversation_repo,
         make_quarantine_repo,
         make_user_repo,
         make_wire_event_repo,
@@ -203,6 +202,8 @@ async def lifespan(app: FastAPI):
     db = make_db(_db_type, **_db_kwargs)
     api_keys = make_api_key_repo(db)
     api_keys.create_tables()
+    conversations = make_conversation_repo(db, integrity_config=_integrity_cfg)
+    conversations.create_tables()
     quarantine = make_quarantine_repo(db)
     quarantine.create_tables()
     users = make_user_repo(db)
@@ -272,7 +273,7 @@ async def lifespan(app: FastAPI):
     # Cost tracker (v0.6)
     cost_tracker = None
     if cfg.get("cost_tracking", {}).get("enabled", False):
-        cost_tracker = CostTracker(sqlite_store)
+        cost_tracker = CostTracker(db)
         logger.info("Cost tracking: enabled")
     else:
         logger.info("Cost tracking: disabled")
@@ -381,7 +382,7 @@ async def lifespan(app: FastAPI):
 
     # Proxy (with hooks, tools, router, and extraction detector)
     proxy = Proxy(
-        sqlite=sqlite_store,
+        conversations=conversations,
         vector=vector_store,
         hook_manager=hook_manager,
         tool_registry=tool_registry,
@@ -393,13 +394,12 @@ async def lifespan(app: FastAPI):
     )
 
     # CaptureFanout — single chokepoint for request/response telemetry.
-    # Wires conversations (sqlite messages writer), wire (the WireLog the
-    # proxy already constructed inside __init__), and vector embedding.
-    # Must be assigned AFTER Proxy construction since it references
-    # proxy.wire (built inside __init__).
+    # Wires conversations (the new ConversationRepo on BaseDB), the WireLog
+    # the proxy constructed inside __init__, and the vector store. Must be
+    # assigned AFTER Proxy() since it references proxy.wire.
     from beigebox.capture import CaptureFanout
     proxy.capture = CaptureFanout(
-        conversations=sqlite_store,
+        conversations=conversations,
         wire=proxy.wire,
         vector=vector_store,
     )
@@ -414,9 +414,9 @@ async def lifespan(app: FastAPI):
     _app_state = AppState(
         proxy=proxy,
         tool_registry=tool_registry,
-        sqlite_store=sqlite_store,
         db=db,
         api_keys=api_keys,
+        conversations=conversations,
         quarantine=quarantine,
         users=users,
         wire_events=wire_events,
@@ -927,7 +927,7 @@ async def list_models():
 async def stats():
     """Return storage and usage statistics."""
     _st = get_state()
-    sqlite_stats = _st.sqlite_store.get_stats() if _st.sqlite_store else {}
+    sqlite_stats = _st.conversations.get_stats() if _st.conversations else {}
     vector_stats = _st.vector_store.get_stats() if _st.vector_store else {}
     tools = _st.tool_registry.list_tools() if _st.tool_registry else []
     hooks = _st.hook_manager.list_hooks() if _st.hook_manager else []
@@ -1560,7 +1560,7 @@ async def auth_me(request: Request):
 async def create_api_key(request: Request):
     """Create a new API key for the authenticated user."""
     st = get_state()
-    if not st.sqlite_store:
+    if not st.conversations:
         return JSONResponse({"error": "API key storage not configured"}, status_code=501)
 
     # Get user_id from session
@@ -1592,7 +1592,7 @@ async def create_api_key(request: Request):
 async def list_api_keys(request: Request):
     """List all API keys for the authenticated user (without plaintext)."""
     st = get_state()
-    if not st.sqlite_store:
+    if not st.conversations:
         return JSONResponse({"error": "API key storage not configured"}, status_code=501)
 
     # Get user_id from session
@@ -1613,7 +1613,7 @@ async def list_api_keys(request: Request):
 async def revoke_api_key(key_id: str, request: Request):
     """Revoke an API key."""
     st = get_state()
-    if not st.sqlite_store:
+    if not st.conversations:
         return JSONResponse({"error": "API key storage not configured"}, status_code=501)
 
     # Get user_id from session
@@ -1654,7 +1654,7 @@ async def api_info():
             "default_model": get_runtime_config().get("default_model") or cfg.get("models", {}).get("default", ""),
         },
         "features": {
-            "storage": _st.sqlite_store is not None and _st.vector_store is not None,
+            "storage": _st.conversations is not None and _st.vector_store is not None,
             "tools": _st.tool_registry is not None and cfg.get("tools", {}).get("enabled", False),
             "hooks": _st.hook_manager is not None,
             "operator": True,  # Always available if Operator can init
@@ -2552,9 +2552,9 @@ async def api_status():
             "default_model": _st.proxy.default_model if _st.proxy else "",
         },
         "storage": {
-            "sqlite": _st.sqlite_store is not None,
+            "sqlite": _st.conversations is not None,
             "vector": _st.vector_store is not None,
-            "stats": _st.sqlite_store.get_stats() if _st.sqlite_store else {},
+            "stats": _st.conversations.get_stats() if _st.conversations else {},
         },
         "tools": {
             "enabled": cfg.get("tools", {}).get("enabled", False),
@@ -2575,7 +2575,7 @@ async def api_status():
 async def api_stats():
     """Statistics about conversations and usage."""
     _st = get_state()
-    sqlite_stats = _st.sqlite_store.get_stats() if _st.sqlite_store else {}
+    sqlite_stats = _st.conversations.get_stats() if _st.conversations else {}
     vector_stats = _st.vector_store.get_stats() if _st.vector_store else {}
     return JSONResponse({
         "conversations": sqlite_stats,
@@ -2622,7 +2622,7 @@ async def api_export(
         sharegpt   — {"id": ..., "conversations": [{"from": "human"|"gpt", "value": ...}]}
     """
     _st = get_state()
-    if not _st.sqlite_store:
+    if not _st.conversations:
         return JSONResponse({"error": "Storage not initialized"}, status_code=503)
 
     fmt = format.lower().strip()
@@ -2635,18 +2635,18 @@ async def api_export(
     model_filter = model or None
 
     if fmt == "jsonl":
-        data = _st.sqlite_store.export_jsonl(model_filter)
+        data = _st.conversations.export_jsonl(model_filter)
         filename = "conversations.jsonl"
         # True JSONL: one JSON object per line
         content = "\n".join(json.dumps(r, ensure_ascii=False) for r in data) + "\n"
         media_type = "application/x-ndjson"
     elif fmt == "alpaca":
-        data = _st.sqlite_store.export_alpaca(model_filter)
+        data = _st.conversations.export_alpaca(model_filter)
         filename = "conversations_alpaca.json"
         content = json.dumps(data, ensure_ascii=False, indent=2)
         media_type = "application/json"
     else:  # sharegpt
-        data = _st.sqlite_store.export_sharegpt(model_filter)
+        data = _st.conversations.export_sharegpt(model_filter)
         filename = "conversations_sharegpt.json"
         content = json.dumps(data, ensure_ascii=False, indent=2)
         media_type = "application/json"
@@ -2663,11 +2663,11 @@ async def api_export(
 async def api_model_performance(days: int = 30):
     """Per-model latency and throughput stats."""
     _st = get_state()
-    if not _st.sqlite_store:
+    if not _st.conversations:
         return JSONResponse({"error": "Storage not initialized"}, status_code=503)
     rt = get_runtime_config()
     since = rt.get("perf_stats_since") or None
-    data = _st.sqlite_store.get_model_performance(days=days, since=since)
+    data = _st.conversations.get_model_performance(days=days, since=since)
     data["enabled"] = True
     data["since"] = since
     return JSONResponse(data)
@@ -2954,12 +2954,12 @@ async def api_conversation_replay(conv_id: str):
             "message": "Conversation replay is disabled. Enable it in Config tab or set conversation_replay.enabled: true in config.yaml.",
         })
     _st = get_state()
-    if not _st.sqlite_store:
+    if not _st.conversations:
         return JSONResponse({"error": "Storage not initialized"}, status_code=503)
 
     from beigebox.replay import ConversationReplayer
     wire_path = cfg.get("wiretap", {}).get("path", "./data/wire.jsonl")
-    replayer = ConversationReplayer(_st.sqlite_store, wiretap_path=wire_path)
+    replayer = ConversationReplayer(_st.conversations, wiretap_path=wire_path)
     result = replayer.replay(conv_id)
     return JSONResponse(result)
 
@@ -2983,7 +2983,7 @@ async def api_conversation_fork(conv_id: str, request: Request):
         source_conversation  str
     """
     _st = get_state()
-    if not _st.sqlite_store:
+    if not _st.conversations:
         return JSONResponse({"error": "Storage not initialized"}, status_code=503)
 
     try:
@@ -3002,7 +3002,7 @@ async def api_conversation_fork(conv_id: str, request: Request):
     new_conv_id = uuid4().hex
 
     try:
-        copied = _st.sqlite_store.fork_conversation(
+        copied = _st.conversations.fork_conversation(
             source_conv_id=conv_id,
             new_conv_id=new_conv_id,
             branch_at=branch_at,

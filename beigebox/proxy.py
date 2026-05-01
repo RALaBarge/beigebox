@@ -26,7 +26,7 @@ from uuid import uuid4
 import httpx
 from beigebox.config import get_config, get_runtime_config
 from beigebox.storage.models import Message
-from beigebox.storage.sqlite_store import SQLiteStore
+from beigebox.storage.repos.conversations import ConversationRepo
 from beigebox.storage.vector_store import VectorStore
 from beigebox.hooks import HookManager
 from beigebox.wiretap import WireLog
@@ -59,7 +59,7 @@ class Proxy:
     """Transparent proxy between frontend and Ollama backend."""
     def __init__(
         self,
-        sqlite: SQLiteStore,
+        conversations: ConversationRepo,
         vector: VectorStore,
         hook_manager: HookManager | None = None,
         tool_registry=None,
@@ -70,7 +70,7 @@ class Proxy:
         wire_events=None,
         capture=None,
     ):
-        self.sqlite = sqlite
+        self.conversations = conversations
         self.vector = vector
         # CaptureFanout — single chokepoint for request/response telemetry.
         # When provided (production), the proxy emits CapturedRequest /
@@ -390,7 +390,7 @@ class Proxy:
                 token_count=tokens,
             )
             try:
-                await loop.run_in_executor(None, self.sqlite.store_message, message)
+                await loop.run_in_executor(None, self.conversations.store_message, message)
             except Exception as e:
                 logger.warning("_log_messages: SQLite store_message failed (conv=%s role=%s): %s",
                                conversation_id, role, e)
@@ -435,7 +435,7 @@ class Proxy:
         try:
             await loop.run_in_executor(
                 None,
-                lambda: self.sqlite.store_message(message, cost_usd=cost_usd, latency_ms=latency_ms, ttft_ms=ttft_ms),
+                lambda: self.conversations.store_message(message, cost_usd=cost_usd, latency_ms=latency_ms, ttft_ms=ttft_ms),
             )
         except Exception as e:
             logger.warning("_log_response: SQLite store_message failed (conv=%s model=%s): %s",

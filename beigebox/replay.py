@@ -13,7 +13,10 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from beigebox.storage.sqlite_store import SQLiteStore
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from beigebox.storage.repos.conversations import ConversationRepo
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +24,8 @@ logger = logging.getLogger(__name__)
 class ConversationReplayer:
     """Reconstruct a conversation with routing decisions and tool usage."""
 
-    def __init__(self, sqlite: SQLiteStore, wiretap_path: str = "./data/wire.jsonl"):
-        self.sqlite = sqlite
+    def __init__(self, conversations: "ConversationRepo", wiretap_path: str = "./data/wire.jsonl"):
+        self.conversations = conversations
         self.wiretap_path = Path(wiretap_path)
 
     def replay(self, conversation_id: str) -> dict:
@@ -37,8 +40,8 @@ class ConversationReplayer:
                 "text": "CONVERSATION REPLAY: ..."
             }
         """
-        # Get messages from SQLite
-        messages, _integrity = self.sqlite.get_conversation(conversation_id)
+        # Get messages from the conversation repo (with integrity verification)
+        messages, _integrity = self.conversations.get_conversation(conversation_id)
         if not messages:
             return {
                 "conversation_id": conversation_id,

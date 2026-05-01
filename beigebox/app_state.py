@@ -12,9 +12,9 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from beigebox.proxy import Proxy
-    from beigebox.storage.sqlite_store import SQLiteStore
     from beigebox.storage.db.base import BaseDB
     from beigebox.storage.repos.api_keys import ApiKeyRepo
+    from beigebox.storage.repos.conversations import ConversationRepo
     from beigebox.storage.repos.quarantine import QuarantineRepo
     from beigebox.storage.repos.users import UserRepo
     from beigebox.storage.repos.wire_events import WireEventRepo
@@ -41,9 +41,9 @@ class AppState:
 
     proxy: Proxy | None = None
     tool_registry: ToolRegistry | None = None
-    sqlite_store: SQLiteStore | None = None
     db: BaseDB | None = None  # BaseDB shim shared by per-entity repos
     api_keys: ApiKeyRepo | None = None
+    conversations: ConversationRepo | None = None
     quarantine: QuarantineRepo | None = None
     users: UserRepo | None = None
     wire_events: WireEventRepo | None = None

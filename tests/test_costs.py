@@ -4,21 +4,26 @@ Run with: pytest tests/test_costs.py
 """
 
 import pytest
-from beigebox.storage.sqlite_store import SQLiteStore
+from beigebox.storage.db import make_db
+from beigebox.storage.repos import make_conversation_repo
 from beigebox.storage.models import Message
 from beigebox.costs import CostTracker
 
 
 @pytest.fixture
 def store(tmp_path):
-    """Create a fresh SQLite store."""
-    return SQLiteStore(str(tmp_path / "test.db"))
+    """Create a fresh ConversationRepo over a real SQLite BaseDB."""
+    db = make_db("sqlite", path=str(tmp_path / "test.db"))
+    repo = make_conversation_repo(db)
+    repo.create_tables()
+    repo._db_for_test = db  # keep handle alive
+    return repo
 
 
 @pytest.fixture
 def tracker(store):
-    """Create a CostTracker backed by the test store."""
-    return CostTracker(store)
+    """Create a CostTracker backed by the test BaseDB."""
+    return CostTracker(store._db)
 
 
 # ---------------------------------------------------------------------------
@@ -27,20 +32,20 @@ def tracker(store):
 
 def test_schema_has_cost_column(store):
     """Messages table includes cost_usd column."""
-    with store._connect() as conn:
-        info = conn.execute("PRAGMA table_info(messages)").fetchall()
-        columns = [row["name"] for row in info]
+    rows = store._db.fetchall("PRAGMA table_info(messages)")
+    columns = [row["name"] for row in rows]
     assert "cost_usd" in columns
     assert "custom_field_1" in columns
     assert "custom_field_2" in columns
 
 
 def test_migration_idempotent(tmp_path):
-    """Running init twice doesn't crash (migration is safe to re-run)."""
-    db = str(tmp_path / "test.db")
-    s1 = SQLiteStore(db)
-    s2 = SQLiteStore(db)  # Should not raise
-    assert s2 is not None
+    """Running create_tables twice doesn't crash (idempotent)."""
+    db = make_db("sqlite", path=str(tmp_path / "test.db"))
+    r1 = make_conversation_repo(db)
+    r1.create_tables()
+    r1.create_tables()  # second call must not raise
+    assert r1 is not None
 
 
 # ---------------------------------------------------------------------------
