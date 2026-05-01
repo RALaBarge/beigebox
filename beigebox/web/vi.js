@@ -1,10 +1,10 @@
 /**
  * BeigeBox Vi Mode
  * Loaded dynamically only when web_ui_vi_mode: true in runtime_config.yaml.
- * Adds vim-style keybindings to chat and operator inputs.
+ * Adds vim-style keybindings to chat input.
  *
  * Modes: NORMAL, INSERT
- * Targets: #chat-input, #op-input, #search-input, #op-input
+ * Targets: #chat-input, #search-input
  */
 
 (function () {
@@ -265,11 +265,8 @@
       // Enter in normal mode — submit
       case 'Enter': {
         const sendBtn = document.getElementById('send-btn');
-        const opBtn   = document.getElementById('op-btn');
         if (el.id === 'chat-input' && sendBtn && !sendBtn.disabled) {
           if (typeof window.sendChat === 'function') window.sendChat();
-        } else if (el.id === 'op-input' && opBtn && !opBtn.disabled) {
-          if (typeof window.runOp === 'function') window.runOp();
         }
         break;
       }

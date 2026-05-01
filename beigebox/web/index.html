@@ -3949,10 +3949,6 @@ function switchTab(name) {
   // Stop Studio context polling when leaving Studio tab
   if (name !== 'studio') stopStudio();
   if (name !== 'toolbox') stopToolboxValidateLoop();
-
-  // Show background operator indicator if leaving operator tab while a run is in progress
-  if (name !== 'operator' && _lastOpRunId) {
-  }
 }
 
 document.addEventListener('keydown', e => {
