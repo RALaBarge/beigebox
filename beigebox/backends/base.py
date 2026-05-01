@@ -26,6 +26,10 @@ class BackendResponse:
     # can include normalized-request transforms/errors in its wire event
     # without re-running normalize_request. Set by MultiBackendRouter.forward.
     request_summary: dict | None = None
+    # When True, proxy passes fix_bpe_artifacts=True to normalize_response.
+    # Set by MlxBackend to clean up the broken Mistral tokenizer regex artifacts
+    # (Ġ/Ċ spam) produced by mlx-lm without fix_mistral_regex=True.
+    fix_bpe_artifacts: bool = False
 
     @property
     def content(self) -> str:

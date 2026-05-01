@@ -17,6 +17,8 @@ Covers:
 - OpenRouter cost extraction (top-level `cost_usd` or `usage.cost`).
 - SSE streaming deltas that carry reasoning separately from content.
 - Fully malformed input (None, "", wrong types).
+- BPE byte-level encoding artifacts (Ġ/Ċ spam from broken Mistral tokenizer
+  regex in mlx-lm) — opt-in via fix_bpe_artifacts=True.
 """
 from __future__ import annotations
 
@@ -38,6 +40,54 @@ _REASONING_FIELDS: tuple[str, ...] = ("reasoning_content", "reasoning", "thinkin
 # (panel-convergent: opt-in, off by default — don't lie about upstream output).
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _LONE_SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
+
+
+# ---------------------------------------------------------------------------
+# BPE byte-level artifact decoder
+# ---------------------------------------------------------------------------
+# mlx-lm with a broken Mistral tokenizer regex (see upstream discussion at
+# huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84)
+# emits the GPT-2 byte-level BPE "unicode façade" instead of real text:
+# space (0x20) → Ġ, newline (0x0A) → Ċ, etc.  We build the reverse map once
+# and apply it when fix_bpe_artifacts=True.
+
+def _build_bpe_reverse_map() -> dict[str, str]:
+    """Return {bpe_unicode_char: real_char} for all 256 bytes."""
+    # Replicates GPT-2's bytes_to_unicode() to get the forward map, then inverts.
+    bs: list[int] = (
+        list(range(ord("!"), ord("~") + 1))
+        + list(range(ord("¡"), ord("¬") + 1))
+        + list(range(ord("®"), ord("ÿ") + 1))
+    )
+    cs: list[int] = bs[:]
+    n = 0
+    for b in range(256):
+        if b not in bs:
+            bs.append(b)
+            cs.append(256 + n)
+            n += 1
+    forward = dict(zip(map(chr, cs), map(chr, bs)))  # unicode_char → real_char
+    return forward
+
+
+_BPE_REVERSE: dict[str, str] = _build_bpe_reverse_map()
+# Only chars outside normal ASCII/Latin-1 printable range are artifact candidates.
+_BPE_ARTIFACT_RE = re.compile(r"[Ā-Ń]")
+
+
+def _decode_bpe_artifacts(text: str) -> str:
+    """Replace GPT-2 BPE byte-level facade chars with their real equivalents.
+
+    Only fires when artifact density is high enough to be clearly a tokenizer
+    encoding issue rather than legitimate unicode in that range (e.g. Latin
+    Extended-A letters in real content).  Threshold: >8% of chars are artifacts.
+    """
+    if not text:
+        return text
+    artifact_count = sum(1 for c in text if "Ā" <= c <= "Ń")
+    if artifact_count / len(text) < 0.03:
+        return text  # not an artifact-heavy response, leave untouched
+    return _BPE_ARTIFACT_RE.sub(lambda m: _BPE_REVERSE.get(m.group(), m.group()), text)
 
 
 def _sanitize_text(text: str) -> str:
@@ -295,6 +345,7 @@ def normalize_response(
     enable_tool_call_extraction: bool = True,
     declared_tools: set[str] | None = None,
     sanitize_unicode: bool = False,
+    fix_bpe_artifacts: bool = False,
 ) -> NormalizedResponse:
     """Normalize a full chat-completion response dict. Never raises.
 
@@ -399,6 +450,12 @@ def normalize_response(
             content = _sanitize_text(content)
         if reasoning:
             reasoning = _sanitize_text(reasoning)
+
+    if fix_bpe_artifacts:
+        if content:
+            content = _decode_bpe_artifacts(content)
+        if reasoning:
+            reasoning = _decode_bpe_artifacts(reasoning)
 
     role_raw = message.get("role")
     role = role_raw if isinstance(role_raw, str) and role_raw else "assistant"
@@ -571,6 +628,7 @@ def finalize_stream(
     deltas: Iterable[NormalizedDelta],
     *,
     sanitize_unicode: bool = False,
+    fix_bpe_artifacts: bool = False,
     enable_tool_call_extraction: bool = True,
     declared_tools: set[str] | None = None,
 ) -> NormalizedResponse:
@@ -628,6 +686,12 @@ def finalize_stream(
             content = _sanitize_text(content)
         if reasoning:
             reasoning = _sanitize_text(reasoning)
+
+    if fix_bpe_artifacts:
+        if content:
+            content = _decode_bpe_artifacts(content)
+        if reasoning:
+            reasoning = _decode_bpe_artifacts(reasoning)
 
     usage = _extract_usage(last_usage_raw or {}, errors)
     cost_usd = _extract_cost(last_usage_raw or {}) if last_usage_raw else None

@@ -38,6 +38,15 @@ backends:
     backoff_base: 1.5
     backoff_max: 10.0
 
+  # Mac M1 — MLX inference (Devstral 24B 6-bit + others)
+  - provider: mlx
+    name: mlx-mac
+    url: "http://192.168.1.214:8080"
+    timeout: 900
+    timeout_ms: 900000
+    priority: 3
+    max_retries: 1
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Models — Unified allocation (Phase 2)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -80,6 +89,14 @@ embedding:
 # Routing Pipeline — Hybrid routing: session cache → classifier → decision LLM → backend
 # ─────────────────────────────────────────────────────────────────────────────
 routing:
+  model_routes:
+    - pattern: "mlx-community/*"
+      backend: mlx-mac
+    - pattern: "devstral*"
+      backend: mlx-mac
+    - pattern: "mistral*"
+      backend: mlx-mac
+
   session_cache:
     ttl_seconds: 3600
     max_entries: 1000
@@ -378,15 +395,15 @@ amf_mesh:
 # Timeouts — Centralized (all in one place)
 # ─────────────────────────────────────────────────────────────────────────────
 timeouts:
-  backend_seconds: 120             # LLM inference timeout
+  backend_seconds: 900             # LLM inference timeout
   decision_llm_seconds: 15         # Routing judge timeout
   operator_seconds: 300            # Single operator iteration timeout
   operator_run_seconds: 600        # Full operator run timeout
   harness_task_seconds: 120        # Harness task timeout
   harness_operator_seconds: 180    # Harness operator step timeout
   embedding_seconds: 5.0           # Embedding API call timeout
-  request_seconds: 300             # Global request timeout
-  stream_stall_seconds: 120        # Stream stall detection timeout
+  request_seconds: 900             # Global request timeout
+  stream_stall_seconds: 300        # Stream stall detection timeout
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Logging & Observability

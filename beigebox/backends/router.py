@@ -26,6 +26,7 @@ from typing import AsyncIterator
 from beigebox.backends.base import BaseBackend, BackendResponse
 from beigebox.backends.ollama import OllamaBackend
 from beigebox.backends.openrouter import OpenRouterBackend
+from beigebox.backends.mlx import MlxBackend
 from beigebox.backends.openai_compat import OpenAICompatibleBackend
 from beigebox.backends.plugin_loader import load_backend_plugins
 from beigebox.config import get_config, get_runtime_config
@@ -40,6 +41,7 @@ PROVIDERS: dict[str, type[BaseBackend]] = {
     "ollama": OllamaBackend,
     "openrouter": OpenRouterBackend,
     "openai_compat": OpenAICompatibleBackend,
+    "mlx": MlxBackend,
 }
 
 # Load custom backend plugins from backends/plugins/

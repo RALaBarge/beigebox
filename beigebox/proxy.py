@@ -848,7 +848,10 @@ class Proxy:
         # NameError on the post-hook line when is_synthetic=True or choices=[].
         assistant_content = ""
         if not is_synthetic:
-            normalized = normalize_response(data)
+            normalized = normalize_response(
+                data,
+                fix_bpe_artifacts=getattr(response, "fix_bpe_artifacts", False),
+            )
             if normalized.content or normalized.tool_calls:
                 assistant_content = normalized.content
                 response_latency = response.latency_ms if self.backend_router and response.ok else None

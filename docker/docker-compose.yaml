@@ -123,6 +123,7 @@ services:
       - "${BEIGEBOX_PORT:-1337}:8000"
     volumes:
       - beigebox_data:/app/data
+      - ./config.yaml:/app/config.yaml:ro
       - ../hooks:/app/hooks:ro
       - ../2600/skills:/app/2600/skills:ro
       - ../workspace/out:/app/workspace/out:rw
