@@ -18,6 +18,8 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
+from beigebox.storage.wire_sink import JsonlWireSink, SqliteWireSink, WireSink
+
 logger = logging.getLogger(__name__)
 
 # ANSI colors
@@ -96,45 +98,34 @@ class WireLog:
 
     If sqlite_store is provided, every log() call also writes a structured row
     to the wire_events table so the web UI can cross-link by conv_id / run_id.
+
+    Extra WireSink instances can be injected via the `sinks` parameter for
+    additional fanout (e.g. remote observability sinks).
     """
 
-    def __init__(self, log_path: str, sqlite_store=None, egress_hooks=None,
-                 max_lines: int = 100_000, rotation_enabled: bool = True):
+    def __init__(
+        self,
+        log_path: str,
+        sqlite_store=None,
+        egress_hooks=None,
+        max_lines: int = 100_000,
+        rotation_enabled: bool = True,
+        sinks: list[WireSink] | None = None,
+    ):
         self.log_path = Path(log_path)
-        self.log_path.parent.mkdir(parents=True, exist_ok=True)
-        self._file = None
-        self._db = sqlite_store        # optional SQLiteStore for dual-write
         self._egress = egress_hooks or []  # list[EgressHook] — fire-and-forget
-        self._max_lines = max_lines
-        self._rotation_enabled = rotation_enabled
-        self._line_count = 0
-        self._line_count_loaded = False
 
-    def _ensure_open(self):
-        if self._file is None:
-            # buffering=1 = line-buffered: each log() call flushes immediately
-            # so the tap viewer sees entries in real time without extra flushing.
-            self._file = open(self.log_path, "a", buffering=1)
-            if not self._line_count_loaded:
-                try:
-                    self._line_count = sum(1 for _ in open(self.log_path))
-                except (FileNotFoundError, OSError):
-                    self._line_count = 0
-                self._line_count_loaded = True
+        # Primary JSONL sink — always active
+        self._jsonl_sink = JsonlWireSink(
+            path=log_path,
+            max_lines=max_lines,
+            rotation_enabled=rotation_enabled,
+        )
 
-    def _rotate_if_needed(self):
-        """Rotate JSONL when max_lines exceeded: rename current to .1, start fresh."""
-        if not self._rotation_enabled or self._line_count < self._max_lines:
-            return
-        if self._file:
-            self._file.close()
-            self._file = None
-        rotated = self.log_path.with_suffix(".jsonl.1")
-        if rotated.exists():
-            rotated.unlink()
-        self.log_path.rename(rotated)
-        self._line_count = 0
-        self._ensure_open()
+        # Optional extra sinks (SQLite dual-write + any caller-supplied sinks)
+        self._extra_sinks: list[WireSink] = list(sinks or [])
+        if sqlite_store is not None:
+            self._extra_sinks.append(SqliteWireSink(sqlite_store))
 
     def log(
         self,
@@ -161,7 +152,6 @@ class WireLog:
             latency_ms: total end-to-end latency in milliseconds
             timing: dict of {stage_name: ms} for per-stage breakdown
         """
-        self._ensure_open()
         entry = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "dir": direction,
@@ -198,9 +188,7 @@ class WireLog:
         else:
             entry["content"] = content[:1000] + f"\n\n[... {len(content) - 2000} chars truncated ...]\n\n" + content[-1000:]
 
-        self._file.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        self._line_count += 1
-        self._rotate_if_needed()
+        self._jsonl_sink.write(entry)
 
         # Fire-and-forget to observability egress hooks (non-blocking)
         if self._egress:
@@ -214,8 +202,8 @@ class WireLog:
             except RuntimeError:
                 pass  # No running event loop (e.g. during tests) — skip silently
 
-        # Dual-write to SQLite for web UI cross-linking
-        if self._db is not None:
+        # Fan out to extra sinks (SQLite dual-write and any injected sinks)
+        if self._extra_sinks:
             _meta: dict = meta.copy() if meta else {}
             if latency_ms is not None:
                 _meta["latency_ms"] = round(latency_ms, 1)
@@ -225,23 +213,25 @@ class WireLog:
                 _meta["tokens"] = token_count
             if tool_name:
                 _meta["tool_name"] = tool_name
-            self._db.log_wire_event(
-                event_type=event_type,
-                source=source,
-                content=entry.get("content", ""),
-                role=role,
-                model=model,
-                conv_id=conversation_id or None,
-                run_id=run_id,
-                turn_id=turn_id,
-                tool_id=tool_id,
-                meta=_meta if _meta else None,
-            )
+            sqlite_event = {
+                "event_type": event_type,
+                "source": source,
+                "content": entry.get("content", ""),
+                "role": role,
+                "model": model,
+                "conv_id": conversation_id or None,
+                "run_id": run_id,
+                "turn_id": turn_id,
+                "tool_id": tool_id,
+                "meta": _meta if _meta else None,
+            }
+            for sink in self._extra_sinks:
+                sink.write(sqlite_event)
 
     def close(self):
-        if self._file:
-            self._file.close()
-            self._file = None
+        self._jsonl_sink.close()
+        for sink in self._extra_sinks:
+            sink.close()
 
 
 def _format_entry(entry: dict, raw: bool = False) -> str:
