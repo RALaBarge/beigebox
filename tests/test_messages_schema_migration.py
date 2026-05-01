@@ -14,7 +14,23 @@ from pathlib import Path
 
 import pytest
 
-from beigebox.storage.sqlite_store import SQLiteStore
+from beigebox.storage.db import make_db
+from beigebox.storage.repos import make_conversation_repo
+
+
+def _migrate_legacy_db(path: Path) -> None:
+    """Apply ConversationRepo's idempotent CREATE + ALTER chain to a path.
+
+    Replaces ``SQLiteStore(path)``'s old behaviour: open a fresh BaseDB
+    and call ``create_tables()``, which runs the same DDL + migration
+    list that the legacy SQLiteStore.__init__ used.
+    """
+    db = make_db("sqlite", path=str(path))
+    try:
+        repo = make_conversation_repo(db)
+        repo.create_tables()
+    finally:
+        db.close()
 
 
 V14_COLUMNS = [
@@ -93,7 +109,7 @@ def test_legacy_db_gets_v14_columns_added(db_path):
     for new_col in V14_COLUMNS:
         assert new_col not in cols_before, f"setup error: {new_col} already present"
 
-    SQLiteStore(str(db_path))
+    _migrate_legacy_db(db_path)
 
     cols_after = _columns(db_path)
     for new_col in V14_COLUMNS:
@@ -102,7 +118,7 @@ def test_legacy_db_gets_v14_columns_added(db_path):
 
 def test_legacy_row_survives_with_null_v14_fields(db_path):
     _create_legacy_messages_table(db_path)
-    SQLiteStore(str(db_path))
+    _migrate_legacy_db(db_path)
 
     conn = sqlite3.connect(str(db_path))
     try:
@@ -125,18 +141,18 @@ def test_legacy_row_survives_with_null_v14_fields(db_path):
 
 def test_migration_is_idempotent(db_path):
     _create_legacy_messages_table(db_path)
-    SQLiteStore(str(db_path))
+    _migrate_legacy_db(db_path)
     cols_first = _columns(db_path)
 
-    SQLiteStore(str(db_path))  # second init must not error
-    SQLiteStore(str(db_path))  # third for good measure
+    _migrate_legacy_db(db_path)  # second init must not error
+    _migrate_legacy_db(db_path)  # third for good measure
     cols_third = _columns(db_path)
 
     assert cols_first == cols_third
 
 
 def test_fresh_db_has_v14_columns_from_create(db_path):
-    SQLiteStore(str(db_path))
+    _migrate_legacy_db(db_path)
 
     cols = _columns(db_path)
     for new_col in V14_COLUMNS:
@@ -144,7 +160,7 @@ def test_fresh_db_has_v14_columns_from_create(db_path):
 
 
 def test_v14_columns_accept_inserts(db_path):
-    SQLiteStore(str(db_path))
+    _migrate_legacy_db(db_path)
 
     conn = sqlite3.connect(str(db_path))
     try:

@@ -16,7 +16,8 @@ import json
 import pytest
 from datetime import datetime, timezone
 
-from beigebox.storage.sqlite_store import SQLiteStore
+from beigebox.storage.db import make_db
+from beigebox.storage.repos import make_conversation_repo
 from beigebox.storage.models import Message
 from beigebox.backends.openrouter import _COST_SENTINEL_PREFIX
 
@@ -25,8 +26,11 @@ from beigebox.backends.openrouter import _COST_SENTINEL_PREFIX
 
 @pytest.fixture
 def store(tmp_path):
-    """Fresh SQLite store per test."""
-    return SQLiteStore(str(tmp_path / "test.db"))
+    """Fresh ConversationRepo per test."""
+    db = make_db("sqlite", path=str(tmp_path / "test.db"))
+    repo = make_conversation_repo(db)
+    repo.create_tables()
+    return repo
 
 
 # ── fork_conversation ─────────────────────────────────────────────────────────

@@ -4,15 +4,18 @@ Uses a temp database for each test.
 """
 
 import pytest
-from beigebox.storage.sqlite_store import SQLiteStore
+from beigebox.storage.db import make_db
+from beigebox.storage.repos import make_conversation_repo
 from beigebox.storage.models import Message
 
 
 @pytest.fixture
 def store(tmp_path):
-    """Create a fresh SQLite store for each test."""
-    db_path = str(tmp_path / "test.db")
-    return SQLiteStore(db_path)
+    """Create a fresh ConversationRepo over a SQLite BaseDB."""
+    db = make_db("sqlite", path=str(tmp_path / "test.db"))
+    repo = make_conversation_repo(db)
+    repo.create_tables()
+    return repo
 
 
 def test_store_and_retrieve(store):

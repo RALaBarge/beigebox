@@ -1,4 +1,4 @@
-"""Integration tests for SQLiteStore.store_captured_request/_response.
+"""Integration tests for ConversationRepo.store_captured_request/_response.
 
 These hit real SQLite (temp file), populate the new v1.4 columns, and verify
 the round trip. They sit between the pure-function capture tests and the
@@ -6,7 +6,6 @@ full proxy integration tests.
 """
 from __future__ import annotations
 
-import sqlite3
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,7 +17,8 @@ from beigebox.capture import (
     CapturedRequest,
     CapturedResponse,
 )
-from beigebox.storage.sqlite_store import SQLiteStore
+from beigebox.storage.db import make_db
+from beigebox.storage.repos import make_conversation_repo
 
 
 def _ctx(**overrides) -> CaptureContext:
@@ -41,13 +41,18 @@ def _ctx(**overrides) -> CaptureContext:
 def store():
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         path = f.name
-    s = SQLiteStore(path)
-    yield s
+    db = make_db("sqlite", path=path)
+    repo = make_conversation_repo(db)
+    repo.create_tables()
+    repo._test_path = path  # for the row-fetch helper below
+    yield repo
+    db.close()
     Path(path).unlink(missing_ok=True)
 
 
-def _row(store: SQLiteStore, msg_id: str) -> dict:
-    conn = sqlite3.connect(str(store.db_path))
+def _row(store, msg_id: str) -> dict:
+    import sqlite3
+    conn = sqlite3.connect(str(store._test_path))
     conn.row_factory = sqlite3.Row
     try:
         row = conn.execute("SELECT * FROM messages WHERE id = ?", (msg_id,)).fetchone()
@@ -119,14 +124,10 @@ class TestStoreCapturedRequest:
         )
         store.store_captured_request(req)
 
-        conn = sqlite3.connect(str(store.db_path))
-        try:
-            row = conn.execute(
-                "SELECT id FROM conversations WHERE id = ?", ("conv-new",)
-            ).fetchone()
-            assert row is not None
-        finally:
-            conn.close()
+        row = store._db.fetchone(
+            "SELECT id FROM conversations WHERE id = ?", ("conv-new",)
+        )
+        assert row is not None
 
 
 class TestStoreCapturedResponse:
