@@ -37,6 +37,19 @@ CREATE TABLE IF NOT EXISTS messages (
     ttft_ms REAL DEFAULT NULL,
     custom_field_1 TEXT DEFAULT NULL,
     custom_field_2 TEXT DEFAULT NULL,
+    -- v1.4 — normalizer-captured telemetry (set by capture.CaptureFanout)
+    reasoning_text TEXT DEFAULT NULL,           -- full chain-of-thought for reasoning models
+    tool_calls_json TEXT DEFAULT NULL,          -- JSON-encoded tool_calls array
+    finish_reason TEXT DEFAULT NULL,            -- stop / length / tool_calls / error / aborted
+    prompt_tokens INTEGER DEFAULT NULL,         -- split out from token_count
+    completion_tokens INTEGER DEFAULT NULL,
+    reasoning_tokens INTEGER DEFAULT NULL,
+    request_transforms_json TEXT DEFAULT NULL,  -- JSON list of normalizer transforms that fired
+    normalize_errors_json TEXT DEFAULT NULL,    -- JSON list of non-fatal normalize errors
+    request_id TEXT DEFAULT NULL,               -- upstream provider's request id when known
+    capture_outcome TEXT DEFAULT NULL,          -- ok / upstream_error / stream_aborted / client_disconnect
+    error_kind TEXT DEFAULT NULL,               -- mirrors capture_outcome when != ok, else NULL
+    error_message TEXT DEFAULT NULL,            -- str(exc) when capture failed
     FOREIGN KEY (conversation_id) REFERENCES conversations(id)
 );
 
@@ -147,6 +160,22 @@ MIGRATIONS = [
     "ALTER TABLE conversations ADD COLUMN integrity_checked_at TEXT DEFAULT NULL",
     # v1.3 — password hash for simple password auth
     "ALTER TABLE users ADD COLUMN password_hash TEXT DEFAULT NULL",
+    # v1.4 — normalizer-captured telemetry. Every chat completion gets one row
+    # for the request batch and one for the response, populated by
+    # beigebox.capture.CaptureFanout. All nullable so legacy rows (and rows
+    # written by callers that bypass the fanout) keep working.
+    "ALTER TABLE messages ADD COLUMN reasoning_text TEXT DEFAULT NULL",
+    "ALTER TABLE messages ADD COLUMN tool_calls_json TEXT DEFAULT NULL",
+    "ALTER TABLE messages ADD COLUMN finish_reason TEXT DEFAULT NULL",
+    "ALTER TABLE messages ADD COLUMN prompt_tokens INTEGER DEFAULT NULL",
+    "ALTER TABLE messages ADD COLUMN completion_tokens INTEGER DEFAULT NULL",
+    "ALTER TABLE messages ADD COLUMN reasoning_tokens INTEGER DEFAULT NULL",
+    "ALTER TABLE messages ADD COLUMN request_transforms_json TEXT DEFAULT NULL",
+    "ALTER TABLE messages ADD COLUMN normalize_errors_json TEXT DEFAULT NULL",
+    "ALTER TABLE messages ADD COLUMN request_id TEXT DEFAULT NULL",
+    "ALTER TABLE messages ADD COLUMN capture_outcome TEXT DEFAULT NULL",
+    "ALTER TABLE messages ADD COLUMN error_kind TEXT DEFAULT NULL",
+    "ALTER TABLE messages ADD COLUMN error_message TEXT DEFAULT NULL",
 ]
 
 
@@ -316,6 +345,135 @@ class SQLiteStore:
                  message_hmac, 1, 0),
             )
         logger.debug("Stored message %s (role=%s, conv=%s)", msg.id, msg.role, msg.conversation_id)
+
+    # ------------------------------------------------------------------
+    # Capture-pipeline writers (v1.4)
+    # ------------------------------------------------------------------
+    # These take ``CapturedRequest`` / ``CapturedResponse`` envelopes from
+    # ``beigebox.capture.CaptureFanout`` and write rows that include the new
+    # nullable v1.4 columns (reasoning_text, tool_calls_json, finish_reason,
+    # prompt/completion/reasoning_tokens, request_transforms_json,
+    # normalize_errors_json, request_id, capture_outcome, error_kind,
+    # error_message). Existing ``store_message`` is unchanged.
+
+    def store_captured_request(self, req) -> list[str]:
+        """Persist a captured request as one or more message rows.
+
+        One row per non-empty user/assistant message in ``req.messages``.
+        System messages are skipped — they're injected by BeigeBox itself
+        and would pollute the conversation store on every turn (matching
+        the old ``_log_messages`` behaviour).
+
+        Returns the list of inserted message IDs (in order), so the caller
+        can hand them to the vector store for embedding.
+        """
+        from uuid import uuid4
+        ctx = req.ctx
+        transforms_json = json.dumps(list(req.transforms)) if req.transforms else None
+        errors_json = json.dumps(list(req.errors)) if req.errors else None
+        request_id = ctx.request_id
+
+        timestamp = ctx.started_at.isoformat() if ctx.started_at else datetime.now(timezone.utc).isoformat()
+        self.ensure_conversation(ctx.conv_id, timestamp, ctx.user_id)
+
+        inserted: list[str] = []
+        with self._connect() as conn:
+            for m in req.messages:
+                if not isinstance(m, dict):
+                    continue
+                role = m.get("role", "")
+                content = m.get("content", "")
+                if not content or role == "system":
+                    continue
+                content_str = content if isinstance(content, str) else json.dumps(content)
+                msg_id = uuid4().hex
+                # HMAC: only on the signable subset, matching store_message().
+                message_hmac = None
+                if self.integrity_validator and ctx.user_id:
+                    message_hmac = self.integrity_validator.sign_message(
+                        {
+                            "id": msg_id,
+                            "conversation_id": ctx.conv_id,
+                            "role": role,
+                            "content": content_str,
+                            "model": ctx.model,
+                            "timestamp": timestamp,
+                            "token_count": 0,
+                        },
+                        ctx.user_id,
+                    )
+                conn.execute(
+                    """INSERT OR REPLACE INTO messages (
+                        id, conversation_id, role, content, model, timestamp, token_count,
+                        request_transforms_json, normalize_errors_json, request_id,
+                        capture_outcome, message_hmac, integrity_version, tamper_detected
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        msg_id, ctx.conv_id, role, content_str,
+                        ctx.model, timestamp, 0,
+                        transforms_json, errors_json, request_id,
+                        "ok", message_hmac, 1, 0,
+                    ),
+                )
+                inserted.append(msg_id)
+        return inserted
+
+    def store_captured_response(self, resp) -> str:
+        """Persist a captured response as one assistant row.
+
+        Always writes a row, even when ``resp.outcome != "ok"`` — failures,
+        aborts, and disconnects each get their full partial state stored
+        with ``capture_outcome`` / ``error_kind`` / ``error_message`` set.
+
+        Returns the inserted message ID.
+        """
+        from uuid import uuid4
+        ctx = resp.ctx
+        msg_id = uuid4().hex
+        timestamp = (ctx.ended_at or datetime.now(timezone.utc)).isoformat()
+        self.ensure_conversation(ctx.conv_id, timestamp, ctx.user_id)
+
+        tool_calls_json = json.dumps(resp.tool_calls) if resp.tool_calls else None
+        normalize_errors_json = json.dumps(list(resp.response_errors)) if resp.response_errors else None
+
+        message_hmac = None
+        if self.integrity_validator and ctx.user_id:
+            message_hmac = self.integrity_validator.sign_message(
+                {
+                    "id": msg_id,
+                    "conversation_id": ctx.conv_id,
+                    "role": resp.role or "assistant",
+                    "content": resp.content,
+                    "model": ctx.model,
+                    "timestamp": timestamp,
+                    "token_count": resp.completion_tokens,
+                },
+                ctx.user_id,
+            )
+
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO messages (
+                    id, conversation_id, role, content, model, timestamp, token_count,
+                    cost_usd, latency_ms, ttft_ms,
+                    reasoning_text, tool_calls_json, finish_reason,
+                    prompt_tokens, completion_tokens, reasoning_tokens,
+                    normalize_errors_json, request_id,
+                    capture_outcome, error_kind, error_message,
+                    message_hmac, integrity_version, tamper_detected
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    msg_id, ctx.conv_id, resp.role or "assistant", resp.content,
+                    ctx.model, timestamp, resp.completion_tokens,
+                    resp.cost_usd, ctx.latency_ms, ctx.ttft_ms,
+                    resp.reasoning, tool_calls_json, resp.finish_reason,
+                    resp.prompt_tokens, resp.completion_tokens, resp.reasoning_tokens,
+                    normalize_errors_json, ctx.request_id,
+                    resp.outcome, resp.error_kind, resp.error_message,
+                    message_hmac, 1, 0,
+                ),
+            )
+        return msg_id
 
     def get_conversation(self, conversation_id: str, user_id: str | None = None) -> tuple[list[dict], dict]:
         """

@@ -229,6 +229,99 @@ class WireLog:
             for sink in self._extra_sinks:
                 sink.write(sqlite_event)
 
+    def write_request(self, req) -> None:
+        """Emit one ``model_request_normalized`` event for a captured request.
+
+        Takes a :class:`beigebox.capture.CapturedRequest`. Carries the full
+        normalizer audit trail (``target``, ``transforms``, ``errors``,
+        ``has_tools``, ``stream``, request ``messages``) in ``meta`` so
+        downstream consumers (tap UI, replay, query tools) can reconstruct
+        the outgoing call without re-reading proxy state.
+
+        The fanout (JSONL + SqliteWireSink + caller-supplied sinks) is the
+        same path :meth:`log` uses; only the meta payload is enriched.
+        """
+        ctx = req.ctx
+        meta = {
+            "target": req.target,
+            "transforms": list(req.transforms),
+            "errors": list(req.errors),
+            "has_tools": req.has_tools,
+            "stream": req.stream,
+            "message_count": len(req.messages),
+            "request_messages": req.messages,
+            "backend": ctx.backend,
+            "started_at": ctx.started_at.isoformat() if ctx.started_at else None,
+            "request_id": ctx.request_id,
+        }
+        # Use the last user message as the displayed content (parity with the
+        # old `_log_messages` JSONL output) so live `tap` still shows what
+        # the user said. Full message list lives in meta.
+        last_user = ""
+        for m in reversed(req.messages):
+            if isinstance(m, dict) and m.get("role") == "user":
+                c = m.get("content")
+                if isinstance(c, str):
+                    last_user = c
+                    break
+        self.log(
+            direction="inbound",
+            role="user",
+            content=last_user,
+            model=ctx.model,
+            conversation_id=ctx.conv_id,
+            event_type="model_request_normalized",
+            source="proxy",
+            run_id=ctx.run_id,
+            turn_id=ctx.turn_id,
+            meta=meta,
+        )
+
+    def write_response(self, resp) -> None:
+        """Emit one ``model_response_normalized`` event for a captured response.
+
+        Takes a :class:`beigebox.capture.CapturedResponse`. Always emits a
+        row, even when ``resp.outcome != "ok"`` — failures, aborts, and
+        client disconnects each carry their full partial state in ``meta``
+        (``outcome``, ``error_kind``, ``error_message`` plus whatever
+        reasoning / tool_calls / usage was assembled before the abort).
+        """
+        ctx = resp.ctx
+        meta: dict = {
+            "outcome": resp.outcome,
+            "error_kind": resp.error_kind,
+            "error_message": resp.error_message,
+            "finish_reason": resp.finish_reason,
+            "has_reasoning": bool(resp.reasoning),
+            "reasoning": resp.reasoning,
+            "tool_calls_count": len(resp.tool_calls) if resp.tool_calls else 0,
+            "tool_calls": resp.tool_calls,
+            "errors": list(resp.response_errors),
+            "usage": {
+                "prompt_tokens": resp.prompt_tokens,
+                "completion_tokens": resp.completion_tokens,
+                "reasoning_tokens": resp.reasoning_tokens,
+                "total_tokens": resp.total_tokens,
+            },
+            "cost_usd": resp.cost_usd,
+            "backend": ctx.backend,
+            "ttft_ms": ctx.ttft_ms,
+            "request_id": ctx.request_id,
+        }
+        self.log(
+            direction="outbound",
+            role=resp.role or "assistant",
+            content=resp.content,
+            model=ctx.model,
+            conversation_id=ctx.conv_id,
+            event_type="model_response_normalized",
+            source="proxy",
+            run_id=ctx.run_id,
+            turn_id=ctx.turn_id,
+            latency_ms=ctx.latency_ms,
+            meta=meta,
+        )
+
     def close(self):
         self._jsonl_sink.close()
         for sink in self._extra_sinks:
