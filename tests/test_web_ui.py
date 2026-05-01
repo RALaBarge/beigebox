@@ -177,7 +177,7 @@ def client(tmp_path):
     mock_proxy = MagicMock()
     mock_proxy.wasm_runtime = mock_wasm
 
-    with patch("beigebox.main.SQLiteStore"), \
+    with patch("beigebox.main.make_conversation_repo"), \
          patch("beigebox.main.VectorStore"), \
          patch("beigebox.main.ToolRegistry") as MockTR, \
          patch("beigebox.main.DecisionAgent", mock_da), \

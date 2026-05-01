@@ -236,10 +236,9 @@ class CaptureFanout:
     """
 
     def __init__(self, *, conversations, wire, vector=None) -> None:
-        # ``conversations`` is the SQLite messages writer. Today this is
-        # the legacy ``SQLiteStore``; once ConversationRepo lands in a
-        # later step it'll be that. Both expose the same
-        # store_captured_request / store_captured_response API.
+        # ``conversations`` is the ConversationRepo (per-entity repo on
+        # BaseDB) — owns the messages table and the capture-pipeline
+        # writers (store_captured_request / store_captured_response).
         self.conversations = conversations
         self.wire = wire
         self.vector = vector

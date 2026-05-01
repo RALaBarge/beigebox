@@ -17,7 +17,23 @@ from pathlib import Path
 
 from beigebox.security.memory_integrity import ConversationIntegrityValidator, IntegrityAuditLog
 from beigebox.security.key_management import KeyManager
-from beigebox.storage.sqlite_store import SQLiteStore
+from beigebox.storage.db import make_db
+from beigebox.storage.repos import make_conversation_repo
+
+
+def _make_store(db_path, integrity_config=None):
+    """Build a ConversationRepo with create_tables() called.
+
+    Replaces the legacy ``SQLiteStore(db_path, integrity_config=...)``
+    construction. Returns the ConversationRepo (which exposes
+    integrity_validator, integrity_mode, store_message, get_conversation,
+    etc. with the same signatures).
+    """
+    db = make_db("sqlite", path=str(db_path))
+    repo = make_conversation_repo(db, integrity_config=integrity_config)
+    repo.create_tables()
+    repo._test_db_path = str(db_path)
+    return repo
 from beigebox.storage.models import Message
 
 
@@ -302,7 +318,7 @@ class TestSQLiteStoreIntegrity:
             "key_source": "env",
             "dev_mode": False,
         }
-        store = SQLiteStore(str(db_path), integrity_config=config)
+        store = _make_store(db_path, integrity_config=config)
         return store
 
     def test_store_with_integrity_enabled(self, store_with_integrity):
@@ -340,15 +356,12 @@ class TestSQLiteStoreIntegrity:
 
         store_with_integrity.store_message(msg, user_id="user_1")
 
-        # Manually tamper with database
-        import sqlite3
-        conn = sqlite3.connect(store_with_integrity.db_path)
-        conn.execute(
+        # Manually tamper with database (through the BaseDB shim, which
+        # is what the production code holds on the repo).
+        store_with_integrity._db.execute(
             "UPDATE messages SET content = ? WHERE id = ?",
-            ("Tampered content", msg.id)
+            ("Tampered content", msg.id),
         )
-        conn.commit()
-        conn.close()
 
         # Retrieve and verify tampering is detected
         messages, integrity = store_with_integrity.get_conversation("conv_1", user_id="user_1")
@@ -401,7 +414,7 @@ class TestBackwardCompatibility:
     def store_no_integrity(self, tmp_path):
         """Create SQLiteStore without integrity validation."""
         db_path = tmp_path / "test.db"
-        store = SQLiteStore(str(db_path), integrity_config={"enabled": False})
+        store = _make_store(db_path, integrity_config={"enabled": False})
         return store
 
     def test_store_unsigned_message(self, store_no_integrity):
@@ -425,7 +438,7 @@ class TestBackwardCompatibility:
         """Test conversation with mix of signed and unsigned messages."""
         # First store without integrity
         db_path = tmp_path / "test.db"
-        store_unsigned = SQLiteStore(str(db_path), integrity_config={"enabled": False})
+        store_unsigned = _make_store(db_path, integrity_config={"enabled": False})
 
         msg1 = Message(conversation_id="conv_1", role="user", content="unsigned", model="gpt-4")
         store_unsigned.store_message(msg1)
@@ -435,7 +448,7 @@ class TestBackwardCompatibility:
         import os
         os.environ["BEIGEBOX_MEMORY_KEY"] = f"base64:{KeyManager.format_env_var(key).split(':')[1]}"
 
-        store_signed = SQLiteStore(str(db_path), integrity_config={
+        store_signed = _make_store(db_path, integrity_config={
             "enabled": True,
             "mode": "log_only",
             "key_source": "env",

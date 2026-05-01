@@ -28,6 +28,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from beigebox.storage.db import make_db
+from beigebox.storage.repos import make_conversation_repo
+
+
+def _make_store(db_path, integrity_config=None):
+    """Build a ConversationRepo with create_tables() applied.
+
+    Replaces ``SQLiteStore(db_path, integrity_config=...)`` from before
+    the demolition. The returned ConversationRepo exposes the same
+    surface: integrity_validator, integrity_mode, store_message,
+    get_conversation, plus the underlying BaseDB at ``store._db``.
+    """
+    db = make_db("sqlite", path=str(db_path))
+    repo = make_conversation_repo(db, integrity_config=integrity_config)
+    repo.create_tables()
+    return repo
+
 import pytest
 
 from beigebox.security.memory_integrity import (
@@ -634,7 +651,7 @@ class TestMigration:
 # ===========================================================================
 
 class TestIntegrationCycle:
-    """Integration tests using SQLiteStore with integrity enabled."""
+    """Integration tests using ConversationRepo with integrity enabled."""
 
     @pytest.mark.integration
     def test_store_and_verify_message(self, secret_key, tmp_path, monkeypatch):
@@ -645,9 +662,9 @@ class TestIntegrationCycle:
             f"base64:{base64.b64encode(secret_key).decode()}",
         )
 
-        from beigebox.storage.sqlite_store import SQLiteStore
+        
         db_path = str(tmp_path / "test.db")
-        store = SQLiteStore(db_path, integrity_config={
+        store = _make_store(db_path, integrity_config={
             "enabled": True,
             "mode": "log_only",
             "key_source": "env",
@@ -682,9 +699,9 @@ class TestIntegrationCycle:
             f"base64:{base64.b64encode(secret_key).decode()}",
         )
 
-        from beigebox.storage.sqlite_store import SQLiteStore
+        
         db_path = str(tmp_path / "test.db")
-        store = SQLiteStore(db_path, integrity_config={
+        store = _make_store(db_path, integrity_config={
             "enabled": True,
             "mode": "log_only",
             "key_source": "env",
@@ -702,11 +719,10 @@ class TestIntegrationCycle:
         store.store_message(msg, user_id="test_user")
 
         # Tamper with the stored message directly in the DB
-        with store._connect() as conn:
-            conn.execute(
-                "UPDATE messages SET content = ? WHERE id = ?",
-                ("INJECTED MALICIOUS CONTENT", msg.id),
-            )
+        store._db.execute(
+            "UPDATE messages SET content = ? WHERE id = ?",
+            ("INJECTED MALICIOUS CONTENT", msg.id),
+        )
 
         messages, integrity = store.get_conversation("conv_tamper_001", user_id="test_user")
         assert integrity["valid"] is False
@@ -721,9 +737,9 @@ class TestIntegrationCycle:
             f"base64:{base64.b64encode(secret_key).decode()}",
         )
 
-        from beigebox.storage.sqlite_store import SQLiteStore
+        
         db_path = str(tmp_path / "test.db")
-        store = SQLiteStore(db_path, integrity_config={
+        store = _make_store(db_path, integrity_config={
             "enabled": True,
             "mode": "strict",
             "key_source": "env",
@@ -741,11 +757,10 @@ class TestIntegrationCycle:
         store.store_message(msg, user_id="test_user")
 
         # Tamper
-        with store._connect() as conn:
-            conn.execute(
-                "UPDATE messages SET content = ? WHERE id = ?",
-                ("TAMPERED", msg.id),
-            )
+        store._db.execute(
+            "UPDATE messages SET content = ? WHERE id = ?",
+            ("TAMPERED", msg.id),
+        )
 
         with pytest.raises(ValueError, match="failed integrity check"):
             store.get_conversation("conv_strict_001", user_id="test_user")
@@ -753,9 +768,9 @@ class TestIntegrationCycle:
     @pytest.mark.integration
     def test_no_integrity_when_disabled(self, tmp_path):
         """With integrity disabled, store/load works normally."""
-        from beigebox.storage.sqlite_store import SQLiteStore
+        
         db_path = str(tmp_path / "test.db")
-        store = SQLiteStore(db_path, integrity_config={"enabled": False})
+        store = _make_store(db_path, integrity_config={"enabled": False})
 
         from beigebox.storage.models import Message
         msg = Message(
@@ -777,9 +792,9 @@ class TestIntegrationCycle:
         """In dev mode with no key, store works without signing."""
         monkeypatch.delenv("BEIGEBOX_MEMORY_KEY", raising=False)
 
-        from beigebox.storage.sqlite_store import SQLiteStore
+        
         db_path = str(tmp_path / "test.db")
-        store = SQLiteStore(db_path, integrity_config={
+        store = _make_store(db_path, integrity_config={
             "enabled": True,
             "mode": "log_only",
             "key_source": "env",
@@ -803,11 +818,11 @@ class TestIntegrationCycle:
     @pytest.mark.integration
     def test_unsigned_messages_backwards_compat(self, secret_key, tmp_path, monkeypatch):
         """Messages stored before integrity was enabled show as unsigned, not tampered."""
-        from beigebox.storage.sqlite_store import SQLiteStore
+        
 
         # First: store without integrity
         db_path = str(tmp_path / "test.db")
-        store1 = SQLiteStore(db_path, integrity_config={"enabled": False})
+        store1 = _make_store(db_path, integrity_config={"enabled": False})
 
         from beigebox.storage.models import Message
         msg = Message(
@@ -825,7 +840,7 @@ class TestIntegrationCycle:
             "BEIGEBOX_MEMORY_KEY",
             f"base64:{base64.b64encode(secret_key).decode()}",
         )
-        store2 = SQLiteStore(db_path, integrity_config={
+        store2 = _make_store(db_path, integrity_config={
             "enabled": True,
             "mode": "log_only",
             "key_source": "env",
@@ -1023,7 +1038,7 @@ class TestMemoryValidatorTool:
             f"base64:{base64.b64encode(secret_key).decode()}",
         )
 
-        from beigebox.storage.sqlite_store import SQLiteStore
+        
         from beigebox.storage.models import Message
         from beigebox.tools.memory_validator_tool import MemoryValidatorTool
 
@@ -1034,7 +1049,7 @@ class TestMemoryValidatorTool:
             "key_source": "env",
             "dev_mode": False,
         }
-        store = SQLiteStore(db_path, integrity_config=integrity_cfg)
+        store = _make_store(db_path, integrity_config=integrity_cfg)
 
         mv = MemoryValidator(integrity_cfg)
         tool = MemoryValidatorTool(validator=mv, store=store)
@@ -1064,7 +1079,7 @@ class TestMemoryValidatorTool:
             f"base64:{base64.b64encode(secret_key).decode()}",
         )
 
-        from beigebox.storage.sqlite_store import SQLiteStore
+        
         from beigebox.storage.models import Message
         from beigebox.tools.memory_validator_tool import MemoryValidatorTool
 
@@ -1075,7 +1090,7 @@ class TestMemoryValidatorTool:
             "key_source": "env",
             "dev_mode": False,
         }
-        store = SQLiteStore(db_path, integrity_config=integrity_cfg)
+        store = _make_store(db_path, integrity_config=integrity_cfg)
         mv = MemoryValidator(integrity_cfg)
         tool = MemoryValidatorTool(validator=mv, store=store)
 
@@ -1089,11 +1104,10 @@ class TestMemoryValidatorTool:
         store.store_message(msg, user_id="audit_user")
 
         # Tamper
-        with store._connect() as conn:
-            conn.execute(
-                "UPDATE messages SET content = ? WHERE id = ?",
-                ("TAMPERED", msg.id),
-            )
+        store._db.execute(
+            "UPDATE messages SET content = ? WHERE id = ?",
+            ("TAMPERED", msg.id),
+        )
 
         result = json.loads(tool.run(
             "audit session_id=conv_audit_001 user_id=audit_user quarantine=true"
@@ -1110,7 +1124,7 @@ class TestMemoryValidatorTool:
             f"base64:{base64.b64encode(secret_key).decode()}",
         )
 
-        from beigebox.storage.sqlite_store import SQLiteStore
+        
         from beigebox.storage.models import Message
         from beigebox.tools.memory_validator_tool import MemoryValidatorTool
 
@@ -1121,7 +1135,7 @@ class TestMemoryValidatorTool:
             "key_source": "env",
             "dev_mode": False,
         }
-        store = SQLiteStore(db_path, integrity_config=integrity_cfg)
+        store = _make_store(db_path, integrity_config=integrity_cfg)
         mv = MemoryValidator(integrity_cfg)
         tool = MemoryValidatorTool(validator=mv, store=store)
 
