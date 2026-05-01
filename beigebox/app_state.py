@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from beigebox.proxy import Proxy
     from beigebox.storage.sqlite_store import SQLiteStore
+    from beigebox.storage.db.base import BaseDB
+    from beigebox.storage.repos.api_keys import ApiKeyRepo
     from beigebox.storage.vector_store import VectorStore
     from beigebox.tools.registry import ToolRegistry
     from beigebox.hooks import HookManager
@@ -37,6 +39,8 @@ class AppState:
     proxy: Proxy | None = None
     tool_registry: ToolRegistry | None = None
     sqlite_store: SQLiteStore | None = None
+    db: BaseDB | None = None  # BaseDB shim shared by per-entity repos
+    api_keys: ApiKeyRepo | None = None
     vector_store: VectorStore | None = None
     blob_store: Any = None
     hook_manager: HookManager | None = None

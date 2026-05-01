@@ -187,6 +187,18 @@ async def lifespan(app: FastAPI):
     sqlite_path, vector_store_path = get_storage_paths(cfg)
     _integrity_cfg = cfg.get("security", {}).get("memory_integrity", {})
     sqlite_store = SQLiteStore(sqlite_path, integrity_config=_integrity_cfg)
+
+    # BaseDB shim — shared by per-entity repos.  First production caller is
+    # ApiKeyRepo (replaces sqlite_store.{create,verify,get,revoke}_api_key).
+    # Same sqlite file as SQLiteStore; both schemas use IF NOT EXISTS so they
+    # coexist during the gradual migration off sqlite_store.py.
+    from beigebox.storage.db import make_db, build_db_kwargs
+    from beigebox.storage.repos import make_api_key_repo
+    _db_type, _db_kwargs = build_db_kwargs(cfg, default_sqlite_path=sqlite_path)
+    db = make_db(_db_type, **_db_kwargs)
+    api_keys = make_api_key_repo(db)
+    api_keys.create_tables()
+
     _embed_cfg    = cfg["embedding"]
     from beigebox.storage.backends import (
         make_backend as _make_backend,
@@ -377,6 +389,8 @@ async def lifespan(app: FastAPI):
         proxy=proxy,
         tool_registry=tool_registry,
         sqlite_store=sqlite_store,
+        db=db,
+        api_keys=api_keys,
         vector_store=vector_store,
         blob_store=blob_store,
         hook_manager=hook_manager,
@@ -645,8 +659,8 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         meta = _app_state.auth_registry.validate(token)
 
         # If static key validation fails, try dynamic API keys from database
-        if meta is None and _app_state.sqlite_store and token:
-            user_id = _app_state.sqlite_store.verify_api_key(token)
+        if meta is None and _app_state.api_keys and token:
+            user_id = _app_state.api_keys.verify(token)
             if user_id:
                 # Create a pseudo-KeyMeta for dynamic keys
                 # Apply default rate limit from config (not unlimited)
@@ -1536,7 +1550,7 @@ async def create_api_key(request: Request):
     except:
         name = "default"
 
-    key_id, plain_key = st.sqlite_store.create_api_key(user_id, name)
+    key_id, plain_key = st.api_keys.create(user_id, name)
     return JSONResponse({
         "key_id": key_id,
         "key": plain_key,  # Only shown once at creation
@@ -1562,7 +1576,7 @@ async def list_api_keys(request: Request):
     else:
         return JSONResponse({"error": "OAuth not configured"}, status_code=501)
 
-    keys = st.sqlite_store.get_api_keys(user_id)
+    keys = st.api_keys.list_for_user(user_id)
     return JSONResponse({"keys": keys})
 
 
@@ -1583,7 +1597,7 @@ async def revoke_api_key(key_id: str, request: Request):
     else:
         return JSONResponse({"error": "OAuth not configured"}, status_code=501)
 
-    success = st.sqlite_store.revoke_api_key(key_id, user_id)
+    success = st.api_keys.revoke(key_id, user_id)
     if not success:
         return JSONResponse({"error": "Key not found or already revoked"}, status_code=404)
     return JSONResponse({"revoked": True})
