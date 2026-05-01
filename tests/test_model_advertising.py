@@ -5,7 +5,8 @@ Tests both advertise and hidden modes.
 
 import pytest
 from beigebox.proxy import Proxy
-from beigebox.storage.sqlite_store import SQLiteStore
+from beigebox.storage.db import make_db
+from beigebox.storage.repos import make_conversation_repo
 from beigebox.storage.vector_store import VectorStore
 
 pytest.importorskip("chromadb", reason="chromadb not installed — skipping model advertising tests")
@@ -14,13 +15,15 @@ pytest.importorskip("chromadb", reason="chromadb not installed — skipping mode
 @pytest.fixture
 def mock_proxy(tmp_path):
     """Create a mock proxy instance for testing."""
-    sqlite = SQLiteStore(str(tmp_path / "test.db"))
+    db = make_db("sqlite", path=str(tmp_path / "test.db"))
+    conversations = make_conversation_repo(db)
+    conversations.create_tables()
     vector = VectorStore(
         chroma_path=str(tmp_path / "chroma"),
         embedding_model="nomic-embed-text",
         embedding_url="http://localhost:11434"
     )
-    proxy = Proxy(sqlite=sqlite, vector=vector)
+    proxy = Proxy(conversations=conversations, vector=vector)
     return proxy
 
 
