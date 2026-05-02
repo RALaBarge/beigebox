@@ -44,29 +44,24 @@ Every helper that ends up on the Tap bus or in a structured store. If you're
 adding a new emit site, prefer extending one of these rather than introducing a
 new code path.
 
-| Function | Event type(s) | Captures | Sink |
-|---|---|---|---|
-| `logging.log_payload_event` | `payload` | source (proxy / proxy_response / proxy_stream / proxy_stream_response / operator…), model, backend, latency_ms, **`extra_meta`** (NormalizedRequest/Response.summary) | Tap + `payload.jsonl` |
-| `logging.log_request_started` / `_completed` | `request_started`, `request_completed` | model, tokens_in, tokens_out, latency, cost | Tap |
-| `logging.log_routing_decision` | `routing_decision` | tier, route, confidence, latency_ms | Tap |
-| `logging.log_backend_selection` | `backend_selection` | backend, model, reason | Tap |
-| `logging.log_decision_llm_call` | `decision_llm_result` | prompt_len, decision, confidence, latency_ms | Tap |
-| `logging.log_classifier_run` | `classifier_result` | scores, chosen_route, confidence | Tap |
-| `logging.log_embedding_decision` | `embedding_decision` | similarity, threshold, decision | Tap |
-| `logging.log_cache_event` | `cache_hit`, `cache_miss`, `cache_store` | cache_type, key_hash, similarity, ttl | Tap |
-| `logging.log_cost_event` | `cost_tracking` | source, model, cost, tokens, cost_per_token | Tap |
-| `logging.log_token_usage` | `token_usage` | component, model, prompt/completion/total tokens, cost | Tap |
-| `logging.log_latency_stage` | `latency_stage` | stage, latency_ms, details | Tap |
-| `logging.log_judge_scores` | `judge_score` | component, scores, weighted | Tap |
-| `logging.log_model_selection` | `model_selection` | context, model, reason | Tap |
-| `logging.log_tool_call` | `tool_call` | tool, status, latency_ms, error | Tap |
-| `logging.log_harness_turn` | `harness_turn` | run_id, turn, model, tokens, status | Tap |
-| `logging.log_error_event` | `error` | component, severity, message | Tap |
-| `logging.log_extraction_attempt` | `extraction_attempt_detected` | session_id, risk_level, confidence, triggers | Tap *(emitted from `Proxy._run_request_pipeline` for HIGH/CRITICAL)* |
-| `logging.log_hook_execution` | `hook_pre_request`, `hook_post_response` | stage, hook_names (success), errors (failures), total_latency_ms | Tap |
-| `logging.log_z_command` | `z_command_received`, `z_command_executed`, `z_command_error` | status, directives, route, model, tools, branch, error | Tap |
-| `logging.log_security_anomaly` | `security_anomaly` | detector_type, action, confidence, reason, *(per-detector extras)* | Tap |
-| `logging.log_amf_event` | `amf_advertise`, `amf_heartbeat`, `amf_unregister` | transport, status, agent_id, endpoint, error | Tap |
+All side-channel logging now flows through typed event envelopes
+(`beigebox/log_events.py`). The 9 thin wrappers in `beigebox/logging.py`
+build the appropriate envelope and dispatch through `emit()` to the
+production WireLog (set via `set_wire_log` at lifespan startup). WireLog
+fans out to three sinks: JSONL (`./data/wire.jsonl`), SQLite
+`wire_events` (via WireEventRepo), and Postgres `wire_events` (when
+`storage.postgres.connection_string` is set).
+
+| Function | Envelope | Event type(s) | Captures | Sinks |
+|---|---|---|---|---|
+| `logging.log_payload_event` | `PayloadEvent` | `payload` | source, model, backend, latency_ms, **`extra_meta`** (NormalizedRequest/Response.summary) — full body also written to `payload.jsonl` (separate concern) | JSONL + SQLite + Postgres + `payload.jsonl` |
+| `logging.log_request_started` / `_completed` | `RequestLifecycleEvent` | `request_started`, `request_completed` | model, tokens_in, tokens_out, latency, cost | JSONL + SQLite + Postgres |
+| `logging.log_backend_selection` | `RoutingEvent` | `backend_selection` | backend, model, reason | JSONL + SQLite + Postgres |
+| `logging.log_tool_call` | `ToolExecutionEvent` | `tool_call` | tool, status, latency_ms, error, source (tools / mcp / pen-mcp / cdp), extra | JSONL + SQLite + Postgres |
+| `logging.log_error_event` | `ErrorEvent` | `error` | component, severity, message | JSONL + SQLite + Postgres |
+| `logging.log_extraction_attempt` | `ErrorEvent` | `extraction_attempt_detected` | session_id, risk_level, confidence, triggers, reason | JSONL + SQLite + Postgres *(emitted from `Proxy._run_request_pipeline` for HIGH/CRITICAL)* |
+| `logging.log_hook_execution` | `HookExecutionEvent` | `hook_pre_request`, `hook_post_response` | stage, hook_names (success), errors (failures), total_latency_ms | JSONL + SQLite + Postgres |
+| `logging.log_security_anomaly` | `ErrorEvent` | `security_anomaly` | detector_type, action, confidence, reason, *(per-detector extras)* | JSONL + SQLite + Postgres |
 | `proxy.wire.log` | varies (`cache_hit`, `wasm`, `validation_warn`, `guardrail_block`, …) | model, conversation_id, content, meta | Tap + SQLite |
 | `proxy._log_messages` / `_log_response` | (no event_type) | conversation_id, role, content, model, cost, latency | Tap + SQLite |
 | `operator._wire(event_type, …)` | `operator_*` family | run_id, content, model, tokens, elapsed_ms, meta | Tap + SQLite |
