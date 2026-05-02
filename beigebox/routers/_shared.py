@@ -4,18 +4,44 @@ Helpers are extracted from beigebox/main.py incrementally, alongside
 the first router commit that needs each one:
 
 - ``_wire_and_forward``   → arrived with routers/openai.py (B-2)
-- ``_require_admin``      → moves with routers/auth.py (B-3)
-- ``_emit_auth_denied``   → moves with routers/auth.py (B-3)
+- ``_require_admin``      → arrived with routers/auth.py (B-3)
 - ``_index_document``     → moves with routers/workspace.py (B-4)
+
+``_emit_auth_denied`` stays in beigebox/main.py because only the
+ApiKeyMiddleware and WebAuthMiddleware (which live there) use it.
 """
 from __future__ import annotations
 
 import httpx
 from fastapi import Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from beigebox.config import get_config, get_primary_backend_url
-from beigebox.state import get_state
+from beigebox.state import get_state, maybe_state
+
+
+def _require_admin(request: Request) -> JSONResponse | None:
+    """Gate handler: returns a 403 JSONResponse if the calling key is not admin.
+
+    Returns None when the key is admin (handler should proceed).
+
+    Auth-disabled mode (no keys configured) is treated as admin-allowed since
+    the operator running an unauthed proxy is implicitly trusting all callers.
+    """
+    state = maybe_state()
+    if state is None or state.auth_registry is None or not state.auth_registry.is_enabled():
+        return None
+    meta = getattr(request.state, "auth_key", None)
+    if meta is not None and getattr(meta, "admin", False):
+        return None
+    return JSONResponse(
+        {"error": {
+            "message": "Admin key required for this endpoint.",
+            "type": "permission_denied",
+            "code": "admin_required",
+        }},
+        status_code=403,
+    )
 
 
 async def _wire_and_forward(
