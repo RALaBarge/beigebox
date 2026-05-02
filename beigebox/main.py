@@ -18,30 +18,23 @@ Now with:
 
 import asyncio
 import logging
-import os
-import secrets
-import time
 import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, Request, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse, FileResponse, HTMLResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from beigebox import __version__ as _BB_VERSION
-from beigebox.constants import DEFAULT_MODEL, DEFAULT_ROUTING_MODEL, DEFAULT_AGENTIC_MODEL, DEFAULT_SUMMARY_MODEL, DEFAULT_EMBEDDING_MODEL
 from beigebox.config import (
     get_config,
-    get_runtime_config,
-    update_runtime_config,
     get_effective_backends_config,
     get_storage_paths,
-    get_primary_backend_url,
 )
 from beigebox.proxy import Proxy
 from beigebox.storage.vector_store import VectorStore
@@ -62,7 +55,6 @@ except ImportError:
 from beigebox.mcp_server import McpServer
 from beigebox.app_state import AppState
 from beigebox.observability.egress import build_egress_hooks, start_egress_hooks, stop_egress_hooks
-from beigebox.metrics import collect_system_metrics_async
 
 
 logger = logging.getLogger(__name__)
@@ -340,8 +332,6 @@ async def lifespan(app: FastAPI):
         logger.info("Model extraction detection: disabled")
 
     # Security Audit & Detection Modules (P1 Security Hardening)
-    from beigebox.security.audit_logger import AuditLogger
-    from beigebox.security.honeypots import HoneypotManager
     from beigebox.security.enhanced_injection_guard import EnhancedInjectionGuard
     from beigebox.security.rag_content_scanner import RAGContentScanner
 
@@ -661,7 +651,6 @@ def _emit_auth_denied(reason_code: str, principal_name: str, principal_type: str
 
 # _require_admin moved to routers/_shared.py (B-3) — used by auth, config,
 # and toolbox routers. Imported here for the in-file admin-gated endpoints.
-from beigebox.routers._shared import _require_admin  # noqa: E402
 
 
 class ApiKeyMiddleware(BaseHTTPMiddleware):
@@ -877,19 +866,13 @@ app.add_middleware(SecurityHeadersMiddleware)
 from beigebox.routers.openai import router as openai_router  # noqa: E402
 from beigebox.routers.auth import router as auth_router  # noqa: E402
 from beigebox.routers.security import router as security_router  # noqa: E402
-from beigebox.routers.workspace import (  # noqa: E402
+from beigebox.routers.workspace import (  # noqa: E402,F401
     router as workspace_router,
     # Re-exports so existing test imports (`from beigebox.main import
     # api_workspace`, etc.) keep working without churning ~30 test sites.
     api_workspace,
-    api_workspace_mounts_add,
-    api_workspace_mounts_delete,
     api_workspace_delete,
     api_workspace_upload,
-    api_transform_pdf,
-    api_conversation_replay,
-    api_conversation_fork,
-    toggle_vi_mode,
 )
 from beigebox.routers.analytics import router as analytics_router  # noqa: E402
 from beigebox.routers.tools import router as tools_router  # noqa: E402
