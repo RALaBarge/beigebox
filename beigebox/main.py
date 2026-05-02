@@ -70,14 +70,12 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Application state — initialized during lifespan startup
 # ---------------------------------------------------------------------------
-_app_state: AppState | None = None
-
-
-def get_state() -> AppState:
-    """Return the initialized AppState. Raises if called before startup."""
-    if _app_state is None:
-        raise RuntimeError("AppState not initialized — server not started yet")
-    return _app_state
+# The state singleton lives in beigebox/state.py so router modules can
+# reach it without an import cycle through main.py. Re-exported here so
+# existing callers of ``from beigebox.main import get_state`` keep
+# working. In-file middleware that referenced the legacy module-level
+# ``_app_state`` global has been migrated to ``maybe_state()``.
+from beigebox.state import get_state, maybe_state, set_state
 
 
 def _setup_logging(cfg: dict):
@@ -172,8 +170,6 @@ async def _preload_embedding_model(cfg: dict):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
-    global _app_state
-
     cfg = get_config()
     _setup_logging(cfg)
     logger = logging.getLogger(__name__)
@@ -445,7 +441,7 @@ async def lifespan(app: FastAPI):
         _aad_tool.set_detector(proxy.anomaly_detector)
         logger.info("APIAnomalyDetectorTool bound to proxy anomaly detector")
 
-    _app_state = AppState(
+    set_state(AppState(
         proxy=proxy,
         tool_registry=tool_registry,
         db=db,
@@ -471,7 +467,7 @@ async def lifespan(app: FastAPI):
         injection_guard=injection_guard,
         rag_scanner=rag_scanner,
         egress_hooks=egress_hooks,
-    )
+    ))
 
     from beigebox.config import get_primary_backend_url
     logger.info(
@@ -604,10 +600,11 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("BeigeBox shutting down")
-    if _app_state and _app_state.egress_hooks:
-        await stop_egress_hooks(_app_state.egress_hooks)
-    if _app_state and _app_state.proxy and _app_state.proxy.wire:
-        _app_state.proxy.wire.close()
+    _final_state = maybe_state()
+    if _final_state and _final_state.egress_hooks:
+        await stop_egress_hooks(_final_state.egress_hooks)
+    if _final_state and _final_state.proxy and _final_state.proxy.wire:
+        _final_state.proxy.wire.close()
     from beigebox.payload_log import close as _pl_close
     _pl_close()
     logger.info("Wiretap and payload log flushed and closed")
@@ -635,7 +632,7 @@ def _emit_auth_denied(reason_code: str, principal_name: str, principal_type: str
     (not silently swallow) the failure so a broken wire dispatcher surfaces
     in the stdlib log instead of disappearing.
     """
-    if not (_app_state and _app_state.proxy and _app_state.proxy.wire):
+    if not (maybe_state() and maybe_state().proxy and maybe_state().proxy.wire):
         return
     meta: dict = {
         "reason_code": reason_code,
@@ -650,7 +647,7 @@ def _emit_auth_denied(reason_code: str, principal_name: str, principal_type: str
         except Exception:  # request introspection — keep meta partial on failure
             pass
     try:
-        _app_state.proxy.wire.log(
+        maybe_state().proxy.wire.log(
             direction="inbound",
             role="auth",
             content=f"deny {reason_code}: {principal_name or '?'} → {endpoint_path}",
@@ -670,7 +667,7 @@ def _require_admin(request: Request) -> JSONResponse | None:
     Auth-disabled mode (no keys configured) is treated as admin-allowed since
     the operator running an unauthed proxy is implicitly trusting all callers.
     """
-    if _app_state is None or _app_state.auth_registry is None or not _app_state.auth_registry.is_enabled():
+    if maybe_state() is None or maybe_state().auth_registry is None or not maybe_state().auth_registry.is_enabled():
         return None
     meta = getattr(request.state, "auth_key", None)
     if meta is not None and getattr(meta, "admin", False):
@@ -704,7 +701,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        if _app_state is None or _app_state.auth_registry is None or not _app_state.auth_registry.is_enabled():
+        if maybe_state() is None or maybe_state().auth_registry is None or not maybe_state().auth_registry.is_enabled():
             return await call_next(request)
 
         path = request.url.path
@@ -719,11 +716,11 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         else:
             token = request.headers.get("api-key", "")
 
-        meta = _app_state.auth_registry.validate(token)
+        meta = maybe_state().auth_registry.validate(token)
 
         # If static key validation fails, try dynamic API keys from database
-        if meta is None and _app_state.api_keys and token:
-            user_id = _app_state.api_keys.verify(token)
+        if meta is None and maybe_state().api_keys and token:
+            user_id = maybe_state().api_keys.verify(token)
             if user_id:
                 # Create a pseudo-KeyMeta for dynamic keys
                 # Apply default rate limit from config (not unlimited)
@@ -752,7 +749,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             )
 
         # Rate limit
-        if not _app_state.auth_registry.check_rate_limit(meta):
+        if not maybe_state().auth_registry.check_rate_limit(meta):
             _emit_auth_denied("rate_limit_exceeded", meta.name, "api_key", path, request)
             return JSONResponse(
                 {
@@ -766,7 +763,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             )
 
         # Endpoint ACL
-        if not _app_state.auth_registry.check_endpoint(meta, path):
+        if not maybe_state().auth_registry.check_endpoint(meta, path):
             _emit_auth_denied("endpoint_not_allowed", meta.name, "api_key", path, request)
             return JSONResponse(
                 {
@@ -802,12 +799,12 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        if _app_state is None:
+        if maybe_state() is None:
             return await call_next(request)
 
         # Check if either OAuth or password auth is enabled
-        oauth_enabled = _app_state.web_auth is not None and _app_state.web_auth.is_enabled()
-        password_auth_enabled = _app_state.password_auth is not None
+        oauth_enabled = maybe_state().web_auth is not None and maybe_state().web_auth.is_enabled()
+        password_auth_enabled = maybe_state().password_auth is not None
 
         if not (oauth_enabled or password_auth_enabled):
             return await call_next(request)
@@ -827,11 +824,11 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
         token = request.cookies.get(COOKIE_SESSION, "")
         user = None
 
-        if oauth_enabled and _app_state.web_auth:
-            user = _app_state.web_auth.verify_session(token) if token else None
+        if oauth_enabled and maybe_state().web_auth:
+            user = maybe_state().web_auth.verify_session(token) if token else None
 
-        if user is None and password_auth_enabled and _app_state.password_auth:
-            user = _app_state.password_auth.verify_session(token) if token else None
+        if user is None and password_auth_enabled and maybe_state().password_auth:
+            user = maybe_state().password_auth.verify_session(token) if token else None
 
         if user is None:
             from starlette.responses import RedirectResponse
@@ -839,7 +836,7 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
             if password_auth_enabled:
                 return RedirectResponse(url="/auth/login", status_code=302)
             else:
-                providers = _app_state.web_auth.list_providers()
+                providers = maybe_state().web_auth.list_providers()
                 login_path = f"/auth/{providers[0]}/login" if providers else "/"
                 return RedirectResponse(url=login_path, status_code=302)
 
