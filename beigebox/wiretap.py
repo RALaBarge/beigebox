@@ -226,8 +226,18 @@ class WireLog:
                 "tool_id": tool_id,
                 "meta": _meta if _meta else None,
             }
+            # Per-sink try/except so one failing sink doesn't drop the
+            # others. PostgresWireSink can fail when the network blips
+            # or the postgres container restarts; we don't want that to
+            # take JSONL + SQLite down with it.
             for sink in self._extra_sinks:
-                sink.write(sqlite_event)
+                try:
+                    sink.write(sqlite_event)
+                except Exception as exc:
+                    logger.warning(
+                        "WireLog sink %s.write failed: %s",
+                        type(sink).__name__, exc,
+                    )
 
     def write_request(self, req) -> None:
         """Emit one ``model_request_normalized`` event for a captured request.
