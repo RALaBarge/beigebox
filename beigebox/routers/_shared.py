@@ -5,12 +5,15 @@ the first router commit that needs each one:
 
 - ``_wire_and_forward``   → arrived with routers/openai.py (B-2)
 - ``_require_admin``      → arrived with routers/auth.py (B-3)
-- ``_index_document``     → moves with routers/workspace.py (B-4)
+- ``_index_document``     → arrived with routers/workspace.py (B-4)
 
 ``_emit_auth_denied`` stays in beigebox/main.py because only the
 ApiKeyMiddleware and WebAuthMiddleware (which live there) use it.
 """
 from __future__ import annotations
+
+import logging
+from pathlib import Path
 
 import httpx
 from fastapi import Request
@@ -110,3 +113,51 @@ async def _wire_and_forward(
                 )
 
     return StreamingResponse(_stream(), media_type="application/octet-stream")
+
+
+def _index_document(file_path: Path, vs, bs) -> None:
+    """Parse, chunk, embed, and store a workspace document. Runs in a thread.
+
+    Used by the workspace upload endpoint and (in B-6) the toolbox skill
+    indexing flow. PDF parsing falls back to a warning + skip if the
+    pdf_oxide module isn't available.
+    """
+    from beigebox.storage.chunker import chunk_text
+    log = logging.getLogger(__name__)
+    source = file_path.name
+    suffix = file_path.suffix.lower()
+
+    try:
+        if suffix == ".pdf":
+            try:
+                import pdf_oxide as pox
+                doc = pox.PdfDocument(str(file_path))
+                parts = []
+                for i in range(doc.page_count()):
+                    md = doc.to_markdown(i, detect_headings=True)
+                    if md.strip():
+                        parts.append(md)
+                text = "\n\n".join(parts)
+            except Exception as e:
+                log.warning("_index_document: pdf_oxide failed for %s: %s", source, e)
+                return
+        else:
+            text = file_path.read_text(encoding="utf-8", errors="replace")
+
+        if not text.strip():
+            log.info("_index_document: %s is empty, skipping", source)
+            return
+
+        chunks = chunk_text(text, source_file=source)
+        for chunk in chunks:
+            blob_hash = bs.write(chunk["text"])
+            vs.store_document_chunk(
+                source_file=source,
+                chunk_index=chunk["chunk_index"],
+                char_offset=chunk["char_offset"],
+                blob_hash=blob_hash,
+                text=chunk["text"],
+            )
+        log.info("_index_document: indexed %d chunks from %s", len(chunks), source)
+    except Exception as e:
+        log.error("_index_document failed for %s: %s", source, e)

@@ -42,7 +42,7 @@ class TestApiWorkspaceList:
         ws = tmp_path / "workspace"
         (ws / "in").mkdir(parents=True)
         (ws / "out").mkdir(parents=True)
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             data = _parse(run(api_workspace()))
         assert data["in"] == []
         assert data["out"] == []
@@ -56,7 +56,7 @@ class TestApiWorkspaceList:
         (ws / "out").mkdir(parents=True)
         (ws / "in" / "data.csv").write_text("col1,col2\n")
         (ws / "out" / "report.md").write_text("# Result\n")
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             data = _parse(run(api_workspace()))
         assert len(data["in"]) == 1
         assert data["in"][0]["name"] == "data.csv"
@@ -68,7 +68,7 @@ class TestApiWorkspaceList:
         ws = tmp_path / "workspace"
         (ws / "out").mkdir(parents=True)
         (ws / "out" / "a.txt").write_bytes(b"hello")
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             data = _parse(run(api_workspace()))
         entry = data["out"][0]
         assert entry["size"] == 5
@@ -81,7 +81,7 @@ class TestApiWorkspaceList:
         (ws / "in").mkdir(parents=True)
         (ws / "in" / ".gitkeep").write_text("")
         (ws / "in" / "real.txt").write_text("hi")
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             data = _parse(run(api_workspace()))
         names = [e["name"] for e in data["in"]]
         assert ".gitkeep" not in names
@@ -90,7 +90,7 @@ class TestApiWorkspaceList:
     def test_nonexistent_dirs_return_empty(self, tmp_path):
         from beigebox.main import api_workspace
         ws = tmp_path / "workspace"  # not created
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             data = _parse(run(api_workspace()))
         assert data["in"] == []
         assert data["out"] == []
@@ -98,7 +98,7 @@ class TestApiWorkspaceList:
     def test_max_mb_included_in_response(self, tmp_path):
         from beigebox.main import api_workspace
         ws = tmp_path / "workspace"
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws, max_mb=200)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws, max_mb=200)):
             data = _parse(run(api_workspace()))
         assert data["max_mb"] == 200
 
@@ -108,7 +108,7 @@ class TestApiWorkspaceList:
         (ws / "out").mkdir(parents=True)
         (ws / "out" / "a.bin").write_bytes(b"x" * 100)
         (ws / "out" / "b.bin").write_bytes(b"y" * 200)
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             data = _parse(run(api_workspace()))
         assert data["out_bytes"] == 300
 
@@ -119,7 +119,7 @@ class TestApiWorkspaceList:
         (ws / "out" / "z.txt").write_text("z")
         (ws / "out" / "a.txt").write_text("a")
         (ws / "out" / "m.txt").write_text("m")
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             data = _parse(run(api_workspace()))
         names = [e["name"] for e in data["out"]]
         assert names == ["a.txt", "m.txt", "z.txt"]
@@ -134,7 +134,7 @@ class TestApiWorkspaceDelete:
         (ws / "out").mkdir(parents=True)
         f = ws / "out" / "report.md"
         f.write_text("done")
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             result = run(api_workspace_delete("report.md"))
         data = _parse(result)
         assert data["ok"] is True
@@ -144,7 +144,7 @@ class TestApiWorkspaceDelete:
         from beigebox.main import api_workspace_delete
         ws = tmp_path / "workspace"
         (ws / "out").mkdir(parents=True)
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             result = run(api_workspace_delete("ghost.txt"))
         assert result.status_code == 404
         assert _parse(result)["ok"] is False
@@ -152,7 +152,7 @@ class TestApiWorkspaceDelete:
     def test_slash_in_filename_blocked(self, tmp_path):
         from beigebox.main import api_workspace_delete
         ws = tmp_path / "workspace"
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             result = run(api_workspace_delete("../secret.txt"))
         assert result.status_code == 400
         assert _parse(result)["ok"] is False
@@ -160,7 +160,7 @@ class TestApiWorkspaceDelete:
     def test_dotdot_alone_blocked(self, tmp_path):
         from beigebox.main import api_workspace_delete
         ws = tmp_path / "workspace"
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             result = run(api_workspace_delete(".."))
         assert result.status_code == 400
         assert _parse(result)["ok"] is False
@@ -168,7 +168,7 @@ class TestApiWorkspaceDelete:
     def test_dotdot_in_name_blocked(self, tmp_path):
         from beigebox.main import api_workspace_delete
         ws = tmp_path / "workspace"
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             result = run(api_workspace_delete("file..evil"))
         assert result.status_code == 400
         assert _parse(result)["ok"] is False
@@ -181,7 +181,7 @@ class TestApiWorkspaceDelete:
         in_file = ws / "in" / "protected.txt"
         in_file.write_text("keep me")
         # out/protected.txt doesn't exist — should 404, not touch in/
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             result = run(api_workspace_delete("protected.txt"))
         assert result.status_code == 404
         assert in_file.exists()  # in/ file untouched
@@ -194,7 +194,7 @@ class TestApiWorkspaceUpload:
         from beigebox.main import api_workspace_upload
         ws = tmp_path / "workspace"
         upload = _make_upload("data.csv", b"col1,col2\n1,2\n")
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             result = run(api_workspace_upload(upload))
         data = _parse(result)
         assert data["ok"] is True
@@ -206,7 +206,7 @@ class TestApiWorkspaceUpload:
         from beigebox.main import api_workspace_upload
         ws = tmp_path / "workspace"
         upload = _make_upload("new.txt", b"hello")
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             run(api_workspace_upload(upload))
         assert (ws / "in").is_dir()
 
@@ -214,7 +214,7 @@ class TestApiWorkspaceUpload:
         from beigebox.main import api_workspace_upload
         ws = tmp_path / "workspace"
         upload = _make_upload(None, b"data")
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             data = _parse(run(api_workspace_upload(upload)))
         assert data["ok"] is True
         assert data["name"] == "upload"
@@ -224,7 +224,7 @@ class TestApiWorkspaceUpload:
         ws = tmp_path / "workspace"
         # A path like "subdir/file.txt" — .name strips the directory part
         upload = _make_upload("subdir/file.txt", b"hi")
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             data = _parse(run(api_workspace_upload(upload)))
         assert data["ok"] is True
         assert data["name"] == "file.txt"
@@ -235,7 +235,7 @@ class TestApiWorkspaceUpload:
         ws = tmp_path / "workspace"
         # "..evil" — after Path.name extraction: "..evil"; ".." in "..evil" is True
         upload = _make_upload("..evil", b"bad")
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             data = _parse(run(api_workspace_upload(upload)))
         assert data["ok"] is False
 
@@ -244,7 +244,7 @@ class TestApiWorkspaceUpload:
         ws = tmp_path / "workspace"
         content = bytes(range(256))
         upload = _make_upload("binary.bin", content)
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             data = _parse(run(api_workspace_upload(upload)))
         assert data["ok"] is True
         assert (ws / "in" / "binary.bin").read_bytes() == content
@@ -255,7 +255,7 @@ class TestApiWorkspaceUpload:
         (ws / "in").mkdir(parents=True)
         (ws / "in" / "existing.txt").write_bytes(b"old content")
         upload = _make_upload("existing.txt", b"new content")
-        with patch("beigebox.main.get_config", return_value=_ws_cfg(ws)):
+        with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             data = _parse(run(api_workspace_upload(upload)))
         assert data["ok"] is True
         assert (ws / "in" / "existing.txt").read_bytes() == b"new content"

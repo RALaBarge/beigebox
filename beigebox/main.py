@@ -876,9 +876,26 @@ app.add_middleware(SecurityHeadersMiddleware)
 
 from beigebox.routers.openai import router as openai_router  # noqa: E402
 from beigebox.routers.auth import router as auth_router  # noqa: E402
+from beigebox.routers.security import router as security_router  # noqa: E402
+from beigebox.routers.workspace import (  # noqa: E402
+    router as workspace_router,
+    # Re-exports so existing test imports (`from beigebox.main import
+    # api_workspace`, etc.) keep working without churning ~30 test sites.
+    api_workspace,
+    api_workspace_mounts_add,
+    api_workspace_mounts_delete,
+    api_workspace_delete,
+    api_workspace_upload,
+    api_transform_pdf,
+    api_conversation_replay,
+    api_conversation_fork,
+    toggle_vi_mode,
+)
 
 app.include_router(openai_router)
 app.include_router(auth_router)
+app.include_router(security_router)
+app.include_router(workspace_router)
 
 
 # OpenAI-compat + Ollama passthrough endpoints live in routers/openai.py
@@ -891,168 +908,8 @@ app.include_router(auth_router)
 # BeigeBox-specific endpoints
 # ---------------------------------------------------------------------------
 
-@app.get("/beigebox/stats")
-async def stats():
-    """Return storage and usage statistics."""
-    _st = get_state()
-    sqlite_stats = _st.conversations.get_stats() if _st.conversations else {}
-    vector_stats = _st.vector_store.get_stats() if _st.vector_store else {}
-    tools = _st.tool_registry.list_tools() if _st.tool_registry else []
-    hooks = _st.hook_manager.list_hooks() if _st.hook_manager else []
-
-    return JSONResponse({
-        "sqlite": sqlite_stats,
-        "vector": vector_stats,
-        "tools": tools,
-        "hooks": hooks,
-    })
-
-
-@app.get("/metrics/quarantine")
-async def metrics_quarantine(format: str = "json"):
-    """Get RAG poisoning quarantine metrics."""
-    from beigebox.observability.poisoning_metrics import PoisoningMetrics
-    _st = get_state()
-
-    if not _st.quarantine:
-        return JSONResponse({"error": "Quarantine repo not initialized"}, status_code=503)
-
-    metrics = PoisoningMetrics(_st.quarantine)
-
-    if format == "prometheus":
-        return Response(
-            content=metrics.get_prometheus_format(),
-            media_type="text/plain; version=0.0.4",
-        )
-    else:  # json
-        return JSONResponse(metrics.get_json_metrics())
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Security Control Plane Endpoints (P1 Audit, Detection, Forensics)
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.get("/api/v1/security/status")
-async def security_status():
-    """Aggregate status of all security subsystems (6 modules)."""
-    _st = get_state()
-    return JSONResponse({
-        "audit_logger": {
-            "enabled": _st.audit_logger is not None,
-            "stats": _st.audit_logger.get_stats() if _st.audit_logger else {}
-        },
-        "honeypots": {
-            "enabled": _st.honeypot_manager is not None,
-            "trap_count": len(_st.honeypot_manager.traps) if _st.honeypot_manager else 0
-        },
-        "injection_guard": {
-            "enabled": _st.injection_guard is not None,
-            "quarantined": len(_st.injection_guard._quarantine) if _st.injection_guard else 0
-        },
-        "rag_scanner": {
-            "enabled": _st.rag_scanner is not None,
-            "quarantined": len(_st.rag_scanner._quarantine) if _st.rag_scanner else 0
-        },
-        "extraction_detector": {
-            "enabled": _st.extraction_detector is not None,
-            "active_sessions": len(_st.extraction_detector._sessions) if _st.extraction_detector else 0
-        },
-        "anomaly_detector": {
-            "enabled": _st.proxy.anomaly_detector is not None if _st.proxy else False
-        }
-    })
-
-
-@app.get("/api/v1/security/audit")
-async def security_audit(hours: int = 24, severity: str = "", tool: str = "", limit: int = 100):
-    """Queryable audit log with filters: severity, tool, hours."""
-    _st = get_state()
-    if not _st.audit_logger:
-        return JSONResponse({"error": "Audit logger not initialized"}, status_code=503)
-
-    stats = _st.audit_logger.get_stats(hours=hours)
-    entries = _st.audit_logger.search_denials(
-        severity=severity or None,
-        tool=tool or None,
-        limit=limit,
-        hours=hours
-    )
-    return JSONResponse({"stats": stats, "entries": entries})
-
-
-@app.get("/api/v1/security/audit/patterns")
-async def security_patterns(hours: int = 24):
-    """Detect suspicious patterns (many denials, rapid calls, etc.)."""
-    _st = get_state()
-    if not _st.audit_logger:
-        return JSONResponse({"error": "Audit logger not initialized"}, status_code=503)
-
-    patterns = _st.audit_logger.search_suspicious_patterns(hours=hours, threshold=1)
-    return JSONResponse({"patterns": patterns})
-
-
-@app.get("/api/v1/security/injection/stats")
-async def injection_stats():
-    """Injection guard quarantine statistics."""
-    _st = get_state()
-    if not _st.injection_guard:
-        return JSONResponse({"enabled": False, "message": "Injection guard not initialized"}, status_code=503)
-
-    stats = _st.injection_guard.get_quarantine_stats()
-    return JSONResponse(stats)
-
-
-@app.get("/api/v1/security/rag/quarantine")
-async def rag_quarantine():
-    """RAG scanner quarantine queue with confidence breakdown."""
-    _st = get_state()
-    if not _st.rag_scanner:
-        return JSONResponse({"enabled": False, "message": "RAG scanner not initialized"}, status_code=503)
-
-    stats = _st.rag_scanner.get_quarantine_stats()
-    contents = _st.rag_scanner.get_quarantine_contents()
-    return JSONResponse({"stats": stats, "entries": contents})
-
-
-@app.get("/api/v1/security/extraction/sessions")
-async def extraction_sessions():
-    """All active extraction detector sessions with risk levels."""
-    _st = get_state()
-    if not _st.extraction_detector:
-        return JSONResponse({"enabled": False, "message": "Extraction detector not initialized"}, status_code=503)
-
-    sessions = []
-    for session_id, metrics in _st.extraction_detector._sessions.items():
-        analysis = _st.extraction_detector.analyze_pattern(session_id)
-        sessions.append(analysis)
-    return JSONResponse({"sessions": sessions})
-
-
-@app.get("/api/v1/security/honeypots")
-async def honeypots_list():
-    """Honeypot trap definitions and status."""
-    _st = get_state()
-    if not _st.honeypot_manager:
-        return JSONResponse({"enabled": False, "message": "Honeypot manager not initialized"}, status_code=503)
-
-    traps = _st.honeypot_manager.get_honeypot_definitions()
-    # Get recent honeypot triggers from audit log
-    recent_triggers = []
-    if _st.audit_logger:
-        triggers = _st.audit_logger.search_bypass_attempts(limit=20)
-        recent_triggers = triggers
-
-    return JSONResponse({"traps": traps, "recent_triggers": recent_triggers})
-
-
-@app.get("/beigebox/search")
-async def search_conversations(q: str, n: int = 5, role: str | None = None):
-    """Semantic search over stored conversations (raw message hits)."""
-    _st = get_state()
-    if not _st.vector_store:
-        return JSONResponse({"error": "Vector store not initialized"}, status_code=503)
-    results = _st.vector_store.search(q, n_results=n, role_filter=role)
-    return JSONResponse({"query": q, "results": results})
+# /beigebox/stats, /metrics/quarantine, /api/v1/security/*, /beigebox/search,
+# /api/v1/search, /beigebox/health all moved to routers/security.py (B-4).
 
 
 _MCP_REQUEST_BODY_LIMIT = 1_048_576  # 1 MiB — caps raw bytes BEFORE json.loads
@@ -1153,17 +1010,7 @@ async def pen_mcp_endpoint(request: Request):
 # /api/v1/zcommands removed in v3 — z-command parsing was deleted.
 
 
-@app.get("/api/v1/search")
-async def api_search_conversations(q: str, n: int = 5, role: str | None = None):
-    """
-    Semantic search grouped by conversation.
-    Returns conversations ranked by best message match, with excerpt.
-    """
-    _st = get_state()
-    if not _st.vector_store:
-        return JSONResponse({"error": "Vector store not initialized"}, status_code=503)
-    results = _st.vector_store.search_grouped(q, n_conversations=n, role_filter=role)
-    return JSONResponse({"query": q, "results": results, "count": len(results)})
+# /api/v1/search moved to routers/security.py (B-4).
 
 
 @app.get("/.well-known/agent-card.json")
@@ -1190,17 +1037,7 @@ async def agent_card():
     })
 
 
-@app.get("/beigebox/health")
-async def health():
-    """Health check."""
-    _st = get_state()
-    cfg = get_config()
-    return JSONResponse({
-        "status": "ok",
-        "version": _BB_VERSION,
-        "backend_url": cfg.get("backend", {}).get("url", "http://localhost:11434").rstrip("/"),
-        "rag_poisoning_detection": "enabled" if _st.poisoning_detector else "disabled",
-    })
+# /beigebox/health moved to routers/security.py (B-4).
 
 
 
@@ -2511,90 +2348,7 @@ async def api_system_metrics():
 # Conversation Replay (v0.6)
 # ---------------------------------------------------------------------------
 
-@app.get("/api/v1/conversation/{conv_id}/replay")
-async def api_conversation_replay(conv_id: str):
-    """Reconstruct a conversation with full routing context."""
-    cfg = get_config()
-    rt = get_runtime_config()
-    # Check runtime config first, fall back to static config
-    if "conversation_replay_enabled" in rt:
-        replay_enabled = rt.get("conversation_replay_enabled")
-    else:
-        replay_enabled = cfg.get("conversation_replay", {}).get("enabled", False)
-    if not replay_enabled:
-        return JSONResponse({
-            "enabled": False,
-            "message": "Conversation replay is disabled. Enable it in Config tab or set conversation_replay.enabled: true in config.yaml.",
-        })
-    _st = get_state()
-    if not _st.conversations:
-        return JSONResponse({"error": "Storage not initialized"}, status_code=503)
-
-    from beigebox.replay import ConversationReplayer
-    wire_path = cfg.get("wiretap", {}).get("path", "./data/wire.jsonl")
-    replayer = ConversationReplayer(_st.conversations, wiretap_path=wire_path)
-    result = replayer.replay(conv_id)
-    return JSONResponse(result)
-
-
-# ---------------------------------------------------------------------------
-# Conversation Fork (v0.7)
-# ---------------------------------------------------------------------------
-
-@app.post("/api/v1/conversation/{conv_id}/fork")
-async def api_conversation_fork(conv_id: str, request: Request):
-    """
-    Fork a conversation into a new one.
-
-    Body (JSON, all optional):
-        branch_at  int   — 0-based message index to branch at (inclusive).
-                           Omit to copy the full conversation.
-
-    Returns:
-        new_conversation_id  str
-        messages_copied      int
-        source_conversation  str
-    """
-    _st = get_state()
-    if not _st.conversations:
-        return JSONResponse({"error": "Storage not initialized"}, status_code=503)
-
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-
-    branch_at = body.get("branch_at")  # None → full copy
-    if branch_at is not None:
-        try:
-            branch_at = int(branch_at)
-        except (ValueError, TypeError):
-            return JSONResponse({"error": "branch_at must be an integer"}, status_code=400)
-
-    from uuid import uuid4
-    new_conv_id = uuid4().hex
-
-    try:
-        copied = _st.conversations.fork_conversation(
-            source_conv_id=conv_id,
-            new_conv_id=new_conv_id,
-            branch_at=branch_at,
-        )
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-    if copied == 0:
-        return JSONResponse(
-            {"error": f"Conversation '{conv_id}' not found or empty"},
-            status_code=404,
-        )
-
-    return JSONResponse({
-        "new_conversation_id": new_conv_id,
-        "messages_copied": copied,
-        "source_conversation": conv_id,
-        "branch_at": branch_at,
-    })
+# /api/v1/conversation/{id}/replay and /fork moved to routers/workspace.py (B-4).
 
 
 # ---------------------------------------------------------------------------
@@ -2753,158 +2507,8 @@ async def api_probe(request: Request):
 # /api/v1/build-centroids removed in v3 — embedding classifier was deleted.
 
 
-@app.get("/api/v1/workspace")
-async def api_workspace():
-    """List files in workspace/in and workspace/out with sizes and timestamps."""
-    cfg = get_config()
-    ws_cfg = cfg.get("workspace", {})
-    ws_path_raw = ws_cfg.get("path", "./workspace")
-    max_mb = ws_cfg.get("max_mb", 0)
-
-    # Resolve relative paths from the app root (parent of the beigebox package dir)
-    app_root = Path(__file__).parent.parent
-    ws_path = (app_root / ws_path_raw).resolve()
-
-    def scan_dir(dirpath: Path) -> tuple[list[dict], int]:
-        entries = []
-        total = 0
-        if not dirpath.exists():
-            return entries, total
-        for entry in os.scandir(dirpath):
-            if entry.name == ".gitkeep":
-                continue
-            try:
-                stat = entry.stat()
-            except (FileNotFoundError, OSError):
-                # Broken symlink or inaccessible entry — skip it
-                continue
-            entries.append({
-                "name": entry.name,
-                "size": stat.st_size,
-                "modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-                "is_link": entry.is_symlink(),
-            })
-            total += stat.st_size
-        entries.sort(key=lambda e: e["name"])
-        return entries, total
-
-    in_files, in_bytes = scan_dir(ws_path / "in")
-    out_files, out_bytes = scan_dir(ws_path / "out")
-
-    def scan_mounts(dirpath: Path) -> list[dict]:
-        entries = []
-        if not dirpath.exists():
-            return entries
-        for entry in os.scandir(dirpath):
-            if entry.name == ".gitkeep":
-                continue
-            is_link = entry.is_symlink()
-            target = str(os.readlink(entry.path)) if is_link else None
-            broken = is_link and not Path(entry.path).exists()
-            entries.append({
-                "name": entry.name,
-                "is_link": is_link,
-                "target": target,
-                "broken": broken,
-                "is_dir": entry.is_dir(),
-            })
-        entries.sort(key=lambda e: e["name"])
-        return entries
-
-    mounts = scan_mounts(ws_path / "mounts")
-
-    return JSONResponse({
-        "in": in_files,
-        "out": out_files,
-        "mounts": mounts,
-        "in_bytes": in_bytes,
-        "out_bytes": out_bytes,
-        "max_mb": max_mb,
-    })
-
-
-@app.post("/api/v1/workspace/mounts")
-async def api_workspace_mounts_add(request: Request):
-    """
-    Create a symlink in workspace/mounts/ pointing to a host path.
-
-    Body: {"name": "myproject", "target": "/home/jinx/myproject"}
-    The symlink is created on the host via the bind-mounted mounts/ directory.
-    Takes effect immediately — no restart required.
-    """
-    body = await request.json()
-    name = body.get("name", "").strip()
-    target = body.get("target", "").strip()
-
-    if not name or not target:
-        return JSONResponse({"ok": False, "error": "name and target required"}, status_code=400)
-    if "/" in name or ".." in name:
-        return JSONResponse({"ok": False, "error": "Invalid name"}, status_code=400)
-
-    cfg = get_config()
-    ws_path_raw = cfg.get("workspace", {}).get("path", "./workspace")
-    app_root = Path(__file__).parent.parent
-    mounts_dir = (app_root / ws_path_raw / "mounts").resolve()
-    link_path = mounts_dir / name
-
-    if link_path.exists() or link_path.is_symlink():
-        return JSONResponse({"ok": False, "error": f"'{name}' already exists"}, status_code=409)
-
-    try:
-        os.symlink(target, link_path)
-    except OSError as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-    broken = not link_path.exists()
-    return JSONResponse({"ok": True, "name": name, "target": target, "broken": broken})
-
-
-@app.delete("/api/v1/workspace/mounts/{name}")
-async def api_workspace_mounts_delete(name: str):
-    """Remove a symlink from workspace/mounts/."""
-    if "/" in name or ".." in name:
-        return JSONResponse({"ok": False, "error": "Invalid name"}, status_code=400)
-
-    cfg = get_config()
-    ws_path_raw = cfg.get("workspace", {}).get("path", "./workspace")
-    app_root = Path(__file__).parent.parent
-    mounts_dir = (app_root / ws_path_raw / "mounts").resolve()
-    link_path = mounts_dir / name
-
-    if not link_path.is_symlink() and not link_path.exists():
-        return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
-
-    # Only remove symlinks — never rm -rf a real directory from here
-    if not link_path.is_symlink():
-        return JSONResponse({"ok": False, "error": "Not a symlink — remove manually"}, status_code=400)
-
-    link_path.unlink()
-    return JSONResponse({"ok": True})
-
-
-@app.delete("/api/v1/workspace/out/{filename}")
-async def api_workspace_delete(filename: str):
-    """Delete a file from workspace/out/. Guards against path traversal."""
-    if "/" in filename or ".." in filename:
-        return JSONResponse({"ok": False, "error": "Invalid filename"}, status_code=400)
-
-    cfg = get_config()
-    ws_path_raw = cfg.get("workspace", {}).get("path", "./workspace")
-    app_root = Path(__file__).parent.parent
-    target = (app_root / ws_path_raw / "out" / filename).resolve()
-
-    # Path traversal guard: resolve() canonicalises symlinks and ".." so the
-    # startswith check is a reliable confinement test. os.sep suffix ensures
-    # "workspace/out2" cannot match the "workspace/out" prefix.
-    out_dir = (app_root / ws_path_raw / "out").resolve()
-    if not str(target).startswith(str(out_dir) + os.sep) and target != out_dir:
-        return JSONResponse({"ok": False, "error": "Invalid path"}, status_code=400)
-
-    if not target.exists():
-        return JSONResponse({"ok": False, "error": "File not found"}, status_code=404)
-
-    target.unlink()
-    return JSONResponse({"ok": True})
+# /api/v1/workspace, /api/v1/workspace/mounts, /api/v1/workspace/mounts/{name},
+# /api/v1/workspace/out/{filename} all moved to routers/workspace.py (B-4).
 
 
 @app.get("/api/v1/openrouter/models")
@@ -3087,124 +2691,15 @@ async def artificial_analysis_rankings():
     return JSONResponse(data)
 
 
-def _index_document(file_path: Path, vs, bs) -> None:
-    """Parse, chunk, embed, and store a workspace document.  Runs in a thread."""
-    from beigebox.storage.chunker import chunk_text
-
-    _log = logging.getLogger(__name__)
-    source = file_path.name
-    suffix = file_path.suffix.lower()
-
-    try:
-        if suffix == ".pdf":
-            try:
-                import pdf_oxide as pox
-                doc = pox.PdfDocument(str(file_path))
-                parts = []
-                for i in range(doc.page_count()):
-                    md = doc.to_markdown(i, detect_headings=True)
-                    if md.strip():
-                        parts.append(md)
-                text = "\n\n".join(parts)
-            except Exception as e:
-                _log.warning("_index_document: pdf_oxide failed for %s: %s", source, e)
-                return
-        else:
-            # Plain text, markdown, code files, etc.
-            text = file_path.read_text(encoding="utf-8", errors="replace")
-
-        if not text.strip():
-            _log.info("_index_document: %s is empty, skipping", source)
-            return
-
-        chunks = chunk_text(text, source_file=source)
-        for chunk in chunks:
-            blob_hash = bs.write(chunk["text"])
-            vs.store_document_chunk(
-                source_file=source,
-                chunk_index=chunk["chunk_index"],
-                char_offset=chunk["char_offset"],
-                blob_hash=blob_hash,
-                text=chunk["text"],
-            )
-
-        _log.info("_index_document: indexed %d chunks from %s", len(chunks), source)
-
-    except Exception as e:
-        _log.error("_index_document failed for %s: %s", source, e)
+# _index_document and /api/v1/workspace/upload moved to routers/_shared.py
+# and routers/workspace.py respectively (B-4). _index_document is shared
+# because routers/tools.py (B-6) uses it for skill indexing.
 
 
-@app.post("/api/v1/workspace/upload")
-async def api_workspace_upload(file: UploadFile):
-    """Upload a file to workspace/in/. Guards against path traversal."""
-    filename = Path(file.filename or "upload").name
-    if not filename or ".." in filename:
-        return JSONResponse({"ok": False, "error": "Invalid filename"}, status_code=400)
-
-    cfg = get_config()
-    ws_path_raw = cfg.get("workspace", {}).get("path", "./workspace")
-    app_root = Path(__file__).parent.parent
-    in_dir = (app_root / ws_path_raw / "in").resolve()
-    in_dir.mkdir(parents=True, exist_ok=True)
-
-    target = (in_dir / filename).resolve()
-    if not str(target).startswith(str(in_dir) + os.sep):
-        return JSONResponse({"ok": False, "error": "Invalid path"}, status_code=400)
-
-    try:
-        content = await file.read()
-        target.write_bytes(content)
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-    # Chunk and embed the file in a background thread — keeps the upload
-    # response fast even for large PDFs. The file is already saved to disk
-    # so if indexing fails the file is still accessible via workspace/in.
-    _st = get_state()
-    if _st.vector_store and _st.blob_store:
-        loop = asyncio.get_event_loop()
-        loop.run_in_executor(None, _index_document, target, _st.vector_store, _st.blob_store)
-
-    return JSONResponse({"ok": True, "name": filename, "size": len(content)})
+# /api/v1/transform/pdf moved to routers/workspace.py (B-4).
 
 
-@app.post("/api/v1/transform/pdf")
-async def api_transform_pdf(file: UploadFile):
-    """
-    Accept a PDF upload and return its text/markdown content via the pdf_oxide
-    WASM module.  Falls back to a plain error if WASM is unavailable.
-
-    Response: {"ok": true, "text": "...", "chars": N, "filename": "..."}
-    """
-    _st = get_state()
-    if not _st.proxy:
-        return JSONResponse({"ok": False, "error": "proxy not initialized"}, status_code=503)
-
-    filename = Path(file.filename or "upload.pdf").name
-    raw = await file.read()
-    if not raw:
-        return JSONResponse({"ok": False, "error": "empty file"}, status_code=400)
-
-    text = await _st.proxy.wasm_runtime.transform_input("pdf_oxide", raw)
-    if not text:
-        return JSONResponse(
-            {"ok": False, "error": "pdf_oxide WASM module not loaded or returned empty"},
-            status_code=422,
-        )
-
-    return JSONResponse({"ok": True, "text": text, "chars": len(text), "filename": filename})
-
-
-@app.post("/api/v1/web-ui/toggle-vi-mode")
-
-
-async def toggle_vi_mode():
-    """Toggle vi mode in runtime_config.yaml. Returns new state."""
-    rt = get_runtime_config()
-    current = rt.get("web_ui_vi_mode", False)
-    new_val = not current
-    ok = update_runtime_config("web_ui_vi_mode", new_val)
-    return JSONResponse({"vi_mode": new_val, "ok": ok})
+# /api/v1/web-ui/toggle-vi-mode moved to routers/workspace.py (B-4).
 
 
 # Serve static web assets (vi.js etc.) — must come before catch-all routes
