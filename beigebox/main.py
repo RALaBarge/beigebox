@@ -405,6 +405,40 @@ async def lifespan(app: FastAPI):
     )
     logger.info("CaptureFanout wired: messages → sqlite + wire_events + vector")
 
+    # PostgresWireSink — third redundant sink alongside JSONL + SQLite.
+    # The user wants "capture everything" with redundancy across postgres,
+    # jsonl, sql; postgres replaced chroma as the primary structured-query
+    # store. Failure here is non-fatal: lifespan continues with two sinks
+    # if postgres is unavailable. Errors per-write are already isolated
+    # by WireLog (commit 7aba40c).
+    _pg_conn = (cfg.get("storage", {})
+                  .get("postgres", {})
+                  .get("connection_string"))
+    if _pg_conn:
+        try:
+            from beigebox.storage.db import make_db
+            from beigebox.storage.wire_sink import make_sink
+            _pg_db = make_db("postgres", connection_string=_pg_conn)
+            _pg_wire_events = make_wire_event_repo(_pg_db)
+            _pg_wire_events.create_tables()
+            proxy.wire.add_sink(make_sink("postgres", repo=_pg_wire_events))
+            logger.info(
+                "PostgresWireSink attached: wire_events fan-out → jsonl + sqlite + postgres",
+            )
+        except Exception as exc:
+            logger.warning(
+                "PostgresWireSink unavailable, continuing with jsonl+sqlite: %s",
+                exc,
+            )
+
+    # Bind the production WireLog to the typed-event dispatch so the
+    # logging.py helpers (once converted in A-4) can reach a real sink.
+    # Until A-4 lands, the helpers still use the legacy _get_tap_logger
+    # path; this set_wire_log call is wired in advance so the swap is
+    # a one-import change in A-4.
+    from beigebox.log_events import set_wire_log
+    set_wire_log(proxy.wire)
+
     # Late-bind the anomaly detector to the tool (proxy must exist first)
     _aad_tool = tool_registry.get("api_anomaly_detector")
     if _aad_tool and proxy.anomaly_detector:

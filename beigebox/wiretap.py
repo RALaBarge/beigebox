@@ -239,6 +239,16 @@ class WireLog:
                         type(sink).__name__, exc,
                     )
 
+    def add_sink(self, sink: WireSink) -> None:
+        """Attach an additional sink after WireLog has been constructed.
+
+        Used by main.py lifespan to bolt on the PostgresWireSink alongside
+        the JSONL + SQLite sinks already attached at __init__ time. Called
+        once at startup; not thread-safe for concurrent attaches (which
+        we don't need).
+        """
+        self._extra_sinks.append(sink)
+
     def write_request(self, req) -> None:
         """Emit one ``model_request_normalized`` event for a captured request.
 
