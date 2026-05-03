@@ -87,7 +87,6 @@ async def startup(app: FastAPI) -> AppState:  # noqa: ARG001 — app reserved fo
         cost_tracker=storage.cost_tracker,
         auth_registry=auth.auth_registry,
         web_auth=auth.web_auth,
-        password_auth=auth.password_auth,
         mcp_server=mcp.mcp_server,
         security_mcp_server=mcp.security_mcp_server,
         poisoning_detector=storage.poisoning_detector,

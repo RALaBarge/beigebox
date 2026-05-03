@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from beigebox.auth import MultiKeyAuthRegistry
     from beigebox.mcp_server import McpServer
     from beigebox.observability.egress import EgressHook
-    from beigebox.web_auth import WebAuthManager, SimplePasswordAuth
+    from beigebox.web_auth import WebAuthManager
     from beigebox.security.rag_poisoning_detector import RAGPoisoningDetector
     from beigebox.security.extraction_detector import ExtractionDetector
     from beigebox.security.audit_logger import AuditLogger
@@ -54,7 +54,6 @@ class AppState:
     cost_tracker: CostTracker | None = None
     auth_registry: MultiKeyAuthRegistry | None = None
     web_auth: WebAuthManager | None = None
-    password_auth: SimplePasswordAuth | None = None
     mcp_server: McpServer | None = None
     # Pen/sec MCP — separate registry of offensive-security tool wrappers,
     # mounted at POST /pen-mcp. None when disabled.

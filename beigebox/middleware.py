@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 _AUTH_EXEMPT = frozenset(["/", "/ui", "/beigebox/health", "/api/v1/status"])
 _AUTH_EXEMPT_PREFIXES = ("/web/", "/auth/")
 
-# Paths that WebAuthMiddleware protects when oauth or password mode is active
+# Paths that WebAuthMiddleware protects when OAuth is active
 _WEB_UI_PATHS = frozenset(["/", "/ui"])
 _WEB_UI_PREFIXES = ("/web/",)
 
@@ -186,7 +186,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
 
 class WebAuthMiddleware(BaseHTTPMiddleware):
     """
-    Gates web UI paths behind a signed session cookie when oauth or password auth is enabled.
+    Gates web UI paths behind a signed session cookie when OAuth is enabled.
 
     API paths (/v1/, /api/) are not touched — those use Bearer token auth.
     The OAuth flow paths (/auth/*) are always exempt.
@@ -197,9 +197,8 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         oauth_enabled = maybe_state().web_auth is not None and maybe_state().web_auth.is_enabled()
-        password_auth_enabled = maybe_state().password_auth is not None
 
-        if not (oauth_enabled or password_auth_enabled):
+        if not oauth_enabled:
             return await call_next(request)
 
         path = request.url.path
@@ -211,20 +210,12 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
         if not is_web:
             return await call_next(request)
 
-        # Validate session cookie (check both OAuth and password auth)
+        # Validate session cookie
         token = request.cookies.get(COOKIE_SESSION, "")
-        user = None
-
-        if oauth_enabled and maybe_state().web_auth:
-            user = maybe_state().web_auth.verify_session(token) if token else None
-
-        if user is None and password_auth_enabled and maybe_state().password_auth:
-            user = maybe_state().password_auth.verify_session(token) if token else None
+        user = maybe_state().web_auth.verify_session(token) if token else None
 
         if user is None:
             from starlette.responses import RedirectResponse
-            if password_auth_enabled:
-                return RedirectResponse(url="/auth/login", status_code=302)
             providers = maybe_state().web_auth.list_providers()
             login_path = f"/auth/{providers[0]}/login" if providers else "/"
             return RedirectResponse(url=login_path, status_code=302)

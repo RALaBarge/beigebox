@@ -56,15 +56,6 @@ class OAuthUserInfo:
     provider: str = ""
 
 
-@dataclass
-class PasswordUserInfo:
-    """Simple username/password auth user."""
-    user_id: str
-    username: str
-    name: str
-    password_changed: bool = False  # Flag: has user reset initial password?
-
-
 # ---------------------------------------------------------------------------
 # Provider protocol — implement this to add a new provider
 # ---------------------------------------------------------------------------
@@ -306,100 +297,6 @@ class GoogleProvider(AuthProvider):
         if self._allowed_emails and user.email.lower() not in self._allowed_emails:
             raise PermissionError(f"Email '{user.email}' not in allowed list")
         return user
-
-
-# ---------------------------------------------------------------------------
-# Simple Password Auth (for SaaS single-tenant deployments)
-# ---------------------------------------------------------------------------
-
-class SimplePasswordAuth:
-    """Minimal password-based auth: username is 'admin', customer sets password on first login."""
-
-    def __init__(self, users):
-        """Initialize with a UserRepo for storing credentials."""
-        self.users = users
-        self._signer = URLSafeTimedSerializer(
-            secrets.token_hex(32),
-            salt="bb-password-session"
-        )
-        # Ensure admin user exists
-        self._ensure_admin_user()
-
-    def _ensure_admin_user(self):
-        """Create admin user if doesn't exist."""
-        if not self.users.get("admin"):
-            self.users.upsert(
-                provider="password",
-                sub="admin",
-                email="admin@localhost",
-                name="Admin",
-                picture="",
-            )
-
-    def login(self, password: str) -> tuple[str, bool]:
-        """Verify password. Return (session_token, password_needs_change).
-
-        Returns (token, False) if login successful and password already changed.
-        Returns (token, True) if login successful but using default password.
-        """
-        import bcrypt
-
-        # Check against initial password (env var or default)
-        # This is for first-time setup; after password change, use stored hash
-        initial_password = os.environ.get("BB_INITIAL_PASSWORD", "changeme")
-
-        # Simple comparison for initial/default password
-        if password == initial_password:
-            # Password matches — create session
-            token = self._signer.dumps({"user_id": "admin", "username": "admin"})
-            # Check if this is the default password (security flag)
-            password_is_default = password == "changeme"
-            return token, password_is_default
-
-        # Otherwise, try to check against stored hash in database
-        try:
-            user = self.users.get("admin")
-            if user and user.get("password_hash"):
-                if bcrypt.checkpw(password.encode(), user["password_hash"].encode()):
-                    token = self._signer.dumps({"user_id": "admin", "username": "admin"})
-                    return token, False
-        except (ValueError, TypeError, AttributeError):
-            pass
-
-        return None, False
-
-    def set_password(self, old_password: str, new_password: str) -> bool:
-        """Change password. Return True if successful."""
-        import bcrypt
-
-        # Verify old password first
-        token, _ = self.login(old_password)
-        if not token:
-            return False
-
-        # Hash new password with bcrypt (cost factor 12 for security)
-        new_password_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt(rounds=12)).decode()
-
-        # Store in database
-        try:
-            # Update user's password hash in database
-            self.users.update_password("admin", new_password_hash)
-            # Also update env var as fallback
-            os.environ["BB_INITIAL_PASSWORD"] = new_password
-            return True
-        except Exception:
-            return False
-
-    def sign_session(self, username: str) -> str:
-        """Sign a session token."""
-        return self._signer.dumps({"user_id": "admin", "username": username})
-
-    def verify_session(self, token: str) -> dict | None:
-        """Verify and decode session token."""
-        try:
-            return self._signer.loads(token, max_age=60 * 60 * 4)  # 4 hours
-        except (BadSignature, SignatureExpired):
-            return None
 
 
 # ---------------------------------------------------------------------------
