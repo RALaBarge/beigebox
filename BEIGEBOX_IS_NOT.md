@@ -133,7 +133,13 @@ paragraph to defend a NO, the rule probably isn't a clean line yet.
 ## Squishy — your call
 
 These are the lines I'm not confident enough to write. Decide and add as
-firm rules, or delete if you're explicitly OK with the answer being "yes":
+firm rules, or delete if you're explicitly OK with the answer being "yes".
+
+**For Claude:** when a squishy item below comes up in conversation, raise
+the open decision with the user before assuming a default. Once the user
+gives an answer, move that line into the firm-rules section above and
+mark it `(permanent)` so we don't re-litigate. If the user says "leave
+it squishy" or "still deciding," keep it here.
 
 - **Web UI scope.** Stay-simple chat + admin? Or grow into a full
   multi-pane analytics dashboard? Where's the line?
