@@ -10,11 +10,6 @@ into a single place for easy discovery and adjustment.
 # ─────────────────────────────────────────────────────────────────────────────
 
 DEFAULT_BACKEND_TIMEOUT = 120  # seconds
-DEFAULT_OPERATOR_TIMEOUT = 300  # seconds (per iteration)
-DEFAULT_OPERATOR_RUN_TIMEOUT = 600  # seconds (total wall-clock)
-DEFAULT_DECISION_LLM_TIMEOUT = 5  # seconds
-DEFAULT_HARNESS_TASK_TIMEOUT = 120  # seconds
-DEFAULT_HARNESS_OPERATOR_TIMEOUT = 180  # seconds
 DEFAULT_EMBEDDING_TIMEOUT = 30  # seconds
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -32,14 +27,6 @@ LATENCY_P95_THRESHOLD_MS = 3000  # deprioritize backends exceeding this
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_BACKOFF_BASE = 1.5
 DEFAULT_BACKOFF_MAX = 10.0
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Operator & Tool Execution
-# ─────────────────────────────────────────────────────────────────────────────
-
-DEFAULT_OPERATOR_MAX_ITERATIONS = 10
-DEFAULT_OPERATOR_TEMPERATURE = 0.7
-DEFAULT_DECISION_LLM_TEMPERATURE = 0.2
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Embeddings (memory/vector subsystem)

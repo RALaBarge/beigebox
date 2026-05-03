@@ -38,7 +38,7 @@ def build_mcp(cfg: dict, tool_registry) -> McpBundle:
     )
     mcp_skills = _load_skills(skills_path)
 
-    mcp_server = McpServer(tool_registry, operator_factory=None, skills=mcp_skills)
+    mcp_server = McpServer(tool_registry, skills=mcp_skills)
     logger.info("MCP server: enabled (POST /mcp)")
 
     # Pen/Sec MCP — separate endpoint exposing offensive-security tool

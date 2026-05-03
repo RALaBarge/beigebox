@@ -17,7 +17,7 @@ Supported JSON-RPC 2.0 methods:
   initialize     — handshake, returns server capabilities
   tools/list     — list resident tools + discover_tools meta-tool
   tools/call     — invoke any tool by name (resident or extended)
-  resources/list — list operator skills
+  resources/list — list available skills
   resources/read — read a skill's markdown content
 
 Notifications (no id field) are accepted and silently acknowledged:
@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Callable, Awaitable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -63,25 +63,6 @@ _DEFAULT_RESIDENT_TOOLS = {
     "memory",
     "document_search",
     "cdp",
-}
-
-_OPERATOR_RUN_SCHEMA = {
-    "name": "operator/run",
-    "description": (
-        "Run BeigeBox Operator — a JSON-based ReAct agent with access to tools "
-        "(web_search, calculator, memory, document_search, etc.). "
-        "Submit a question or task; the operator reasons step by step and returns a final answer."
-    ),
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "input": {
-                "type": "string",
-                "description": "The question or task for the operator to complete.",
-            }
-        },
-        "required": ["input"],
-    },
 }
 
 _DISCOVER_TOOLS_SCHEMA = {
@@ -198,10 +179,6 @@ class McpServer:
     This keeps the model's tool context small (better selection quality) while
     still allowing any registered tool to be called by name.
 
-    operator_factory: optional async callable (question: str) -> str
-        When provided, adds operator/run as an MCP tool that external clients
-        (Claude Desktop, AMF mesh workers, etc.) can invoke.
-
     skills: optional list of skill dicts (name, description, path, dir, metadata)
         When provided, exposed via resources/list and resources/read so MCP
         clients can browse skills without injecting them into every prompt.
@@ -214,13 +191,11 @@ class McpServer:
     def __init__(
         self,
         tool_registry,
-        operator_factory: Callable[[str], Awaitable[str]] | None = None,
         skills: list | None = None,
         resident_tools: set[str] | None = None,
         server_label: str = "mcp",
     ):
         self._registry = tool_registry
-        self._operator_factory = operator_factory
         self._skills = skills or []
         # resident_tools=None → use default set.  resident_tools=set() → expose all.
         self._resident_tools: set[str] | None = resident_tools
@@ -254,7 +229,6 @@ class McpServer:
         for name, tool in self._registry.tools.items():
             if name not in resident:
                 entries.append(_CapabilityEntry(name, tool))
-        # operator/run is always resident when enabled; skip from extended index
         return entries
 
     def _search_capabilities(self, query: str, top_k: int = 5) -> list[dict]:
@@ -362,7 +336,7 @@ class McpServer:
                 "Use tools/call to invoke them. All tools accept a single 'input' string argument. "
                 "See each tool's description for the expected format."
                 + discovery_note
-                + (" Use resources/list to browse operator skills." if self._skills else "")
+                + (" Use resources/list to browse available skills." if self._skills else "")
             ),
         }
 
@@ -379,9 +353,6 @@ class McpServer:
         for name, tool in self._registry.tools.items():
             if name in resident:
                 tools.append(_tool_schema(name, tool))
-
-        if self._operator_factory is not None:
-            tools.append(_OPERATOR_RUN_SCHEMA)
 
         # Add discover_tools only when there are hidden tools to find
         n_extended = len(self._registry.tools) - len(tools)
@@ -510,34 +481,9 @@ class McpServer:
                 "isError": False,
             }
 
-        # operator/run — dispatches to the BeigeBox Operator agent
-        if name == "operator/run":
-            if self._operator_factory is None:
-                _emit("error", error="operator_disabled")
-                return {
-                    "content": [{"type": "text", "text": "operator/run is not available (operator disabled or not configured)."}],
-                    "isError": True,
-                }
-            try:
-                answer = await self._operator_factory(input_text)
-                _emit("ok")
-                return {
-                    "content": [{"type": "text", "text": answer or "(no result)"}],
-                    "isError": False,
-                }
-            except Exception as e:
-                logger.error("MCP operator/run error: %s", e)
-                _emit("error", error=str(e)[:200])
-                return {
-                    "content": [{"type": "text", "text": f"Operator error: {e}"}],
-                    "isError": True,
-                }
-
         # Any registered tool — resident OR extended (both callable by name)
         if name not in self._registry.tools:
             known = ", ".join(self._registry.tools.keys()) or "(none)"
-            if self._operator_factory is not None:
-                known += ", operator/run"
             known += ", discover_tools"
             _emit("error", error="tool_not_found")
             return {
