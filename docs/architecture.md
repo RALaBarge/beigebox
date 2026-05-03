@@ -58,31 +58,39 @@ The streaming path follows the same shape but yields chunks back through the res
 - Emits a `transforms` audit on the wiretap so you can diff what the upstream actually got vs what the client sent.
 
 **9-10. Logging + post-hooks**
-- Conversation messages logged to SQLite (`storage/sqlite_store.py`).
+- Conversation messages persisted via `storage/repos/conversations.py` (`ConversationRepo` on the `BaseDB` shim — `storage/sqlite_store.py` was demolished in v3).
+- Wire events captured by the `CaptureFanout` chokepoint in `beigebox/capture.py`, which fans one captured turn out to ConversationRepo + WireLog + VectorStore.
 - Assistant content embedded + indexed in Postgres+pgvector (`storage/vector_store.py`) for cross-session memory recall.
 - Post-response hooks run for format validation, metrics, etc.
 
-**11. Semantic cache** (`beigebox/cache.py:SemanticCache`)
-- Stores (user-message-embedding, response) tuples. On future requests, similar messages can hit the cache and skip the backend call entirely.
+**11. Tool-result cache** (`beigebox/cache.py:ToolResultCache`)
+- Short-TTL hash-keyed cache for deterministic tool calls (web_search, calculator, etc.). The earlier SemanticCache + EmbeddingCache were deleted in v3 — request-level dedup is the orchestrating client's job, and semantic caching distorted routing/observability (cached responses misreported model + latency, replayed against different tool inventories).
 
 ## Subsystems
 
 | Module | Purpose |
 |---|---|
-| `beigebox/main.py` | FastAPI app, lifespan, all HTTP endpoints |
-| `beigebox/proxy.py` | `Proxy.forward_chat_completion{,_stream}` — the core pipeline |
+| `beigebox/main.py` | FastAPI app + lifespan; v3 extracted routes to `routers/`, middleware to `middleware.py`, bootstrap to `bootstrap/` |
+| `beigebox/proxy/` | Package: `core.py` (`Proxy.forward_chat_completion{,_stream}` orchestrator), `request_helpers.py`, `body_pipeline.py`, `model_listing.py`, `request_inspector.py` |
+| `beigebox/routers/` | Per-area route handlers (auth, openai, security, workspace, analytics, tools, config, misc) — extracted from main.py in v3 |
+| `beigebox/middleware.py` | `ApiKeyMiddleware`, `WebAuthMiddleware`, `SecurityHeadersMiddleware` |
+| `beigebox/bootstrap/` | Lifespan setup split by concern (proxy, storage, mcp, …) |
 | `beigebox/auth.py` | `KeyMeta`, `MultiKeyAuthRegistry`, admin gate |
 | `beigebox/app_state.py` | `AppState` dataclass — all subsystem references |
+| `beigebox/state.py` | `get_state()`, `set_state()`, `maybe_state()` accessors |
+| `beigebox/capture.py` | `CaptureFanout` — single chokepoint for chat-completion telemetry |
 | `beigebox/config.py` | Config loader: static (`config.yaml`) + hot-reload (`runtime_config.yaml`) |
 | `beigebox/hooks.py` | Generic hook registry + execution |
-| `beigebox/cache.py` | `SemanticCache`, `EmbeddingCache`, `ToolResultCache` |
+| `beigebox/cache.py` | `ToolResultCache` (SemanticCache + EmbeddingCache deleted in v3) |
 | `beigebox/guardrails.py` | Input/output content allow/deny rules |
 | `beigebox/backends/router.py` | `MultiBackendRouter` — per-model provider selection, latency tracking |
 | `beigebox/backends/retry_wrapper.py` | `RetryableBackendWrapper` — backoff + streaming-safe failure |
 | `beigebox/backends/{openrouter,openai_compat,ollama}.py` | Concrete backends |
 | `beigebox/request_normalizer.py`, `response_normalizer.py` | OpenAI-shape canonicalization with transform log |
 | `beigebox/wiretap.py` | `WireLog` — dual-write SQLite + JSONL |
-| `beigebox/storage/sqlite_store.py` | Conversations, metrics, audit, wire events |
+| `beigebox/storage/db/{base,sqlite,postgres,memory}.py` | `BaseDB` shim — pluggable SQL backend (`make_db` factory). Replaces the deleted v2 `sqlite_store.py` god-object. |
+| `beigebox/storage/repos/{api_keys,conversations,quarantine,users,wire_events}.py` | Per-entity repositories on top of `BaseDB`; `make_*_repo(db)` factories from `repos/__init__.py`. Own all SQL persistence. |
+| `beigebox/storage/wire_sink.py` | `WireSink` ABC + `make_sink()` factory (jsonl + sqlite + null impls) |
 | `beigebox/storage/vector_store.py` | Postgres+pgvector wrapper; cross-session memory |
 | `beigebox/storage/backends/{base,postgres,memory}.py` | Pluggable vector backends via `make_backend` factory |
 | `beigebox/wasm_runtime.py` | WASM/WASI sandbox for response/text/input transforms |
@@ -100,12 +108,30 @@ All subsystems are initialized once at startup and stored in a single `AppState`
 from beigebox.main import get_state
 
 state = get_state()
-state.proxy              # Proxy
-state.router            # MultiBackendRouter
-state.semantic_cache    # SemanticCache
-state.sqlite_store      # SQLiteStore | None
-state.harness_injection_queues  # live run_id → asyncio.Queue map
-# ... (see app_state.py for all fields)
+state.proxy              # Proxy (orchestrator, in beigebox/proxy/core.py)
+state.backend_router     # MultiBackendRouter
+state.tool_registry      # ToolRegistry
+state.db                 # BaseDB shim (sqlite | postgres | memory)
+state.conversations      # ConversationRepo
+state.api_keys           # ApiKeyRepo
+state.users              # UserRepo
+state.quarantine         # QuarantineRepo
+state.wire_events        # WireEventRepo
+state.vector_store       # VectorStore (pgvector)
+state.mcp_server         # McpServer (POST /mcp)
+state.security_mcp_server  # McpServer (POST /pen-mcp) — None when disabled
+state.web_auth           # WebAuthManager
+state.auth_registry      # MultiKeyAuthRegistry
+state.cost_tracker       # CostTracker
+state.hook_manager       # HookManager
+state.audit_logger       # AuditLogger
+state.injection_guard    # EnhancedInjectionGuard
+state.poisoning_detector # RAGPoisoningDetector
+state.extraction_detector  # ExtractionDetector
+state.honeypot_manager   # HoneypotManager
+state.rag_scanner        # RAGContentScanner
+state.egress_hooks       # list[EgressHook]
+# ... (see app_state.py for the canonical list)
 ```
 
 If called before FastAPI lifespan startup completes, raises `RuntimeError`.
@@ -146,7 +172,6 @@ models:
     summary: qwen3:4b
 
 features:
-  semantic_cache: false
   hooks: true
 ```
 

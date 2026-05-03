@@ -98,11 +98,12 @@ Importable async pipelines under `beigebox/skills/` — each is a self-contained
 
 ### Source Code
 
-- `beigebox/main.py` — FastAPI app, all endpoints
-- `beigebox/proxy.py` — Request pipeline (routing, caching, transforms)
+- `beigebox/main.py` — FastAPI app + lifespan; thin after v3 routers/middleware/bootstrap extraction
+- `beigebox/proxy/` — Request pipeline package (`core.py` orchestrator + `request_helpers.py` + `body_pipeline.py` + `model_listing.py` + `request_inspector.py`)
+- `beigebox/routers/` — Per-area route handlers extracted from main.py (auth, openai, security, workspace, analytics, tools, config, misc)
 - `beigebox/config.py` — Config loader
 - `beigebox/backends/router.py` — Multi-backend routing engine
-- `beigebox/cache.py` — Semantic + embedding caching
+- `beigebox/cache.py` — `ToolResultCache` (SemanticCache + EmbeddingCache deleted in v3)
 - `beigebox/web/index.html` — Web UI (no build step)
 - `beigebox/storage/` — SQLite + Postgres+pgvector storage (`storage/backends/{base,postgres,memory}.py` factory)
 - `CLAUDE.md` — Development guidelines
