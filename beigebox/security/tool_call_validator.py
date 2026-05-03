@@ -282,7 +282,7 @@ class ToolCallValidator:
         isolation_enabled: bool = True,
         audit_enabled: bool = True,
         allow_unsafe: bool = False,
-        audit_store=None,  # Optional SQLiteStore for audit logging
+        audit_store=None,  # Optional audit store backend
     ):
         self.rate_limit_per_tool = rate_limit_per_tool
         self.isolation_enabled = isolation_enabled
