@@ -38,7 +38,7 @@ def _make_upload(filename, content: bytes):
 
 class TestApiWorkspaceList:
     def test_empty_dirs(self, tmp_path):
-        from beigebox.main import api_workspace
+        from beigebox.routers.workspace import api_workspace
         ws = tmp_path / "workspace"
         (ws / "in").mkdir(parents=True)
         (ws / "out").mkdir(parents=True)
@@ -50,7 +50,7 @@ class TestApiWorkspaceList:
         assert data["out_bytes"] == 0
 
     def test_lists_in_and_out_files(self, tmp_path):
-        from beigebox.main import api_workspace
+        from beigebox.routers.workspace import api_workspace
         ws = tmp_path / "workspace"
         (ws / "in").mkdir(parents=True)
         (ws / "out").mkdir(parents=True)
@@ -64,7 +64,7 @@ class TestApiWorkspaceList:
         assert data["out"][0]["name"] == "report.md"
 
     def test_file_entry_has_size_and_modified(self, tmp_path):
-        from beigebox.main import api_workspace
+        from beigebox.routers.workspace import api_workspace
         ws = tmp_path / "workspace"
         (ws / "out").mkdir(parents=True)
         (ws / "out" / "a.txt").write_bytes(b"hello")
@@ -76,7 +76,7 @@ class TestApiWorkspaceList:
         assert entry["modified"].endswith("+00:00")
 
     def test_gitkeep_excluded(self, tmp_path):
-        from beigebox.main import api_workspace
+        from beigebox.routers.workspace import api_workspace
         ws = tmp_path / "workspace"
         (ws / "in").mkdir(parents=True)
         (ws / "in" / ".gitkeep").write_text("")
@@ -88,7 +88,7 @@ class TestApiWorkspaceList:
         assert "real.txt" in names
 
     def test_nonexistent_dirs_return_empty(self, tmp_path):
-        from beigebox.main import api_workspace
+        from beigebox.routers.workspace import api_workspace
         ws = tmp_path / "workspace"  # not created
         with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             data = _parse(run(api_workspace()))
@@ -96,14 +96,14 @@ class TestApiWorkspaceList:
         assert data["out"] == []
 
     def test_max_mb_included_in_response(self, tmp_path):
-        from beigebox.main import api_workspace
+        from beigebox.routers.workspace import api_workspace
         ws = tmp_path / "workspace"
         with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws, max_mb=200)):
             data = _parse(run(api_workspace()))
         assert data["max_mb"] == 200
 
     def test_out_bytes_is_sum_of_file_sizes(self, tmp_path):
-        from beigebox.main import api_workspace
+        from beigebox.routers.workspace import api_workspace
         ws = tmp_path / "workspace"
         (ws / "out").mkdir(parents=True)
         (ws / "out" / "a.bin").write_bytes(b"x" * 100)
@@ -113,7 +113,7 @@ class TestApiWorkspaceList:
         assert data["out_bytes"] == 300
 
     def test_entries_sorted_by_name(self, tmp_path):
-        from beigebox.main import api_workspace
+        from beigebox.routers.workspace import api_workspace
         ws = tmp_path / "workspace"
         (ws / "out").mkdir(parents=True)
         (ws / "out" / "z.txt").write_text("z")
@@ -129,7 +129,7 @@ class TestApiWorkspaceList:
 
 class TestApiWorkspaceDelete:
     def test_deletes_existing_file(self, tmp_path):
-        from beigebox.main import api_workspace_delete
+        from beigebox.routers.workspace import api_workspace_delete
         ws = tmp_path / "workspace"
         (ws / "out").mkdir(parents=True)
         f = ws / "out" / "report.md"
@@ -141,7 +141,7 @@ class TestApiWorkspaceDelete:
         assert not f.exists()
 
     def test_missing_file_returns_404(self, tmp_path):
-        from beigebox.main import api_workspace_delete
+        from beigebox.routers.workspace import api_workspace_delete
         ws = tmp_path / "workspace"
         (ws / "out").mkdir(parents=True)
         with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
@@ -150,7 +150,7 @@ class TestApiWorkspaceDelete:
         assert _parse(result)["ok"] is False
 
     def test_slash_in_filename_blocked(self, tmp_path):
-        from beigebox.main import api_workspace_delete
+        from beigebox.routers.workspace import api_workspace_delete
         ws = tmp_path / "workspace"
         with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             result = run(api_workspace_delete("../secret.txt"))
@@ -158,7 +158,7 @@ class TestApiWorkspaceDelete:
         assert _parse(result)["ok"] is False
 
     def test_dotdot_alone_blocked(self, tmp_path):
-        from beigebox.main import api_workspace_delete
+        from beigebox.routers.workspace import api_workspace_delete
         ws = tmp_path / "workspace"
         with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             result = run(api_workspace_delete(".."))
@@ -166,7 +166,7 @@ class TestApiWorkspaceDelete:
         assert _parse(result)["ok"] is False
 
     def test_dotdot_in_name_blocked(self, tmp_path):
-        from beigebox.main import api_workspace_delete
+        from beigebox.routers.workspace import api_workspace_delete
         ws = tmp_path / "workspace"
         with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
             result = run(api_workspace_delete("file..evil"))
@@ -174,7 +174,7 @@ class TestApiWorkspaceDelete:
         assert _parse(result)["ok"] is False
 
     def test_only_deletes_from_out_not_in(self, tmp_path):
-        from beigebox.main import api_workspace_delete
+        from beigebox.routers.workspace import api_workspace_delete
         ws = tmp_path / "workspace"
         (ws / "in").mkdir(parents=True)
         (ws / "out").mkdir(parents=True)
@@ -191,7 +191,7 @@ class TestApiWorkspaceDelete:
 
 class TestApiWorkspaceUpload:
     def test_uploads_file_to_in_dir(self, tmp_path):
-        from beigebox.main import api_workspace_upload
+        from beigebox.routers.workspace import api_workspace_upload
         ws = tmp_path / "workspace"
         upload = _make_upload("data.csv", b"col1,col2\n1,2\n")
         with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
@@ -203,7 +203,7 @@ class TestApiWorkspaceUpload:
         assert (ws / "in" / "data.csv").read_bytes() == b"col1,col2\n1,2\n"
 
     def test_creates_in_dir_if_missing(self, tmp_path):
-        from beigebox.main import api_workspace_upload
+        from beigebox.routers.workspace import api_workspace_upload
         ws = tmp_path / "workspace"
         upload = _make_upload("new.txt", b"hello")
         with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
@@ -211,7 +211,7 @@ class TestApiWorkspaceUpload:
         assert (ws / "in").is_dir()
 
     def test_none_filename_falls_back_to_upload(self, tmp_path):
-        from beigebox.main import api_workspace_upload
+        from beigebox.routers.workspace import api_workspace_upload
         ws = tmp_path / "workspace"
         upload = _make_upload(None, b"data")
         with patch("beigebox.routers.workspace.get_config", return_value=_ws_cfg(ws)):
@@ -220,7 +220,7 @@ class TestApiWorkspaceUpload:
         assert data["name"] == "upload"
 
     def test_directory_component_stripped(self, tmp_path):
-        from beigebox.main import api_workspace_upload
+        from beigebox.routers.workspace import api_workspace_upload
         ws = tmp_path / "workspace"
         # A path like "subdir/file.txt" — .name strips the directory part
         upload = _make_upload("subdir/file.txt", b"hi")
@@ -231,7 +231,7 @@ class TestApiWorkspaceUpload:
         assert (ws / "in" / "file.txt").exists()
 
     def test_dotdot_prefix_filename_blocked(self, tmp_path):
-        from beigebox.main import api_workspace_upload
+        from beigebox.routers.workspace import api_workspace_upload
         ws = tmp_path / "workspace"
         # "..evil" — after Path.name extraction: "..evil"; ".." in "..evil" is True
         upload = _make_upload("..evil", b"bad")
@@ -240,7 +240,7 @@ class TestApiWorkspaceUpload:
         assert data["ok"] is False
 
     def test_binary_content_preserved(self, tmp_path):
-        from beigebox.main import api_workspace_upload
+        from beigebox.routers.workspace import api_workspace_upload
         ws = tmp_path / "workspace"
         content = bytes(range(256))
         upload = _make_upload("binary.bin", content)
@@ -250,7 +250,7 @@ class TestApiWorkspaceUpload:
         assert (ws / "in" / "binary.bin").read_bytes() == content
 
     def test_overwrites_existing_file(self, tmp_path):
-        from beigebox.main import api_workspace_upload
+        from beigebox.routers.workspace import api_workspace_upload
         ws = tmp_path / "workspace"
         (ws / "in").mkdir(parents=True)
         (ws / "in" / "existing.txt").write_bytes(b"old content")

@@ -748,14 +748,7 @@ app.add_middleware(SecurityHeadersMiddleware)
 from beigebox.routers.openai import router as openai_router  # noqa: E402
 from beigebox.routers.auth import router as auth_router  # noqa: E402
 from beigebox.routers.security import router as security_router  # noqa: E402
-from beigebox.routers.workspace import (  # noqa: E402,F401
-    router as workspace_router,
-    # Re-exports so existing test imports (`from beigebox.main import
-    # api_workspace`, etc.) keep working without churning ~30 test sites.
-    api_workspace,
-    api_workspace_delete,
-    api_workspace_upload,
-)
+from beigebox.routers.workspace import router as workspace_router  # noqa: E402
 from beigebox.routers.analytics import router as analytics_router  # noqa: E402
 from beigebox.routers.tools import router as tools_router  # noqa: E402
 from beigebox.routers.config import router as config_router  # noqa: E402
