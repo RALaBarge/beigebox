@@ -17,6 +17,13 @@ Every command has a phreaker name and a standard alias:
     dump            export          Export conversations to JSON
     flash           info, config    Show stats and config at a glance
     tone            banner          Print the BeigeBox banner
+
+NOTE: This file is intentionally one module despite its length. Each
+``cmd_*`` is independent and testable; per-command imports are kept
+inside the functions so cold-start cost (e.g. ``bb ring``) doesn't
+pay for unused subcommands. Splitting into a ``cli/`` package would
+be pure aesthetic — defer unless a real driver shows up (multi-author
+churn, a per-command test suite, etc.).
 """
 
 import argparse
