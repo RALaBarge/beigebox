@@ -27,6 +27,10 @@ Complete reference for BeigeBox deployment, configuration, and usage.
 - **[Observability Coverage](observability-coverage.md)** — definitive map of what's emitted, what's a gap, and the rubric for adding new events
 - **[Security](security.md)** — Supply chain hardening, hash locking, network isolation, Docker hardening, threat model
 
+## Design History
+
+- **[Grok Reviews — 2026-05-01 v3 demolition](grok_reviews_2026_05_01.md)** — pre-merge critiques (x-ai/grok-4 + grok-4.3) for the SQLiteStore demolition + capture-pipeline + log-events consolidation + routers split. Captures the design rationale behind the 35 commits between `36ab408` and `a46825f`.
+
 ## Skills
 
 Importable async pipelines under `beigebox/skills/` — each is a self-contained directory with `pipeline.py`, a CLI, and a `SKILL.md`.
