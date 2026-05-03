@@ -411,6 +411,148 @@ class Proxy:
         return body, is_synthetic, model
 
     # ------------------------------------------------------------------
+    # Phase helpers (G-3) — shared between streaming and non-streaming
+    # ------------------------------------------------------------------
+
+    def _check_hook_block(self, body: dict, conversation_id: str) -> dict | None:
+        """Return the block payload if pre-request hooks set ``_beigebox_block``.
+
+        Hooks (e.g. the prompt-injection guard) can short-circuit a request
+        by writing ``body['_beigebox_block']``. This helper just inspects
+        the body and emits the wire event; the orchestrator decides what
+        synthetic response to yield.
+        """
+        if "_beigebox_block" not in body:
+            return None
+        block = body["_beigebox_block"]
+        self.wire.log(
+            direction="internal",
+            role="system",
+            content=(
+                f"request blocked: reason={block.get('reason')} "
+                f"score={block.get('score')} patterns={block.get('patterns')}"
+            ),
+            model="prompt-injection-guard",
+            conversation_id=conversation_id,
+        )
+        return block
+
+    def _check_and_record_anomaly(
+        self,
+        body: dict,
+        conversation_id: str,
+        model: str,
+        client_ip: str,
+        user_agent: str,
+        *,
+        post_call_status_code: int | None = None,
+        post_call_latency_ms: float | None = None,
+    ) -> tuple[bool, dict | None]:
+        """Single anomaly entry point for both pre- and post-call phases.
+
+        Pre-call (``post_call_status_code is None``): runs ``is_anomalous``,
+        emits a ``security_anomaly`` wire event when triggered, and returns
+        ``(block_now, block_response)``. ``block_now=True`` means the
+        orchestrator should short-circuit with the returned synthetic body.
+
+        Post-call (``post_call_status_code is not None``): records baseline
+        metrics on the detector. Always returns ``(False, None)`` — there's
+        nothing to block after the upstream call has already completed.
+        """
+        if self.anomaly_detector is None:
+            return False, None
+
+        # Post-call: baseline-update path.
+        if post_call_status_code is not None:
+            request_body_bytes = len(str(body).encode("utf-8"))
+            api_key = body.get("_bb_auth_key", "anonymous")
+            self.anomaly_detector.record_request(
+                ip=client_ip,
+                user_agent=user_agent,
+                api_key=api_key,
+                model=model,
+                request_bytes=request_body_bytes,
+                status_code=post_call_status_code,
+                latency_ms=post_call_latency_ms or 0.0,
+                conversation_id=conversation_id,
+            )
+            return False, None
+
+        # Pre-call: inspect, emit, optionally block.
+        req_bytes = len(str(body).encode("utf-8"))
+        is_anom, triggered_rules = self.anomaly_detector.is_anomalous(
+            client_ip, user_agent, req_bytes,
+        )
+        if not is_anom:
+            return False, None
+        from beigebox.security.anomaly_detector import (
+            _compute_risk_score, _recommended_action,
+        )
+        risk = _compute_risk_score(triggered_rules)
+        mode = self._anomaly_cfg.get("detection_mode", "warn")
+        action = _recommended_action(risk, mode)
+        self.wire.log(
+            direction="internal",
+            role="system",
+            content=(
+                f"anomaly detected: {', '.join(triggered_rules)} "
+                f"(ip={client_ip}, risk={risk:.2f}, action={action})"
+            ),
+            model=model,
+            conversation_id=conversation_id,
+            event_type="security_anomaly",
+            meta={
+                "rules_triggered": triggered_rules,
+                "client_ip": client_ip,
+                "risk_score": risk,
+                "recommended_action": action,
+                "detection_mode": mode,
+            },
+        )
+        if action == "block":
+            return True, {
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "Request blocked due to suspicious activity.",
+                    },
+                }],
+                "model": "beigebox",
+            }
+        return False, None
+
+    def _emit_timing_summary(
+        self,
+        conversation_id: str,
+        model: str,
+        backend_name: str,
+        total_ms: float,
+        stages: dict,
+        cost_usd: float | None,
+        *,
+        ttft_ms: float | None = None,
+        stream: bool = False,
+    ) -> None:
+        """Emit the per-request wire-log timing summary.
+
+        Used by both forward methods. The ``stream`` flag flips the prefix
+        ("completed" vs "stream completed") and drops a TTFT suffix into
+        the message when one is available.
+        """
+        cost_str = f" · ${cost_usd:.6f}" if cost_usd else ""
+        ttft_str = f" · TTFT {ttft_ms:.0f}ms" if (stream and ttft_ms is not None) else ""
+        prefix = "stream completed" if stream else "completed"
+        self.wire.log(
+            direction="internal",
+            role="system",
+            content=f"{prefix} via '{backend_name}' · {total_ms:.0f}ms total{cost_str}{ttft_str}",
+            model=model,
+            conversation_id=conversation_id,
+            latency_ms=total_ms,
+            timing=stages,
+        )
+
+    # ------------------------------------------------------------------
     # ------------------------------------------------------------------
 
     async def forward_chat_completion(
@@ -448,51 +590,21 @@ class Proxy:
         )
 
         # Check for hook-initiated block (e.g. prompt injection detection)
-        if "_beigebox_block" in body:
-            block = body["_beigebox_block"]
-            self.wire.log(
-                direction="internal",
-                role="system",
-                content=f"request blocked: reason={block.get('reason')} score={block.get('score')} patterns={block.get('patterns')}",
-                model="prompt-injection-guard",
-                conversation_id=conversation_id,
-            )
+        block = self._check_hook_block(body, conversation_id)
+        if block is not None:
             return {
                 "choices": [{"message": {"role": "assistant", "content": block.get("message", "Request blocked.")}}],
                 "model": "beigebox",
             }
 
-        # API Anomaly Detection — check for suspicious patterns
+        # API Anomaly Detection (pre-call) — check for suspicious patterns
         _t_anom = _time.monotonic()
-        if self.anomaly_detector:
-            _req_bytes = len(str(body).encode("utf-8"))
-            is_anom, triggered_rules = self.anomaly_detector.is_anomalous(client_ip, user_agent, _req_bytes)
-            if is_anom:
-                from beigebox.security.anomaly_detector import _compute_risk_score, _recommended_action
-                _risk = _compute_risk_score(triggered_rules)
-                mode = self._anomaly_cfg.get("detection_mode", "warn")
-                _action = _recommended_action(_risk, mode)
-                self.wire.log(
-                    direction="internal",
-                    role="system",
-                    content=f"anomaly detected: {', '.join(triggered_rules)} (ip={client_ip}, risk={_risk:.2f}, action={_action})",
-                    model=model,
-                    conversation_id=conversation_id,
-                    event_type="security_anomaly",
-                    meta={
-                        "rules_triggered": triggered_rules,
-                        "client_ip": client_ip,
-                        "risk_score": _risk,
-                        "recommended_action": _action,
-                        "detection_mode": mode,
-                    },
-                )
-                if _action == "block":
-                    return {
-                        "choices": [{"message": {"role": "assistant", "content": "Request blocked due to suspicious activity."}}],
-                        "model": "beigebox",
-                    }
+        block_now, block_response = self._check_and_record_anomaly(
+            body, conversation_id, model, client_ip, user_agent,
+        )
         _stages["anomaly_check"] = (_time.monotonic() - _t_anom) * 1000
+        if block_now:
+            return block_response
 
         try:
             body, is_synthetic, model = await self._run_request_pipeline(
@@ -559,9 +671,9 @@ class Proxy:
             _stages["backend"] = (_time.monotonic() - _t_backend) * 1000
             if not response.ok:
                 # Inspector — finalize error
-                if _insp_entry is not None:
-                    _insp_entry["latency_ms"] = round(_stages.get("backend", 0), 1)
-                    _insp_entry["status"] = "error"
+                RequestInspector.finish(
+                    _insp_entry, latency_ms=_stages.get("backend", 0), status="error",
+                )
                 # Capture the failed request + response when fanout is wired.
                 # Soft failures (response.ok=False) don't raise — the proxy
                 # returns a synthetic error reply — but we still want a row.
@@ -634,9 +746,9 @@ class Proxy:
             _req_captured = True
 
         # Inspector — finalize latency
-        if _insp_entry is not None:
-            _insp_entry["latency_ms"] = round(_stages.get("backend", 0), 1)
-            _insp_entry["status"] = "complete"
+        RequestInspector.finish(
+            _insp_entry, latency_ms=_stages.get("backend", 0), status="complete",
+        )
 
         # Log assistant response (skip synthetic)
         # assistant_content is set inside the if-block; guard below prevents
@@ -730,34 +842,17 @@ class Proxy:
 
         # Emit timing summary to wiretap
         total_ms = (_time.monotonic() - _t0) * 1000
-        cost_str = f" · ${cost_usd:.6f}" if cost_usd else ""
-        self.wire.log(
-            direction="internal",
-            role="system",
-            content=f"completed via '{backend_name}' · {total_ms:.0f}ms total{cost_str}",
-            model=model,
-            conversation_id=conversation_id,
-            latency_ms=total_ms,
-            timing=_stages,
+        self._emit_timing_summary(
+            conversation_id, model, backend_name, total_ms, _stages, cost_usd,
         )
 
         # Record request metrics for anomaly detection baseline updates
-        if self.anomaly_detector:
-            request_body_bytes = len(str(body).encode("utf-8"))
-            # Extract API key if available (use placeholder if not)
-            api_key = body.get("_bb_auth_key", "anonymous")
-            # Determine status code (200 for success, 5xx for error)
-            status_code = 200 if "error" not in data else 500
-            self.anomaly_detector.record_request(
-                ip=client_ip,
-                user_agent=user_agent,
-                api_key=api_key,
-                model=model,
-                request_bytes=request_body_bytes,
-                status_code=status_code,
-                latency_ms=total_ms,
-                conversation_id=conversation_id,
-            )
+        status_code = 200 if "error" not in data else 500
+        self._check_and_record_anomaly(
+            body, conversation_id, model, client_ip, user_agent,
+            post_call_status_code=status_code,
+            post_call_latency_ms=total_ms,
+        )
 
         return data
 
@@ -787,8 +882,6 @@ class Proxy:
         ) if self.capture is not None else None
         _stream_req_captured = False
         _stream_resp_captured = False
-        _stream_outcome = "ok"
-        _stream_error: BaseException | None = None
 
         # Drop consecutive duplicate messages from a buggy/replaying client
         body = self._dedupe_consecutive_messages(body)
@@ -811,17 +904,9 @@ class Proxy:
         )
 
         # Check for hook-initiated block (e.g. prompt injection detection)
-        if "_beigebox_block" in body:
-            block = body["_beigebox_block"]
-            self.wire.log(
-                direction="internal",
-                role="system",
-                content=f"stream blocked: reason={block.get('reason')} score={block.get('score')}",
-                model="prompt-injection-guard",
-                conversation_id=conversation_id,
-            )
-            import json as _json
-            chunk = _json.dumps({
+        block = self._check_hook_block(body, conversation_id)
+        if block is not None:
+            chunk = json.dumps({
                 "choices": [{"delta": {"content": block.get("message", "Request blocked.")}, "index": 0}],
                 "model": "beigebox",
             })
@@ -829,42 +914,22 @@ class Proxy:
             yield "data: [DONE]\n"
             return
 
-        # API Anomaly Detection — check for suspicious patterns
+        # API Anomaly Detection (pre-call) — check for suspicious patterns
         _t_anom = _time.monotonic()
-        _anomaly_triggered = False
-        if self.anomaly_detector:
-            _req_bytes = len(str(body).encode("utf-8"))
-            is_anom, triggered_rules = self.anomaly_detector.is_anomalous(client_ip, user_agent, _req_bytes)
-            if is_anom:
-                _anomaly_triggered = True
-                from beigebox.security.anomaly_detector import _compute_risk_score, _recommended_action
-                _risk = _compute_risk_score(triggered_rules)
-                mode = self._anomaly_cfg.get("detection_mode", "warn")
-                _action = _recommended_action(_risk, mode)
-                self.wire.log(
-                    direction="internal",
-                    role="system",
-                    content=f"anomaly detected: {', '.join(triggered_rules)} (ip={client_ip}, risk={_risk:.2f}, action={_action})",
-                    model=model,
-                    conversation_id=conversation_id,
-                    event_type="security_anomaly",
-                    meta={
-                        "rules_triggered": triggered_rules,
-                        "client_ip": client_ip,
-                        "risk_score": _risk,
-                        "recommended_action": _action,
-                        "detection_mode": mode,
-                    },
-                )
-                if _action == "block":
-                    chunk = json.dumps({
-                        "choices": [{"delta": {"content": "Request blocked due to suspicious activity."}, "index": 0}],
-                        "model": "beigebox",
-                    })
-                    yield f"data: {chunk}\n"
-                    yield "data: [DONE]\n"
-                    return
+        block_now, block_response = self._check_and_record_anomaly(
+            body, conversation_id, model, client_ip, user_agent,
+        )
         _stages["anomaly_check"] = (_time.monotonic() - _t_anom) * 1000
+        if block_now:
+            # Translate the helper's non-streaming block dict into an SSE chunk.
+            block_text = block_response["choices"][0]["message"]["content"]
+            chunk = json.dumps({
+                "choices": [{"delta": {"content": block_text}, "index": 0}],
+                "model": "beigebox",
+            })
+            yield f"data: {chunk}\n"
+            yield "data: [DONE]\n"
+            return
 
         try:
             body, is_synthetic, model = await self._run_request_pipeline(
@@ -886,8 +951,6 @@ class Proxy:
         # synthetic requests because synthetic clients don't have a UI.
         if not is_synthetic:
             yield f"data: {json.dumps({'bb_type': 'routing', 'model': model})}\n\n"
-
-        user_message = self._get_latest_user_message(body)
 
         # Capture pipeline: request envelope deferred until first chunk
         # arrives (so we know upstream is alive).
@@ -962,7 +1025,6 @@ class Proxy:
                 # Capture whatever we assembled and re-raise so the runtime
                 # can clean up. asyncio.CancelledError must propagate;
                 # GeneratorExit must NOT be suppressed.
-                _stream_outcome = "client_disconnect"
                 if self.capture is not None and not is_synthetic and not _stream_resp_captured:
                     self._capture_stream_response(
                         _capture_ctx, body, full_response, _stages,
@@ -973,8 +1035,6 @@ class Proxy:
                     _stream_resp_captured = True
                 raise
             except Exception as exc:
-                _stream_outcome = "stream_aborted"
-                _stream_error = exc
                 if self.capture is not None and not is_synthetic and not _stream_resp_captured:
                     self._capture_stream_response(
                         _capture_ctx, body, full_response, _stages,
@@ -1034,9 +1094,11 @@ class Proxy:
                 })
                 yield f"data: {err_chunk}\n"
                 yield "data: [DONE]\n\n"
-                if _insp_entry is not None:
-                    _insp_entry["latency_ms"] = round((_time.monotonic() - _t_backend) * 1000, 1)
-                    _insp_entry["status"] = "error"
+                RequestInspector.finish(
+                    _insp_entry,
+                    latency_ms=(_time.monotonic() - _t_backend) * 1000,
+                    status="error",
+                )
                 return
             except httpx.RequestError as e:
                 logger.error("Backend connection error for model '%s': %s", model, e)
@@ -1046,9 +1108,11 @@ class Proxy:
                 })
                 yield f"data: {err_chunk}\n"
                 yield "data: [DONE]\n\n"
-                if _insp_entry is not None:
-                    _insp_entry["latency_ms"] = round((_time.monotonic() - _t_backend) * 1000, 1)
-                    _insp_entry["status"] = "error"
+                RequestInspector.finish(
+                    _insp_entry,
+                    latency_ms=(_time.monotonic() - _t_backend) * 1000,
+                    status="error",
+                )
                 return
 
         # Wall-clock stream duration
@@ -1056,10 +1120,12 @@ class Proxy:
         total_ms = (_time.monotonic() - _t0) * 1000
 
         # Inspector — finalize latency
-        if _insp_entry is not None:
-            _insp_entry["latency_ms"] = round(total_ms, 1)
-            _insp_entry["ttft_ms"] = round(_stages.get("ttft_ms", 0), 1)
-            _insp_entry["status"] = "complete"
+        RequestInspector.finish(
+            _insp_entry,
+            latency_ms=total_ms,
+            ttft_ms=_stages.get("ttft_ms", 0),
+            status="complete",
+        )
 
         # Log request completion
         try:
@@ -1155,33 +1221,18 @@ class Proxy:
                 _stream_resp_captured = True
 
         # Emit timing summary to wiretap
-        cost_str = f" · ${stream_cost_usd:.6f}" if stream_cost_usd else ""
-        ttft_str = f" · TTFT {_stages['ttft_ms']:.0f}ms" if "ttft_ms" in _stages else ""
-        self.wire.log(
-            direction="internal",
-            role="system",
-            content=f"stream completed via '{backend_name}' · {total_ms:.0f}ms total{cost_str}{ttft_str}",
-            model=model,
-            conversation_id=conversation_id,
-            latency_ms=total_ms,
-            timing=_stages,
+        self._emit_timing_summary(
+            conversation_id, model, backend_name, total_ms, _stages, stream_cost_usd,
+            ttft_ms=_stages.get("ttft_ms"),
+            stream=True,
         )
 
         # Record request metrics for anomaly detection baseline updates
-        if self.anomaly_detector:
-            request_body_bytes = len(str(body).encode("utf-8"))
-            # Extract API key if available (use placeholder if not)
-            api_key = body.get("_bb_auth_key", "anonymous")
-            self.anomaly_detector.record_request(
-                ip=client_ip,
-                user_agent=user_agent,
-                api_key=api_key,
-                model=model,
-                request_bytes=request_body_bytes,
-                status_code=200,  # Stream completed successfully
-                latency_ms=total_ms,
-                conversation_id=conversation_id,
-            )
+        self._check_and_record_anomaly(
+            body, conversation_id, model, client_ip, user_agent,
+            post_call_status_code=200,  # Stream completed successfully
+            post_call_latency_ms=total_ms,
+        )
 
     # Model listing — thin wrappers around proxy/model_listing.py
     async def list_models(self) -> dict:
