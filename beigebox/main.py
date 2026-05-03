@@ -4,16 +4,10 @@ BeigeBox — LLM Middleware Control Plane
 LICENSING: Dual-licensed under AGPL-3.0 (free) and Commercial License (proprietary).
 See LICENSE.md and COMMERCIAL_LICENSE.md for details.
 
-FastAPI application — the BeigeBox entry point.
-Implements OpenAI-compatible endpoints that proxy to Ollama.
-
-Now with:
-  - Decision LLM initialization and preloading
-  - Hook manager setup
-  - Embedding model preloading
-  - Enhanced stats with token tracking
-  - Multi-backend routing with fallback (v0.6)
-  - Cost tracking for API backends (v0.6)
+FastAPI application — the BeigeBox entry point. Wires app construction,
+middleware, lifespan, and router registration. Endpoint handlers live in
+beigebox/routers/; storage, security, and proxy initialization runs through
+the lifespan() startup path.
 """
 
 import asyncio
@@ -44,14 +38,7 @@ from beigebox.hooks import HookManager
 from beigebox.backends.router import MultiBackendRouter
 from beigebox.costs import CostTracker
 from beigebox.auth import MultiKeyAuthRegistry
-try:
-    from beigebox.web_auth import WebAuthManager, COOKIE_SESSION, COOKIE_STATE
-except ImportError:
-    WebAuthManager = None  # type: ignore[assignment,misc]
-    COOKIE_SESSION = "bb_session"
-    COOKIE_STATE   = "bb_oauth_state"
-
-# _COOKIE_VERIFIER moved to routers/auth.py (B-3) — only the OAuth flow uses it.
+from beigebox.web_auth import WebAuthManager, COOKIE_SESSION, COOKIE_STATE
 from beigebox.mcp_server import McpServer
 from beigebox.app_state import AppState
 from beigebox.observability.egress import build_egress_hooks, start_egress_hooks, stop_egress_hooks
@@ -59,14 +46,9 @@ from beigebox.observability.egress import build_egress_hooks, start_egress_hooks
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Application state — initialized during lifespan startup
-# ---------------------------------------------------------------------------
-# The state singleton lives in beigebox/state.py so router modules can
-# reach it without an import cycle through main.py. Re-exported here so
-# existing callers of ``from beigebox.main import get_state`` keep
-# working. In-file middleware that referenced the legacy module-level
-# ``_app_state`` global has been migrated to ``maybe_state()``.
+# Application state singleton lives in beigebox/state.py so router modules
+# can reach it without an import cycle through main.py. Re-exported here so
+# `from beigebox.main import get_state` keeps working.
 from beigebox.state import get_state, maybe_state, set_state
 
 
@@ -278,10 +260,6 @@ async def lifespan(app: FastAPI):
         from beigebox.web_auth import SimplePasswordAuth
         password_auth = SimplePasswordAuth(users) if users else None
 
-    # MCP server — expose operator/run if operator is enabled
-    # Operator-via-MCP factory removed in v3 — Operator class deleted.
-    _op_mcp_factory = None
-
     # Load skills for MCP resources/list + resources/read
     from beigebox.skill_loader import load_skills as _load_skills
     _skills_path = cfg.get("skills", {}).get("path") or str(
@@ -289,7 +267,7 @@ async def lifespan(app: FastAPI):
     )
     _mcp_skills = _load_skills(_skills_path)
 
-    mcp_server = McpServer(tool_registry, operator_factory=_op_mcp_factory, skills=_mcp_skills)
+    mcp_server = McpServer(tool_registry, operator_factory=None, skills=_mcp_skills)
     logger.info("MCP server: enabled (POST /mcp)")
 
     # Pen/Sec MCP — separate endpoint exposing offensive-security tool wrappers
@@ -337,16 +315,12 @@ async def lifespan(app: FastAPI):
 
     sec_cfg = cfg.get("security", {})
 
-    # Audit Logger (SQLite-backed, queryable) — disabled for now due to DB write issues
-    audit_logger_path = sec_cfg.get("audit_db_path", "~/.beigebox/audit.db")
-    audit_logger = None  # Temporarily disabled
-    if audit_logger:
-        logger.info("Audit Logger: initialized at %s", audit_logger_path)
-
-    # Honeypot Manager (8 bypass canaries) — disabled for now
-    honeypot_manager = None  # Temporarily disabled
-    if honeypot_manager:
-        logger.info("Honeypot Manager: 8 traps active, logging to audit_logger")
+    # AuditLogger + HoneypotManager are not currently wired (left unset to
+    # be revived by a dedicated commit if/when their DB-write issues are
+    # resolved). AppState carries them as None so downstream consumers
+    # remain quiet rather than missing-attribute-error.
+    audit_logger = None
+    honeypot_manager = None
 
     # Enhanced Injection Guard (semantic + pattern detection)
     injection_guard = EnhancedInjectionGuard() if sec_cfg.get("injection_guard", {}).get("enabled", True) else None
@@ -418,10 +392,7 @@ async def lifespan(app: FastAPI):
             )
 
     # Bind the production WireLog to the typed-event dispatch so the
-    # logging.py helpers (once converted in A-4) can reach a real sink.
-    # Until A-4 lands, the helpers still use the legacy _get_tap_logger
-    # path; this set_wire_log call is wired in advance so the swap is
-    # a one-import change in A-4.
+    # logging.py helpers can reach a real sink.
     from beigebox.log_events import set_wire_log
     set_wire_log(proxy.wire)
 
@@ -469,13 +440,6 @@ async def lifespan(app: FastAPI):
     logger.info("Storage: SQLite=%s, Vector=%s", sqlite_path, vector_store_path)
     logger.info("Tools: %s", tool_registry.list_tools())
     logger.info("Hooks: %s", hook_manager.list_hooks())
-    op_enabled = cfg.get("operator", {}).get("enabled", False)
-    if op_enabled:
-        op_allowed = cfg.get("operator", {}).get("allowed_tools", [])
-        scope = f"restricted to {op_allowed}" if op_allowed else "ALL registered tools"
-        logger.warning("Operator agent: ENABLED — LLM-driven tool execution active (%s)", scope)
-    else:
-        logger.info("Operator agent: disabled (set operator.enabled: true to activate)")
 
     # Preload models — run concurrently in the background so startup is not blocked.
     # Both use retry-with-backoff; Ollama may still be loading models from disk.
@@ -647,10 +611,6 @@ def _emit_auth_denied(reason_code: str, principal_name: str, principal_type: str
         )
     except Exception:
         logger.warning("auth_denied wire emit failed", exc_info=True)
-
-
-# _require_admin moved to routers/_shared.py (B-3) — used by auth, config,
-# and toolbox routers. Imported here for the in-file admin-gated endpoints.
 
 
 class ApiKeyMiddleware(BaseHTTPMiddleware):
@@ -887,28 +847,6 @@ app.include_router(tools_router)
 app.include_router(config_router)
 
 
-# OpenAI-compat + Ollama passthrough endpoints live in routers/openai.py
-# (extracted in commit B-2). Registered above via app.include_router().
-# /api/v1/route-check removed in v3 — the agentic routing layer it exercised
-# (z-commands, hybrid routing, decision LLM, embedding classifier) was deleted.
-
-
-# ---------------------------------------------------------------------------
-# BeigeBox-specific endpoints
-# ---------------------------------------------------------------------------
-
-# /beigebox/stats, /metrics/quarantine, /api/v1/security/*, /beigebox/search,
-# /api/v1/search, /beigebox/health all moved to routers/security.py (B-4).
-
-
-
-
-# /api/v1/zcommands removed in v3 — z-command parsing was deleted.
-
-
-# /api/v1/search moved to routers/security.py (B-4).
-
-
 @app.get("/.well-known/agent-card.json")
 async def agent_card():
     """A2A agent card — describes this node to the AMF mesh and any A2A client."""
@@ -933,33 +871,6 @@ async def agent_card():
     })
 
 
-# /beigebox/health moved to routers/security.py (B-4).
-
-
-
-
-# ---------------------------------------------------------------------------
-# API v1 endpoints (for web UI and other clients)
-# ---------------------------------------------------------------------------
-
-
-
-
-# ---------------------------------------------------------------------------
-# Conversation Replay (v0.6)
-# ---------------------------------------------------------------------------
-
-# /api/v1/conversation/{id}/replay and /fork moved to routers/workspace.py (B-4).
-
-
-# ---------------------------------------------------------------------------
-# Tap — wire log reader with filters (v0.7)
-# ---------------------------------------------------------------------------
-
-
-
-# ---------------------------------------------------------------------------
-# Web UI settings
 # ---------------------------------------------------------------------------
 # Network probe — server-side HTTP request (reaches internal Docker services)
 # ---------------------------------------------------------------------------
@@ -1024,26 +935,6 @@ async def api_probe(request: Request):
         return JSONResponse({"error": str(e), "latency_ms": int((_time.monotonic() - t0) * 1000)})
 
 
-# /api/v1/build-centroids removed in v3 — embedding classifier was deleted.
-
-
-# /api/v1/workspace, /api/v1/workspace/mounts, /api/v1/workspace/mounts/{name},
-# /api/v1/workspace/out/{filename} all moved to routers/workspace.py (B-4).
-
-
-
-
-# _index_document and /api/v1/workspace/upload moved to routers/_shared.py
-# and routers/workspace.py respectively (B-4). _index_document is shared
-# because routers/tools.py (B-6) uses it for skill indexing.
-
-
-# /api/v1/transform/pdf moved to routers/workspace.py (B-4).
-
-
-# /api/v1/web-ui/toggle-vi-mode moved to routers/workspace.py (B-4).
-
-
 # Serve static web assets (vi.js etc.) — must come before catch-all routes
 from pathlib import Path as _Path
 _web_dir = _Path(__file__).parent / "web"
@@ -1067,20 +958,10 @@ async def ui():
     return FileResponse("beigebox/web/index.html", media_type="text/html")
 
 
-# ---------------------------------------------------------------------------
-# Known OpenAI-compatible endpoints — explicit routes for observability.
-# These all forward to the backend but are logged to wiretap.
-# Catch-all below handles anything not listed here.
-# ---------------------------------------------------------------------------
-
-# _wire_and_forward extracted to beigebox/routers/_shared.py (B-2).
-# Imported below for the catch-all route. The per-endpoint passthroughs
-# (/v1/embeddings, /v1/completions, /v1/files/, /v1/fine_tuning/,
-# /v1/assistants/, /api/* ollama-native routes) live in routers/openai.py.
+# _wire_and_forward backs the catch-all route below.
 from beigebox.routers._shared import _wire_and_forward
 
 
-# ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Bench — direct-to-Ollama speed benchmark (bypasses proxy)
 # ---------------------------------------------------------------------------
@@ -1168,9 +1049,6 @@ async def cdp_status():
         "note": "Chrome/Chromium not running. Start with: docker compose --profile cdp up -d",
     })
 
-
-# OpenAI Files / Fine-tuning / Assistants (future-proofing)
-# OpenAI-compat + Ollama passthroughs extracted to routers/openai.py (B-2).
 
 # ---------------------------------------------------------------------------
 # Catch-all — anything not explicitly handled above is forwarded transparently.
