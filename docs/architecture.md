@@ -91,7 +91,6 @@ The streaming path follows the same shape but yields chunks back through the res
 | `beigebox/tools/registry.py` | `ToolRegistry` — single source of truth for which tools exist |
 | `beigebox/tools/plugin_loader.py` | Auto-discover plugin tools at startup |
 | `beigebox/web/index.html` | Single-file web UI (no build step) |
-| `beigebox/agents/{council.py,ensemble_voter.py,wiggam_planner.py,ralph_orchestrator.py,skill_loader.py}` | Multi-LLM features that survive: Council, Ensemble, Wiggam, Ralph |
 
 ## Application State
 

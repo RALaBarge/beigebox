@@ -104,7 +104,6 @@ Importable async pipelines under `beigebox/skills/` — each is a self-contained
 - `beigebox/backends/router.py` — Multi-backend routing engine
 - `beigebox/cache.py` — Semantic + embedding caching
 - `beigebox/web/index.html` — Web UI (no build step)
-- `beigebox/agents/` — Multi-LLM features (council, ensemble_voter, wiggam_planner, ralph_orchestrator, skill_loader)
 - `beigebox/storage/` — SQLite + Postgres+pgvector storage (`storage/backends/{base,postgres,memory}.py` factory)
 - `CLAUDE.md` — Development guidelines
 

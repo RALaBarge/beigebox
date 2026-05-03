@@ -139,7 +139,6 @@ The next labeled batch is **principle-violation-first, size-irrelevant.** What's
 - **`mcp_server.py` still advertises `operator/run`.** Schema (`_OPERATOR_RUN_SCHEMA`) and dispatcher are live; returns `operator_disabled` when no factory is wired, but the tool name is still surfaced to MCP clients. Conflicts with "Not an agent harness." Delete the schema, dispatcher, and the `_operator_factory` plumbing — or wire it back if Operator is re-introduced.
 - **`tools/cdp.py`** — CLAUDE.md flags this as the canonical "we skipped the untrusted-input question" leftover (real Chrome cookie symlinks; subprocess paths derivable from model output). Either route through the same factory pattern that landed for `web_auth` and `wire_sink`, or delete.
 - **`tools/network_audit.py`** and any other `tools/*.py` doing direct `subprocess` / `os.system` / model-derived paths without going through a factory. Audit and either factory-isolate or delete.
-- **Doc drift in `docs/INDEX.md` and `docs/architecture.md`.** Both still describe `beigebox/agents/{council.py, ensemble_voter.py, wiggam_planner.py, ralph_orchestrator.py, skill_loader.py}` as live. The directory does not exist. Update or delete those entries.
 - **Cosmetic**: `security/tool_call_validator.py:285` has a stale `# Optional SQLiteStore for audit logging` comment.
 
 ## Invariant being enforced (factory pattern, ongoing)
