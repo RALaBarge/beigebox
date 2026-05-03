@@ -304,9 +304,16 @@ class GoogleProvider(AuthProvider):
 # ---------------------------------------------------------------------------
 
 class WebAuthManager:
-    """Builds providers from config, signs/verifies session cookies."""
+    """Builds providers from config, signs/verifies session cookies.
 
-    def __init__(self, web_ui_cfg: dict):
+    Top-level kill switch: when ``enabled=False`` (mirroring ``auth.enabled``
+    in config), ``is_enabled()`` returns ``False`` regardless of mode/providers.
+    This is the single-user dev-mode short-circuit (web UI wide open). Default
+    is ``True``: respect ``web_ui.mode`` and the configured providers.
+    """
+
+    def __init__(self, web_ui_cfg: dict, *, enabled: bool = True):
+        self._enabled: bool = bool(enabled)
         self.mode = web_ui_cfg.get("mode", "none")
         self._providers: dict[str, OAuthProvider] = {}
         self._signer: URLSafeTimedSerializer | None = None
@@ -373,6 +380,8 @@ class WebAuthManager:
             logger.warning("WebAuth: mode=oauth but no providers loaded — web UI will be open")
 
     def is_enabled(self) -> bool:
+        if not self._enabled:
+            return False
         return self.mode == "oauth" and bool(self._providers)
 
     def get_provider(self, name: str) -> OAuthProvider | None:

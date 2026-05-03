@@ -53,11 +53,17 @@ class MultiKeyAuthRegistry:
     Enforces per-key model ACLs, endpoint ACLs, and rate limits.
 
     Empty token map = auth disabled (all requests pass through).
+
+    Top-level kill switch: when ``auth.enabled`` is set to ``False`` in config,
+    ``is_enabled()`` returns ``False`` regardless of which keys were configured.
+    This is the single-user dev-mode short-circuit (BeigeBox wide open). Default
+    is ``True``: respect the configured keys (or pass-through if none).
     """
 
     def __init__(self, auth_cfg: dict):
         self._token_map: dict[str, KeyMeta] = {}   # token → meta
         self._rate_windows: dict[str, deque] = {}   # key name → timestamps
+        self._enabled: bool = bool(auth_cfg.get("enabled", True))
 
         # Legacy single key (backwards compat — always a wildcard key, and
         # admin since it's the operator's own key in single-key deployments).
@@ -93,12 +99,19 @@ class MultiKeyAuthRegistry:
                 meta.admin,
             )
 
-        if self._token_map:
+        if not self._enabled:
+            logger.warning(
+                "Auth: disabled by auth.enabled=false — BeigeBox open "
+                "(single-user dev mode only — never use in production)"
+            )
+        elif self._token_map:
             logger.info("Auth: %d key(s) active", len(self._token_map))
         else:
             logger.info("Auth: disabled (no keys configured)")
 
     def is_enabled(self) -> bool:
+        if not self._enabled:
+            return False
         return bool(self._token_map)
 
     def validate(self, token: str) -> KeyMeta | None:
