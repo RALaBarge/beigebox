@@ -20,49 +20,6 @@ from pydantic import BaseModel, Field, validator
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-class WorkspaceFileInput(BaseModel):
-    """WorkspaceFileTool input: read/write/append files in /workspace/out/."""
-
-    action: Literal["write", "append", "read", "list"] = Field(
-        ...,
-        description="File operation: write (overwrite), append, read, or list",
-    )
-    path: Optional[str] = Field(
-        None,
-        max_length=256,
-        description="Relative path in /workspace/out/ (e.g., 'plan.md')",
-    )
-    content: Optional[str] = Field(
-        None,
-        max_length=65536,
-        description="Content to write or append (for write/append actions)",
-    )
-
-    @validator("path", pre=True, always=True)
-    def validate_path(cls, v, values):
-        """Ensure path is provided for actions that need it."""
-        action = values.get("action", "")
-        if action in {"write", "append", "read"} and not v:
-            raise ValueError(f"path is required for action='{action}'")
-        if v:
-            # Reject obvious path traversal
-            if "../" in v or "..\\" in v or v.startswith("/"):
-                raise ValueError(
-                    f"Path traversal not allowed: '{v}'. Use relative paths like 'plan.md'."
-                )
-        return v
-
-    @validator("content")
-    def validate_content(cls, v):
-        """Ensure content is a string, not dict/list."""
-        if v is not None and not isinstance(v, str):
-            raise ValueError("content must be a string")
-        return v
-
-    class Config:
-        extra = "forbid"
-
-
 class NetworkAuditScanNetworkInput(BaseModel):
     """NetworkAuditTool.scan_network: RFC1918-only network scan."""
 
@@ -110,19 +67,6 @@ class CDPNavigateInput(BaseModel):
         if any(v_lower.startswith(s) for s in dangerous_schemes):
             raise ValueError(f"Dangerous URL scheme: {v[:30]}...")
         return v
-
-    class Config:
-        extra = "forbid"
-
-
-class PythonInterpreterInput(BaseModel):
-    """PythonInterpreterTool: Python code (length-limited, sandboxed)."""
-
-    code: str = Field(
-        ...,
-        max_length=65536,
-        description="Python code to execute in sandbox",
-    )
 
     class Config:
         extra = "forbid"
@@ -355,10 +299,8 @@ class GenericToolInput(BaseModel):
 
 
 TOOL_INPUT_SCHEMAS = {
-    "workspace_file": WorkspaceFileInput,
     "network_audit": NetworkAuditScanNetworkInput,
     "cdp": CDPNavigateInput,
-    "python": PythonInterpreterInput,
     "apex_analyzer": ApexAnalyzerInput,
     "atlassian": AtlassianSearchInput,
     "web_search": WebSearchInput,

@@ -197,28 +197,6 @@ class TestMcpToolsCallErrors:
         assert "name" in resp["error"]["message"].lower()
 
     @pytest.mark.asyncio
-    async def test_parameter_validation_failure_surfaces_to_client(self):
-        """When the registry's ParameterValidator rejects an input
-        (e.g. path traversal in workspace_file), the rejection text comes
-        back to the client through the same channel as a successful
-        response — so the model can read the error and try again."""
-        registry = _FakeRegistry()
-        # workspace_file has a strict path-traversal validator
-        registry.register("workspace_file", _FakeTool(lambda x: "should not reach"))
-        server = McpServer(registry, resident_tools=set())
-
-        # JSON-encoded dict with a path-traversal payload
-        bad_input = '{"action": "write", "path": "../../etc/passwd", "content": "x"}'
-        resp = await server.handle(_rpc_call("workspace_file", bad_input))
-
-        assert "result" in resp
-        text = resp["result"]["content"][0]["text"]
-        # The error names the failing field/concept so the model knows what to fix
-        assert "path traversal" in text.lower() or "validation failed" in text.lower()
-        # Tool body never ran (no "should not reach" in response)
-        assert "should not reach" not in text
-
-    @pytest.mark.asyncio
     async def test_oversized_input_rejected_with_jsonrpc_invalid_params(self):
         """The 1 MB input cap is enforced at the MCP boundary, before the
         tool sees the input. Clients can't smuggle a 100 MB payload past

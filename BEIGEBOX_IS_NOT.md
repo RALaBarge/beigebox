@@ -29,10 +29,14 @@ paragraph to defend a NO, the rule probably isn't a clean line yet.
   on purpose. SOTA-class models running through BeigeBox can drive themselves
   via MCP tools. We are not rebuilding "the agent that runs in BeigeBox."
 
-- **Not a code sandbox.** The bwrap profile in `system_info.py` exists to
-  contain *our own* shell-out calls (`df`, `nvidia-smi`). It is not a
-  general-purpose REPL for user-supplied code. The python_interpreter +
-  workspace_file MCP tools were deleted in 2026-05-02 for this reason.
+- **Not a code sandbox.** No in-tree tool executes user-supplied or
+  model-generated code. The `bwrap` profile in `system_info.py` exists
+  *only* to contain BeigeBox's own shell-outs (`df`, `nvidia-smi`). The
+  `python_interpreter` and `workspace_file` MCP tools were deleted on
+  2026-05-03 — execution and arbitrary filesystem I/O belong in whatever
+  client is driving BeigeBox (Claude Code's Bash, jcode, etc.), not in the
+  proxy. The bar to add a *new* in-tree tool that executes code or touches
+  the filesystem outside the proxy's own working set is very high.
 
 - **Not a research framework.** dgm/, eval/, discovery/, orchestration/,
   agents/, AMF mesh — all deleted in v3. Experiments live as separate

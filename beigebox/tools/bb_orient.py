@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-ORIENTATION_PATH = Path(__file__).resolve().parent.parent / "orientation.md"
+ORIENTATION_PATH = Path(__file__).resolve().parent.parent.parent / "orientation.md"
 
 
 def bb_orient() -> str:

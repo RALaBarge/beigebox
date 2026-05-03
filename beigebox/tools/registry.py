@@ -27,8 +27,6 @@ from beigebox.tools.pdf_reader import PdfReaderTool
 from beigebox.tools.browserbox import BrowserboxTool
 from beigebox.tools.cdp import CDPTool
 from beigebox.tools.connection_tool import ConnectionTool
-from beigebox.tools.python_interpreter import PythonInterpreterTool
-from beigebox.tools.workspace_file import WorkspaceFileTool
 from beigebox.tools.apex_analyzer import ApexAnalyzerTool
 from beigebox.tools.confluence_crawler import ConfluenceCrawler
 from beigebox.tools.aura_recon import AuraReconTool
@@ -125,12 +123,6 @@ class ToolRegistry:
         si_cfg = tools_cfg.get("system_info", {})
         if si_cfg.get("enabled", True):  # Enabled by default — no deps
             self.tools["system_info"] = SystemInfoTool()
-
-        # --- Workspace File (read/write /workspace/out/ — always enabled) ---
-        from pathlib import Path as _P
-        _ws_cfg = cfg.get("workspace", {})
-        _ws_out = _P(__file__).parent.parent.parent / _ws_cfg.get("path", "./workspace") / "out"
-        self.tools["workspace_file"] = WorkspaceFileTool(workspace_out=_ws_out)
 
         # --- Document Search (workspace document RAG) ---
         ds_cfg = tools_cfg.get("document_search", {})
@@ -234,13 +226,6 @@ class ToolRegistry:
                 internal_org_names = sfi_cfg.get("internal_org_names", []),
             )
             logger.info("SF ingest tool registered (ws_url=%s)", sfi_cfg.get("ws_url", "ws://localhost:9009"))
-
-        # --- Python Interpreter (TIR — disabled by default, requires bwrap) ---
-        # Registered under the key "python" (not "python_interpreter") so the
-        # operator can call it as {"tool": "python", "input": "..."}.
-        pi_cfg = tools_cfg.get("python_interpreter", {})
-        if pi_cfg.get("enabled", False):
-            self.tools["python"] = PythonInterpreterTool()
 
         # --- BlueTruth (Bluetooth diagnostic & device simulation — disabled by default) ---
         # Requires bluTruth to be running (e.g., sudo blutruth serve)

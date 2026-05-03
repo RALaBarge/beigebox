@@ -2,6 +2,13 @@
 
 Hand-curated, single source of truth. Edit when something changes; no auto-regeneration.
 
+## ⚠️ Git workflow (v2 vs v3)
+
+- **v2** is frozen on **`origin/main`** (`RALaBarge/beigebox`). No new feature work; only deliberate cherry-picks.
+- **v3** is destined for **`security/main`** (`RALaBarge/beigebox-security`). The current refactor lives on local `main`, ahead of `origin/main`, and will be pushed to `security/main` when v3 is dubbed done.
+- Both remotes are fast-forward only. No `--force`, no `--no-verify`. (See `BEIGEBOX_IS_NOT.md`.)
+- Side-branch checkpoints get pushed to `origin` (e.g., `v3-checkpoint-2026-05-03`) without touching `origin/main`.
+
 ## ⚠️ Routing rule
 
 **External model calls go through BeigeBox** at `http://localhost:1337/v1` (OpenAI-compatible). Never hit OpenRouter / Anthropic / OpenAI directly from project code. BeigeBox forwards using the host's `OPENROUTER_API_KEY`. Verify with `python -m beigebox.cli ring`. Tail with `python -m beigebox.cli tap` — and there's a lot more: `sweep` (semantic search over past conversations), `flash` (stats/config), `models` (OpenRouter catalog), `rankings` (top model rankings), `eval`, `experiment`, `dump`, `bench`, quarantine commands, etc. Run `python -m beigebox.cli --help` for the full list. Exception: when running inside Claude Code specifically, Anthropic-model calls placed via Claude Code's `Agent` tool stay on bundled tokens (Claude-Code-specific behaviour, not a BeigeBox feature).
@@ -113,4 +120,32 @@ Distilled from the Operator class before it was deleted in v3 — agentic loops 
                        # + build_<concern>_kwargs(cfg, ...) (config → kwargs)
       plugins/         # (optional) auto-discovered userland impls
     ```
-  Reference implementations: `storage/backends/` (vector storage), `backends/` (LLM providers), and `storage/db/` (SQL shim) all use the directory shape. `web_auth.py` and `storage/wire_sink.py` use the same factory pattern in single-file form (the `make_<concern>(type, **kwargs)` dispatch is what matters; the directory split is for cases with many impls or optional deps). When something doesn't follow this shape today, it's a known asymmetry — fix it instead of building around it. **SQLiteStore demolition complete (2026-05-01).** Five repos on the BaseDB shim now own all SQL persistence: ApiKeyRepo, ConversationRepo, QuarantineRepo, UserRepo, WireEventRepo. `storage/sqlite_store.py` is gone — production wires through `make_*_repo(db)` factories from `storage/repos/__init__.py`, tests construct repos directly the same way. The capture pipeline (`beigebox/capture.py`) is the single chokepoint for chat-completion telemetry; CaptureFanout fans out one captured turn to ConversationRepo + WireLog + VectorStore. (Earlier resolutions: `web_auth.py` → `make_auth()`, `wiretap.py` → `make_sink()`, `SemanticCache` deleted leaving only `ToolResultCache`.)
+  Reference implementations: `storage/backends/` (vector storage), `backends/` (LLM providers), and `storage/db/` (SQL shim) all use the directory shape. `web_auth.py` and `storage/wire_sink.py` use the same factory pattern in single-file form (the `make_<concern>(type, **kwargs)` dispatch is what matters; the directory split is for cases with many impls or optional deps). When something doesn't follow this shape today, it's a known asymmetry — fix it instead of building around it.
+
+  **Recent v3 milestones (2026-05-01 → 2026-05-03):**
+  - **Proxy package split (G-1, G-2, G-3).** `proxy.py` (1779 LOC) is now a 6-module package: `proxy/core.py` (orchestrator, ~1245 LOC), `proxy/request_helpers.py` (extract_conversation_id, get_model, get_latest_user_message, is_synthetic, dedupe_consecutive_messages), `proxy/body_pipeline.py` (inject_generation_params/model_options, apply_window_config), `proxy/model_listing.py` (list_models, transform_model_names), `proxy/request_inspector.py` (RequestInspector + finish helper), and `proxy/__init__.py` re-exports. Forward methods extracted three repeated phases into `_check_hook_block`, `_check_and_record_anomaly`, `_emit_timing_summary`. Capture envelope builders (`build_capture_context`, `build_captured_request`, `capture_stream_response`) moved to `beigebox/capture.py`; `evict_ollama_model` moved to `backends/router.py`. Streaming invariants (TTFT timer, no-yield-in-helpers, capture state machine, CancelledError propagation) preserved.
+  - **Auth simplification (E-1, E-2).** `SimplePasswordAuth` and the password login endpoints are deleted. Added `auth.enabled` top-level kill switch in runtime config — when false, the entire auth middleware stack is bypassed.
+  - **SQLiteStore demolition.** Five repos on the BaseDB shim now own all SQL persistence: ApiKeyRepo, ConversationRepo, QuarantineRepo, UserRepo, WireEventRepo. `storage/sqlite_store.py` is gone — production wires through `make_*_repo(db)` factories from `storage/repos/__init__.py`, tests construct repos directly the same way. The capture pipeline (`beigebox/capture.py`) is the single chokepoint for chat-completion telemetry; CaptureFanout fans out one captured turn to ConversationRepo + WireLog + VectorStore.
+
+  (Earlier resolutions: `web_auth.py` → `make_auth()`, `wiretap.py` → `make_sink()`, `SemanticCache` deleted leaving only `ToolResultCache`.)
+
+## Known correctness violations (H batch)
+
+The next labeled batch is **principle-violation-first, size-irrelevant.** What's outstanding as of 2026-05-03:
+
+- **`mcp_server.py` advertises `operator/run`.** Schema (`_OPERATOR_RUN_SCHEMA`) and dispatcher are live; returns `operator_disabled` when no factory is wired, but the tool name is still surfaced to MCP clients. The constitution's "Not an agent harness" stands — this entry point should be deleted (schema, dispatcher, `_operator_factory` plumbing) since BeigeBox provides tools but does not host the agent loop.
+
+- **`tools/python_interpreter.py` and `tools/workspace_file.py` deleted 2026-05-03.** Code execution and filesystem I/O belong in the driving client (Claude Code, jcode, etc.), not in the proxy. Removed: tool files, `tools/registry.py` imports/registrations, `tools/schemas.py` Pydantic classes, `tools/validation_schemas.py` + `tools/validation.py` entries, `security/mcp_parameter_validator.py` validator methods, `security/audit_logger.py` example references, `tests/test_parameter_validation.py` workspace/python tests, `tests/test_mcp_e2e.py` workspace e2e scenario, `docs/agents.md` mentions, `mcp_server.py` resident tool entry.
+- **`mcp_server.py` still advertises `operator/run`.** Schema (`_OPERATOR_RUN_SCHEMA`) and dispatcher are live; returns `operator_disabled` when no factory is wired, but the tool name is still surfaced to MCP clients. Conflicts with "Not an agent harness." Delete the schema, dispatcher, and the `_operator_factory` plumbing — or wire it back if Operator is re-introduced.
+- **`tools/cdp.py`** — CLAUDE.md flags this as the canonical "we skipped the untrusted-input question" leftover (real Chrome cookie symlinks; subprocess paths derivable from model output). Either route through the same factory pattern that landed for `web_auth` and `wire_sink`, or delete.
+- **`tools/network_audit.py`** and any other `tools/*.py` doing direct `subprocess` / `os.system` / model-derived paths without going through a factory. Audit and either factory-isolate or delete.
+- **Doc drift in `docs/INDEX.md` and `docs/architecture.md`.** Both still describe `beigebox/agents/{council.py, ensemble_voter.py, wiggam_planner.py, ralph_orchestrator.py, skill_loader.py}` as live. The directory does not exist. Update or delete those entries.
+- **Cosmetic**: `security/tool_call_validator.py:285` has a stale `# Optional SQLiteStore for audit logging` comment.
+
+## Invariant being enforced (factory pattern, ongoing)
+
+All extension points that touch anything outside BeigeBox's own process MUST go through a `make_<concern>(type, **kwargs)` factory with a Protocol/ABC base. Done: `web_auth.py` (`make_auth`), `storage/wire_sink.py` (`make_sink`), `storage/backends/`, `backends/`, `storage/db/`. **Remaining (H batch):** `tools/cdp.py`, `tools/network_audit.py`, anomaly-detector hooks, anything else under `tools/` that bypasses the factory shape.
+
+## Why `security/main` is the destination, not `origin/main`
+
+The H-batch violations above are why v3 is going to `security/main` rather than back-merging into `origin/main`. The v2 line accumulated bypass paths (Operator entry points, `python_interpreter`, `workspace_file`, `cdp.py`, `network_audit.py`) that v3 is closing. `security/main` is the post-cleanup line; `origin/main` stays frozen at the pre-cleanup state for any users still on it.

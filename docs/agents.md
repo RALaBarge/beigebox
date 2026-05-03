@@ -24,15 +24,13 @@ The client owns: the loop, the tool-selection logic, the conversation state. Bei
 ### `/mcp` — general tools
 - `memory` — semantic recall over `conversations.db` + ingested docs
 - `web_search`, `web_scraper`
-- `workspace_file` — read/write under `/workspace/{in,out}/`
 - `system_info` — sandboxed shell-allowlist
 - `cdp` — headless Chromium control
 - `browserbox` — higher-level browser automation
 - `aura_recon`, `atlassian`, `sf_ingest`
-- `plan_manager` — `workspace/out/plan.md` lifecycle
+- `plan_manager` — plan lifecycle
 - `dice`, `doc_parser`, `repo`, `units`, `wiretap_summary`, `zip_inspector`
 - `pdf_reader` — Python pdf_oxide binding (separate from the WASM PDF transform path)
-- `python_interpreter` — `bwrap`-sandboxed
 - A handful of others — see `beigebox/tools/registry.py` for the live list.
 
 ### `/pen-mcp` — offensive-security tools (off by default)

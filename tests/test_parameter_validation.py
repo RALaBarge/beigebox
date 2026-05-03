@@ -18,10 +18,8 @@ from unittest.mock import patch, MagicMock
 from beigebox.tools.validation import ParameterValidator, ValidationResult
 from beigebox.tools.injection_patterns import InjectionDetector
 from beigebox.tools.schemas import (
-    WorkspaceFileInput,
     NetworkAuditScanNetworkInput,
     CDPNavigateInput,
-    PythonInterpreterInput,
     ApexAnalyzerInput,
     WebSearchInput,
     CalculatorInput,
@@ -60,83 +58,6 @@ class TestParameterValidator:
                 }
             }
             return ParameterValidator()
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Test: WorkspaceFileTool Validation
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def test_workspace_file_valid_write(self, validator):
-        """Valid workspace_file write should pass."""
-        input_data = {"action": "write", "path": "plan.md", "content": "# Plan"}
-        result = validator.validate_tool_input("workspace_file", input_data)
-
-        assert result.is_valid is True
-        assert result.errors == []
-        assert result.confidence == 0.0
-
-    def test_workspace_file_valid_read(self, validator):
-        """Valid workspace_file read should pass."""
-        input_data = {"action": "read", "path": "plan.md"}
-        result = validator.validate_tool_input("workspace_file", input_data)
-
-        assert result.is_valid is True
-        assert result.errors == []
-
-    def test_workspace_file_valid_list(self, validator):
-        """Valid workspace_file list should pass."""
-        input_data = {"action": "list"}
-        result = validator.validate_tool_input("workspace_file", input_data)
-
-        assert result.is_valid is True
-        assert result.errors == []
-
-    def test_workspace_file_path_traversal_rejected(self, validator):
-        """Path traversal attempts should be rejected."""
-        input_data = {"action": "read", "path": "../../../etc/passwd"}
-        result = validator.validate_tool_input("workspace_file", input_data)
-
-        assert result.is_valid is False
-        assert len(result.errors) > 0
-        assert "traversal" in result.errors[0].lower()
-
-    def test_workspace_file_windows_traversal_rejected(self, validator):
-        """Windows path traversal should be rejected."""
-        input_data = {"action": "read", "path": "..\\..\\windows\\system32"}
-        result = validator.validate_tool_input("workspace_file", input_data)
-
-        assert result.is_valid is False
-        assert "traversal" in result.errors[0].lower()
-
-    def test_workspace_file_content_too_large(self, validator):
-        """Content exceeding 64 KB should be rejected."""
-        large_content = "x" * (65_000)
-        input_data = {"action": "write", "path": "large.txt", "content": large_content}
-        result = validator.validate_tool_input("workspace_file", input_data)
-
-        assert result.is_valid is False
-        assert "exceeds 64 KB" in result.errors[0]
-
-    def test_workspace_file_invalid_action(self, validator):
-        """Invalid action should be rejected."""
-        input_data = {"action": "delete", "path": "plan.md"}
-        result = validator.validate_tool_input("workspace_file", input_data)
-
-        assert result.is_valid is False
-
-    def test_workspace_file_missing_path_for_read(self, validator):
-        """Missing path for read action should be rejected."""
-        input_data = {"action": "read"}
-        result = validator.validate_tool_input("workspace_file", input_data)
-
-        assert result.is_valid is False
-        assert "required" in result.errors[0].lower()
-
-    def test_workspace_file_json_string_input(self, validator):
-        """Should accept JSON string input as well as dict."""
-        input_json = json.dumps({"action": "write", "path": "test.md", "content": "test"})
-        result = validator.validate_tool_input("workspace_file", input_json)
-
-        assert result.is_valid is True
 
     # ─────────────────────────────────────────────────────────────────────────
     # Test: NetworkAuditTool Validation
@@ -236,42 +157,6 @@ class TestParameterValidator:
         result = validator.validate_tool_input("cdp", input_data)
 
         assert result.is_valid is False
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Test: Python Interpreter Validation
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def test_python_valid_code(self, validator):
-        """Valid Python code should pass."""
-        code = "print(2 ** 10)"
-        result = validator.validate_tool_input("python", code)
-
-        assert result.is_valid is True
-
-    def test_python_code_too_long(self, validator):
-        """Code exceeding 64 KB should be rejected."""
-        long_code = "print('x')\n" * 10_000
-        result = validator.validate_tool_input("python", long_code)
-
-        assert result.is_valid is False
-        assert "exceeds 64 KB" in result.errors[0]
-
-    def test_python_eval_warning(self, validator):
-        """eval() usage should trigger warning."""
-        code = "result = eval(user_input)"
-        result = validator.validate_tool_input("python", code)
-
-        assert result.is_valid is True
-        assert len(result.warnings) > 0
-        assert "eval" in result.warnings[0].lower()
-
-    def test_python_exec_warning(self, validator):
-        """exec() usage should trigger warning."""
-        code = "exec(code_string)"
-        result = validator.validate_tool_input("python", code)
-
-        assert result.is_valid is True
-        assert len(result.warnings) > 0
 
     # ─────────────────────────────────────────────────────────────────────────
     # Test: ApexAnalyzer Validation
@@ -376,32 +261,9 @@ class TestParameterValidator:
     # Test: Mode Enforcement
     # ─────────────────────────────────────────────────────────────────────────
 
-    def test_strict_mode_rejects(self, validator):
-        """Strict mode should reject invalid input."""
-        input_data = {"action": "read", "path": "../../../etc/passwd"}
-        result = validator.validate_tool_input("workspace_file", input_data)
-
-        assert result.is_valid is False
-
-    def test_permissive_mode_allows(self, permissive_validator):
-        """Permissive mode should allow even invalid input."""
-        input_data = {"action": "read", "path": "../../../etc/passwd"}
-        result = permissive_validator.validate_tool_input("workspace_file", input_data)
-
-        assert result.is_valid is True  # Permissive allows
-
     # ─────────────────────────────────────────────────────────────────────────
     # Test: Get Schema
     # ─────────────────────────────────────────────────────────────────────────
-
-    def test_get_tool_schema_workspace_file(self, validator):
-        """Should return JSON schema for workspace_file."""
-        schema = validator.get_tool_schema("workspace_file")
-
-        assert schema is not None
-        assert schema["type"] == "object"
-        assert "action" in schema["properties"]
-        assert "path" in schema["properties"]
 
     def test_get_tool_schema_network_audit(self, validator):
         """Should return JSON schema for network_audit."""
@@ -419,28 +281,6 @@ class TestParameterValidator:
     # ─────────────────────────────────────────────────────────────────────────
     # Test: Edge Cases & Encoding Tricks
     # ─────────────────────────────────────────────────────────────────────────
-
-    def test_unicode_in_payload(self, validator):
-        """Unicode characters should be handled safely."""
-        input_data = {"action": "write", "path": "📄.md", "content": "Hello 世界"}
-        result = validator.validate_tool_input("workspace_file", input_data)
-
-        assert result.is_valid is True
-
-    def test_null_bytes_in_path(self, validator):
-        """Null bytes should be rejected."""
-        input_data = {"action": "read", "path": "plan.md\x00.evil"}
-        result = validator.validate_tool_input("workspace_file", input_data)
-
-        # Should either pass through or be caught by filesystem layer
-
-    def test_double_encoding_attack(self, validator):
-        """Double-encoded traversal should still be caught."""
-        # %2e%2e%2f encodes ../
-        input_data = {"action": "read", "path": "%2e%2e%2fetc%2fpasswd"}
-        result = validator.validate_tool_input("workspace_file", input_data)
-
-        # Depends on whether we decode first — current implementation doesn't
 
 
 class TestInjectionDetector:
@@ -530,21 +370,6 @@ class TestInjectionDetector:
 
 class TestPydanticSchemas:
     """Test Pydantic schema validation."""
-
-    def test_workspace_file_schema_valid(self):
-        """Valid WorkspaceFileInput should parse."""
-        data = {"action": "write", "path": "test.md", "content": "hello"}
-        obj = WorkspaceFileInput(**data)
-
-        assert obj.action == "write"
-        assert obj.path == "test.md"
-
-    def test_workspace_file_schema_invalid_action(self):
-        """Invalid action should fail Pydantic validation."""
-        data = {"action": "invalid_action", "path": "test.md", "content": "hello"}
-
-        with pytest.raises(Exception):  # Pydantic ValidationError
-            WorkspaceFileInput(**data)
 
     def test_cdp_schema_valid_url(self):
         """Valid CDPNavigateInput should parse."""
@@ -641,22 +466,6 @@ class TestAttackPayloads:
     def test_command_injection_payloads(self, payload, validator):
         """Command injection payloads should be flagged."""
         result = validator.validate_tool_input("calculator", payload)
-        assert result.is_valid is False
-
-    # Path traversal payloads
-    @pytest.mark.parametrize(
-        "payload",
-        [
-            "../../../etc/passwd",
-            "..\\..\\windows\\system32",
-            "/etc/passwd",
-            "../../config",
-        ],
-    )
-    def test_path_traversal_payloads(self, payload, validator):
-        """Path traversal payloads should be rejected."""
-        input_data = {"action": "read", "path": payload}
-        result = validator.validate_tool_input("workspace_file", input_data)
         assert result.is_valid is False
 
     # SQL injection payloads

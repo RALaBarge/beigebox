@@ -108,7 +108,7 @@ class ParameterValidator:
         Main entry point: validate tool input before execution.
 
         Args:
-            tool_name: Name of the tool (e.g., "workspace_file", "network_audit")
+            tool_name: Name of the tool (e.g., "network_audit", "cdp")
             raw_input: Raw input from the operator (dict, str, or other)
 
         Returns:
@@ -166,10 +166,8 @@ class ParameterValidator:
 
         # Tool-specific validators
         validators = {
-            "workspace_file": self._validate_workspace_file,
             "network_audit": self._validate_network_audit,
             "cdp": self._validate_cdp,
-            "python": self._validate_python,
             "apex_analyzer": self._validate_apex_analyzer,
             "atlassian": self._validate_atlassian,
             "web_search": self._validate_web_search,
@@ -189,64 +187,6 @@ class ParameterValidator:
     # ─────────────────────────────────────────────────────────────────────────
     # Tool-Specific Validators (Critical Path)
     # ─────────────────────────────────────────────────────────────────────────
-
-    def _validate_workspace_file(self, raw_input: Any) -> ValidationResult:
-        """
-        WorkspaceFileTool: path traversal prevention, action whitelist.
-
-        High-risk: Can read/write any file in workspace.
-        Constraints:
-          - action: must be one of [write, append, read, list]
-          - path: no ../, ..\\, UNC paths
-          - content: max 64KB
-        """
-        errors = []
-        warnings = []
-
-        if isinstance(raw_input, str):
-            try:
-                params = json.loads(raw_input)
-            except json.JSONDecodeError:
-                errors.append("Input must be valid JSON")
-                return ValidationResult(False, raw_input, errors, warnings, 1.0)
-        else:
-            params = raw_input
-
-        if not isinstance(params, dict):
-            errors.append("Input must be a dict")
-            return ValidationResult(False, raw_input, errors, warnings, 1.0)
-
-        action = params.get("action", "").lower()
-        path = str(params.get("path", "")).strip() if "path" in params else ""
-        content = params.get("content", "")
-
-        # Validate action
-        allowed_actions = {"write", "append", "read", "list"}
-        if action and action not in allowed_actions:
-            errors.append(f"action must be one of {allowed_actions}, got '{action}'")
-
-        # Validate path (only for actions that need it)
-        if action in {"write", "append", "read"} and not path:
-            errors.append("path is required for action='{}' ".format(action))
-
-        if path:
-            # Check for path traversal
-            if self.path_traversal_pattern.search(path):
-                errors.append(f"Path traversal detected in '{path}'")
-            # Check for absolute paths outside workspace
-            if path.startswith("/") and "/workspace/out" not in path:
-                errors.append(
-                    f"Absolute paths outside /workspace/out not allowed: '{path}'"
-                )
-
-        # Validate content length
-        if isinstance(content, str) and len(content.encode()) > 64_000:
-            errors.append("content exceeds 64 KB limit")
-
-        if errors:
-            return ValidationResult(False, raw_input, errors, warnings, 1.0)
-
-        return ValidationResult(True, params, errors, warnings, 0.0)
 
     def _validate_network_audit(self, raw_input: Any) -> ValidationResult:
         """
@@ -380,50 +320,6 @@ class ParameterValidator:
             return ValidationResult(False, raw_input, errors, warnings, 1.0)
 
         return ValidationResult(True, raw_input, errors, warnings, 0.0)
-
-    def _validate_python(self, raw_input: Any) -> ValidationResult:
-        """
-        PythonInterpreterTool: code length limits, import restrictions.
-
-        Critical-risk: Arbitrary code execution (albeit sandboxed).
-        Constraints:
-          - Code length: max 64 KB
-          - No eval/exec/exec in the code
-          - No __import__ manipulation
-          - No multiprocessing/subprocess direct calls (bwrap prevents escape)
-        """
-        errors = []
-        warnings = []
-
-        if not isinstance(raw_input, str):
-            errors.append("Input must be a string (Python code)")
-            return ValidationResult(False, raw_input, errors, warnings, 1.0)
-
-        code = raw_input.strip()
-
-        # Length check
-        if len(code) > 64_000:
-            errors.append("Code exceeds 64 KB limit")
-
-        # Dangerous built-in functions (in sandboxed environment, but warn anyway)
-        dangerous_patterns = [
-            r"\beval\s*\(",
-            r"\bexec\s*\(",
-            r"\bcompile\s*\(",
-            r"\b__import__\s*\(",
-        ]
-
-        for pattern in dangerous_patterns:
-            if re.search(pattern, code, re.IGNORECASE):
-                warnings.append(
-                    f"Found {pattern.replace(r'\\s*\\(', '')} — "
-                    "will be executed in sandbox with restricted scope"
-                )
-
-        if errors:
-            return ValidationResult(False, raw_input, errors, warnings, 1.0)
-
-        return ValidationResult(True, code, errors, warnings, 0.0 if not warnings else 0.2)
 
     def _validate_apex_analyzer(self, raw_input: Any) -> ValidationResult:
         """
@@ -699,27 +595,6 @@ class ParameterValidator:
         Used by OpenAPI documentation, MCP schema introspection.
         """
         schemas = {
-            "workspace_file": {
-                "type": "object",
-                "required": ["action"],
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["write", "append", "read", "list"],
-                        "description": "File operation to perform",
-                    },
-                    "path": {
-                        "type": "string",
-                        "description": "Relative path in /workspace/out/",
-                        "maxLength": 256,
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "Content to write or append",
-                        "maxLength": 65536,
-                    },
-                },
-            },
             "network_audit": {
                 "type": "object",
                 "properties": {

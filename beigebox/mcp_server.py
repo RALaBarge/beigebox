@@ -61,9 +61,7 @@ _DEFAULT_RESIDENT_TOOLS = {
     "calculator",
     "datetime",
     "memory",
-    "workspace_file",
     "document_search",
-    "python",
     "cdp",
 }
 
@@ -71,7 +69,7 @@ _OPERATOR_RUN_SCHEMA = {
     "name": "operator/run",
     "description": (
         "Run BeigeBox Operator — a JSON-based ReAct agent with access to tools "
-        "(web_search, calculator, memory, workspace_file, etc.). "
+        "(web_search, calculator, memory, document_search, etc.). "
         "Submit a question or task; the operator reasons step by step and returns a final answer."
     ),
     "inputSchema": {

@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 class AuditLogEntry:
     """Single security audit log entry."""
     timestamp: str                  # ISO 8601
-    tool: str                       # "workspace_file", "network_audit", etc
+    tool: str                       # "network_audit", "cdp", etc
     action: str                     # "read", "write", "validate", etc
     input_params: str               # JSON dump of parameters
     input_hash: str                 # SHA256 of parameters (for dedup)
@@ -57,11 +57,11 @@ class AuditLogger:
     Usage:
         audit = AuditLogger(db_path="~/.beigebox/audit.db")
         audit.log_validation(
-            tool="workspace_file",
-            action="read",
-            params={"path": "out/file.txt"},
+            tool="network_audit",
+            action="scan_network",
+            params={"subnet": "192.168.1.0/24"},
             decision="ALLOW",
-            reason="Path within workspace"
+            reason="Subnet within RFC1918"
         )
 
         # Query recent denials
@@ -129,7 +129,7 @@ class AuditLogger:
         Log a validation decision.
 
         Args:
-            tool: Tool name (e.g., "workspace_file")
+            tool: Tool name (e.g., "network_audit")
             action: Action being validated (e.g., "read")
             params: Input parameters (dict or JSON string)
             decision: "ALLOW" or "DENY"

@@ -52,8 +52,8 @@ class SkillReaderTool:
             content = skill_md_path.read_text(encoding="utf-8")
             result = content
 
-            # List bundled scripts so the operator knows which shell commands
-            # it can run via the python_interpreter or shell tool.
+            # List bundled scripts so the caller knows which shell commands
+            # are bundled with this skill.
             scripts_dir = skill_md_path.parent / "scripts"
             if scripts_dir.exists():
                 scripts = sorted(f.name for f in scripts_dir.iterdir() if f.is_file())

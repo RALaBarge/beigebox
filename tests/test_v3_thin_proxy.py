@@ -307,7 +307,7 @@ def test_deleted_modules_not_importable():
 def test_orientation_md_mentions_v3_patterns():
     """Smoke: the agent-workflow-patterns section should still be present."""
     from pathlib import Path
-    text = Path(__file__).parent.parent.joinpath("beigebox/orientation.md").read_text()
+    text = Path(__file__).parent.parent.joinpath("orientation.md").read_text()
     assert "Agent workflow patterns" in text
     # And it should be vendor-neutral (not pinning to one specific MCP client)
     assert "MCP-speaking client" in text or "MCP client" in text
