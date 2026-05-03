@@ -137,7 +137,7 @@ def _build_proxy(tmpdir: str, *, streaming: bool = False, extra_sinks: list | No
     vector = FakeVector()
     router = FakeStreamingRouter() if streaming else FakeRouter()
 
-    with patch("beigebox.proxy.get_config") as mock_cfg:
+    with patch("beigebox.proxy.core.get_config") as mock_cfg:
         mock_cfg.return_value = {
             "backend": {"url": "http://127.0.0.1:9999", "timeout": 30, "default_model": "test"},
             "storage": {"log_conversations": True},
@@ -150,7 +150,7 @@ def _build_proxy(tmpdir: str, *, streaming: bool = False, extra_sinks: list | No
             "security": {"api_anomaly": {"enabled": False}},
             "wasm": {},
         }
-        with patch("beigebox.proxy.get_runtime_config", return_value={}):
+        with patch("beigebox.proxy.core.get_runtime_config", return_value={}):
             proxy = Proxy(
                 conversations=conv_repo,
                 vector=vector,

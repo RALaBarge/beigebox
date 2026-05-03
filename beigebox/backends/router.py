@@ -23,6 +23,8 @@ import random
 import time
 from typing import AsyncIterator
 
+import httpx
+
 from beigebox.backends.base import BaseBackend, BackendResponse
 from beigebox.backends.ollama import OllamaBackend
 from beigebox.backends.openrouter import OpenRouterBackend
@@ -590,3 +592,28 @@ class MultiBackendRouter:
                 entry["hw_stats"] = inner.get_hw_stats()
             results.append(entry)
         return results
+
+
+async def evict_ollama_model(backend_url: str, model: str) -> None:
+    """Evict a model from Ollama by sending ``keep_alive=0``.
+
+    Ollama unloads the model immediately; the next request will reload it
+    fresh, picking up any new options (e.g. ``num_gpu``). Best-effort: a
+    request to the native ``/api/generate`` endpoint — errors are logged
+    but do not block the follow-up chat request.
+
+    Lifted out of ``Proxy._evict_model`` in G-2 — the proxy still owns
+    the call site, this just keeps the implementation next to the rest of
+    the backend-facing helpers.
+    """
+    if not model:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            await client.post(
+                f"{backend_url.rstrip('/')}/api/generate",
+                json={"model": model, "keep_alive": 0},
+            )
+        logger.info("Evicted model '%s' from Ollama (will reload with new options)", model)
+    except Exception as e:
+        logger.warning("Failed to evict model '%s': %s", model, e)

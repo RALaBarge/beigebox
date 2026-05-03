@@ -379,3 +379,157 @@ def attach_response_timing(
         latency_ms=latency_ms,
         user_id=ctx.user_id,
     )
+
+
+# ---------------------------------------------------------------------------
+# Envelope builders — orchestrator-side helpers
+# ---------------------------------------------------------------------------
+# These pair the proxy's request body with the BackendResponse / accumulated
+# stream text and produce the dataclasses above. They were previously
+# methods on ``Proxy`` (``_build_capture_context``, ``_build_captured_request``,
+# ``_capture_stream_response``); they had no remaining dependency on Proxy
+# state once the capture pipeline was the only path. Lifted here in G-2.
+# ---------------------------------------------------------------------------
+
+
+def build_capture_context(
+    conversation_id: str,
+    model: str,
+    *,
+    backend: str = "",
+    run_id: str | None = None,
+    user_id: str | None = None,
+) -> CaptureContext:
+    """Build a fresh ``CaptureContext`` for a request entering the proxy."""
+    from uuid import uuid4
+    return CaptureContext(
+        conv_id=conversation_id,
+        turn_id=uuid4().hex,
+        model=model,
+        backend=backend,
+        started_at=_utcnow(),
+        run_id=run_id,
+        user_id=user_id,
+    )
+
+
+def build_captured_request(
+    ctx: CaptureContext,
+    body: dict,
+    response,
+) -> CapturedRequest:
+    """Construct a ``CapturedRequest`` from the body + (optional) response.
+
+    When ``response`` is the ``BackendResponse`` from the router, prefer the
+    ``NormalizedRequest`` it stashed (full transforms / errors / target).
+    When unavailable (direct httpx fallback or upstream error before the
+    router returned), fall back to a best-effort envelope built from the
+    request body alone.
+    """
+    nr = getattr(response, "normalized_request", None) if response is not None else None
+    messages = body.get("messages", []) if isinstance(body, dict) else []
+    if nr is not None:
+        return CapturedRequest.from_normalized(nr, ctx, messages)
+    return CapturedRequest(
+        ctx=ctx,
+        target="(unavailable)",
+        transforms=[],
+        errors=[],
+        messages=list(messages),
+        has_tools=bool(body.get("tools")) if isinstance(body, dict) else False,
+        stream=bool(body.get("stream")) if isinstance(body, dict) else False,
+    )
+
+
+def capture_stream_response(
+    fanout: "CaptureFanout | None",
+    ctx: CaptureContext,
+    body: dict,
+    full_response: list[str],
+    stages: dict[str, float],
+    backend_name: str,
+    cost_usd: float | None,
+    prompt_tokens: int,
+    *,
+    outcome: str,
+    error: BaseException | None,
+    req_already_captured: bool,
+) -> None:
+    """Emit a captured response envelope for a streaming request.
+
+    On normal completion (``outcome="ok"``), synthesizes a
+    ``NormalizedResponse`` from the accumulated text + token estimates so
+    the row carries the same fields the non-streaming path produces. On
+    failure outcomes (``stream_aborted`` / ``client_disconnect``), uses
+    ``from_partial`` so partial content is preserved with the right
+    outcome marker.
+
+    No-op when ``fanout`` is ``None``.
+    """
+    if fanout is None:
+        return
+    import logging
+    from beigebox.response_normalizer import (
+        estimate_tokens as _estimate_tokens,
+        normalize_response,
+    )
+    log = logging.getLogger("beigebox.capture")
+
+    ttft_ms = stages.get("ttft_ms")
+    ctx_after = attach_response_timing(ctx, ttft_ms=ttft_ms)
+    # Make sure backend got populated in ctx_after; carry the resolved
+    # name through if the caller already knows it.
+    if backend_name and ctx_after.backend != backend_name:
+        ctx_after = CaptureContext(
+            conv_id=ctx_after.conv_id,
+            turn_id=ctx_after.turn_id,
+            model=ctx_after.model,
+            backend=backend_name,
+            started_at=ctx_after.started_at,
+            run_id=ctx_after.run_id,
+            request_id=ctx_after.request_id,
+            ended_at=ctx_after.ended_at,
+            ttft_ms=ctx_after.ttft_ms,
+            latency_ms=ctx_after.latency_ms,
+            user_id=ctx_after.user_id,
+        )
+
+    # Belt-and-suspenders: emit a request envelope if the chunk loop never
+    # reached its first chunk (upstream errored before any output arrived).
+    if not req_already_captured:
+        try:
+            fanout.capture_request(build_captured_request(ctx, body, None))
+        except Exception as exc:
+            log.warning("stream capture_request fallback failed: %s", exc)
+
+    complete_text = "".join(full_response)
+    try:
+        if outcome == "ok":
+            synth = normalize_response({
+                "choices": [{
+                    "message": {"role": "assistant", "content": complete_text},
+                    "finish_reason": "stop",
+                }],
+                "usage": {
+                    "prompt_tokens": prompt_tokens or 0,
+                    "completion_tokens": _estimate_tokens(complete_text),
+                },
+            })
+            # OpenRouter cost arrives via the cost sentinel (not the synthesized
+            # data dict) — slot it onto the normalized response so the captured
+            # row's cost_usd is populated.
+            synth.cost_usd = cost_usd
+            fanout.capture_response(
+                CapturedResponse.from_normalized(synth, ctx_after, "ok")
+            )
+        else:
+            fanout.capture_response(
+                CapturedResponse.from_partial(
+                    ctx=ctx_after,
+                    outcome=outcome,
+                    content=complete_text,
+                    error=error,
+                )
+            )
+    except Exception as exc:
+        log.warning("stream capture_response failed: %s", exc)

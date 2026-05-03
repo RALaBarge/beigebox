@@ -63,7 +63,7 @@ def proxy_setup():
         router = FakeRouter()
 
         # Patch wiretap path via config so WireLog writes to tmp
-        with patch("beigebox.proxy.get_config") as mock_cfg:
+        with patch("beigebox.proxy.core.get_config") as mock_cfg:
             mock_cfg.return_value = {
                 "backend": {"url": "http://127.0.0.1:9999", "timeout": 30, "default_model": "test"},
                 "storage": {"log_conversations": True},
@@ -76,7 +76,7 @@ def proxy_setup():
                 "security": {"api_anomaly": {"enabled": False}},
                 "wasm": {},
             }
-            with patch("beigebox.proxy.get_runtime_config", return_value={}):
+            with patch("beigebox.proxy.core.get_runtime_config", return_value={}):
                 proxy = Proxy(
                     conversations=repo,
                     vector=vector,
@@ -302,7 +302,7 @@ def stream_proxy_setup():
         vector = FakeVector()
         router = FakeStreamingRouter()
 
-        with patch("beigebox.proxy.get_config") as mock_cfg:
+        with patch("beigebox.proxy.core.get_config") as mock_cfg:
             mock_cfg.return_value = {
                 "backend": {"url": "http://127.0.0.1:9999", "timeout": 30, "default_model": "test"},
                 "storage": {"log_conversations": True},
@@ -315,7 +315,7 @@ def stream_proxy_setup():
                 "security": {"api_anomaly": {"enabled": False}},
                 "wasm": {},
             }
-            with patch("beigebox.proxy.get_runtime_config", return_value={}):
+            with patch("beigebox.proxy.core.get_runtime_config", return_value={}):
                 proxy = Proxy(
                     conversations=repo,
                     vector=vector,
