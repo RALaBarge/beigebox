@@ -14,7 +14,6 @@ import asyncio
 import logging
 import json
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -473,83 +472,6 @@ async def lifespan(app: FastAPI):
     _preload_tasks.append(asyncio.create_task(_staggered_preloads()))
     # Fire-and-forget: server starts accepting requests immediately while
     # models warm up. Tasks are not awaited here.
-
-    # Auto-ingest staged documents on startup
-    def _sync_ingest_staging():
-        """Synchronous worker: index staged docs. Runs in a thread via run_in_executor."""
-        import hashlib
-        import shutil
-        from beigebox.storage.chunker import chunk_text
-
-        staging_path = Path(__file__).parent.parent / "2600" / "2600-staging"
-        archive_path = Path(__file__).parent.parent / "2600" / "2599"
-        manifest_path = Path(__file__).parent.parent / "2600" / ".upload-manifest.json"
-
-        if not staging_path.exists():
-            return
-
-        staged_files = list(staging_path.glob("*.md"))
-        if not staged_files:
-            return
-
-        logger.info("Found %d staged document(s) in 2600-staging — indexing…", len(staged_files))
-
-        manifest = {}
-        if manifest_path.exists():
-            manifest = json.loads(manifest_path.read_text())
-
-        if "files" not in manifest:
-            manifest["files"] = {}
-
-        for file_path in staged_files:
-            try:
-                content = file_path.read_text(encoding="utf-8")
-                md5 = hashlib.md5(content.encode()).hexdigest()
-
-                chunks = chunk_text(content, source_file=file_path.name)
-
-                for chunk in chunks:
-                    vector_store.store_document_chunk(
-                        source_file=file_path.name,
-                        chunk_index=chunk["chunk_index"],
-                        char_offset=chunk["char_offset"],
-                        blob_hash=md5,
-                        text=chunk["text"],
-                    )
-
-                manifest["files"][file_path.name] = {
-                    "uploaded_at": datetime.now(timezone.utc).isoformat(),
-                    "md5": md5,
-                    "status": "uploaded"
-                }
-
-                archive_path.mkdir(parents=True, exist_ok=True)
-                dest = archive_path / file_path.name
-                shutil.move(str(file_path), str(dest))
-                logger.info("Indexed and archived: %s", file_path.name)
-
-            except Exception as e:
-                logger.error("Failed to ingest %s: %s", file_path.name, e)
-                manifest["files"][file_path.name] = {
-                    "uploaded_at": datetime.now(timezone.utc).isoformat(),
-                    "md5": "",
-                    "status": "failed",
-                    "error": str(e)
-                }
-
-        manifest["last_sync"] = datetime.now(timezone.utc).isoformat()
-        manifest_path.write_text(json.dumps(manifest, indent=2))
-        logger.info("Staging ingest complete — manifest updated")
-
-    async def _auto_ingest_staging():
-        """Fire-and-forget wrapper: runs sync ingest in a thread executor."""
-        try:
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, _sync_ingest_staging)
-        except Exception as e:
-            logger.warning("Staging ingest failed: %s", e)
-
-    asyncio.create_task(_auto_ingest_staging())
 
     yield
 
