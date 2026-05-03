@@ -137,8 +137,13 @@ The next labeled batch is **principle-violation-first, size-irrelevant.** What's
 
 - **`mcp_server.py` `operator/run` deleted 2026-05-03.** Schema, dispatcher, and `operator_factory` plumbing all removed. The current `{input: string} → {answer: string}` shape is too primitive for the future chat-widget + CLI agent driver (no streaming, no conversation_id, no tool-call visibility). When that driver is built, design fresh — probably a streaming endpoint with conversation context, factory-wired with the right contract from day one. Until then, the dead schema is gone from the MCP advertised surface.
 - **`mcp_server.py` still advertises `operator/run`.** Schema (`_OPERATOR_RUN_SCHEMA`) and dispatcher are live; returns `operator_disabled` when no factory is wired, but the tool name is still surfaced to MCP clients. Conflicts with "Not an agent harness." Delete the schema, dispatcher, and the `_operator_factory` plumbing — or wire it back if Operator is re-introduced.
-- **`tools/cdp.py`** — CLAUDE.md flags this as the canonical "we skipped the untrusted-input question" leftover (real Chrome cookie symlinks; subprocess paths derivable from model output). Either route through the same factory pattern that landed for `web_auth` and `wire_sink`, or delete.
-- **`tools/network_audit.py`** and any other `tools/*.py` doing direct `subprocess` / `os.system` / model-derived paths without going through a factory. Audit and either factory-isolate or delete.
+- **`tools/cdp.py`** — CLAUDE.md flags this as the canonical "we skipped the untrusted-input question" leftover (real Chrome cookie symlinks; subprocess paths derivable from model output). Currently parked — needs an actual code-read audit before delete-vs-factory-isolate.
+- **`tools/network_audit.py` audited 2026-05-03 — verdict: clean.** No `shell=True`; all 3 subprocess calls use argv lists; `timeout` is `int`-coerced; `ip` strings validated upstream. File ops are only `/proc/net/arp` read + `urllib.urlopen` to validated IPs. Validation fires via `tools/registry.py:368` (`ParameterValidator.validate_tool_input` runs `_validate_network_audit` — RFC1918, port range, timeout bounds — before every dispatch). No code change required.
+
+## Open architectural opportunities (separate from H-batch)
+
+- **Tool ABC is informal.** `NetworkAuditTool`, `CDPTool`, `CalculatorTool`, etc. are duck-typed (`run(input_text) -> str`) but not enforced by a `tools/base.py:Tool` Protocol. Adding one + having every tool inherit would apply the factory-pattern stance at the tool layer. Touches every tool, so deferred until v3 settles.
+- **Two `ParameterValidator` classes.** `beigebox/tools/validation.py:ParameterValidator` is wired into the registry and fires on dispatch. `beigebox/security/mcp_parameter_validator.py:ParameterValidator` has a more thorough multi-tier API but its actual instantiation surface needs tracing. Possible duplication, possible defense-in-depth — worth a focused look.
 - **Cosmetic**: `security/tool_call_validator.py:285` has a stale `# Optional SQLiteStore for audit logging` comment.
 
 ## Invariant being enforced (factory pattern, ongoing)
