@@ -25,7 +25,6 @@ from uuid import uuid4
 
 import httpx
 from beigebox.config import get_config, get_runtime_config
-from beigebox.storage.models import Message
 from beigebox.storage.repos.conversations import ConversationRepo
 from beigebox.storage.vector_store import VectorStore
 from beigebox.hooks import HookManager
@@ -73,10 +72,9 @@ class Proxy:
         self.conversations = conversations
         self.vector = vector
         # CaptureFanout — single chokepoint for request/response telemetry.
-        # When provided (production), the proxy emits CapturedRequest /
-        # CapturedResponse envelopes here instead of calling _log_messages /
-        # _log_response directly. When None (legacy tests), the proxy falls
-        # back to the old per-call paths.
+        # The proxy emits CapturedRequest / CapturedResponse envelopes here
+        # for every chat completion. Tests must wire a real CaptureFanout
+        # before invoking forward methods.
         self.capture = capture
         self.blob_store = blob_store
         self.hook_manager = hook_manager
@@ -219,9 +217,8 @@ class Proxy:
     # Capture pipeline helpers (v1.4)
     # ------------------------------------------------------------------
     # These build the CapturedRequest / CapturedResponse envelopes for the
-    # CaptureFanout. The fanout is only wired in production (main.py
-    # lifespan); tests that instantiate Proxy without it fall through to
-    # the legacy _log_messages / _log_response paths below.
+    # CaptureFanout. Production wires the fanout in main.py lifespan;
+    # tests must assign proxy.capture before invoking forward methods.
 
     def _build_capture_context(
         self,
@@ -355,143 +352,23 @@ class Proxy:
         except Exception as _exc:
             logger.warning("stream capture_response failed: %s", _exc)
 
-    async def _log_messages(self, conversation_id: str, messages: list[dict], model: str):
-        """Store the user messages from the request."""
-        if not self.log_enabled:
-            return
-        loop = asyncio.get_event_loop()
-        # Defense in depth: collapse consecutive identical (role, content) pairs
-        # before logging. A buggy or replaying client can send the same user
-        # message twice in one body — without this, every following turn would
-        # carry the dup forward and pollute the conversation store, the wire
-        # tap, the vector index, and the token accounting.
-        _prev_key: tuple[str, str] | None = None
-        for msg in messages:
-            role = msg.get("role", "")
-            content = msg.get("content", "")
-            # Skip system messages: they're injected by BeigeBox itself and
-            # re-logged on every turn, which would pollute the conversation store
-            # and double-count tokens.
-            if not content or role == "system":
-                continue
-            content_str = content if isinstance(content, str) else json.dumps(content)
-            _key = (role, content_str)
-            if _key == _prev_key:
-                logger.debug("_log_messages: dropping consecutive duplicate role=%s len=%d",
-                             role, len(content_str))
-                continue
-            _prev_key = _key
-            tokens = _estimate_tokens(content_str)
-            message = Message(
-                conversation_id=conversation_id,
-                role=role,
-                content=content_str,
-                model=model,
-                token_count=tokens,
-            )
-            try:
-                await loop.run_in_executor(None, self.conversations.store_message, message)
-            except Exception as e:
-                logger.warning("_log_messages: SQLite store_message failed (conv=%s role=%s): %s",
-                               conversation_id, role, e)
-            # Wire tap
-            try:
-                self.wire.log(
-                    direction="inbound",
-                    role=role,
-                    content=message.content,
-                    model=model,
-                    conversation_id=conversation_id,
-                    token_count=tokens,
-                )
-            except Exception as e:
-                logger.debug("_log_messages: wire.log failed: %s", e)
-            # Embed async in background — avoids blocking the event loop
-            _t = asyncio.create_task(self.vector.store_message_async(
-                message_id=message.id,
-                conversation_id=conversation_id,
-                role=role,
-                content=message.content,
-                model=model,
-                timestamp=message.timestamp,
-            ))
-            _t.add_done_callback(
-                lambda t: t.exception() and logger.warning("vector embed failed: %s", t.exception())
-            )
-
-    async def _log_response(self, conversation_id: str, content: str, model: str, cost_usd: float | None = None, latency_ms: float | None = None, ttft_ms: float | None = None):
-        """Store the assistant response."""
-        if not self.log_enabled or not content.strip():
-            return
-        loop = asyncio.get_event_loop()
-        tokens = _estimate_tokens(content)
-        message = Message(
-            conversation_id=conversation_id,
-            role="assistant",
-            content=content,
-            model=model,
-            token_count=tokens,
-        )
-        try:
-            await loop.run_in_executor(
-                None,
-                lambda: self.conversations.store_message(message, cost_usd=cost_usd, latency_ms=latency_ms, ttft_ms=ttft_ms),
-            )
-        except Exception as e:
-            logger.warning("_log_response: SQLite store_message failed (conv=%s model=%s): %s",
-                           conversation_id, model, e)
-        # Wire tap
-        cost_info = f" cost=${cost_usd:.6f}" if cost_usd else ""
-        try:
-            self.wire.log(
-                direction="outbound",
-                role="assistant",
-                content=content,
-                model=model,
-                conversation_id=conversation_id,
-                token_count=tokens,
-            )
-        except Exception as e:
-            logger.debug("_log_response: wire.log failed: %s", e)
-        if cost_usd:
-            self.wire.log(
-                direction="internal",
-                role="system",
-                content=f"cost_usd={cost_usd:.6f} model={model}",
-                model="cost-tracker",
-                conversation_id=conversation_id,
-            )
-        # Embed async in background — avoids blocking the event loop
-        _t = asyncio.create_task(self.vector.store_message_async(
-            message_id=message.id,
-            conversation_id=conversation_id,
-            role="assistant",
-            content=content,
-            model=model,
-            timestamp=message.timestamp,
-        ))
-        _t.add_done_callback(
-            lambda t: t.exception() and logger.warning("vector embed failed: %s", t.exception())
-        )
-
     def _build_hook_context(
         self,
         body: dict,
         conversation_id: str,
         model: str,
-        decision: object | None = None,  # historical, always None now
     ) -> dict:
         """Build the context dict passed to hooks.
 
-        The ``decision`` arg used to carry a routing-LLM Decision; that layer
-        was deleted in v3. Hook callers may still pass ``None`` positionally,
-        which is preserved for compatibility.
+        The ``decision`` key is preserved (always None) so any external hook
+        relying on its presence keeps reading None rather than KeyError; the
+        agentic decision layer was deleted in v3.
         """
         return {
             "conversation_id": conversation_id,
             "model": model,
             "user_message": self._get_latest_user_message(body),
-            "decision": decision,
+            "decision": None,
             "config": self.cfg,
             "vector_store": self.vector,
         }
@@ -611,7 +488,6 @@ class Proxy:
                 mistral:7b: 99      # all GPU layers
                 llama2:70b: 20      # partial offload
         """
-        from beigebox.config import get_runtime_config
         model = body.get("model", "")
         if not model:
             return body
@@ -709,15 +585,6 @@ class Proxy:
         except Exception as e:
             logger.warning("Failed to evict model '%s': %s", model, e)
 
-    def _inject_system_context(self, body: dict) -> dict:
-        """Inject system_context.md content into the request (hot-reloaded)."""
-        try:
-            from beigebox.system_context import inject_system_context
-            return inject_system_context(body, self.cfg)
-        except Exception as e:
-            logger.debug("system_context injection skipped: %s", e)
-            return body
-
     # ------------------------------------------------------------------
     # Shared request pipeline
     # ------------------------------------------------------------------
@@ -795,13 +662,11 @@ class Proxy:
 
         # The model already comes from body["model"] (caller resolved it).
         model = body.get("model", model)
-        stages["routing"] = 0.0  # kept for backward-compat with stage timers
 
         # Strip internal metadata keys — must not reach backends
         body.pop("_bb_auth_key", None)
         body.pop("_beigebox_synthetic", None)
         body.pop("_bb_injection_flag", None)
-        body.pop("_beigebox_direct", None)  # historical override; now a no-op
 
         # Auto-summarize if conversation exceeds token budget
         try:
@@ -818,7 +683,12 @@ class Proxy:
             logger.debug("aggressive_summarizer skipped: %s", _e)
 
         # Inject system context, generation params, per-model options, window config
-        body = self._inject_system_context(body)
+        # (inlined from former _inject_system_context wrapper — silent on failure)
+        try:
+            from beigebox.system_context import inject_system_context
+            body = inject_system_context(body, self.cfg)
+        except Exception as e:
+            logger.debug("system_context injection skipped: %s", e)
         body = self._inject_generation_params(body)
         body = self._inject_model_options(body)
         body, _force_reload = self._apply_window_config(body)
@@ -842,9 +712,8 @@ class Proxy:
         conversation_id = self._extract_conversation_id(body)
 
         # Build a CaptureContext at request entry. ``backend`` and
-        # ``request_id`` are populated post-router (see below). The fanout
-        # only fires when self.capture is wired; legacy tests with
-        # capture=None fall through to the old _log_messages path.
+        # ``request_id`` are populated post-router (see below). Tests that
+        # don't wire a CaptureFanout get None and skip capture entirely.
         _capture_ctx = self._build_capture_context(
             conversation_id, model,
             user_id=body.get("_bb_user_id"),
@@ -856,7 +725,7 @@ class Proxy:
         body = self._dedupe_consecutive_messages(body)
 
         # Pre-request hooks
-        context = self._build_hook_context(body, conversation_id, model, None)
+        context = self._build_hook_context(body, conversation_id, model)
         body, _stages["pre_hooks"] = self._run_hooks_with_logging(
             stage="pre_request",
             body=body,
@@ -923,11 +792,8 @@ class Proxy:
                 "model": "beigebox",
             }
 
-        # Log incoming user messages (skip synthetic).
-        # Capture pipeline: defer the request envelope until after router
-        # returns so it carries the NormalizedRequest. Legacy path runs here.
-        if not is_synthetic and self.capture is None:
-            await self._log_messages(conversation_id, body.get("messages", []), model)
+        # Capture pipeline: request envelope is emitted post-router so it
+        # carries the NormalizedRequest (transforms/errors/target).
 
         # The request-side wire event will be enriched with normalizer
         # transforms after the backend call (see below) — at this point we
@@ -1074,13 +940,6 @@ class Proxy:
             _insp_entry["latency_ms"] = round(_stages.get("backend", 0), 1)
             _insp_entry["status"] = "complete"
 
-        # WASM response transform path — historically driven by decision.wasm_module
-        # from the routing LLM. With routing gone in v3 nothing currently sets a
-        # per-request WASM module, so this is dormant. The runtime is still
-        # initialised; a future branch can wire body["_beigebox_wasm_module"]
-        # (or similar) to re-enable per-request transforms.
-        wasm_mod = ""
-
         # Log assistant response (skip synthetic)
         # assistant_content is set inside the if-block; guard below prevents
         # NameError on the post-hook line when is_synthetic=True or choices=[].
@@ -1109,10 +968,9 @@ class Proxy:
 
             if normalized.content or normalized.tool_calls:
                 assistant_content = normalized.content
-                response_latency = response.latency_ms if self.backend_router and response.ok else None
 
                 if self.capture is not None and not _resp_captured:
-                    # New capture pipeline: full canonical fields land in
+                    # Capture pipeline: full canonical fields land in
                     # messages + wire_events + vector embedding via the fanout.
                     ctx_after = attach_response_timing(
                         _capture_ctx,
@@ -1126,12 +984,6 @@ class Proxy:
                     except Exception as _exc:
                         logger.warning("capture_response failed: %s", _exc)
                     _resp_captured = True
-                else:
-                    # Legacy path (no fanout wired) — keep existing behaviour.
-                    await self._log_response(
-                        conversation_id, assistant_content, model,
-                        cost_usd=cost_usd, latency_ms=response_latency,
-                    )
 
                 # Side-channel payload log — separate subsystem, opt-in via
                 # payload_log_enabled. Stays even when capture is wired.
@@ -1167,7 +1019,7 @@ class Proxy:
 
         # Post-response hooks
         if not is_synthetic:
-            context = self._build_hook_context(body, conversation_id, model, None)
+            context = self._build_hook_context(body, conversation_id, model)
             data, _stages["post_hooks"] = self._run_hooks_with_logging(
                 stage="post_response",
                 body=body,
@@ -1251,7 +1103,7 @@ class Proxy:
             pass  # Don't block on logging
 
         # Pre-request hooks
-        context = self._build_hook_context(body, conversation_id, model, None)
+        context = self._build_hook_context(body, conversation_id, model)
         body, _stages["pre_hooks"] = self._run_hooks_with_logging(
             stage="pre_request",
             body=body,
@@ -1339,11 +1191,8 @@ class Proxy:
 
         user_message = self._get_latest_user_message(body)
 
-        # Log incoming user messages (skip synthetic).
-        # Capture pipeline: defer until after first chunk arrives so we
-        # know upstream is alive. Legacy path (no capture) writes here.
-        if not is_synthetic and self.capture is None:
-            await self._log_messages(conversation_id, body.get("messages", []), model)
+        # Capture pipeline: request envelope deferred until first chunk
+        # arrives (so we know upstream is alive).
 
         if not is_synthetic:
             log_payload_event("proxy_stream", payload=body, model=model,
@@ -1374,21 +1223,13 @@ class Proxy:
             }
             self._request_inspector.append(_insp_entry)
 
-        # full_response accumulates token deltas so we can log and cache the
-        # complete assistant message after streaming. It's also the WASM input
-        # buffer when a module is active.
+        # full_response accumulates token deltas so we can log the complete
+        # assistant message after streaming completes.
         full_response = []
         stream_cost_usd: float | None = None
         backend_name = "direct"
         _t_backend = _time.monotonic()
         _first_chunk = True  # TTFT sentinel — cleared after the first yielded chunk
-        # WASM buffer mode: historically driven by decision.wasm_module from the
-        # routing LLM. Routing was removed in v3, so nothing currently sets a
-        # per-request WASM module — always pass-through. A future branch can wire
-        # body["_beigebox_wasm_module"] (or similar) to re-enable per-request
-        # transforms; the runtime itself is still alive.
-        wasm_mod = ""
-        _wasm_buffer_mode = False
 
         if self.backend_router:
             # Stream via multi-backend router. The try/except tracks the
@@ -1420,9 +1261,7 @@ class Proxy:
                             except Exception as _exc:
                                 logger.warning("stream capture_request failed: %s", _exc)
                             _stream_req_captured = True
-                    # In WASM buffer mode, collect but don't yield to client yet
-                    if not _wasm_buffer_mode:
-                        yield line + "\n"
+                    yield line + "\n"
                     # Parse to buffer content
                     if line.startswith("data: "):
                         data_str = line[6:]
@@ -1491,9 +1330,7 @@ class Proxy:
                             if _first_chunk:
                                 _stages["ttft_ms"] = (_time.monotonic() - _t_backend) * 1000
                                 _first_chunk = False
-                            # In WASM buffer mode, collect but don't yield to client yet
-                            if not _wasm_buffer_mode:
-                                yield line + "\n"
+                            yield line + "\n"
                             # Parse to buffer content
                             if line.startswith("data: "):
                                 data_str = line[6:]
@@ -1588,18 +1425,7 @@ class Proxy:
                     latency_ms=round(_stages.get("backend", 0), 1),
                     extra_meta=_stream_meta,
                 )
-            # WASM transform — runs on assembled text in both modes.
-            # In buffer mode the transformed text is re-emitted to the client below.
-            if complete_text and wasm_mod:
-                complete_text = await self.wasm_runtime.transform_text(wasm_mod, complete_text)
-                self.wire.log(
-                    direction="internal",
-                    role="wasm",
-                    content=f"transform applied: module={wasm_mod}",
-                    model=model,
-                    conversation_id=conversation_id,
-                )
-            # Guardrail — output check (after WASM transform, before logging/cache)
+            # Guardrail — output check (before logging/cache)
             if complete_text:
                 _gr_out, complete_text = self.guardrails.check_output(complete_text)
                 if not _gr_out.allowed:
@@ -1633,36 +1459,17 @@ class Proxy:
                           "schema_errors": _val.schema_errors},
                 )
 
-            # Re-emit transformed content to client (WASM buffer mode only)
-            if _wasm_buffer_mode and complete_text:
-                emit_chunk = json.dumps({
-                    "choices": [{"delta": {"content": complete_text}, "finish_reason": "stop", "index": 0}],
-                    "model": model,
-                })
-                yield f"data: {emit_chunk}\n"
-                yield "data: [DONE]\n"
-            if complete_text:
-                if self.capture is not None and not _stream_resp_captured:
-                    # New capture pipeline: synthesize a NormalizedResponse
-                    # from assembled text + token estimates so the row
-                    # carries the v1.4 fields (tokens, finish_reason, etc.)
-                    self._capture_stream_response(
-                        _capture_ctx, body, full_response, _stages,
-                        backend_name, stream_cost_usd, prompt_tokens,
-                        outcome="ok", error=None,
-                        req_already_captured=_stream_req_captured,
-                    )
-                    _stream_resp_captured = True
-                else:
-                    # Legacy path (no fanout wired) — keep existing behaviour.
-                    await self._log_response(
-                        conversation_id,
-                        complete_text,
-                        model,
-                        cost_usd=stream_cost_usd,
-                        latency_ms=round(_stages["backend"], 1),
-                        ttft_ms=round(_stages["ttft_ms"], 1) if "ttft_ms" in _stages else None,
-                    )
+            if complete_text and self.capture is not None and not _stream_resp_captured:
+                # Capture pipeline: synthesize a NormalizedResponse from the
+                # assembled text + token estimates so the row carries the
+                # v1.4 fields (tokens, finish_reason, etc.).
+                self._capture_stream_response(
+                    _capture_ctx, body, full_response, _stages,
+                    backend_name, stream_cost_usd, prompt_tokens,
+                    outcome="ok", error=None,
+                    req_already_captured=_stream_req_captured,
+                )
+                _stream_resp_captured = True
 
         # Emit timing summary to wiretap
         cost_str = f" · ${stream_cost_usd:.6f}" if stream_cost_usd else ""

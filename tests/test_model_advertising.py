@@ -4,6 +4,7 @@ Tests both advertise and hidden modes.
 """
 
 import pytest
+from beigebox.capture import CaptureFanout
 from beigebox.proxy import Proxy
 from beigebox.storage.db import make_db
 from beigebox.storage.repos import make_conversation_repo
@@ -24,6 +25,7 @@ def mock_proxy(tmp_path):
         embedding_url="http://localhost:11434"
     )
     proxy = Proxy(conversations=conversations, vector=vector)
+    proxy.capture = CaptureFanout(conversations=conversations, wire=proxy.wire, vector=vector)
     return proxy
 
 
