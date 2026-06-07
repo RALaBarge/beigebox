@@ -38,6 +38,11 @@ class OpenAICompatibleBackend(BaseBackend):
         api_key: str = "",
         timeout_ms: int | None = None,
     ):
+        from beigebox.security.safe_url import validate_backend_url, SsrfRefusedError
+        try:
+            validate_backend_url(url)
+        except SsrfRefusedError as e:
+            raise ValueError(f"Backend URL refused by SSRF guard: {e}") from e
         super().__init__(name, url, timeout, priority, timeout_ms=timeout_ms)
         self.api_key = api_key
         logger.debug("OpenAICompatibleBackend '%s': effective timeout=%.1fs", self.name, self.timeout)

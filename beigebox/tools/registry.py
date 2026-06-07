@@ -307,6 +307,10 @@ class ToolRegistry:
             )
             logger.info("MCPValidatorTool registered (allow_unsafe=%s)", mcp_val_cfg.get("allow_unsafe", False))
 
+        # --- Tool Call Validator (injection / rate-limit — always on) ---
+        from beigebox.security.tool_call_validator import ToolCallValidator
+        self._tool_call_validator = ToolCallValidator()
+
         # --- Plan Manager (orchestration plan.md management — enabled by default when tools enabled) ---
         pm_cfg = tools_cfg.get("plan_manager", {})
         if pm_cfg.get("enabled", True):
@@ -401,6 +405,10 @@ class ToolRegistry:
             return None
 
         # Step 1: Validate input parameters (Phase 1)
+        tc_result = self._tool_call_validator.validate(name, {"input": input_text})
+        if not tc_result.valid:
+            logger.warning("ToolCallValidator blocked %s: %s", name, tc_result.issues)
+            return {"error": "Tool call blocked: " + "; ".join(tc_result.issues)}
         validation_result = self.validator.validate_tool_input(name, input_text)
         if not validation_result.is_valid:
             logger.error(

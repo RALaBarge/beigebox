@@ -37,6 +37,11 @@ class OpenRouterBackend(BaseBackend):
         priority: int = 2,
         timeout_ms: int | None = None,
     ):
+        from beigebox.security.safe_url import validate_backend_url, SsrfRefusedError
+        try:
+            validate_backend_url(url)
+        except SsrfRefusedError as e:
+            raise ValueError(f"Backend URL refused by SSRF guard: {e}") from e
         super().__init__(name=name, url=url, timeout=timeout, priority=priority,
                          timeout_ms=timeout_ms)
         # Resolve env var references like ${OPENROUTER_API_KEY}

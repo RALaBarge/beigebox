@@ -89,6 +89,12 @@ def load_plugins(plugins_dir: str | Path, tools_cfg: dict) -> dict[str, object]:
         return {}
 
     base = Path(plugins_dir).resolve()
+    from beigebox.security.plugin_safety import safe_plugin_dir, UnsafePluginDirError
+    try:
+        safe_plugin_dir(base, project_root=base.parent)
+    except UnsafePluginDirError as e:
+        logger.error("Plugin: unsafe directory refused: %s", e)
+        return {}
     if not base.is_dir():
         logger.warning("Plugin directory not found: %s", base)
         return {}
