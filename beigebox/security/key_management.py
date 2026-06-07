@@ -109,6 +109,11 @@ class KeyManager:
 
         Raises:
             ValueError: If key file is malformed
+
+        SECURITY: key_path is operator-supplied (config, env var, or CLI).
+        Same trust model as memory_integrity._audit_path — defense is
+        filesystem permissions and the 0600 mode-check below, not
+        in-process path validation.
         """
         path = Path(key_path)
 

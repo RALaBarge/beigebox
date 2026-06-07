@@ -146,6 +146,8 @@ class ToolCallValidationResult:
     injections_detected: list[tuple[str, str]] = field(default_factory=list)
     rate_limit_exceeded: bool = False
     isolation_violation: bool = False
+    args_too_large: bool = False
+    arg_string_too_long: bool = False
     elapsed_ms: float = 0.0
 
     def to_dict(self) -> dict:
@@ -156,8 +158,41 @@ class ToolCallValidationResult:
             "injections_detected": [{"type": t, "sample": s} for t, s in self.injections_detected],
             "rate_limit_exceeded": self.rate_limit_exceeded,
             "isolation_violation": self.isolation_violation,
+            "args_too_large": self.args_too_large,
+            "arg_string_too_long": self.arg_string_too_long,
             "elapsed_ms": round(self.elapsed_ms, 2),
         }
+
+
+# Always-on default caps. These are the second line of defense behind the
+# per-route PolicyEngine (which is opt-in). See policy.py for the equivalent
+# config-driven caps. The validator caps run on EVERY tool call regardless of
+# route.
+DEFAULT_MAX_ARGS_BYTES = 64 * 1024     # 64 KiB serialized JSON
+DEFAULT_MAX_STRING_LENGTH = 8 * 1024   # 8 KiB single string
+
+
+def _max_string_length(obj: Any) -> int:
+    """Walk *obj* recursively and return the longest str value found."""
+    if isinstance(obj, str):
+        return len(obj)
+    if isinstance(obj, dict):
+        best = 0
+        for k, v in obj.items():
+            if isinstance(k, str) and len(k) > best:
+                best = len(k)
+            n = _max_string_length(v)
+            if n > best:
+                best = n
+        return best
+    if isinstance(obj, list):
+        best = 0
+        for v in obj:
+            n = _max_string_length(v)
+            if n > best:
+                best = n
+        return best
+    return 0
 
 
 # ── Rate Limiter ──────────────────────────────────────────────────────────────
@@ -282,23 +317,55 @@ class ToolCallValidator:
         isolation_enabled: bool = True,
         audit_enabled: bool = True,
         allow_unsafe: bool = False,
-        audit_store=None,  # Optional SQLiteStore for audit logging
+        audit_store=None,  # Optional audit store backend
+        max_args_bytes: int = DEFAULT_MAX_ARGS_BYTES,
+        max_string_length: int = DEFAULT_MAX_STRING_LENGTH,
     ):
         self.rate_limit_per_tool = rate_limit_per_tool
         self.isolation_enabled = isolation_enabled
         self.audit_enabled = audit_enabled
         self.allow_unsafe = allow_unsafe
         self.audit_store = audit_store
+        # DoS caps — see DEFAULT_MAX_* constants. ``None`` or non-positive
+        # disables that specific cap; the rest stay enforced.
+        self.max_args_bytes: int | None = max_args_bytes if (max_args_bytes and max_args_bytes > 0) else None
+        self.max_string_length: int | None = max_string_length if (max_string_length and max_string_length > 0) else None
 
         self._rate_limiter = ToolRateLimiter(rate_limit_per_tool)
         self._namespace_isolator = ToolNamespaceIsolator()
 
         logger.info(
-            "ToolCallValidator initialized (rate_limit=%d/min, isolation=%s, audit=%s, allow_unsafe=%s)",
+            "ToolCallValidator initialized (rate_limit=%d/min, isolation=%s, audit=%s, "
+            "allow_unsafe=%s, max_args_bytes=%s, max_string_length=%s)",
             rate_limit_per_tool,
             isolation_enabled,
             audit_enabled,
             allow_unsafe,
+            self.max_args_bytes,
+            self.max_string_length,
+        )
+
+    @classmethod
+    def from_config(cls, cfg: dict | None, audit_store=None) -> "ToolCallValidator":
+        """Build a validator from ``security.tool_call_validator.*`` config.
+
+        Recognized keys (all optional):
+          - ``rate_limit_per_tool`` (default 10)
+          - ``isolation_enabled``   (default True)
+          - ``audit_enabled``       (default True)
+          - ``allow_unsafe``        (default False)
+          - ``max_args_bytes``      (default 65536)
+          - ``max_string_length``   (default 8192)
+        """
+        block = ((cfg or {}).get("security") or {}).get("tool_call_validator") or {}
+        return cls(
+            rate_limit_per_tool=int(block.get("rate_limit_per_tool", 10)),
+            isolation_enabled=bool(block.get("isolation_enabled", True)),
+            audit_enabled=bool(block.get("audit_enabled", True)),
+            allow_unsafe=bool(block.get("allow_unsafe", False)),
+            audit_store=audit_store,
+            max_args_bytes=int(block.get("max_args_bytes", DEFAULT_MAX_ARGS_BYTES)),
+            max_string_length=int(block.get("max_string_length", DEFAULT_MAX_STRING_LENGTH)),
         )
 
     def validate(
@@ -325,6 +392,33 @@ class ToolCallValidator:
             valid=True,
             risk_level=RiskLevel.LOW,
         )
+
+        # Layer 0: DoS size caps. Run BEFORE injection detection so an
+        # attacker can't burn regex-engine cycles on a 10 MB blob. These caps
+        # are the always-on tier; the per-route PolicyEngine is the opt-in
+        # tier with stricter limits per endpoint.
+        if self.max_args_bytes is not None:
+            try:
+                serialized = json.dumps(parameters, ensure_ascii=False, default=str)
+            except (TypeError, ValueError):
+                serialized = ""
+            args_size = len(serialized.encode("utf-8", errors="ignore"))
+            if args_size > self.max_args_bytes:
+                result.args_too_large = True
+                result.risk_level = RiskLevel.HIGH
+                result.issues.append(
+                    f"Tool args {args_size} bytes exceeds {self.max_args_bytes}"
+                )
+                result.valid = False
+        if self.max_string_length is not None:
+            longest = _max_string_length(parameters)
+            if longest > self.max_string_length:
+                result.arg_string_too_long = True
+                result.risk_level = RiskLevel.HIGH
+                result.issues.append(
+                    f"Tool arg string length {longest} exceeds {self.max_string_length}"
+                )
+                result.valid = False
 
         # Layer 1: Parameter injection detection
         injections = self._detect_parameter_injections(parameters)
