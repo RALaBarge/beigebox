@@ -9,6 +9,6 @@
 #   label=TARGET                — prepend a display label
 
 localhost
-# debian=ryan@192.168.1.235
-# mac=useruser@192.168.1.214
+# lab=user@192.0.2.10
+# mac=user@192.0.2.20
 # lab=ryan@lab.tailnet-name.ts.net

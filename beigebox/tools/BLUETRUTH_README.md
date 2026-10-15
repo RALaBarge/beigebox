@@ -246,7 +246,7 @@ pytest tests/test_bluetruth_scenarios.py -v  # BeigeBox integration tests
 
 ## License
 
-MIT — See [LICENSE](https://github.com/RALaBarge/beigebox/blob/main/LICENSE.md)
+MIT — See [LICENSE](https://github.com/RALaBarge/beigebox/blob/main/LICENSE)
 
 ## Support
 

@@ -56,7 +56,7 @@ Snapshots & schema:
 Examples:
   audit.sh local
   audit.sh user@server
-  audit.sh debian=ryan@192.168.1.235 mac=useruser:1234@192.168.1.214
+  audit.sh lab=user@192.0.2.10 mac=user:password@192.0.2.20
   audit.sh --format json local user@server
   audit.sh --format claude --file ~/.config/beigebox/audit-targets
 EOF

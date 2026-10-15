@@ -69,4 +69,3 @@ CMD ["python", "-m", "beigebox", "dial"]
 
 LABEL org.opencontainers.image.licenses="MIT"
 LABEL maintainer="Ryan L. <ryan.a.labarge+ghBeigebox@gmail.com>"
-LABEL commercial_licensing="Reach out for proprietary use cases -- free otherwise"

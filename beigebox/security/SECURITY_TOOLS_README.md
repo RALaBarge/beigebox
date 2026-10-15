@@ -296,7 +296,7 @@ Verify distributions are correct and working:
 - **embeddings-guardian:** MIT
 - **bluetruth:** MIT
 
-See [LICENSE.md](../../LICENSE.md) and [COMMERCIAL_LICENSE.md](../../COMMERCIAL_LICENSE.md).
+See [LICENSE](../../LICENSE).
 
 ## Support
 

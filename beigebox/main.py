@@ -2,7 +2,7 @@
 BeigeBox — LLM Middleware Control Plane
 
 LICENSING: MIT.
-See LICENSE.md and COMMERCIAL_LICENSE.md for details.
+See LICENSE.
 
 FastAPI application — the BeigeBox entry point.
 Implements OpenAI-compatible endpoints that proxy to Ollama.

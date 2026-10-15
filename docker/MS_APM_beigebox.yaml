@@ -13,7 +13,7 @@ name: beigebox
 version: "1.9"
 description: "Modular OpenAI-compatible LLM middleware with integrated observability, routing, and agentic orchestration"
 author: "BeigeBox Contributors"
-license: "AGPL-3.0"
+license: "MIT"
 target: agents
 type: hybrid
 

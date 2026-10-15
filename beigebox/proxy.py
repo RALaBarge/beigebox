@@ -2,7 +2,7 @@
 BeigeBox Proxy — Core request pipeline
 
 LICENSING: MIT.
-See LICENSE.md and COMMERCIAL_LICENSE.md for details.
+See LICENSE.
 
 Intercepts OpenAI-compatible requests, logs both sides, forwards to backend.
 Handles streaming (SSE) transparently.

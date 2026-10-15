@@ -23,13 +23,13 @@ scripts/audit.sh local
 scripts/audit.sh user@server.example
 
 # audit a remote using a password (sshpass)
-scripts/audit.sh user:password@192.168.1.214
+scripts/audit.sh user:password@192.0.2.20
 
 # label the output (appears in the report heading)
-scripts/audit.sh debian=ryan@192.168.1.235
+scripts/audit.sh lab=user@192.0.2.10
 
 # multiple targets in one pass
-scripts/audit.sh local debian=ryan@192.168.1.235 mac=useruser:1234@192.168.1.214
+scripts/audit.sh local lab=user@192.0.2.10 mac=user:password@192.0.2.20
 
 # output forms
 scripts/audit.sh --format markdown TARGET ...    # default, human-readable
@@ -40,7 +40,7 @@ scripts/audit.sh --format claude   TARGET ...    # pasteable into CLAUDE.md
 scripts/audit.sh --file targets.example
 
 # save a timestamped JSON snapshot per target (for version tracking)
-scripts/audit.sh --save debian=ryan@192.168.1.235
+scripts/audit.sh --save lab=user@192.0.2.10
 
 # diff each target's latest snapshot against its previous one
 scripts/audit.sh --diff debian mac
