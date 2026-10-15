@@ -1,7 +1,7 @@
 """
 BeigeBox Proxy — Core request pipeline
 
-LICENSING: Dual-licensed under AGPL-3.0 (free) and Commercial License (proprietary).
+LICENSING: MIT.
 See LICENSE.md and COMMERCIAL_LICENSE.md for details.
 
 Intercepts OpenAI-compatible requests, logs both sides, forwards to backend.

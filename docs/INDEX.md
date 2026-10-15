@@ -206,7 +206,7 @@ See [Security](security.md) for full threat model and how each layer works.
 - **GitHub**: [ralabarge/beigebox](https://github.com/ralabarge/beigebox)
 - **Issues**: [GitHub Issues](https://github.com/ralabarge/beigebox/issues)
 - **Main README**: [../README.md](../README.md)
-- **License**: [../LICENSE.md](../LICENSE.md) (AGPL-3.0 + Commercial)
+- **License**: [../LICENSE](../LICENSE) (MIT)
 
 ---
 

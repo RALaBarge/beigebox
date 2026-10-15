@@ -67,6 +67,6 @@ EXPOSE 8000
 
 CMD ["python", "-m", "beigebox", "dial"]
 
-LABEL org.opencontainers.image.licenses="AGPL-3.0"
+LABEL org.opencontainers.image.licenses="MIT"
 LABEL maintainer="Ryan L. <ryan.a.labarge+ghBeigebox@gmail.com>"
 LABEL commercial_licensing="Reach out for proprietary use cases -- free otherwise"

@@ -1,6 +1,6 @@
 # BeigeBox
 
-[![Docker Build & Push](https://github.com/RALaBarge/beigebox/actions/workflows/docker-build.yml/badge.svg?branch=main)](https://github.com/RALaBarge/beigebox/actions/workflows/docker-build.yml) [![Security Scanning](https://github.com/RALaBarge/beigebox/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/RALaBarge/beigebox/actions/workflows/security.yml) [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](./LICENSE.md) [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/) [![GHCR Image](https://img.shields.io/badge/ghcr.io-ralabarge%2Fbeigebox-2496ED?logo=docker)](https://github.com/RALaBarge/beigebox/pkgs/container/beigebox)
+[![Docker Build & Push](https://github.com/RALaBarge/beigebox/actions/workflows/docker-build.yml/badge.svg?branch=main)](https://github.com/RALaBarge/beigebox/actions/workflows/docker-build.yml) [![Security Scanning](https://github.com/RALaBarge/beigebox/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/RALaBarge/beigebox/actions/workflows/security.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE) [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/) [![GHCR Image](https://img.shields.io/badge/ghcr.io-ralabarge%2Fbeigebox-2496ED?logo=docker)](https://github.com/RALaBarge/beigebox/pkgs/container/beigebox)
 
 Modular, OpenAI-compatible LLM middleware. Sits between your frontend and your model providers — handles routing, orchestration, caching, logging, evaluation, and policy decisions while remaining transparent to both sides.
 
@@ -408,12 +408,7 @@ All include health checks, security hardening, and persistent data. See [deploy/
 
 ## License
 
-Dual-licensed: **AGPL-3.0** (source available) and **Commercial** (proprietary).
-
-For proprietary use cases, reach out — licensing is negotiable.
-
-See [LICENSE.md](LICENSE.md) and [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md).
-
+[MIT](LICENSE).
 ---
 
 ## Community

@@ -1,7 +1,7 @@
 """
 BeigeBox — LLM Middleware Control Plane
 
-LICENSING: Dual-licensed under AGPL-3.0 (free) and Commercial License (proprietary).
+LICENSING: MIT.
 See LICENSE.md and COMMERCIAL_LICENSE.md for details.
 
 FastAPI application — the BeigeBox entry point.

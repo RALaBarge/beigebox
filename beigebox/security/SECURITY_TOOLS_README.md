@@ -292,7 +292,7 @@ Verify distributions are correct and working:
 
 ## License
 
-- **beigebox-security:** Part of beigebox (AGPL-3.0 + Commercial license)
+- **beigebox-security:** Part of beigebox (MIT)
 - **embeddings-guardian:** MIT
 - **bluetruth:** MIT
 
